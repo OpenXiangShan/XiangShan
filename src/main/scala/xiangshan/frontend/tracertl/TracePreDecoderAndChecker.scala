@@ -45,6 +45,8 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val fromIFU = Input(new TraceFromIFU())
   // From TraceReader
   val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
+  // FakeICache to provide wrong path inst info at one fetch bundle.
+  val icacheData = Input(Valid(new TraceFakeICacheRespBundle()))
   // From BPU and IFU
   val predInfo = Input(new TracePredictInfo())
 
@@ -58,7 +60,6 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val traceChecker = Output(new TraceCheckerResp())
   // trace Inst: one-to-one with preDecoder but contains the traceInfo
   val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
-//  val traceExpandInsts = Output(Vec(PredictWidth, UInt(32.W)))
 }
 
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
@@ -86,15 +87,18 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.traceInsts := io.traceInsts,
     _.predStartAddr := io.predInfo.startAddr,
     _.instRange := io.predInfo.instRange,
-    _.lastHalfValid := concede2Bytes
+    _.lastHalfValid := concede2Bytes,
+    _.icacheData := io.icacheData,
   )
 
   preDecoder.io.specifyField(
     _.traceInsts := traceInstIFUCut,
+    _.pdValid := traceAligner.io.pdValid,
   )
   predChecker.io.specifyField(
     _.fire_in := io.fromIFU.fire,
     _.traceInsts := traceInstIFUCut,
+    // _.pdValid := traceAligner.pdValid,
     _.predictInfo := io.predInfo,
     _.preDecode := preDecoder.io.out,
     _.traceRange := traceAligner.io.traceRange,

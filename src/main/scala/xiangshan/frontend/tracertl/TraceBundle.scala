@@ -19,9 +19,11 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{XSBundle, XSModule}
+import xiangshan.cache.HasL1CacheParameters
 
 trait TraceParams {
   val TraceInstrWidth = 32
+  // val blockOffBits = log2Ceil(64)
 }
 
 class TraceBundle(implicit p: Parameters) extends XSBundle with TraceParams

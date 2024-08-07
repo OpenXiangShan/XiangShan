@@ -20,11 +20,14 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{ParallelPosteriorityEncoder}
 import utils.XSError
+import xiangshan.frontend.HasPdConst
 
 class TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
   val debug_valid = Input(Bool())
 
   val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
+  // icacheData is align with ICacheHalfLine(256bits)
+  val icacheData = Input(Valid(new TraceFakeICacheRespBundle()))
   // preDInfo's startAddr
   val predStartAddr = Input(UInt(VAddrBits.W))
   // instRange come from BPU's prediction: 'startAddr to nextStartAddr' & 'ftqOffset'
@@ -35,26 +38,52 @@ class TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
 
   val cutInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle)))
   val traceRange = Output(UInt(PredictWidth.W))
+  // use by predecode/predChecker/newFtq's false-hit update
+  val pdValid = Output(UInt(PredictWidth.W))
+
   val traceRangeTaken2B = Output(Bool())
   val instRangeTaken2B = Output(Bool())
 }
 
-class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
+class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
+  with HasPdConst {
   val io = IO(new TraceAlignToIFUCutIO())
 
   val width = io.traceInsts.size
   require(width == io.instRange.getWidth, f"Width of traceInsts ${width} and instRange ${io.instRange.getWidth} should be the same")
   val traceRangeVec = Wire(Vec(width, Bool()))
   val lastInstEndVec = Wire(Vec(PredictWidth + 1, Bool()))
+  val pdLastInstEndVec = Wire(Vec(PredictWidth + 1, Bool()))
   val curInstIdxVec = Wire(Vec(PredictWidth + 1, UInt(log2Ceil(width).W)))
   val stillConsecutiveVec = Wire(Vec(width, Bool()))
+  val pdValidVec = Wire(Vec(PredictWidth, Bool()))
+  val startPC = io.predStartAddr
+
   io.traceRange := traceRangeVec.asUInt
+  io.pdValid := pdValidVec.asUInt
   io.traceRangeTaken2B := isTaken2B(io.traceRange)
   io.instRangeTaken2B := isTaken2B(io.instRange)
-  val startPC = io.predStartAddr
+
+  val icacheInstVec = Wire(Vec(512/16-1, UInt(32.W)))
+  val actualIdxVec = Wire(Vec(PredictWidth, UInt(blockOffBits.W)))
+  val fetchInstVec = Wire(Vec(PredictWidth, UInt(32.W)))
+  icacheInstVec.zipWithIndex.foreach{ case (inst, idx) =>
+    val stride = 16
+    val instSize = 32
+    val rawData = Cat(io.icacheData.bits.data(1), io.icacheData.bits.data(0))
+    inst := rawData(idx*stride + instSize - 1 , idx*stride)
+  }
+  (0 until PredictWidth).foreach { case idx =>
+    actualIdxVec(idx) := Cat(0.U(1.W), startPC(blockOffBits-2, 1)) + idx.U // Require C-Ext
+    fetchInstVec(idx) := icacheInstVec(actualIdxVec(idx))
+  }
+  dontTouch(icacheInstVec)
+  dontTouch(actualIdxVec)
+  dontTouch(fetchInstVec)
 
   dontTouch(traceRangeVec)
   dontTouch(lastInstEndVec)
+  dontTouch(pdLastInstEndVec)
   dontTouch(curInstIdxVec)
   dontTouch(stillConsecutiveVec)
   dontTouch(io)
@@ -64,12 +93,17 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
     !isRVC(io.cutInsts(lastIdx).bits.inst) && io.cutInsts(lastIdx).valid
   }
 
-  def isRVC(inst: UInt): Bool = (inst(1, 0) =/= 3.U)
+  // def isRVC(inst: UInt): Bool = (inst(1, 0) =/= 3.U)
 
+  pdValidVec.zipWithIndex.foreach {
+    case (v, i) => v := pdLastInstEndVec(i)
+  }
   traceRangeVec.foreach(_ := false.B)
   lastInstEndVec.map(_ := false.B)
+  pdLastInstEndVec.foreach(_ := false.B)
   curInstIdxVec.map(_ := 0.U)
   lastInstEndVec(0) := !io.lastHalfValid
+  pdLastInstEndVec(0) := !io.lastHalfValid
 
   (0 until width).foreach { i =>
     val curPC = startPC + (i * 2).U
@@ -77,13 +111,44 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
     stillConsecutiveVec(i) := traceRangeVec.take(i).foldRight(true.B)(_ && _)
 
     val inst = io.cutInsts(i)
+    // predecode valid generate
+    when (pdLastInstEndVec(i)) {
+      pdLastInstEndVec(i + 1) := isRVC(fetchInstVec(i))
+    }.otherwise {
+      pdLastInstEndVec(i + 1) := true.B
+    }
+
+    when (io.debug_valid && io.instRange(i) && stillConsecutiveVec(i)) {
+      XSError(lastInstEndVec(i) =/= pdLastInstEndVec(i), "lastCheck from trace and icache should equal")
+    }
+
     when(!io.instRange(i) || !stillConsecutiveVec(i)) {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
+
+      // wrong path dummy value for predecode
+      inst.bits.pcVA := startPC + (i*2).U
+      inst.bits.inst := fetchInstVec(i)
     }.elsewhen(lastInstEndVec(i)) {
       traceRangeVec(i) := curPC === curTrace.pcVA
       inst.valid := traceRangeVec(i)
-      inst.bits := curTrace
+      pdValidVec(i) := inst.valid
+
+      when (inst.valid) {
+        inst.bits := curTrace
+
+        when (io.debug_valid) {
+          when (isRVC(inst.bits.inst)) {
+            XSError(inst.bits.inst(15,0) =/= fetchInstVec(i)(15,0), "FakeICache's result should equal to tracefile")
+          }.otherwise {
+            XSError(inst.bits.inst(31,0) =/= fetchInstVec(i)(31,0), "FakeICache's result should equal to tracefile")
+          }
+        }
+      }.otherwise {
+        inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
+        inst.bits.pcVA := startPC + (i*2).U
+        inst.bits.inst := fetchInstVec(i)
+      }
 
       when(inst.valid) {
         lastInstEndVec(i + 1) := isRVC(inst.bits.inst)
@@ -108,7 +173,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
 
-      XSError(true.B, "Should not reach here")
+      XSError(io.debug_valid, "Should not reach here")
     }
   }
 }

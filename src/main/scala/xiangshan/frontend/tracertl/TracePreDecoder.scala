@@ -34,6 +34,8 @@ class TracePreDecoder(implicit p: Parameters) extends TraceModule
   with HasPdConst {
   val io = IO(new Bundle {
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+    val pdValid = Input(UInt(PredictWidth.W))
+
     val out = Output(new PreDecodeResp)
   })
   dontTouch(io)
@@ -51,7 +53,7 @@ class TracePreDecoder(implicit p: Parameters) extends TraceModule
     val jalOffset = jal_offset(trace.inst, curIsRVC)
     val brOffset = br_offset(trace.inst, curIsRVC)
 
-    pd.valid := io.traceInsts(i).valid
+    pd.valid := io.pdValid(i) // io.traceInsts(i).valid
     pd.isRVC := curIsRVC
     pd.brType := brType
     pd.isCall := isCall
