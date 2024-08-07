@@ -170,7 +170,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
         }
         s"""
            |always @(negedge clock) begin
-           |  if (enable) begin
+           |  if (!reset && enable) begin
            |    ${assignTrace}
            |  end
            |  else begin
@@ -359,6 +359,7 @@ class TraceDriveCollectorHelper(width: Int)
 class TraceICacheHelper extends ExtModule
   with HasExtModuleInline {
   val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
   val enable = IO(Input(Bool()))
   val addr = IO(Input(UInt(64.W)))
   val data = IO(Output(Vec(512/64, UInt(64.W))))
@@ -370,11 +371,49 @@ class TraceICacheHelper extends ExtModule
         .map(i => s"output reg [63:0] data_$i,")
         .mkString("  ", "\n  ", "\n")
     }
-    def callDPIC: String = {
+    def genLogicDeclare: String = {
       (0 until 512/64)
-        .map(i => s"data_$i <= trace_icache_dword_helper(addr_align + $i * 8);")
-        .mkString("      ", "\n      ", "\n")
+        .map(i => s"logic [63:0] logicData_$i;")
+        .mkString("    ", "\n  ", "\n")
     }
+    def fromLogictoIO: String = {
+      val assignData: String =
+        (0 until 512/64)
+          .map(i => s"data_$i <= logicData_$i;")
+          .mkString("      ", "\n    ", "\n")
+      s"""
+         |always @(posedge clock) begin
+         |  if (!reset && enable) begin
+         |$assignData
+         |    legal_addr <= logic_legal_addr;
+         |  end
+         |end
+         |"""
+    }
+    def callDPIC: String = {
+      def assignDPIC: String = {
+        (0 until 512/64)
+          .map(i => s"logicData_$i <= trace_icache_dword_helper(addr_align + $i * 8);")
+          .mkString("      ", "\n      ", "\n")
+      }
+      def assignDummy: String = {
+        (0 until 512/64)
+          .map(i => s"logicData_$i <= 0;")
+          .mkString("    ", "\n    ", "\n")
+      }
+      s"""
+         |always @(negedge clock) begin
+         |  if (!reset && enable) begin
+         |${assignDPIC}
+         |  end
+         |  else begin
+         |${assignDummy}
+         |  end
+         |end
+         """.stripMargin
+    }
+
+
     s"""
        |import "DPI-C" function byte trace_icache_legal_addr(
        |  input longint addr
@@ -385,46 +424,60 @@ class TraceICacheHelper extends ExtModule
        |
        |module TraceICacheHelper(
        |  input             clock,
+       |  input             reset,
        |  input             enable,
        |  input      [63:0] addr,
        |$getDataPort
        |  output reg [7:0]  legal_addr
        |);
        |
+       |  logic [7:0] logic_legal_addr;
+       |$genLogicDeclare
+       |
+       |$fromLogictoIO
+       |
        |  wire [63:0] addr_align = addr & 64'hffffffffffffffe0;
        |  always @(negedge clock) begin
-       |    if (enable) begin
-       |      legal_addr <= trace_icache_legal_addr(addr_align);
-       |$callDPIC
+       |    if (!reset && enable) begin
+       |      logic_legal_addr <= trace_icache_legal_addr(addr_align);
+       |    end
+       |    else begin
+       |      logic_legal_addr <= 0;
        |    end
        |  end
+       |
+       |$callDPIC
+       |
        |endmodule
+       |
        |""".stripMargin
   }
 
   setInline(s"$desiredName.v", getVerilog)
 }
 
+class TraceFakeICacheRespBundle(implicit p: Parameters) extends TraceBundle {
+  val data = Vec(2, UInt(256.W))
+  val addr = UInt(VAddrBits.W)
+}
+
 // Replace ICache's data
 // IFU1 --fire--> IFU2
-class FakeICache()(implicit p: Parameters) extends TraceModule {
+class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
   val io = IO(new Bundle {
     val req = Flipped(ValidIO(new Bundle {
       val addr = UInt(VAddrBits.W)
     }))
-    val resp = Valid(new Bundle {
-      val data0 = UInt(256.W)
-      val data1 = UInt(256.W)
-      val addr = UInt(VAddrBits.W)
-    })
+    val resp = Valid(new TraceFakeICacheRespBundle)
   })
 
   val helper = Module(new TraceICacheHelper)
   helper.clock := clock
+  helper.reset := reset
   helper.enable := io.req.valid
   helper.addr := io.req.bits.addr
   io.resp.valid := helper.legal_addr(0) && RegNext(io.req.valid)
-  io.resp.bits.data0 := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
-  io.resp.bits.data1 := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
+  io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
+  io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
   io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
 }
