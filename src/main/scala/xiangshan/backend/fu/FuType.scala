@@ -132,6 +132,8 @@ object FuType extends OHEnumeration {
   val vecArithOrMem = vecArith ++ vecMem
   val vecAll = vecVSET ++ vecArithOrMem
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
+  val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
+  val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
@@ -202,6 +204,10 @@ object FuType extends OHEnumeration {
   def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
   def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
+
+  def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
+
+  def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
 
   object FuTypeOrR {
     def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {

@@ -109,6 +109,7 @@ object Bundles {
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
+    val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
@@ -451,6 +452,11 @@ object Bundles {
       this.vsew  := source.vsew
       this.vlmul := source.vlmul
     }
+  }
+
+  class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
+    val scalaNeedFrm = Bool()
+    val vectorNeedFrm = Bool()
   }
 
   // DynInst --[IssueQueue]--> DataPath

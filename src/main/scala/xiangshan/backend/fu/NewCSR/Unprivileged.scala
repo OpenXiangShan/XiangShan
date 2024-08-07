@@ -21,7 +21,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val OF = WARL(2, wNoFilter)
     val DZ = WARL(3, wNoFilter)
     val NV = WARL(4, wNoFilter)
-    val FRM = WARL(7, 5, wNoFilter)
+    val FRM = WARL(7, 5, wNoFilter).withReset(0.U)
   }) with HasRobCommitBundle {
     val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRFFlagsBundle)))
     val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
