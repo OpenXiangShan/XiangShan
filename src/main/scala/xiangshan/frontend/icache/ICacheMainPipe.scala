@@ -37,18 +37,11 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
 {
   val vaddr    = UInt(VAddrBits.W)
-  // val registerData = UInt(blockBits.W)
-  // val sramData = UInt(blockBits.W)
-  // val select   = Bool()
-  val data = UInt((blockBits).W)
+  val data     = UInt((blockBits).W)
   val paddr    = UInt(PAddrBits.W)
   val gpaddr    = UInt(GPAddrBits.W)
-  val tlbExcp  = new Bundle{
-    val pageFault = Bool()
-    val guestPageFault = Bool()
-    val accessFault = Bool()
-    val mmio = Bool()
-  }
+  val exception = UInt(ExceptionType.width.W)
+  val mmio      = Bool()
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
@@ -375,12 +368,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  val s2_corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  val s2_l2_corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
-      s2_corrupt(i) := false.B
+      s2_l2_corrupt(i) := false.B
     }.elsewhen(s2_MSHR_hits(i)) {
-      s2_corrupt(i) := fromMSHR.bits.corrupt
+      s2_l2_corrupt(i) := fromMSHR.bits.corrupt
     }
   }
 
@@ -422,6 +415,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall",  toMSHR.valid && !toMSHR.ready)
 
   val s2_fetch_finish = !s2_miss.reduce(_||_)
+  val s2_exception_out = ExceptionType.merge(s2_exception, VecInit(s2_l2_corrupt.map(ExceptionType.fromECC)))
 
   /**
     ******************************************************************************
@@ -430,40 +424,32 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   (0 until PortNumber).foreach{ i =>
     if(i == 0) {
-      toIFU(i).valid                        := s2_fire
-      toIFU(i).bits.tlbExcp.pageFault       := s2_exception(i) === ExceptionType.pf
-      toIFU(i).bits.tlbExcp.guestPageFault  := s2_exception(i) === ExceptionType.gpf
-      toIFU(i).bits.tlbExcp.accessFault     := s2_exception(i) === ExceptionType.af || s2_corrupt(i)
-      toIFU(i).bits.tlbExcp.mmio            := s2_mmio(i) && s2_exception(i) === ExceptionType.none
-      toIFU(i).bits.data                    := s2_datas.asTypeOf(UInt(blockBits.W))
+      toIFU(i).valid          := s2_fire
+      toIFU(i).bits.exception := s2_exception_out(i)
+      toIFU(i).bits.mmio      := s2_mmio(i)
+      toIFU(i).bits.data      := s2_datas.asTypeOf(UInt(blockBits.W))
     } else {
-      /* Note: toIFU(1).bits.tlbExcp.xxx is already "&&ed" with doubleline before it goes into WayLookup (see IPrefetch.scala)
-       * so we actually don't need do "&&" again here,
-       * but as excp_pmp_xxx and corrupt does not, we keep all the "&&" logic here for clarity
-       */
-      toIFU(i).valid                        := s2_fire && s2_doubleline
-      toIFU(i).bits.tlbExcp.pageFault       := s2_exception(i) === ExceptionType.pf && s2_doubleline
-      toIFU(i).bits.tlbExcp.guestPageFault  := s2_exception(i) === ExceptionType.gpf && s2_doubleline
-      toIFU(i).bits.tlbExcp.accessFault     := (s2_exception(i) === ExceptionType.af || s2_corrupt(i)) && s2_doubleline
-      toIFU(i).bits.tlbExcp.mmio            := s2_mmio(i) && s2_exception(i) === ExceptionType.none && s2_doubleline
-      toIFU(i).bits.data                    := DontCare
+      toIFU(i).valid          := s2_fire && s2_doubleline
+      toIFU(i).bits.exception := Mux(s2_doubleline, s2_exception_out(i), ExceptionType.none)
+      toIFU(i).bits.mmio      := s2_mmio(i) && s2_doubleline
+      toIFU(i).bits.data      := DontCare
     }
-    toIFU(i).bits.vaddr                     := s2_req_vaddr(i)
-    toIFU(i).bits.paddr                     := s2_req_paddr(i)
-    toIFU(i).bits.gpaddr                    := s2_req_gpaddr  // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
+    toIFU(i).bits.vaddr       := s2_req_vaddr(i)
+    toIFU(i).bits.paddr       := s2_req_paddr(i)
+    toIFU(i).bits.gpaddr      := s2_req_gpaddr  // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
   }
 
   s2_flush := io.flush
   s2_ready := (s2_fetch_finish && !io.respStall) || !s2_valid
   s2_fire  := s2_valid && s2_fetch_finish && !io.respStall && !s2_flush
-  
+
   /**
     ******************************************************************************
     * report Tilelink corrupt error
     ******************************************************************************
     */
   (0 until PortNumber).map{ i =>
-    when(RegNext(s2_fire && s2_corrupt(i))){
+    when(RegNext(s2_fire && s2_l2_corrupt(i))){
       io.errors(i).valid                 := true.B
       io.errors(i).bits.report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
       io.errors(i).bits.paddr            := RegNext(s2_req_paddr(i))
@@ -528,7 +514,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
-      val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.guestPageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio
+      val discard = toIFU(i).bits.exception =/= ExceptionType.none || toIFU(i).bits.mmio
       discard
     }
     val blkPaddrAll = s2_req_paddr.map(addr => addr(PAddrBits - 1, blockOffBits) << blockOffBits)
