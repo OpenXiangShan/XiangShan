@@ -34,6 +34,7 @@ object ArgParser {
     """
       |XiangShan Options
       |--xs-help                  print this help message
+      |--version                  print version info
       |--config <ConfigClassName>
       |--num-cores <Int>
       |--hartidbits <Int>
@@ -66,6 +67,10 @@ object ArgParser {
         case Nil => config
         case "--xs-help" :: tail =>
           println(usage)
+          if(tail == Nil) exit(0)
+          nextOption(config, tail)
+        case "--version" :: tail =>
+          println(os.read(os.resource / "publishVersion"))
           if(tail == Nil) exit(0)
           nextOption(config, tail)
         case "--config" :: confString :: tail =>
