@@ -53,6 +53,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val hartId = Input(UInt(hartIdLen.W))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
+    val toRenameAllFire = Output(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // enq Lsq
@@ -172,8 +173,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
   val toIntDq0Valid = Wire(Vec(RenameWidth, Bool()))
   val toIntDq1Valid = Wire(Vec(RenameWidth, Bool()))
-  dontTouch(toIntDq0Valid)
-  dontTouch(toIntDq1Valid)
   toIntDq0Valid.indices.map { case i =>
     toIntDq0Valid(i) := Mux(!io.toIntDq0.canAccept, false.B, Mux(!io.toIntDq1.canAccept, isOnlyDq0(i) || isBothDq01(i), isOnlyDq0(i) || aluSelectDq0(i) || brhSelectDq0(i)))
   }
@@ -194,7 +193,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStore(req.bits.fuType)))
   val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
-  val isBlockBackward = VecInit(io.fromRename.map(_.bits.blockBackward))
+  val isBlockBackward  = VecInit(io.fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
 
   val singleStepStatus = RegInit(false.B)
@@ -236,7 +235,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
 
     // update singleStep
-    updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
+    // Singlestep should only commit one instruction after dret, and then hart enter debugMode according to singlestep exception.
+    // singleStep exception only enable in uop[1](from cache), or enable in uop[0](from flash).
+    if(i < 2) {
+      updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
+    } else {
+      updatedUop(i).singleStep := false.B
+    }
     when (io.fromRename(i).fire) {
       XSDebug(updatedUop(i).trigger.getFrontendCanFire, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
@@ -282,7 +287,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // notBlockedByPrevious: previous instructions can enqueue
   val hasException = VecInit(io.fromRename.zip(updatedUop).map {
     case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
-      selectFrontend(fromRename.bits.exceptionVec).asUInt.orR || uop.singleStep || fromRename.bits.trigger.getFrontendCanFire
+      fromRename.bits.hasException || uop.singleStep
   })
 
   private val blockedByWaitForward = Wire(Vec(RenameWidth, Bool()))
@@ -290,11 +295,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 1 until RenameWidth) {
     blockedByWaitForward(i) := blockedByWaitForward(i - 1) || (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR) && isWaitForward(i)
   }
-  dontTouch(blockedByWaitForward)
+  if(backendParams.debugEn){
+    dontTouch(toIntDq0Valid)
+    dontTouch(toIntDq1Valid)
+    dontTouch(blockedByWaitForward)
+  }
 
   // Only the uop with block backward flag will block the next uop
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
-    !(isBlockBackward(i) && io.fromRename(i).valid)
+    !isBlockBackward(i)
   ))
   val notBlockedByPrevious = VecInit((0 until RenameWidth).map(i =>
     if (i == 0) true.B
@@ -327,6 +336,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && dqCanAccept
     io.enqRob.req(i).bits := updatedUop(i)
+    if(i < 2){
+      io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
+      io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
+    }
     XSDebug(io.enqRob.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.pc)} receives nrob ${io.enqRob.resp(i)}\n")
 
     // When previous instructions have exceptions, following instructions should not enter dispatch queues.
@@ -389,16 +402,20 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     * Part 4: send response to rename when dispatch queue accepts the uop
     */
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
-  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && isBlockBackward(i))).orR
+  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 
   private val canAccept = !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept && dqCanAccept
 
+  val isWaitForwardOrBlockBackward = isWaitForward.asUInt.orR || isBlockBackward.asUInt.orR
+  io.toRenameAllFire := !isWaitForwardOrBlockBackward && io.enqRob.canAccept && dqCanAccept
   for (i <- 0 until RenameWidth) {
     io.fromRename(i).ready := thisCanActualOut(i) && io.enqRob.canAccept && dqCanAccept
 
     io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.rfWen && (io.fromRename(i).bits.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
     io.allocPregs(i).isFp := io.fromRename(i).valid && io.fromRename(i).bits.fpWen
     io.allocPregs(i).isVec := io.fromRename(i).valid && io.fromRename(i).bits.vecWen
+    io.allocPregs(i).isV0 := io.fromRename(i).valid && io.fromRename(i).bits.v0Wen
+    io.allocPregs(i).isVl := io.fromRename(i).valid && io.fromRename(i).bits.vlWen
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.fromRename.map(_.fire))

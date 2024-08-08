@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSError
+import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
@@ -16,7 +16,7 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
 
   // modules
   private val vidiv = Module(new VectorIdiv)

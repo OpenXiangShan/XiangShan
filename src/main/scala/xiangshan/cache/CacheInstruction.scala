@@ -143,7 +143,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     val cache = new L1CacheInnerOpIO
     val cache_req_dup = Vec(DCacheDupNum, Valid(new CacheCtrlReqInfo))
     val cacheOp_req_bits_opCode_dup = Output(Vec(DCacheDupNum, UInt(XLEN.W)))
-    val error = Flipped(new L1CacheErrorInfo)
+    val error = Flipped(ValidIO(new L1CacheErrorInfo))
   })
 
   // CSRCacheOpDecoder state
@@ -272,11 +272,8 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     data_transfer_cnt := 0.U
   }
 
-  val error = Wire(io.error.cloneType)
-  val (error_valid,error_bits) = DelayNWithValid(io.error, io.error.valid, 1)
-  error <> error_bits
-  error.valid := error_valid
-  when(error.report_to_beu && error.valid) {
+  val error = DelayNWithValid(io.error, 1)
+  when(error.bits.report_to_beu && error.valid) {
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := error.asUInt
     io.csr.update.w.valid := true.B
@@ -293,20 +290,20 @@ class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
       printf("  " + desc + "\n")
     }
   }
-  val decoded_cache_error = WireInit(encoded_cache_error.asTypeOf(new L1CacheErrorInfo))
+  val decoded_cache_error = WireInit(encoded_cache_error.asTypeOf(ValidIO(new L1CacheErrorInfo)))
   when(decoded_cache_error.valid && !RegNext(decoded_cache_error.valid)){
     printf("CACHE_ERROR CSR reported an error:\n")
-    printf("  paddr 0x%x\n", decoded_cache_error.paddr)
-    print_cache_error_flag(decoded_cache_error.report_to_beu, "report to bus error unit")
-    print_cache_error_flag(decoded_cache_error.source.tag, "tag")
-    print_cache_error_flag(decoded_cache_error.source.data, "data")
-    print_cache_error_flag(decoded_cache_error.source.l2, "l2")
-    print_cache_error_flag(decoded_cache_error.opType.fetch, "fetch")
-    print_cache_error_flag(decoded_cache_error.opType.load, "load")
-    print_cache_error_flag(decoded_cache_error.opType.store, "store")
-    print_cache_error_flag(decoded_cache_error.opType.probe, "probe")
-    print_cache_error_flag(decoded_cache_error.opType.release, "release")
-    print_cache_error_flag(decoded_cache_error.opType.atom, "atom")
+    printf("  paddr 0x%x\n", decoded_cache_error.bits.paddr)
+    print_cache_error_flag(decoded_cache_error.bits.report_to_beu, "report to bus error unit")
+    print_cache_error_flag(decoded_cache_error.bits.source.tag, "tag")
+    print_cache_error_flag(decoded_cache_error.bits.source.data, "data")
+    print_cache_error_flag(decoded_cache_error.bits.source.l2, "l2")
+    print_cache_error_flag(decoded_cache_error.bits.opType.fetch, "fetch")
+    print_cache_error_flag(decoded_cache_error.bits.opType.load, "load")
+    print_cache_error_flag(decoded_cache_error.bits.opType.store, "store")
+    print_cache_error_flag(decoded_cache_error.bits.opType.probe, "probe")
+    print_cache_error_flag(decoded_cache_error.bits.opType.release, "release")
+    print_cache_error_flag(decoded_cache_error.bits.opType.atom, "atom")
     printf("It should not happen in normal execution flow\n")
   }
 }

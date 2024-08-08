@@ -15,7 +15,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   // associated with AddrData's position of JmpCfg.srcData
   private val src = io.in.bits.data.src(0)
-  private val pc = SignExt(io.in.bits.data.pc.get, cfg.dataBits)
+  private val pc = SignExt(io.in.bits.data.pc.get, cfg.destDataBits)
   private val immMin = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
   private val isRVC = io.in.bits.ctrl.preDecode.get.isRVC
@@ -40,6 +40,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
   redirect.cfiUpdate.target := jumpDataModule.io.target
+  redirect.cfiUpdate.pc := io.in.bits.data.pc.get
   redirect.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 

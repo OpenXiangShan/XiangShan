@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -114,7 +115,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
   // 2 cycle line mask clean
   for(line <- 0 until StoreBufferSize){
-    val line_mask_clean_flag = RegNext(
+    val line_mask_clean_flag = GatedValidRegNext(
       io.maskFlushReq.map(a => a.valid && a.bits.wvec(line)).reduce(_ || _)
     )
     line_mask_clean_flag.suggestName("line_mask_clean_flag_"+line)
@@ -132,7 +133,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     val req = io.writeReq(i)
     for(line <- 0 until StoreBufferSize){
       val sbuffer_in_s1_line_wen = req.valid && req.bits.wvec(line)
-      val sbuffer_in_s2_line_wen = RegNext(sbuffer_in_s1_line_wen)
+      val sbuffer_in_s2_line_wen = GatedValidRegNext(sbuffer_in_s1_line_wen)
       val line_write_buffer_data = RegEnable(req.bits.data, sbuffer_in_s1_line_wen)
       val line_write_buffer_wline = RegEnable(req.bits.wline, sbuffer_in_s1_line_wen)
       val line_write_buffer_mask = RegEnable(req.bits.mask, sbuffer_in_s1_line_wen)
@@ -287,7 +288,7 @@ class Sbuffer(implicit p: Parameters)
   val cohTimeOutOH = PriorityEncoderOH(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
   val (missqReplayTimeOutIdxGen, missqReplayHasTimeOutGen) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
-  val missqReplayHasTimeOut = RegNext(missqReplayHasTimeOutGen) && !RegNext(sbuffer_out_s0_fire)
+  val missqReplayHasTimeOut = GatedValidRegNext(missqReplayHasTimeOutGen) && !GatedValidRegNext(sbuffer_out_s0_fire)
   val missqReplayTimeOutIdx = RegEnable(missqReplayTimeOutIdxGen, missqReplayHasTimeOutGen)
 
   //-------------------------sbuffer enqueue-----------------------------
@@ -380,7 +381,7 @@ class Sbuffer(implicit p: Parameters)
   ) && (EnsbufferWidth >= 1).B
   val forward_need_uarch_drain = WireInit(false.B)
   val merge_need_uarch_drain = WireInit(false.B)
-  val do_uarch_drain = RegNext(forward_need_uarch_drain) || RegNext(RegNext(merge_need_uarch_drain))
+  val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
@@ -476,9 +477,10 @@ class Sbuffer(implicit p: Parameters)
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
     assert(!((PopCount(insertVec) > 1.U) && in.fire && in.bits.vecValid))
     val insertIdx = OHToUInt(insertVec)
-    accessIdx(i).valid := RegNext(in.fire && in.bits.vecValid)
-    accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
-    when(in.fire && in.bits.vecValid){
+    val accessValid = in.fire && in.bits.vecValid
+    accessIdx(i).valid := RegNext(accessValid)
+    accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessValid)
+    when(accessValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
         mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
@@ -526,12 +528,12 @@ class Sbuffer(implicit p: Parameters)
   val ActiveCount = PopCount(activeMask)
   val ValidCount = PopCount(validMask)
   val forceThreshold = Mux(io.force_write, threshold - base, threshold)
-  val do_eviction = RegNext(ActiveCount >= forceThreshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
+  val do_eviction = GatedValidRegNext(ActiveCount >= forceThreshold || ActiveCount === (StoreBufferSize-1).U || ValidCount === (StoreBufferSize).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
   XSDebug(p"ActiveCount[$ActiveCount]\n")
 
-  io.flush.empty := RegNext(empty && io.sqempty)
+  io.flush.empty := GatedValidRegNext(empty && io.sqempty)
   // lru.io.flush := sbuffer_state === x_drain_all && empty
   switch(sbuffer_state){
     is(x_idle){
@@ -622,7 +624,7 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate &&
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready
@@ -633,7 +635,7 @@ class Sbuffer(implicit p: Parameters)
   // ---------------------------------------------------------------------------
 
   // TODO: use EnsbufferWidth
-  val shouldWaitWriteFinish = RegNext(VecInit((0 until EnsbufferWidth).map{i =>
+  val shouldWaitWriteFinish = GatedValidRegNext(VecInit((0 until EnsbufferWidth).map{i =>
     (writeReq(i).bits.wvec.asUInt & UIntToOH(sbuffer_out_s0_evictionIdx).asUInt).orR &&
     writeReq(i).valid
   }).asUInt.orR)
@@ -717,8 +719,8 @@ class Sbuffer(implicit p: Parameters)
       when(
         stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
-        RegNext(resp.fire) &&
-        waitInflightMask(i) === UIntToOH(RegNext(id_to_sbuffer_id(dcache_resp_id)))
+        GatedValidRegNext(resp.fire) &&
+        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
       ){
         stateVec(i).w_sameblock_inflight := false.B
       }
@@ -772,8 +774,8 @@ class Sbuffer(implicit p: Parameters)
     // ptag_matches uses paddr from dtlb, which is far from sbuffer
     val ptag_matches = VecInit(widthMap(w => RegEnable(ptag(w), forward.valid) === RegEnable(getPTag(forward.paddr), forward.valid)))
     val tag_matches = vtag_matches
-    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
-      RegNext(vtag_matches(w)) =/= ptag_matches(w) && RegNext((activeMask(w) || inflightMask(w)))
+    val tag_mismatch = GatedValidRegNext(forward.valid) && VecInit(widthMap(w =>
+      GatedValidRegNext(vtag_matches(w)) =/= ptag_matches(w) && GatedValidRegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
@@ -789,9 +791,8 @@ class Sbuffer(implicit p: Parameters)
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getVWordOffset(forward.paddr))
 
-    val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
-    val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
-    val line_offset_reg = RegNext(line_offset_mask)
+    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, forward.valid))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, forward.valid))
     val forward_mask_candidate_reg = RegEnable(
       VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid

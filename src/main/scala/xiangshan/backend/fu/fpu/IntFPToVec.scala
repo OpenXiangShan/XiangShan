@@ -38,11 +38,24 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   // when isFmv is true, the high bits of the scalar data is 1
   private val isFmv = IF2VectorType.isFmv(in.ctrl.fuOpType(4, 2))
 
+  private val isFp = IF2VectorType.isFp(in.ctrl.fuOpType(4, 2))
+
   // imm use src(1), scalar use src(0)
   private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
   // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
+
+  private val outNAN = Seq(
+    Cat(0.U, Fill(3, 1.U), 1.U, 0.U(3.W)),
+    Cat(0.U, Fill(5, 1.U), 1.U, 0.U(9.W)),
+    Cat(0.U, Fill(8, 1.U), 1.U, 0.U(22.W))
+  )
+  private val isFpCanonicalNAN = Seq(
+    !scalaData.head(56).andR,
+    !scalaData.head(48).andR,
+    !scalaData.head(32).andR
+  )
 
   private val fpData = Mux1H(Seq(
     (vsew === VSew.e8)  -> Cat(Fill(56, 1.U), scalaData( 7, 0)),
@@ -56,11 +69,11 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   private val vecE32Data = Wire(Vec(dataWidth / 32, UInt(32.W)))
   private val vecE64Data = Wire(Vec(dataWidth / 64, UInt(64.W)))
 
-  vecE8Data   := VecInit(Seq.fill(dataWidth /  8)(scalaData( 7, 0)))
-  vecE16Data  := VecInit(Seq.fill(dataWidth / 16)(scalaData(15, 0)))
-  vecE32Data  := VecInit(Seq.fill(dataWidth / 32)(scalaData(31, 0)))
+  vecE8Data   := VecInit(Seq.fill(dataWidth /  8)(Mux(isFpCanonicalNAN(0) & isFp, outNAN(0), scalaData( 7, 0))))
+  vecE16Data  := VecInit(Seq.fill(dataWidth / 16)(Mux(isFpCanonicalNAN(1) & isFp, outNAN(1), scalaData(15, 0))))
+  vecE32Data  := VecInit(Seq.fill(dataWidth / 32)(Mux(isFpCanonicalNAN(2) & isFp, outNAN(2), scalaData(31, 0))))
   vecE64Data  := VecInit(Seq.fill(dataWidth / 64)(scalaData(63, 0)))
-
+  connect0LatencyCtrlSingal
   out.res.data := Mux(needDup, Mux1H(Seq(
     (vsew === VSew.e8)  -> vecE8Data.asUInt,
     (vsew === VSew.e16) -> vecE16Data.asUInt,

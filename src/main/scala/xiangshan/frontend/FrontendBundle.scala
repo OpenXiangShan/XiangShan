@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -48,7 +49,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
     when (b.fallThruError) {
-      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.startAddr, b.nextLineAddr)
+      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
       val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
       this.nextStartAddr :=
         Cat(nextBlockHigher,
@@ -69,6 +70,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
+  val ftqIdx              = new FtqPtr
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
@@ -102,18 +104,17 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val instrRange   = Vec(PredictWidth, Bool())
 }
 
-// Ftq send req to Prefetch
-class PrefetchRequest(implicit p:Parameters) extends XSBundle {
-  val target          = UInt(VAddrBits.W)
-}
-
-class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
-  val req = DecoupledIO(new PrefetchRequest)
-}
-
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioFtqPtr = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
+}
+
+object ExceptionType {
+  def none = "b00".U
+  def ipf = "b01".U
+  def igpf = "b10".U
+  def acf = "b11".U
+  def width = 2
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
@@ -125,9 +126,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val ipf          = Vec(PredictWidth, Bool())
-  val igpf          = Vec(PredictWidth, Bool())
-  val acf          = Vec(PredictWidth, Bool())
+  val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
   val topdown_info = new FrontendTopDownBundle
@@ -429,6 +428,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
   val fallThroughAddr = UInt(VAddrBits.W)
   val fallThroughErr = Bool()
+  val multiHit = Bool()
 
   val is_jal = Bool()
   val is_jalr = Bool()
@@ -474,13 +474,13 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // the vec indicating if ghr should shift on each branch
   def shouldShiftVec =
     VecInit(br_valids.zipWithIndex.map{ case (v, i) =>
-      v && !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B)})
+      v && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
 
   def lastBrPosOH =
     VecInit((!hit || !br_valids.reduce(_||_)) +: // not hit or no brs in entry
       (0 until numBr).map(i =>
         br_valids(i) &&
-        !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
+        !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
         (real_br_taken_mask()(i) || !br_valids.drop(i+1).reduceOption(_||_).getOrElse(false.B)) && // no brs behind it
         hit
       )
@@ -502,6 +502,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   }
 
   def fallThruError: Bool = hit && fallThroughErr
+  def ftbMultiHit: Bool = hit && multiHit
 
   def hit_taken_on_jmp =
     !real_slot_taken_mask().init.reduce(_||_) &&
@@ -542,7 +543,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
-    fallThroughErr := startLower >= endLowerwithCarry
+    fallThroughErr := startLower >= endLowerwithCarry || endLowerwithCarry > (startLower + (PredictWidth).U)
     fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc, last_stage_entry))
   }
 
@@ -579,6 +580,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def brTaken          = VecInit(full_pred.map(_.brTaken))
   def shouldShiftVec   = VecInit(full_pred.map(_.shouldShiftVec))
   def fallThruError    = VecInit(full_pred.map(_.fallThruError))
+  def ftbMultiHit      = VecInit(full_pred.map(_.ftbMultiHit))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
@@ -592,10 +594,13 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val s1_uftbHit = Bool()
+  val s1_uftbHasIndirect = Bool()
+  val s1_ftbCloseReq = Bool()
 
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry

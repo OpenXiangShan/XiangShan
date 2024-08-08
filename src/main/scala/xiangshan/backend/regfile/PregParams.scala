@@ -43,6 +43,26 @@ case class VfPregParams(
   val isFake: Boolean = false
 }
 
+case class V0PregParams(
+  numEntries: Int,
+  numRead   : Option[Int],
+  numWrite  : Option[Int],
+) extends PregParams {
+
+  val dataCfg: DataConfig = V0Data()
+  val isFake: Boolean = false
+}
+
+case class VlPregParams(
+  numEntries: Int,
+  numRead   : Option[Int],
+  numWrite  : Option[Int],
+) extends PregParams {
+
+  val dataCfg: DataConfig = VlData()
+  val isFake: Boolean = false
+}
+
 case class NoPregParams() extends PregParams {
   val numEntries: Int = 0
   val numRead   : Option[Int] = None

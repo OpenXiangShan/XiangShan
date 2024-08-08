@@ -21,7 +21,9 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
-import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasPerfEvents, HasTLDump}
+import utility.{XSDebug, XSPerfAccumulate}
+
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val param  = UInt(cWidth.W)
@@ -144,7 +146,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state = RegInit(s_invalid)
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
-  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid)))
+  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid))) //TODO: clock gate
 
   val remain = RegInit(0.U(refillCycles.W))
   val remain_dup_0 = RegInit(0.U(refillCycles.W))

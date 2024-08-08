@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -20,8 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate}
-import utils.XSDebug
+import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
 
 import scala.math.max
@@ -46,12 +46,12 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
     val resp = Output(Vec(3, Vec(blockRows, Bits(encRowBits.W))))
     val nacks = Output(Vec(3, Bool()))
-    val errors = Output(Vec(3, new L1CacheErrorInfo))
+    val errors = Output(Vec(3, ValidIO(new L1CacheErrorInfo)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until 3).map(f))
 
-  def dumpRead() = {
+  def dumpRead = {
     (0 until 3) map { w =>
       when(io.read(w).valid) {
         XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
@@ -60,7 +60,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.valid) {
       XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
         io.write.bits.way_en, io.write.bits.addr)
@@ -72,7 +72,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpResp() = {
+  def dumpResp = {
     (0 until 3) map { w =>
       XSDebug(s"DataArray ReadResp channel: $w\n")
       (0 until blockRows) map { r =>
@@ -81,7 +81,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpNack() = {
+  def dumpNack = {
     (0 until 3) map { w =>
       when(io.nacks(w)) {
         XSDebug(s"DataArray NACK channel: $w\n")

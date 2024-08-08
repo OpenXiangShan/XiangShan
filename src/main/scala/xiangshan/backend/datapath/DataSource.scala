@@ -9,7 +9,9 @@ class DataSource extends Bundle {
 
   def readRegOH: Bool = value === DataSource.reg
 
-  def readAnotherReg: Bool = value === DataSource.anotherReg
+  def readRegCache: Bool = value === DataSource.regcache
+
+  def readV0: Bool = value === DataSource.v0
 
   def readZero: Bool = value === DataSource.zero
 
@@ -28,7 +30,9 @@ object DataSource {
 
   def reg: UInt = "b1000".U
 
-  def anotherReg: UInt = "b1001".U
+  def regcache: UInt = "b0110".U
+
+  def v0: UInt = "b0101".U
 
   // read int preg addr is 0
   def zero: UInt = "b0000".U

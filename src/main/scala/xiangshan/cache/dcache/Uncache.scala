@@ -79,6 +79,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val req = Reg(new UncacheWordReq)
   val resp_data = Reg(UInt(DataBits.W))
+  val resp_nderr = Reg(Bool())
   def storeReq = req.cmd === MemoryOpConstants.M_XWR
 
   io.invalid := state === s_invalid
@@ -99,6 +100,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     when (io.req.fire) {
       req := io.req.bits
       req.addr := io.req.bits.addr
+      resp_nderr := false.B
       state := s_refill_req
     }
   }
@@ -145,6 +147,8 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     when (io.mem_grant.fire) {
       resp_data := io.mem_grant.bits.data
+      resp_nderr := io.mem_grant.bits.denied
+      // TODO: consider corrupt
       assert(refill_done, "Uncache response should be one beat only!")
       state := Mux(storeReq && io.enableOutstanding, s_invalid, s_send_resp)
     }
@@ -160,6 +164,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.replay := false.B
     io.resp.bits.tag_error := false.B
     io.resp.bits.error := false.B
+    io.resp.bits.nderr := resp_nderr
 
     when (io.resp.fire) {
       state := s_invalid

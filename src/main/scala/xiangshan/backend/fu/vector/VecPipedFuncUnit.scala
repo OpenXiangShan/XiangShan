@@ -77,6 +77,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val outVl       = outVConfig.vl
   protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
+  protected val outVlmul    = outCtrl.vpu.get.vlmul
+  protected val outLastUop  = outCtrl.vpu.get.lastUop
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
   protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {

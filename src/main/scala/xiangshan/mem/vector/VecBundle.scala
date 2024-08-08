@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.vector.Bundles.VEew
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 
@@ -46,7 +47,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val vm                  = Bool() // whether vector masking is enabled
   val usWholeReg          = Bool() // unit-stride, whole register load
   val usMaskReg           = Bool() // unit-stride, masked store/load
-  val eew                 = UInt(ewBits.W) // size of memory elements
+  val eew                 = VEew() // size of memory elements
   val sew                 = UInt(ewBits.W)
   val emul                = UInt(mulBits.W)
   val lmul                = UInt(mulBits.W)
@@ -67,6 +68,11 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
 
   val alignedType         = UInt(alignTypeBits.W)
+  val indexVlMaxInVd      = UInt(elemIdxBits.W)
+
+  val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
+  val usAligned128        = Bool()
+  val usMask              = UInt((VLENB*2).W) // for unit-stride split
 }
 
 object VSFQFeedbackType {
@@ -233,10 +239,11 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
+  val vecDifftestInfo     = Decoupled(new DynInst) // to sbuffer
   val dtlb                = new TlbRequestIO(2)
   val pmpResp             = Flipped(new PMPRespBundle())
   val flush_sbuffer       = new SbufferFlushBundle
   val feedback            = ValidIO(new RSFeedback(isVector = true))
   val redirect            = Flipped(ValidIO(new Redirect))
-  val exceptionAddr       = ValidIO(new FeedbackToLsqIO)
+  val exceptionInfo       = ValidIO(new FeedbackToLsqIO)
 }

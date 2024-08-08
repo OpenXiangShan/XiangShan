@@ -1,5 +1,6 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
   * Copyright (c) 2020-2021 Peng Cheng Laboratory
   *
   * XiangShan is licensed under Mulan PSL v2.
@@ -32,7 +33,6 @@ import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
 import yunsuan.VpermType
-import scala.collection.Seq
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
 class indexedLSUopTable(uopIdx:Int) extends Module {
@@ -79,6 +79,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
 trait VectorConstants {
   val MAX_VLMUL = 8
   val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
+  val VECTOR_COMPRESS = 1 // in v0 regfile
   val MAX_INDEXED_LS_UOPNUM = 64
 }
 
@@ -149,6 +150,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   isVsetSimple := latchedInst.isVset
   val vlmulReg = latchedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
+  val vstartReg = latchedInst.vpu.vstart
 
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
@@ -175,6 +177,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
+  val fixedDecodedInst = Wire(Vec(maxUopSize, new DecodedInst))
+
   csBundle.foreach { case dst =>
     dst := latchedInst
     dst.numUops := latchedUopInfo.numOfUop
@@ -187,6 +191,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  csBundle(numOfUop - 1.U).blockBackward := vstartReg =/= 0.U
+  csBundle(0.U).flushPipe := vstartReg =/= 0.U
+
   switch(typeOfSplit) {
     is(UopSplitType.VSET) {
       // In simple decoder, rfWen and vecWen are not set
@@ -194,23 +203,32 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         // Default
         // uop0 set rd, never flushPipe
         csBundle(0).fuType := FuType.vsetiwi.U
-        csBundle(0).flushPipe := false.B
+        csBundle(0).flushPipe := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
+        csBundle(0).blockBackward := false.B
         csBundle(0).rfWen := true.B
         // uop1 set vl, vsetvl will flushPipe
-        csBundle(1).ldest := VCONFIG_IDX.U
-        csBundle(1).vecWen := true.B
+        csBundle(1).ldest := Vl_IDX.U
+        csBundle(1).vecWen := false.B
+        csBundle(1).vlWen := true.B
+        csBundle(1).flushPipe := false.B
+        csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := false.B
+          csBundle(0).vlWen := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
-          csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).srcType(0) := SrcType.no
+          csBundle(1).srcType(2) := SrcType.no
+          csBundle(1).srcType(3) := SrcType.no
+          csBundle(1).srcType(4) := SrcType.vp
+          csBundle(1).lsrc(4) := Vl_IDX.U
         }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // uop0: mv vtype gpr to vector region
           csBundle(0).srcType(0) := SrcType.xp
           csBundle(0).srcType(1) := SrcType.no
+          csBundle(0).lsrc(0) := src2
           csBundle(0).lsrc(1) := 0.U
           csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
           csBundle(0).fuType := FuType.i2v.U
@@ -218,22 +236,40 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := true.B
-          csBundle(0).flushPipe := false.B
+          csBundle(0).vlWen := false.B
           // uop1: uvsetvcfg_vv
           csBundle(1).fuType := FuType.vsetfwf.U
           // vl
-          csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).srcType(0) := SrcType.no
+          csBundle(1).srcType(2) := SrcType.no
+          csBundle(1).srcType(3) := SrcType.no
+          csBundle(1).srcType(4) := SrcType.vp
+          csBundle(1).lsrc(4) := Vl_IDX.U
           // vtype
           csBundle(1).srcType(1) := SrcType.vp
           csBundle(1).lsrc(1) := VECTOR_TMP_REG_LMUL.U
-          csBundle(1).vecWen := true.B
-          csBundle(1).ldest := VCONFIG_IDX.U
+          csBundle(1).vecWen := false.B
+          csBundle(1).vlWen := true.B
+          csBundle(1).ldest := Vl_IDX.U
         }.elsewhen(dest === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := false.B
+          csBundle(0).vlWen := false.B
+        }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType)) {
+          // because vsetvl may modified src2 when src2 == rd,
+          // we need to modify vd in second uop to avoid dependency
+          // uop0 set vl
+          csBundle(0).fuType := FuType.vsetiwf.U
+          csBundle(0).ldest := Vl_IDX.U
+          csBundle(0).rfWen := false.B
+          csBundle(0).vlWen := true.B
+          // uop1 set rd
+          csBundle(1).fuType := FuType.vsetiwi.U
+          csBundle(1).ldest := dest
+          csBundle(1).rfWen := true.B
+          csBundle(1).vlWen := false.B
         }
         // use bypass vtype from vtypeGen
         csBundle(0).vpu.connectVType(io.vtypeBypass)
@@ -347,7 +383,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -430,13 +466,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := Cat(IF2VectorType.iDup2Vec(2, 0), vsewReg)
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.immDup2Vec(2, 0), IF2VectorType.iDup2Vec(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
 
       for (i <- 0 until MAX_VLMUL / 2) {
@@ -531,7 +567,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -601,7 +637,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1282,7 +1318,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_SLIDEUP) {
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1310,7 +1346,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_SLIDEDOWN) {
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1354,10 +1390,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := ldest
         csBundle(i).uopIdx := i.U
       }
-      csBundle(lmul - 1.U).rfWen := true.B
-      csBundle(lmul - 1.U).fpWen := false.B
-      csBundle(lmul - 1.U).vecWen := false.B
-      csBundle(lmul - 1.U).ldest := dest
+      csBundle(numOfUop - 1.U).rfWen := Mux(dest === 0.U, false.B, true.B)
+      csBundle(numOfUop - 1.U).fpWen := false.B
+      csBundle(numOfUop - 1.U).vecWen := false.B
+      csBundle(numOfUop - 1.U).ldest := dest
     }
 
     is(UopSplitType.VEC_MVV) {
@@ -1380,14 +1416,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i * 2 + 1).ldest := (VECTOR_TMP_REG_LMUL + i).U
         csBundle(i * 2 + 1).uopIdx := (i * 2 + 1).U
       }
-    }
-
-    is(UopSplitType.VEC_M0X_VFIRST) {
-      // LMUL
-      csBundle(0).rfWen := true.B
-      csBundle(0).fpWen := false.B
-      csBundle(0).vecWen := false.B
-      csBundle(0).ldest := dest
     }
     is(UopSplitType.VEC_VWW) {
       for (i <- 0 until MAX_VLMUL*2) {
@@ -1457,7 +1485,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           }
       }
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1586,17 +1614,21 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           for (j <- 0 until jlen) {
             val vd_old = if(i==j) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j + 1).U
             val vd = if(i==len-1) (dest + j.U) else {
-              if (j == i+1) VECTOR_TMP_REG_LMUL.U else (VECTOR_TMP_REG_LMUL + j + 1).U
+              if (j == i+1) VECTOR_TMP_REG_LMUL.U  else (VECTOR_TMP_REG_LMUL + j + 1).U
             }
+            csBundle(i*(i+3)/2 + j).vecWen := true.B
+            csBundle(i*(i+3)/2 + j).v0Wen := false.B
             val src13Type = if (j == i+1) DontCare else SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(0) := src13Type
             csBundle(i*(i+3)/2 + j).srcType(1) := SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(2) := src13Type
-            csBundle(i*(i+3)/2 + j).srcType(3) := SrcType.vp
-            csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            if (i == 0) {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            } else {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := VECTOR_TMP_REG_LMUL.U
+            }
             csBundle(i*(i+3)/2 + j).lsrc(1) := src2 + i.U
             csBundle(i*(i+3)/2 + j).lsrc(2) := vd_old
-            csBundle(i*(i+3)/2 + j).lsrc(3) := VECTOR_TMP_REG_LMUL.U
             csBundle(i*(i+3)/2 + j).ldest := vd
             csBundle(i*(i+3)/2 + j).uopIdx := (i*(i+3)/2 + j).U
           }
@@ -1721,12 +1753,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
-      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Array(
+      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
       ))
-      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Array(
+      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
@@ -1838,7 +1870,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
   val thisAllOut = uopRes <= readyCounter
@@ -1871,14 +1903,23 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
+  fixedDecodedInst := csBundle
+
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
+
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
-    outDecodedInsts(i) := Mux((i.U + numOfUop - uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
+    outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
   }
 
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
   inReady := state === s_idle || state === s_active && thisAllOut
 
+
+  XSError(io.in.valid && numOfUop === 0.U,
+    p"uop number $numOfUop is illegal, cannot be zero")
 //  val validSimple = Wire(Vec(DecodeWidth, Bool()))
 //  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
 //  val notInf = Wire(Vec(DecodeWidth, Bool()))

@@ -75,7 +75,11 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
-  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val enq_s0_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val enq_s0_bits = WireInit(VecInit(io.enq.map(_.bits)))
+  enq_s0_bits zip io.enq foreach { case (sink, source) =>
+    sink.flushPipe := source.bits.flushPipe && !source.bits.hasException
+  }
 
   // s0: compare wb in 6 groups
   val csr_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr).nonEmpty).map(_._1)
@@ -99,8 +103,8 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val s1_out_bits = RegEnable(getOldest(s0_out_valid, s0_out_bits), s1_valid.asUInt.orR)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
-  val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
-  val enq_bits = RegEnable(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)), in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
+  val enq_s1_valid = RegNext(enq_s0_valid.asUInt.orR && !io.redirect.valid && !io.flush)
+  val enq_s1_bits: RobExceptionInfo = RegEnable(ParallelPriorityMux(enq_s0_valid, enq_s0_bits), enq_s0_valid.asUInt.orR && !io.redirect.valid && !io.flush)
 
   // s2: compare the input exception with the current one
   // priorities:
@@ -127,13 +131,13 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   }.elsewhen (s1_out_valid && !s1_flush) {
     currentValid := true.B
     current := s1_out_bits
-  }.elsewhen (enq_valid && !(io.redirect.valid || io.flush)) {
+  }.elsewhen (enq_s1_valid && !(io.redirect.valid || io.flush)) {
     currentValid := true.B
-    current := enq_bits
+    current := enq_s1_bits
   }
 
-  io.out.valid   := s1_out_valid || enq_valid && enq_bits.can_writeback
-  io.out.bits    := Mux(s1_out_valid, s1_out_bits, enq_bits)
+  io.out.valid   := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback
+  io.out.bits    := Mux(s1_out_valid, s1_out_bits, enq_s1_bits)
   io.state.valid := currentValid
   io.state.bits  := current
 

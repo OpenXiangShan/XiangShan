@@ -77,6 +77,44 @@ trait HasLoadHelper { this: XSModule =>
     ))
   }
 
+  def genRdataOH(uop: DynInst): UInt = {
+    val fuOpType = uop.fuOpType
+    val fpWen    = uop.fpWen
+    val result = Cat(
+      (fuOpType === LSUOpType.lw && fpWen),
+      (fuOpType === LSUOpType.lw && !fpWen) || (fuOpType === LSUOpType.hlvw),
+      (fuOpType === LSUOpType.lh)           || (fuOpType === LSUOpType.hlvh),
+      (fuOpType === LSUOpType.lb)           || (fuOpType === LSUOpType.hlvb),
+      (fuOpType === LSUOpType.ld)           || (fuOpType === LSUOpType.hlvd),
+      (fuOpType === LSUOpType.lwu)          || (fuOpType === LSUOpType.hlvwu) || (fuOpType === LSUOpType.hlvxwu),
+      (fuOpType === LSUOpType.lhu)          || (fuOpType === LSUOpType.hlvhu) || (fuOpType === LSUOpType.hlvxhu),
+      (fuOpType === LSUOpType.lbu)          || (fuOpType === LSUOpType.hlvbu),
+    )
+    result
+  }
+
+  def newRdataHelper(select: UInt, rdata: UInt): UInt = {
+    XSError(PopCount(select) > 1.U, "data selector must be One-Hot!\n")
+    val selData = Seq(
+      ZeroExt(rdata(7, 0), XLEN),
+      ZeroExt(rdata(15, 0), XLEN),
+      ZeroExt(rdata(31, 0), XLEN),
+      rdata(63, 0),
+      SignExt(rdata(7, 0) , XLEN),
+      SignExt(rdata(15, 0) , XLEN),
+      SignExt(rdata(31, 0) , XLEN),
+      FPU.box(rdata, FPU.S)
+    )
+    Mux1H(select, selData)
+  }
+
+  def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
+    require(addrOffset.getWidth == 4)
+    VecInit((0 until 16).map{ case i =>
+      addrOffset === i.U
+    })
+  }
+
   def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
     LookupTree(alignedType, List(
       "b00".U -> ZeroExt(rdata(7, 0), VLEN),
@@ -145,7 +183,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
-    val nuke_rollback = Output(Valid(new Redirect))
+    val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Output(Valid(new Redirect))
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
@@ -222,14 +260,17 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   // vlsu exception!
   for (i <- 0 until VecLoadPipelineWidth) {
-    exceptionBuffer.io.req(LoadPipelineWidth + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits                := DontCare
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
-    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+    exceptionBuffer.io.req(LoadPipelineWidth + i).valid                 := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits                  := DontCare
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr            := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx       := io.vecFeedback(i).bits.uopidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx       := io.vecFeedback(i).bits.robidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart   := io.vecFeedback(i).bits.vstart
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl       := io.vecFeedback(i).bits.vl
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.exceptionVec := io.vecFeedback(i).bits.exceptionVec
   }
+  // mmio non-data error exception
+  exceptionBuffer.io.req.last := uncacheBuffer.io.exception
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
@@ -289,7 +330,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("full_mask_101", full_mask === 5.U)
   XSPerfAccumulate("full_mask_110", full_mask === 6.U)
   XSPerfAccumulate("full_mask_111", full_mask === 7.U)
-  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.valid)
+  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
   XSPerfAccumulate("nack_rollabck", io.nack_rollback.valid)
 
   // perf cnt
@@ -303,7 +344,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("full_mask_101", full_mask === 5.U),
     ("full_mask_110", full_mask === 6.U),
     ("full_mask_111", full_mask === 7.U),
-    ("nuke_rollback", io.nuke_rollback.valid),
+    ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
     ("nack_rollback", io.nack_rollback.valid)
   )
   generatePerfEvent()

@@ -6,10 +6,10 @@ import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid, PopCount}
 import utils.SeqUtils.{MixedVec3, Seq3}
 import utils.{OptionWrapper, SeqUtils}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
-import xiangshan.backend.datapath.RdConfig.{IntRD, NoRD, RdConfig, VfRD, FpRD}
+import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.regfile.PregParams
-import utils._
+import utility._
 
 case class RFRdArbParams(
   inRdCfgs: Seq3[RdConfig],
@@ -53,8 +53,8 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
     .groupBy(_.bits.rdCfg.get.port)
     .map(x => (x._1, x._2.sortBy(_.bits.rdCfg.get.priority).toSeq))
   protected val arbiters: Seq[Option[WBArbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
-    OptionWrapper(
-      inGroup.isDefinedAt(portIdx),
+    Option.when(
+      inGroup.isDefinedAt(portIdx))(
       Module(new WBArbiter(
         new RFArbiterBundle(pregWidth),
         inGroup(portIdx).size
@@ -136,3 +136,18 @@ class VfRFReadArbiter(
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(VecData()).max
 }
 
+class V0RFReadArbiter(
+  backendParams: BackendParams
+)(implicit
+  p: Parameters
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[V0RD], backendParams.v0PregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getRdPortIndices(V0Data()).max
+}
+
+class VlRFReadArbiter(
+  backendParams: BackendParams
+)(implicit
+  p: Parameters
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[VlRD], backendParams.vlPregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getRdPortIndices(VlData()).max
+}

@@ -1,5 +1,6 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -17,27 +18,34 @@
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
 
-TOP = XSTop
+TOP = $(XSTOP_PREFIX)XSTop
 SIM_TOP = SimTop
 
 FPGATOP = top.TopMain
 SIMTOP  = top.SimTop
 
-TOP_V = $(RTL_DIR)/$(TOP).v
-SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).v
+RTL_SUFFIX ?= sv
+TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
+SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
 MEM_GEN = ./scripts/vlsi_mem_gen
 MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
-SPLIT_VERILOG = ./scripts/split_verilog.sh
 
-IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-MFC ?= 1
+ISSUE ?= B
 
+SUPPORT_CHI_ISSUE = B E.b
+ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
+$(error "Unsupported CHI issue: $(ISSUE)")
+endif
+
+ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
+$(error At most one target can be specified)
+endif
 
 ifeq ($(MAKECMDGOALS),)
 GOALS = verilog
@@ -46,25 +54,24 @@ GOALS = $(MAKECMDGOALS)
 endif
 
 # common chisel args
-ifeq ($(MFC),1)
-CHISEL_VERSION = chisel
-FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
-SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-MFC_ARGS = --dump-fir --target verilog \
+FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
+SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
+MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
 PLDM_ARGS += $(MFC_ARGS)
-else
-CHISEL_VERSION = chisel3
-FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
-SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
-endif
 
 ifneq ($(XSTOP_PREFIX),)
 RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+endif
+
+ifeq ($(IMSIC_USE_TL),1)
+RELEASE_ARGS += --imsic-use-tl
+DEBUG_ARGS += --imsic-use-tl
+PLDM_ARGS += --imsic-use-tl
 endif
 
 # co-simulation with DRAMsim3
@@ -123,8 +130,6 @@ endif
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -avp -o $(TIMELOG)
 
-SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
-
 ifeq ($(PLDM),1)
 SED_IFNDEF = `ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala
 SED_ENDIF  = `endif // not def SYNTHESIS
@@ -133,18 +138,14 @@ endif
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
+	mill -i xiangshan.runMain $(FPGATOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
-		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
+	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
-ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(RTL_DIR)"
-endif
-	$(SED_CMD) $@
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -159,14 +160,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
-		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
+	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
-ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
-endif
-	$(SED_CMD) $@
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -175,14 +172,16 @@ endif
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 ifeq ($(PLDM),1)
-	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
-	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/$$finish/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
+	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(RTL_DIR)/*.$(RTL_SUFFIX)
 else
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+ifeq ($(ENABLE_XPROP),1)
+	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $(RTL_DIR)/*.$(RTL_SUFFIX)
+else
+	sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
-ifeq ($(MFC),1)
-	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
 endif
+	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 
 sim-verilog: $(SIM_TOP_V)
 
@@ -201,7 +200,7 @@ bsp:
 	mill -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.scalalib.GenIdea/idea
+	mill -i mill.idea.GenIdea/idea
 
 check-format:
 	mill xiangshan[$(CHISEL_VERSION)].checkFormat
@@ -211,25 +210,30 @@ reformat:
 
 # verilator simulation
 emu: sim-verilog
-	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 emu-run: emu
-	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
 simv: sim-verilog
-	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+simv-run:
+	$(MAKE) -C ./difftest simv-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # palladium simulation
 pldm-build: sim-verilog
-	$(MAKE) -C ./difftest pldm-build SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest pldm-build SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 pldm-run:
-	$(MAKE) -C ./difftest pldm-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest pldm-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 pldm-debug:
-	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 include Makefile.test
+
+include src/main/scala/device/standalone/standalone_device.mk
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)

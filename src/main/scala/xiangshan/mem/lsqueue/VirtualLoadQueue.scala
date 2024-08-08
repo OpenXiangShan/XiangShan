@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -92,14 +93,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect) && allocated(i)
   })))
-  val lastNeedCancel = RegNext(needCancel)
+  val lastNeedCancel = GatedValidRegNext(needCancel)
   val enqCancel = canEnqueue.zip(io.enq.req).map{case (v , x) =>
     v && x.bits.robIdx.needFlush(io.redirect)
   }
   val enqCancelNum = enqCancel.zip(io.enq.req).map{case (v, req) =>
     Mux(v, req.bits.numLsElem, 0.U)
   }
-  val lastEnqCancel = RegNext(enqCancelNum.reduce(_ + _))
+  val lastEnqCancel = GatedRegNext(enqCancelNum.reduce(_ + _))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect.valid)
 
@@ -139,7 +140,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
   deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
   val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
-  val lastCommitCount = RegNext(commitCount)
+  val lastCommitCount = GatedRegNext(commitCount)
 
   // update deqPtr
   // cycle 1: generate deqPtrNext
@@ -148,7 +149,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   deqPtrNext := deqPtr + lastCommitCount
   deqPtr := RegEnable(deqPtrNext, 0.U.asTypeOf(new LqPtr), deqPtrUpdateEna)
 
-  io.lqDeq := RegNext(lastCommitCount)
+  io.lqDeq := GatedRegNext(lastCommitCount)
   io.lqCancelCnt := redirectCancelCount
   io.ldWbPtr := deqPtr
   io.lqEmpty := RegNext(validCount === 0.U)
@@ -164,7 +165,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val index = io.enq.req(i).bits.lqIdx
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      for (j <- 0 until VecMemDispatchMaxNumber) {
+      // The maximum 'numLsElem' number that can be emitted per dispatch port is:
+      //    16 2 2 2 2 2.
+      // Therefore, VecMemLSQEnqIteratorNumberSeq = Seq(16, 2, 2, 2, 2, 2)
+      for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
         when (j.U < validVLoadOffset(i)) {
           allocated((index + j.U).value) := true.B
           uop((index + j.U).value) := io.enq.req(i).bits
@@ -205,7 +209,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VirtualLoadQueueSize) {
     val cmt = io.vecCommit
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCommittmp(i)(j) := cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
     }
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
 
@@ -269,13 +273,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
 
-        when (io.ldin(i).bits.usSecondInv) {
-          uop(loadWbIndex + 1.U).robIdx := uop(loadWbIndex).robIdx
-          uop(loadWbIndex + 1.U).uopIdx := uop(loadWbIndex).uopIdx
-        }
-
         XSInfo(io.ldin(i).valid,
-          "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x vec_secondInv %x\n",
+          "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
           io.ldin(i).bits.uop.lqIdx.asUInt,
           io.ldin(i).bits.uop.pc,
           io.ldin(i).bits.vaddr,
@@ -284,8 +283,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
           io.ldin(i).bits.forwardData.asUInt,
           io.ldin(i).bits.forwardMask.asUInt,
           io.ldin(i).bits.mmio,
-          io.ldin(i).bits.isvec,
-          io.ldin(i).bits.usSecondInv
+          io.ldin(i).bits.isvec
         )
       }
     }
@@ -311,7 +309,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {
-    XSDebug(i + " pc %x pa %x ", uop(i).pc, debug_paddr(i))
+    XSDebug(s"$i pc %x pa %x ", uop(i).pc, debug_paddr(i))
     PrintFlag(allocated(i), "v")
     PrintFlag(allocated(i) && datavalid(i), "d")
     PrintFlag(allocated(i) && addrvalid(i), "a")

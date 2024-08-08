@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -20,8 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate}
-import utils.XSDebug
+import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
 
 // basic building blocks for L1 DCache
@@ -59,7 +59,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     val read = Flipped(Decoupled(new L1MetaReadReq))
     val write = Flipped(Decoupled(new L1MetaWriteReq))
     val resp = Output(Vec(nWays, UInt(encMetaBits.W)))
-    val error = Output(new L1CacheErrorInfo)
+    val error = Output(ValidIO(new L1CacheErrorInfo))
   })
   val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
   val rst = rst_cnt < nSets.U
@@ -90,20 +90,20 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
-  io.error.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
+  io.error.bits.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
+  io.error.bits.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
   io.read.ready := !wen
 
-  def dumpRead() = {
+  def dumpRead = {
     when(io.read.fire) {
       XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
         io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
@@ -134,10 +134,10 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     val read = Vec(numReadPorts, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
     val resp = Output(Vec(numReadPorts, Vec(nWays, UInt(encMetaBits.W))))
-    val errors = Output(Vec(numReadPorts, new L1CacheErrorInfo))
+    val errors = Output(Vec(numReadPorts, ValidIO(new L1CacheErrorInfo)))
   })
   val meta = Seq.fill(numReadPorts) {
-    Module(new L1MetadataArray(onReset _))
+    Module(new L1MetadataArray(() => onReset))
   }
 
   for (w <- 0 until numReadPorts) {
@@ -151,7 +151,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
   // io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
   io.write.ready := true.B
 
-  def dumpRead() = {
+  def dumpRead = {
     (0 until numReadPorts) map { w =>
       when(io.read(w).fire) {
         XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
@@ -160,7 +160,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)

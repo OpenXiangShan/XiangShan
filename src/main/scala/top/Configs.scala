@@ -79,10 +79,9 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
         // ============ VLSU ============
-        VlMergeBufferSize = 8,
+        VlMergeBufferSize = 16,
         VsMergeBufferSize = 8,
         UopWritebackWidth = 2,
-        SplitBufferSize = 8,
         // ==============================
         RobSize = 48,
         RabSize = 96,
@@ -117,12 +116,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
-          nMissEntries = 2,
-          nReleaseEntries = 1,
-          nProbeEntries = 2,
-          // fdip
-          enableICachePrefetch = true,
-          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -135,8 +128,25 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
         )),
-        EnableBPD = false, // disable TAGE
+        // ============ BPU ===============
         EnableLoop = false,
+        EnableGHistDiff = false,
+        FtbSize = 256,
+        FtbWays = 2,
+        RasSize = 8,
+        RasSpecSize = 16,
+        TageTableInfos =
+          Seq((512, 4, 6),
+            (512, 9, 6),
+            (1024, 19, 6)),
+        SCNRows = 128,
+        SCNTables = 2,
+        SCHistLens = Seq(0, 5),
+        ITTageTableInfos =
+          Seq((256, 4, 7),
+            (256, 8, 7),
+            (512, 16, 7)),
+        // ================================
         itlbParameters = TLBParameters(
           name = "itlb",
           fetchi = true,
@@ -281,7 +291,9 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Seq(PrefetchReceiverParams(), BOPParameters()) ++ (if (tp) Seq(TPParameters()) else Nil),
+        prefetch = Seq(BOPParameters()) ++
+          (if (tp) Seq(TPParameters()) else Nil) ++
+          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -394,5 +406,11 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 8)
-    ++ new BaseConfig(n)
+    ++ new DefaultConfig(n)
+)
+
+class XSNoCTopConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
 )

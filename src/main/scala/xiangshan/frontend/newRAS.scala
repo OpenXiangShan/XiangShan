@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -25,7 +26,7 @@ import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
-    val ctr = UInt(8.W) // layer of nested call functions
+    val ctr = UInt(RasCtrSize.W) // layer of nested call functions
     def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
 
@@ -212,7 +213,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     // it would be unsafe for specPtr manipulation if specSize is not power of 2
     assert(log2Up(RasSpecSize) == log2Floor(RasSpecSize))
-    def ctrMax = ((1l << RasCtrSize) - 1).U
+    def ctrMax = ((1L << RasCtrSize) - 1).U
     def ptrInc(ptr: UInt) = ptr + 1.U
     def ptrDec(ptr: UInt) = ptr - 1.U
 
@@ -258,7 +259,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
 
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
-      io.redirect_meta_NOS, TOSR)
+      io.redirect_meta_TOSR, TOSR)
 
     when (io.spec_push_valid || (io.redirect_valid && io.redirect_isCall)) {
       writeBypassEntry := writeEntry
@@ -417,6 +418,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         spec_overflowed := true.B;
       }
     }
+    XSPerfAccumulate("spec_overflowed", TOSW.value === BOS.value)
 
     when (io.spec_push_valid) {
       specPush(io.spec_push_addr, ssp, sctr, TOSR, TOSW, topEntry)
@@ -516,8 +518,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
       // when overflow, BOS may be forced move forward, do not revert those changes
-      when (!spec_overflowed || isAfter(specPtrInc(io.commit_meta_TOSW), BOS)) {
-        BOS := specPtrInc(io.commit_meta_TOSW)
+      when (!spec_overflowed || isAfter(io.commit_meta_TOSW, BOS)) {
+        BOS := io.commit_meta_TOSW
         spec_overflowed := false.B
       }
 

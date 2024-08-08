@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utility.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
@@ -27,18 +27,21 @@ trait HasFuLatency {
   val latencyVal: Option[Int]
   val extraLatencyVal: Option[Int]
   val uncertainLatencyVal: Option[Int]
+  val uncertainEnable: Option[Int]
 }
 
 case class CertainLatency(value: Int, extraValue: Int = 0) extends HasFuLatency {
   override val latencyVal: Option[Int] = Some(value + extraValue)
   override val extraLatencyVal: Option[Int] = Some(extraValue)
   override val uncertainLatencyVal: Option[Int] = None
+  override val uncertainEnable: Option[Int] = None
 }
 
 case class UncertainLatency(value: Option[Int]) extends HasFuLatency {
   override val latencyVal: Option[Int] = None
   override val extraLatencyVal: Option[Int] = None
   override val uncertainLatencyVal: Option[Int] = value
+  override val uncertainEnable: Option[Int] = Some(0) // for gate uncertain fu
 }
 
 object UncertainLatency {

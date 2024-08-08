@@ -29,867 +29,423 @@ import huancun.PreferCacheKey
 import xiangshan.XSCoreParamsKey
 import utility._
 
-
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
-//TODO: remove this
-object DebugFlags {
-  val fdip = false
-}
-
-class PIQData(implicit p: Parameters) extends IPrefetchBundle {
-  val ptage = UInt(tagBits.W)
-  val vSetIdx = UInt(idxBits.W)
-  val cacheline = UInt(blockBits.W)
-  val writeBack = Bool()
-}
-
-class PIQToMainPipe(implicit  p: Parameters) extends IPrefetchBundle{
-  val info = DecoupledIO(new PIQData)
-}
-
-class PrefetchReq(implicit  p: Parameters) extends IPrefetchBundle{
-  val paddr     = UInt(PAddrBits.W)
-  val vSetIdx   = UInt(idxBits.W)
-}
-
-class PrefetchBufferIO(implicit p: Parameters) extends IPrefetchBundle {
-  val hartId = Input(UInt(hartIdLen.W))
-  val fencei = Input(Bool())
-  val IPFFilterRead   = new IPFBufferFilterRead
-  val IPFBufferRead   = new IPFBufferRead
-  val IPFBufferWrite  = Flipped(DecoupledIO(new IPFBufferWrite))
-  val metaWrite       = DecoupledIO(new ICacheMetaWriteBundle)
-  val dataWrite       = DecoupledIO(new ICacheDataWriteBundle)
-  val IPFReplacer     = new IPFReplacer
-  val ipfRecentWrite  = Output(Vec(2, new FilterInfo))
-}
-
-class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
-{
-  val io = IO(new PrefetchBufferIO)
-  
-  val fromIPrefetch   = io.IPFFilterRead.req
-  val toIPrefetch     = io.IPFFilterRead.resp
-  val fromMainPipe    = io.IPFBufferRead.req
-  val toMainPipe      = io.IPFBufferRead.resp
-  val fromPIQ         = io.IPFBufferWrite
-  val toICacheMeta    = io.metaWrite
-  val toICacheData    = io.dataWrite
-  val fromReplacer    = io.IPFReplacer
-  val toIPrefetchInfo = io.ipfRecentWrite
-
-  class IPFBufferEntryMeta(implicit p: Parameters) extends IPrefetchBundle
-  {
-    val valid         = Bool()
-    val paddr         = UInt(PAddrBits.W)
-    val vSetIdx       = UInt(idxBits.W)
-    val confidence    = UInt(log2Ceil(maxIPFMoveConf + 1).W)
-  }
-
-  class IPFBufferEntryData(implicit p: Parameters) extends IPrefetchBundle
-  {
-    val cacheline = UInt(blockBits.W)
-  }
-
-  val meta_buffer = InitQueue(new IPFBufferEntryMeta, size = nPrefBufferEntries)
-  val data_buffer = InitQueue(new IPFBufferEntryData, size = nPrefBufferEntries)
-
-  /**
-    ******************************************************************************
-    * handle look-up request from IPrefetchPipe
-    * - 1. Receive request from IPrefetch
-    * - 2. Look up whether hit in meta_buffer
-    * - 3. Send response to IPrefetch at the same cycle
-    ******************************************************************************
-    */
-  val fr_block  = get_block(fromIPrefetch.paddr)
-  val fr_hit_oh = meta_buffer.map(e => e.valid && (get_block(e.paddr) === fr_block))
-  toIPrefetch.ipf_hit := ParallelOR(fr_hit_oh)
-  // only hit one entry in meta_buffer at the same time
-  assert(PopCount(fr_hit_oh) <= 1.U, "More than 1 hit in L1 prefetch buffer for filter")
-
-  /**
-    ******************************************************************************
-    * handle read request from ICacheMainPipe
-    * - 1. Receive request from ICacheMainPipe
-    * - 2. Look up whether hit in meta_buffer and get hitted data
-    * - 3. Send response to ICacheMainPipe at the same cycle
-    ******************************************************************************
-    */
-  fromMainPipe.foreach(_.ready := DontCare)
-  val r_blocks      = fromMainPipe.map (e => get_block(e.bits.paddr))
-  val r_hit_oh      = r_blocks.map (ptag => meta_buffer.map(e => e.valid && (get_block(e.paddr) === ptag)))
-  val curr_hit_ptr  = r_hit_oh.map (OHToUInt(_))
-  val r_hit_data    = r_hit_oh.map (oh => Mux1H(oh, data_buffer.map(_.cacheline)))
-  val r_hit         = (0 until PortNumber).map (i => ParallelOR(r_hit_oh(i)) && fromMainPipe(i).valid)
-  (0 until PortNumber).foreach (i => {
-    toMainPipe(i).ipf_hit   := r_hit(i)
-    toMainPipe(i).cacheline := r_hit_data(i)
-    // only hit one entry in meta_buffer
-    assert(PopCount(r_hit_oh(i)) <= 1.U, "More than 1 hit in L1 prefetch buffer")
-    XSPerfAccumulate("fdip_mainpipe_hit_in_ipf_" + i, r_hit(i))
-  })
-  
-
-  /**
-    ******************************************************************************
-    * move the entry arriving max confidence to icache
-    * - 1. Chose a moved entry from the entries that reach max confidence (LSB first)
-    * - 2. Get victim way of array from replacer of ICacheMainPipe
-    * - 3. Send write req to metaArray and dataArray and ensure fire together
-    ******************************************************************************
-    */
-  val move_oh   = meta_buffer.map (e => e.confidence === maxIPFMoveConf.U && e.valid)
-  val move_need = ParallelOR(move_oh)
-  val curr_move_ptr  = PriorityEncoder(move_oh)
-
-  fromReplacer.vsetIdx := meta_buffer(curr_move_ptr).vSetIdx
-
-  toICacheMeta.valid := move_need
-  toICacheMeta.bits.generate(
-    tag     = get_phy_tag(meta_buffer(curr_move_ptr).paddr),
-    idx     = meta_buffer(curr_move_ptr).vSetIdx,
-    waymask = fromReplacer.waymask,
-    bankIdx = meta_buffer(curr_move_ptr).vSetIdx(0))
-
-  toICacheData.valid := move_need
-  toICacheData.bits.generate(
-    data    = data_buffer(curr_move_ptr).cacheline,
-    idx     = meta_buffer(curr_move_ptr).vSetIdx,
-    waymask = fromReplacer.waymask,
-    bankIdx = meta_buffer(curr_move_ptr).vSetIdx(0),
-    paddr   = meta_buffer(curr_move_ptr).paddr)
-
-  // TODO: how to ensure
-  assert((toICacheMeta.fire && toICacheData.fire) || (!toICacheMeta.fire && !toICacheData.fire),
-    "meta and data array need fire at same time")
-
-  XSPerfAccumulate("fdip_move_to_icache", toICacheMeta.fire && toICacheData.fire)
-
-  when(toICacheMeta.fire) {
-    XSDebug(p"PrefetchBuffer: write prefetch data to icache . vSetIdx:${meta_buffer(curr_move_ptr).vSetIdx} " +
-            p"paddr:${meta_buffer(curr_move_ptr).paddr}")
-  }
-
-  /**
-    ******************************************************************************
-    * Prefetch buffer write logic
-    * Read old data when read and write occur in the same cycle
-    * There are 4 situations that can cause meta_buffer and data_buffer to be written
-    * - 1. ICacheMainPipe read hit that need to change some status
-    * - 2. Move prefetch cacheline to icache
-    * - 3. Receive write request from ICacheMissUnit
-    * - 4. Receive fencei req that need to flush all buffer
-    * Priority: 4 > 3 > 2 > 1
-    * The order of the code determines the priority, with the following priority being higher
-    ******************************************************************************
-    */
-
-  /** 1. confidence++ for every ICacheMainPipe hit */
-  (0 until PortNumber) .map (i =>
-    when(r_hit(i)) {
-      // handle overflow
-      when(meta_buffer(curr_hit_ptr(i)).confidence =/= maxIPFMoveConf.U) {
-        meta_buffer(curr_hit_ptr(i)).confidence := meta_buffer(curr_hit_ptr(i)).confidence + 1.U
-      }
-    }
-  )
-
-  /** 2. set entry invalid after move to icache */
-  when(toICacheMeta.fire) {
-    meta_buffer(curr_move_ptr).valid := false.B
-  }
-
-  /** 3. write prefetch data to entry */
-  // try to get a free entry ptr  
-  val free_oh       = meta_buffer.map (_.valid === false.B)
-  val has_free      = ParallelOR(free_oh)
-  val ptr_from_free = PriorityEncoder(free_oh)
-  // get a ptr from random replacement policy
-  val replacer = ReplacementPolicy.fromString(Some("random"), nPrefBufferEntries)
-  // write to free entry if has, otherwise random entry
-  val curr_write_ptr = Mux(has_free, ptr_from_free, replacer.way)
-  fromPIQ.ready := DontCare
-  when(fromPIQ.valid) {
-    meta_buffer(curr_write_ptr).valid         := true.B
-    meta_buffer(curr_write_ptr).confidence    := fromPIQ.bits.has_hit.asUInt
-    meta_buffer(curr_write_ptr).paddr         := fromPIQ.bits.paddr
-    meta_buffer(curr_write_ptr).vSetIdx       := fromPIQ.bits.vSetIdx
-    data_buffer(curr_write_ptr).cacheline     := fromPIQ.bits.cacheline
-  }
-
-  if(DebugFlags.fdip) {
-    when(fromPIQ.valid) {
-      printf(p"PrefetchBuffer: receive prefetch data. vSetIdx:${fromPIQ.bits.vSetIdx} paddr:${fromPIQ.bits.paddr}")
-    }
-  }
-
-  XSPerfAccumulate("fdip_vitcm_used",     !has_free && fromPIQ.valid && (meta_buffer(curr_write_ptr).confidence =/= 0.U))
-  XSPerfAccumulate("fdip_vitcm_no_used",  !has_free && fromPIQ.valid && (meta_buffer(curr_write_ptr).confidence === 0.U))
-
-  /** 4. flush all prefetch buffer when fencei */
-  when(io.fencei) {
-    meta_buffer.foreach { b =>
-      b.valid         := false.B
-      b.confidence    := 0.U
-    }
-  }
-
-  /**
-    ******************************************************************************
-    * Register 2 cycle meta write info for IPrefetchPipe filter
-    ******************************************************************************
-    */
-  val meta_write_buffer = InitQueue(new FilterInfo, size = 2)
-  meta_write_buffer(0).valid := toICacheMeta.fire
-  meta_write_buffer(0).paddr := meta_buffer(curr_move_ptr).paddr
-  meta_write_buffer(1)       := meta_write_buffer(0)
-  (0 until PortNumber).foreach (i => {
-    toIPrefetchInfo(i) := meta_write_buffer(i)
-  })
-
-  XSPerfAccumulate("fdip_fencei_cycle", io.fencei)
-
-  if (env.EnableDifftest) {
-    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
-    difftest.coreid  := io.hartId
-    difftest.index   := 6.U
-    difftest.valid   := toICacheData.fire
-    difftest.addr    := toICacheData.bits.paddr
-    difftest.data    := toICacheData.bits.data.asTypeOf(difftest.data)
-    difftest.idtfr   := DontCare
-  }
-}
-
 class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
-  val ftqReq              = Flipped(new FtqPrefechBundle)
-  val iTLBInter           = new TlbRequestIO
-  val pmp                 = new ICachePMPBundle
-  val metaReadReq         = Decoupled(new PrefetchMetaReadBundle)
-  val metaReadResp        = Input(new PrefetchMetaRespBundle)
-  val prefetchReq         = DecoupledIO(new PrefetchReq)
+  // control
+  val csr_pf_enable     = Input(Bool())
+  val flush             = Input(Bool())
 
-  val IPFFilterRead       = Flipped(new IPFBufferFilterRead)
-  val PIQFilterRead       = Flipped(new PIQFilterRead)
-
-  val ipfRecentWrite      = Input(Vec(2, new FilterInfo))
-  val ICacheMissUnitInfo  = Flipped(new ICacheMissUnitInfo)
-  val ICacheMainPipeInfo  = Flipped(new ICacheMainPipeInfo)
-
-  val fencei              = Input(Bool())
+  val ftqReq            = Flipped(new FtqToPrefetchIO)
+  val itlb              = Vec(PortNumber, new TlbRequestIO)
+  val pmp               = Vec(PortNumber, new ICachePMPBundle)
+  val metaRead          = new ICacheMetaReqBundle
+  val MSHRReq           = DecoupledIO(new ICacheMissReq)
+  val MSHRResp          = Flipped(ValidIO(new ICacheMissResp))
+  val wayLookupWrite    = DecoupledIO(new WayLookupInfo)
 }
 
 class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 {
   val io = IO(new IPredfetchIO)
 
-  val enableBit = RegInit(false.B)
-  enableBit := enableICachePrefetch.B
-
   val fromFtq = io.ftqReq
-  val (toITLB,  fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
-  val (toIMeta, fromIMeta, fromIMetaValid) = (io.metaReadReq, io.metaReadResp.metaData, io.metaReadResp.entryValid)
-  val (toIPFBuffer, fromIPFBuffer) = (io.IPFFilterRead.req, io.IPFFilterRead.resp)
-  val (toPIQ, fromPIQ) = (io.PIQFilterRead.req, io.PIQFilterRead.resp)
-  val (toPMP,  fromPMP)   = (io.pmp.req, io.pmp.resp)
-  val toPIQEnqReq = io.prefetchReq
+  val (toITLB,  fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
+  val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
+  val (toMeta,  fromMeta) = (io.metaRead.toIMeta,  io.metaRead.fromIMeta)
+  val (toMSHR, fromMSHR)  = (io.MSHRReq, io.MSHRResp)
+  val toWayLookup = io.wayLookupWrite
 
-  val fromIPFInfo      = io.ipfRecentWrite
-  val fromMainPipeInfo = io.ICacheMainPipeInfo
-  val fromMissUnitInfo = io.ICacheMissUnitInfo
+  val enableBit = RegInit(false.B)
+  enableBit := io.csr_pf_enable
 
-  val p0_fire, p1_fire, p2_fire           = WireInit(false.B)
-  val p0_discard, p1_discard, p2_discard  = WireInit(false.B)
-  val p0_ready, p1_ready, p2_ready        = WireInit(false.B)
+  val s0_fire, s1_fire, s2_fire             = WireInit(false.B)
+  val s0_discard, s2_discard                = WireInit(false.B)
+  val s0_ready, s1_ready, s2_ready          = WireInit(false.B)
+  val s0_flush, s1_flush, s2_flush          = WireInit(false.B)
+  val from_bpu_s0_flush, from_bpu_s1_flush  = WireInit(false.B)
 
   /**
     ******************************************************************************
     * IPrefetch Stage 0
-    * - 1. send req to IMeta
-    * - 2. send req to ITLB (no blocked)
-    * - 3. check last req
+    * - 1. receive ftq req
+    * - 2. send req to ITLB
+    * - 3. send req to Meta SRAM
     ******************************************************************************
     */
-  val p0_valid  = fromFtq.req.valid
+  val s0_valid  = fromFtq.req.valid
 
-  val p0_vaddr      = addrAlign(fromFtq.req.bits.target, blockBytes, VAddrBits)
-  val p0_vaddr_reg  = RegEnable(p0_vaddr, p0_fire)
-  val p0_req_cancel = Wire(Bool())
+  /**
+    ******************************************************************************
+    * receive ftq req
+    ******************************************************************************
+    */
+  val s0_req_vaddr    = VecInit(Seq(fromFtq.req.bits.startAddr, fromFtq.req.bits.nextlineStart))
+  val s0_req_ftqIdx   = fromFtq.req.bits.ftqIdx
+  val s0_doubleline   = fromFtq.req.bits.crossCacheline
+  val s0_req_vSetIdx  = s0_req_vaddr.map(get_idx(_))
 
-  /** 1. send req to IMeta */
-  toIMeta.valid     := p0_valid && !p0_req_cancel
-  toIMeta.bits.idx  := get_idx(p0_vaddr)
+  from_bpu_s0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
+                       fromFtq.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx)
+  s0_flush := io.flush || from_bpu_s0_flush || s1_flush
 
-  /** 2. send req to ITLB (no blocked) */
-  toITLB.valid                    := p0_valid && !p0_req_cancel
-  toITLB.bits.size                := 3.U // TODO: fix the size
-  toITLB.bits.vaddr               := p0_vaddr
-  toITLB.bits.debug.pc            := p0_vaddr
-  toITLB.bits.kill                := DontCare
-  toITLB.bits.cmd                 := TlbCmd.exec
-  toITLB.bits.debug.robIdx        := DontCare
-  toITLB.bits.debug.isFirstIssue  := DontCare
-  toITLB.bits.memidx              := DontCare
-  toITLB.bits.no_translate        := false.B
-  toITLB.bits.hyperinst := DontCare
-  toITLB.bits.hlvx := DontCare
-  fromITLB.ready                  := true.B
-  // TODO: whether to handle tlb miss for prefetch
-  io.iTLBInter.req_kill           := true.B
+  val s0_can_go = s1_ready && toITLB(0).ready && toITLB(1).ready && toMeta.ready
+  fromFtq.req.ready := s0_can_go
 
-  /** FTQ request port */
-  fromFtq.req.ready := p0_ready
-
-  /** 3. Check last req: request from FTQ is same as last time or behind */
-  val p0_hit_behind = Wire(Bool())
-
-  /** stage 0 control */
-  // Cancel request when prefetch not enable or the request from FTQ is same as last time
-  p0_req_cancel := !enableBit || p0_hit_behind || io.fencei
-  p0_ready      := p0_req_cancel || p1_ready && toITLB.ready && toIMeta.ready
-  p0_fire       := p0_valid && p1_ready && toITLB.ready && toIMeta.ready && enableBit && !p0_req_cancel
-  p0_discard    := p0_valid && p0_req_cancel
-
-  if(DebugFlags.fdip) {
-    when(p0_discard) {
-      printf(p"IPrefetchPipe: discard req in s0.")
-    }
-  }
+  s0_fire := s0_valid && s0_can_go && !s0_flush
 
   /**
     ******************************************************************************
     * IPrefetch Stage 1
-    * - 1. Receive resp from ITLB (no blocked)
-    * - 2. Receive resp from IMeta
-    * - 3. Check MSHR
+    * - 1. Receive resp from ITLB
+    * - 2. Receive resp from IMeta and check
+    * - 3. Monitor the requests from missUnit to write to SRAM.
+    * - 4. Wirte wayLookup
     ******************************************************************************
     */
-  val p1_valid  = generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
+  val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val p1_vaddr      = RegEnable(p0_vaddr, 0.U(VAddrBits.W), p0_fire)
-  val p1_req_cancel = Wire(Bool())
+  val s1_req_vaddr    = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
+  val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+  val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
+  val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx(_)))
 
-  /** 1. Receive resp from ITLB (no blocked) */
-  val p1_tlb_resp_miss  = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.miss)
-  val p1_tlb_resp_paddr = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.paddr(0))
-  val p1_tlb_resp_pf    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).pf.instr)
-  val p1_tlb_resp_af    = ResultHoldBypass(valid = RegNext(p0_fire), data = fromITLB.bits.excp(0).af.instr)
-  val p1_exception      = VecInit(Seq(p1_tlb_resp_pf, p1_tlb_resp_af))
-  val p1_has_except     = p1_exception.reduce(_ || _)
-  val p1_paddr          = p1_tlb_resp_paddr
+  val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
+  val state = RegInit(m_idle)
+  val next_state = WireDefault(state)
+  val s0_fire_r = RegNext(s0_fire)
+  dontTouch(state)
+  dontTouch(next_state)
+  state := next_state
 
-  /** 2. Receive resp from IMeta. Register the data first because of strict timing. */
-  val p1_meta_ptags_reg   = RegEnable(VecInit(fromIMeta.map(way => way.tag)), RegNext(p0_fire))
-  val p1_meta_valids_reg  = RegEnable(fromIMetaValid, RegNext(p0_fire))
+  /**
+    ******************************************************************************
+    * resend itlb req if miss
+    ******************************************************************************
+    */
+  val s1_wait_itlb  = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  (0 until PortNumber).foreach { i =>
+    when(s1_flush) {
+      s1_wait_itlb(i) := false.B
+    }.elsewhen(RegNext(s0_fire) && fromITLB(i).bits.miss) {
+      s1_wait_itlb(i) := true.B
+    }.elsewhen(s1_wait_itlb(i) && !fromITLB(i).bits.miss) {
+      s1_wait_itlb(i) := false.B
+    }
+  }
+  val s1_need_itlb    = VecInit(Seq((RegNext(s0_fire) || s1_wait_itlb(0)) && fromITLB(0).bits.miss,
+                                    (RegNext(s0_fire) || s1_wait_itlb(1)) && fromITLB(1).bits.miss && s1_doubleline))
+  val tlb_valid_pulse = VecInit(Seq((RegNext(s0_fire) || s1_wait_itlb(0)) && !fromITLB(0).bits.miss,
+                                    (RegNext(s0_fire) || s1_wait_itlb(1)) && !fromITLB(1).bits.miss && s1_doubleline))
+  val tlb_valid_latch = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_pulse(i), s1_fire, flush=s1_flush)))
+  val itlb_finish     = tlb_valid_latch(0) && (!s1_doubleline || tlb_valid_latch(1))
 
-  /** Stage 1 control */
-  p1_req_cancel := p1_tlb_resp_miss || p1_has_except || io.fencei
-  p1_ready      := p1_valid && p2_ready || !p1_valid
-  p1_fire       := p1_valid && !p1_req_cancel && p2_ready && enableBit
-  p1_discard    := p1_valid && p1_req_cancel
+  for (i <- 0 until PortNumber) {
+    toITLB(i).valid             := s1_need_itlb(i) || (s0_valid && (if(i == 0) true.B else s0_doubleline))
+    toITLB(i).bits              := DontCare
+    toITLB(i).bits.size         := 3.U
+    toITLB(i).bits.vaddr        := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
+    toITLB(i).bits.debug.pc     := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
+    toITLB(i).bits.cmd          := TlbCmd.exec
+    toITLB(i).bits.no_translate := false.B
+  }
+  fromITLB.foreach(_.ready := true.B)
+  io.itlb.foreach(_.req_kill := false.B)
 
-  when(p1_discard) {
-    XSDebug(p"IPrefetchPipe: discard req in s1. vaddr:${p1_vaddr}")
+  /**
+    ******************************************************************************
+    * Receive resp from ITLB
+    ******************************************************************************
+    */
+  val s1_req_paddr_wire   = VecInit(fromITLB.map(_.bits.paddr(0)))
+  val s1_req_paddr_reg    = VecInit((0 until PortNumber).map(i =>
+                                RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))))
+  val s1_req_paddr        = VecInit((0 until PortNumber).map(i => 
+                                Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))))
+  val s1_req_gpaddr_tmp   = VecInit((0 until PortNumber).map(i =>
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))))
+  val itlbExcpPF          = VecInit((0 until PortNumber).map(i =>
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).pf.instr), data = fromITLB(i).bits.excp(0).pf.instr)))
+  val itlbExcpGPF         = VecInit((0 until PortNumber).map(i =>
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).gpf.instr), data = fromITLB(i).bits.excp(0).gpf.instr)))
+  val itlbExcpAF          = VecInit((0 until PortNumber).map(i =>
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).af.instr), data = fromITLB(i).bits.excp(0).af.instr)))
+  val itlbExcp            = VecInit((0 until PortNumber).map(i => itlbExcpAF(i) || itlbExcpPF(i) || itlbExcpGPF(i)))
+
+  /* Select gpaddr with the first gpf
+   * Note: the backend wants the base guest physical address of a fetch block
+   *       for port(i), its base gpaddr is actually (gpaddr - i * blocksize)
+   *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
+   *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
+   */
+  val s1_req_gpaddr = PriorityMuxDefault(
+    itlbExcpGPF zip (0 until PortNumber).map(i => s1_req_gpaddr_tmp(i) - (i << blockOffBits).U),
+    0.U.asTypeOf(s1_req_gpaddr_tmp(0))
+  )
+
+  /**
+    ******************************************************************************
+    * resend metaArray read req when itlb miss finish
+    ******************************************************************************
+    */
+  val s1_need_meta = ((state === m_itlbResend) && itlb_finish) || (state === m_metaResend)
+  toMeta.valid              := s1_need_meta || s0_valid
+  toMeta.bits               := DontCare
+  toMeta.bits.isDoubleLine  := Mux(s1_need_meta, s1_doubleline, s0_doubleline)
+
+  for (i <- 0 until PortNumber) {
+    toMeta.bits.vSetIdx(i)  := Mux(s1_need_meta, s1_req_vSetIdx(i), s0_req_vSetIdx(i))
   }
 
   /**
     ******************************************************************************
-    * IPrefetch Stage 2
-    * - 1. IMeta Check: check whether req hit in icache
-    * - 2. PMP Check: send req and receive resq in the same cycle
-    * - 3. Prefetch buffer Check (if prefetch to L1)
-    * - 4. Prefetch Queue Check 
-    * - 5. Prefetch Buffer Recently write chcek
-    * - 6. MainPipeInfo chcek
-    * - 7. MissUnitInfo chcek
-    * - 8. Recently meta write check
+    * Receive resp from IMeta and check
     ******************************************************************************
     */
-  val p2_valid  = generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
+  val s1_req_ptags    = VecInit(s1_req_paddr.map(get_phy_tag(_)))
+
+  val s1_meta_ptags   = fromMeta.tags
+  val s1_meta_valids  = fromMeta.entryValid
+  val s1_meta_errors = VecInit((0 until PortNumber).map( p =>
+    // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
+    fromMeta.errors(p).asUInt.orR
+  ))
+
+  def get_waymask(paddrs: Vec[UInt]): Vec[UInt] = {
+    val ptags         = paddrs.map(get_phy_tag(_))
+    val tag_eq_vec    = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w => s1_meta_ptags(p)(w) === ptags(p)))))
+    val tag_match_vec = VecInit((0 until PortNumber).map( k => VecInit(tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_valids(k)(w)})))
+    val waymasks      = VecInit(tag_match_vec.map(_.asUInt))
+    waymasks
+  }
+
+  val s1_SRAM_waymasks = VecInit((0 until PortNumber).map(i =>
+                            Mux(tlb_valid_pulse(i), get_waymask(s1_req_paddr_wire)(i), get_waymask(s1_req_paddr_reg)(i))))
+
+  /**
+    ******************************************************************************
+    * update waymask according to MSHR update data
+    ******************************************************************************
+    */
+  def update_waymask(mask: UInt, vSetIdx: UInt, ptag: UInt): UInt = {
+    require(mask.getWidth == nWays)
+    val new_mask  = WireInit(mask)
+    val valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
+    val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
+    val way_same  = fromMSHR.bits.waymask === mask
+    when(valid && vset_same) {
+      when(ptag_same) { 
+        new_mask := fromMSHR.bits.waymask
+      }.elsewhen(way_same) {
+        new_mask := 0.U
+      }
+    }
+    new_mask
+  }
+
+  val s1_SRAM_valid = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
+  val s1_MSHR_valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+  val s1_waymasks   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
+  val s1_waymasks_r = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_SRAM_valid || s1_MSHR_valid)
+  (0 until PortNumber).foreach{i =>
+    val old_waymask = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
+    s1_waymasks(i) := update_waymask(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i))
+  }
+
+  /**
+    ******************************************************************************
+    * send enqueu req to WayLookup
+    ******** **********************************************************************
+    */
+  // Disallow enqueuing wayLookup when SRAM write occurs.
+  toWayLookup.valid             := ((state === m_enqWay) || ((state === m_idle) && itlb_finish)) && !s1_flush && !fromMSHR.valid
+  toWayLookup.bits.vSetIdx      := s1_req_vSetIdx
+  toWayLookup.bits.waymask      := s1_waymasks
+  toWayLookup.bits.ptag         := s1_req_ptags
+  toWayLookup.bits.gpaddr       := s1_req_gpaddr
+  (0 until PortNumber).foreach { i =>
+    val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
+    toWayLookup.bits.excp_tlb_af(i)  := excpValid && itlbExcpAF(i)
+    toWayLookup.bits.excp_tlb_pf(i)  := excpValid && itlbExcpPF(i)
+    toWayLookup.bits.excp_tlb_gpf(i) := excpValid && itlbExcpGPF(i)
+    toWayLookup.bits.meta_errors(i)  := excpValid && s1_meta_errors(i)
+  }
+
+  val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
+  when(toWayLookup.fire) {
+    assert(PopCount(s1_waymasks_vec(0)) <= 1.U && (PopCount(s1_waymasks_vec(1)) <= 1.U || !s1_doubleline),
+      "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
+      PopCount(s1_waymasks_vec(0)) > 1.U, s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
+      PopCount(s1_waymasks_vec(1)) > 1.U && s1_doubleline, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
+  }
+
+  /**
+    ******************************************************************************
+    * PMP check
+    ******************************************************************************
+    */
+  toPMP.zipWithIndex.map { case (p, i) =>
+    p.valid     := s1_valid
+    p.bits.addr := s1_req_paddr(i)
+    p.bits.size := 3.U // TODO
+    p.bits.cmd  := TlbCmd.exec
+  }
+  val pmpExcp = VecInit((0 until PortNumber).map( i => fromPMP(i).instr || fromPMP(i).mmio ))
+
+  /**
+    ******************************************************************************
+    * state machine
+    ******** **********************************************************************
+    */
+
+  switch(state) {
+    is(m_idle) {
+      when(s1_valid && !itlb_finish) {
+        next_state := m_itlbResend
+      }.elsewhen(s1_valid && itlb_finish && !toWayLookup.fire) {
+        next_state := m_enqWay
+      }.elsewhen(s1_valid && itlb_finish && toWayLookup.fire && !s2_ready) {
+        next_state := m_enterS2
+      }
+    }
+    is(m_itlbResend) {
+      when(itlb_finish && !toMeta.ready) {
+        next_state := m_metaResend
+      }.elsewhen(itlb_finish && toMeta.ready) {
+        next_state := m_enqWay
+      }
+    }
+    is(m_metaResend) {
+      when(toMeta.ready) {
+        next_state := m_enqWay
+      }
+    }
+    is(m_enqWay) {
+      when(toWayLookup.fire && !s2_ready) {
+        next_state := m_enterS2
+      }.elsewhen(toWayLookup.fire && s2_ready) {
+        next_state := m_idle
+      }
+    }
+    is(m_enterS2) {
+      when(s2_ready) {
+        next_state := m_idle
+      }
+    }
+  }
+
+  when(s1_flush) {
+    next_state := m_idle
+  }
+
+  /** Stage 1 control */
+  from_bpu_s1_flush := s1_valid && fromFtq.flushFromBpu.shouldFlushByStage3(s1_req_ftqIdx)
+  s1_flush := io.flush || from_bpu_s1_flush
+
+  s1_ready      := next_state === m_idle
+  s1_fire       := (next_state === m_idle) && s1_valid && !s1_flush
+
+  /**
+    ******************************************************************************
+    * IPrefetch Stage 2
+    * - 1. Monitor the requests from missUnit to write to SRAM.
+    * - 2. send req to missUnit
+    ******************************************************************************
+    */
+  val s2_valid  = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
+
+  val s2_req_vaddr    = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
+  val s2_doubleline   = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
+  val s2_req_paddr    = RegEnable(s1_req_paddr, 0.U.asTypeOf(s1_req_paddr), s1_fire)
+
+  val s2_pmpExcp      = RegEnable(pmpExcp, 0.U.asTypeOf(pmpExcp), s1_fire)
+  val s2_itlbExcp     = RegEnable(itlbExcp, 0.U.asTypeOf(itlbExcp), s1_fire)
+  val s2_waymasks     = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
+
+  val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
+  val s2_req_ptags    = s2_req_paddr.map(get_phy_tag(_))
+
+  /**
+    ******************************************************************************
+    * Monitor the requests from missUnit to write to SRAM
+    ******************************************************************************
+    */
+
+  /* NOTE: If fromMSHR.bits.corrupt, we should set s2_MSHR_hits to false.B, and send prefetch requests again.
+   * This is the opposite of how mainPipe handles fromMSHR.bits.corrupt,
+   *   in which we should set s2_MSHR_hits to true.B, and send error to ifu.
+   */
+  val s2_MSHR_match = VecInit((0 until PortNumber).map(i =>
+    (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
+    (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
+    s2_valid && fromMSHR.valid && !fromMSHR.bits.corrupt
+  ))
+  val s2_MSHR_hits = (0 until PortNumber).map(i => ValidHoldBypass(s2_MSHR_match(i), s2_fire || s2_flush))
+
+  val s2_SRAM_hits = s2_waymasks.map(_.orR)
+  val s2_hits = VecInit((0 until PortNumber).map(i => s2_MSHR_hits(i) || s2_SRAM_hits(i)))
+
+  // pmpExcp includes access fault and mmio, neither of which should be prefetched
+  // also, if port0 has exception, port1 should not be prefetched
+  // miss = this port not hit && need this port && no exception found before and in this port
+  val s2_miss = VecInit((0 until PortNumber).map { i =>
+    !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
+      !s2_itlbExcp.take(i+1).reduce(_||_) && !s2_pmpExcp.take(i+1).reduce(_||_)
+  })
+
+  /**
+    ******************************************************************************
+    * send req to missUnit
+    ******************************************************************************
+    */
+  val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
   
-  val p2_paddr      = RegEnable(p1_paddr, p1_fire)
-  val p2_vaddr      = RegEnable(p1_vaddr, 0.U(VAddrBits.W), p1_fire)
-  val p2_req_cancel = Wire(Bool())
-  val p2_vidx       = get_idx(p2_vaddr)
-
-  p0_hit_behind := (p0_vaddr === p1_vaddr) || (p0_vaddr === p2_vaddr)
-
-  /** 1. IMeta Check */
-  val p2_ptag           = get_phy_tag(p2_paddr)
-  val p2_tag_eq_vec     = VecInit(p1_meta_ptags_reg.map(_  ===  p2_ptag ))
-  val p2_tag_match_vec  = VecInit(p2_tag_eq_vec.zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && p1_meta_valids_reg(w)})
-  val p2_tag_match      = DataHoldBypass(ParallelOR(p2_tag_match_vec), RegNext(p1_fire))
-
-  /** 2. PMP Check */
-  // TODO: When fromPMP.mmio is low but fromPMP.instr is high, which is a except?
-  val p2_exception  = DataHoldBypass((fromPMP.mmio && !fromPMP.instr) || fromPMP.instr, RegNext(p1_fire))
-  // PMP request
-  toPMP.valid     := p2_valid
-  toPMP.bits.addr := p2_paddr
-  toPMP.bits.size := 3.U
-  toPMP.bits.cmd  := TlbCmd.exec
-
-  /** 3. Prefetch buffer Check */
-  toIPFBuffer.paddr := p2_paddr
-  val p2_hit_buffer = fromIPFBuffer.ipf_hit
-
-  /** 4. Prefetch Queue Check */
-  toPIQ.paddr := p2_paddr
-  val p2_hit_piq = fromPIQ.piq_hit
-
-  /** 5. Prefetch Buffer Recently write chcek */
-  val p2_check_ipf_info = VecInit(fromIPFInfo.map(info =>
-        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
-
-  /** 6. MainPipeInfo chcek */
-  val check_mp_s1 = VecInit(fromMainPipeInfo.s1Info.map(info =>
-        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
-  val check_mp_s2 = VecInit(fromMainPipeInfo.s2Info.map(info =>
-        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
-  val check_mp_missSlot = VecInit(fromMainPipeInfo.missSlot.map(info =>
-        info.valid && info.ptag === get_phy_tag(p2_paddr) && info.vSetIdx === p2_vidx)).reduce(_||_)
-  val p2_check_mp_info = check_mp_s1 || check_mp_s2 || check_mp_missSlot
-
-  /** 7. MissUnitInfo chcek */
-  val check_mu_mshr = VecInit(fromMissUnitInfo.mshr.map(info =>
-        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
-  val check_mu_recent_write = VecInit(fromMissUnitInfo.recentWrite.map(info =>
-        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
-  val p2_check_mu_info = check_mu_mshr || check_mu_recent_write
-
-  /** 8. send req to piq */
-  toPIQEnqReq.valid := p2_valid && !p2_req_cancel
-  toPIQEnqReq.bits.paddr := p2_paddr
-  toPIQEnqReq.bits.vSetIdx := p2_vidx
-
-  /** Stage 2 control */
-  p2_req_cancel := p2_tag_match || p2_exception || p2_hit_buffer || p2_hit_piq ||
-                    p2_check_ipf_info || p2_check_mp_info || p2_check_mu_info || io.fencei
-  p2_ready      := p2_valid && toPIQEnqReq.ready || !p2_valid
-  p2_fire       := toPIQEnqReq.fire
-  p2_discard    := p2_valid && p2_req_cancel
-
-  when(p2_discard) {
-    XSDebug(p"IPrefetchPipe: discard req in s2. vaddr:${p2_vaddr}")
+  // To avoid sending duplicate requests.
+  val has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
+  (0 until PortNumber).foreach{ i =>
+    when(s1_fire) {
+      has_send(i) := false.B
+    }.elsewhen(toMSHRArbiter.io.in(i).fire) {
+      has_send(i) := true.B
+    }
   }
 
-  when(p2_fire) {
-    XSDebug(p"IPrefetchPipe: send req to PIQ. vaddr:${p2_vaddr} paddr:${p2_paddr}")
+  (0 until PortNumber).map{ i =>
+    toMSHRArbiter.io.in(i).valid          := s2_valid && s2_miss(i) && !has_send(i)
+    toMSHRArbiter.io.in(i).bits.blkPaddr  := getBlkAddr(s2_req_paddr(i))
+    toMSHRArbiter.io.in(i).bits.vSetIdx   := s2_req_vSetIdx(i)
   }
+
+  toMSHR <> toMSHRArbiter.io.out
+
+  s2_flush := io.flush
+
+  val s2_finish  = (0 until PortNumber).map(i => has_send(i) || !s2_miss(i) || toMSHRArbiter.io.in(i).fire).reduce(_&&_)
+  s2_ready      := s2_finish || !s2_valid
+  s2_fire       := s2_valid && s2_finish && !s2_flush
 
   /** PerfAccumulate */
   // the number of prefetch request received from ftq
   XSPerfAccumulate("prefetch_req_receive", fromFtq.req.fire)
-  // the number of prefetch request sent to PIQ
-  XSPerfAccumulate("prefetch_req_send_piq", toPIQEnqReq.fire)
+  // the number of prefetch request sent to missUnit
+  XSPerfAccumulate("prefetch_req_send", toMSHR.fire)
+  XSPerfAccumulate("to_missUnit_stall", toMSHR.valid && !toMSHR.ready)
   /**
     * Count the number of requests that are filtered for various reasons.
     * The number of prefetch discard in Performance Accumulator may be
     * a littel larger the number of really discarded. Because there can
     * be multiple reasons for a canceled request at the same time.
     */
-  // discard prefetch request by fencei instruction
-  XSPerfAccumulate("fdip_prefetch_discard_by_fencei",      (p0_discard || p1_discard || p2_discard) && io.fencei)
-  
-  // discard prefetch request by the request is same as pipeline behind
-  XSPerfAccumulate("fdip_prefetch_discard_by_behind",      p0_discard && p0_hit_behind)
-  // discard prefetch request by tlb miss
-  XSPerfAccumulate("fdip_prefetch_discard_by_tlb_miss",    p1_discard && p1_tlb_resp_miss)
-  // discard prefetch request by tlb except
-  XSPerfAccumulate("fdip_prefetch_discard_by_tlb_except",  p1_discard && p1_has_except)
-  // discard prefetch request by hit mainPipe info
-  XSPerfAccumulate("fdip_prefetch_discard_by_mainPipe",    p2_discard && p2_check_mp_info)
-  // discard prefetch request by hit missUnit info
-  XSPerfAccumulate("fdip_prefetch_discard_by_missUnit",    p2_discard && p2_check_mu_info)
-  // discard prefetch request by hit icache
-  XSPerfAccumulate("fdip_prefetch_discard_by_hit_cache",   p2_discard && p2_tag_match)
-  // discard prefetch request by pmp except or mmio
-  XSPerfAccumulate("fdip_prefetch_discard_by_pmp",         p2_discard && p2_exception)
-  // discard prefetch request by hit in prefetch buffer
-  XSPerfAccumulate("fdip_prefetch_discard_by_hit_pf",      p2_discard && p2_hit_buffer)
-  // discard prefetch request by hit in prefetch queue
-  XSPerfAccumulate("fdip_prefetch_discard_by_hit_piq",     p2_discard && p2_hit_piq)
-}
-
-class PiqPtr(implicit p: Parameters) extends CircularQueuePtr[PiqPtr](
-  p => p(XSCoreParamsKey).icacheParameters.nPrefetchEntries
-){
-}
-
-object PiqPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): PiqPtr = {
-    val ptr = Wire(new PiqPtr)
-    ptr.flag := f
-    ptr.value := v
-    ptr
-  }
-  def inverse(ptr: PiqPtr)(implicit p: Parameters): PiqPtr = {
-    apply(!ptr.flag, ptr.value)
-  }
-}
-
-class PrefetchQueueIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchBundle {
-  val hartId              = Input(UInt(8.W))
-  val prefetchReq         = Flipped(DecoupledIO(new PrefetchReq))
-  val PIQFilterRead       = new PIQFilterRead
-  val PIQRead             = new PIQRead
-  val IPFBufferWrite      = DecoupledIO(new IPFBufferWrite)
-  /** TileLink Port */
-  val mem_acquire         = DecoupledIO(new TLBundleA(edge.bundle))
-  val mem_grant           = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-  val fencei              = Input(Bool())
-}
-
-class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule with HasCircularQueuePtrHelper {
-  val io = IO(new PrefetchQueueIO(edge))
-  
-  val enqueReq          = io.prefetchReq
-  val fromIPrefetch     = io.PIQFilterRead.req
-  val toIPrefetch       = io.PIQFilterRead.resp
-  val fromMainPipe      = io.PIQRead.req
-  val toMainPipe        = io.PIQRead.resp
-  val toIPF             = io.IPFBufferWrite
-
-  /** Define entryt content and initial FIFO queue */
-  class PrefetchEntry(implicit p: Parameters) extends IPrefetchBundle {
-    val valid   = Bool()
-    val paddr   = UInt(PAddrBits.W)
-    val vSetIdx = UInt(idxBits.W)
-  }
-  val PIQ = RegInit(VecInit(Seq.fill(nPrefetchEntries)(0.U.asTypeOf((new PrefetchEntry).cloneType))))
-
-  val enqPtr = RegInit(PiqPtr(false.B, 0.U))
-  val deqPtr = RegInit(PiqPtr(false.B, 0.U))
-
-  class HandleEntry(implicit p: Parameters) extends IPrefetchBundle {
-    val valid       = Bool()
-    val paddr       = UInt(PAddrBits.W)
-    val vSetIdx     = UInt(idxBits.W)
-    val issue       = Bool()
-    val finish      = Bool()
-    val flash       = Bool()
-    val readBeatCnt = UInt(log2Up(refillCycles).W)
-    val respData    = Vec(refillCycles, UInt(beatBits.W))
-
-    def cacheline = respData.asUInt
-  }
-  val handleEntry = RegInit(0.U.asTypeOf((new HandleEntry).cloneType))
-
-  /**
-    ******************************************************************************
-    * handle look-up request from IPrefetchPipe
-    * - 1. Receive request from IPrefetch
-    * - 2. Look up whether hit in PIQ and handleEntry
-    * - 3. Send response to IPrefetch at the same cycle
-    ******************************************************************************
-    */
-  val fr_block  = get_block(fromIPrefetch.paddr)
-  val fr_hit_oh = PIQ.map(e => e.valid && (get_block(e.paddr) === fr_block)) :+
-                    (handleEntry.valid && (get_block(handleEntry.paddr) === fr_block))
-  val fr_hit    = ParallelOR(fr_hit_oh)
-  toIPrefetch.piq_hit := fr_hit
-  // only hit one entry in PIQ
-  assert(PopCount(fr_hit_oh) <= 1.U, "More than 1 hit in L1 PIQ for filter")
-
-
-  /**
-    ******************************************************************************
-    * handle read request from ICacheMainPipe
-    * - 1. Receive request from ICacheMainPipe
-    * - 2. Look up PIQ and handleEntry
-    * - 3. Send response to ICacheMainPipe at the same cycle
-    ******************************************************************************
-    */
-  fromMainPipe.foreach(_.ready := DontCare)
-  val r_blocks      = fromMainPipe.map (e => get_block(e.bits.paddr))
-  /** When hit in PIQ, invalid hitted entry */
-  val r_hit_oh      = r_blocks.map (block => PIQ.map(e => e.valid && (get_block(e.paddr) === block)))
-  val curr_hit_ptr  = r_hit_oh.map (OHToUInt(_))
-  val r_hit_PIQ     = (0 until PortNumber).map (i => ParallelOR(r_hit_oh(i)) && fromMainPipe(i).valid)
-  // only hit one entry in PIQ
-  (0 until PortNumber).map (i =>
-    assert(PopCount(r_hit_oh(i)) <= 1.U, "More than 1 hit in L1 PIQ")
-  )
-
-  /** When hit in handleEntry has't been issued, cancel it and return not hit at the same cycle.
-   * When hit in handleEntry has been issued return hit at the same cycle, then return data when transiton finish.
-   * ICacheMainPipe should be blocked during handle handleEntry.
-  */
-  val r_hit_handle = r_blocks.map(block => handleEntry.valid && (block === get_block(handleEntry.paddr)))
-  val cancelHandleEntry = (((0 until PortNumber).map(i=> fromMainPipe(i).valid && r_hit_handle(i))).reduce(_||_) || io.fencei) && !handleEntry.issue
-  val piq_hit = (0 until PortNumber).map(i => r_hit_handle(i) && handleEntry.issue && !handleEntry.flash && !io.fencei)
-  toMainPipe := DontCare
-  if (prefetchToL1) {
-    (0 until PortNumber).foreach (i => {
-      toMainPipe(i).piq_hit     := piq_hit(i)
-      toMainPipe(i).cacheline   := handleEntry.cacheline
-      toMainPipe(i).data_valid  := handleEntry.valid && handleEntry.finish
-    })
-  }
-  val piq_hit_req = RegEnable(piq_hit.reduce(_||_), fromMainPipe.map(_.valid).reduce(_||_))
-
-  XSPerfAccumulate("cancel_req_by_mainpipe_hit_handle", cancelHandleEntry && !io.mem_acquire.fire)
-
-  /**
-    ******************************************************************************
-    * Manage prefetch requests by queue
-    * - 1. Free: invalid the entry hitted mainpipe
-    * - 2. Dequeue: move req to handle entry when handle entry is free
-    * - 3. Enqueue: enqueue new req, flush earlier req when PIQ is full
-    * - 4. Fencei: invalid all PIQ entry when fencei
-    * - 5. Dequeue: move prefetch request from last entry to handle entry
-    * - 6. Cancel handleEntry hitted mainpipe if hasn't been issued
-    * - 7. Valid flash of handleEntry when fencei if has been issued
-    ******************************************************************************
-    */
-  /** 1. Free: invalid the entry hitted mainpipe */
-  (0 until PortNumber) .foreach (i => {
-    when(r_hit_PIQ(i)) {
-      PIQ(curr_hit_ptr(i)).valid := false.B
-    }
-    XSPerfAccumulate("cancel_req_by_mainpipe_hit_" + i.toString(), r_hit_PIQ(i))
-  })
-
-  /** 2. Dequeue: move req to handle entry when handle entry is free */
-  // cancel entry when dequene req is hitted by mainpipe
-  val cancel = (0 until PortNumber).map (i => r_hit_PIQ(i) && (curr_hit_ptr(i) === deqPtr.value)).reduce(_||_)
-  when(!handleEntry.valid && !cancel && !isEmpty(enqPtr, deqPtr)) {
-    handleEntry.valid       := PIQ(deqPtr.value).valid
-    handleEntry.paddr       := PIQ(deqPtr.value).paddr
-    handleEntry.vSetIdx     := PIQ(deqPtr.value).vSetIdx
-    handleEntry.issue       := false.B
-    handleEntry.finish      := false.B
-    handleEntry.flash       := false.B
-    handleEntry.readBeatCnt := 0.U
-    PIQ(deqPtr.value).valid := false.B
-    deqPtr := deqPtr + 1.U
-  }
-
-  /** 3. Enqueue: enqueue new req, flush earlier req when PIQ is full */
-  enqueReq.ready := true.B
-  when(enqueReq.valid) {
-    PIQ(enqPtr.value).valid   := true.B
-    PIQ(enqPtr.value).vSetIdx := enqueReq.bits.vSetIdx
-    PIQ(enqPtr.value).paddr   := enqueReq.bits.paddr
-    enqPtr := enqPtr + 1.U
-    when(isFull(enqPtr, deqPtr)) {
-      deqPtr := deqPtr + 1.U
-    }
-  }
-  XSPerfAccumulate("cancel_req_by_piq_full", enqueReq.valid && PIQ(enqPtr.value).valid)
-
-  /** 4. Fencei: invalid all PIQ entry when fencei */
-  when(io.fencei) {
-    PIQ.map (
-      _.valid := false.B
-    )
-    enqPtr.value  := 0.U
-    enqPtr.flag   := false.B
-    deqPtr.value  := 0.U
-    deqPtr.flag   := false.B
-  }
-
-  /** 5. Cancel handleEntry hitted mainpipe or receive fencei if hasn't been issued */
-  when(cancelHandleEntry) {
-    handleEntry.valid := false.B
-  }
-
-  /** 6. Valid flash of handleEntry when fencei. Drop data from TileLink port */
-  when(io.fencei) {
-    handleEntry.flash := true.B
-  }
-
-  // deqPtr <= enqPtr
-  // assert(deqPtr <= enqPtr, "deqPtr must be not in front of enqPtr!")
-  assert((deqPtr.flag ^ enqPtr.flag) && (deqPtr.value >= enqPtr.value) || (!(deqPtr.flag ^ enqPtr.flag)) && (deqPtr.value <= enqPtr.value), "deqPtr must be not in front of enqPtr!")
-
-  /**
-    ******************************************************************************
-    * Write Prefetch Data to Prefetch Buffer
-    * - valid signal only hold one cycle
-    ******************************************************************************
-    */
-  toIPF.valid          := handleEntry.valid && handleEntry.finish
-  toIPF.bits.paddr     := handleEntry.paddr
-  toIPF.bits.vSetIdx   := handleEntry.vSetIdx
-  toIPF.bits.cacheline := handleEntry.cacheline
-  toIPF.bits.has_hit   := piq_hit_req
-
-
-  /**
-    ******************************************************************************
-    * Tilelink Transition
-    * - 1. Send acquire to L2Cache, after which the request cannot be canceled (issue valid)
-    * - 2. Wait data response from Tilelink
-    * - 3. Get data, valid finish (only one cycle) and invalid issue
-    ******************************************************************************
-    */
-  val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
-
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: Nil = Enum(4)
-  val state = RegInit(s_idle)
-
-  // acquire port
-  io.mem_acquire.bits := DontCare
-  if (prefetchToL1) {
-    io.mem_acquire.bits := edge.Get(
-      fromSource      = PortNumber.U,
-      toAddress       = Cat(handleEntry.paddr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
-      lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
-  } else {
-    io.mem_acquire.bits := edge.Hint(
-      fromSource      = PortNumber.U,
-      toAddress       = addrAlign(handleEntry.paddr, blockBytes, PAddrBits),
-      lgSize          = (log2Up(cacheParams.blockBytes)).U,
-      param           = TLHints.PREFETCH_READ)._2
-  }
-  
-  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
-  io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1InstPrefetch.id.U)
-
-  // grant port
-  io.mem_grant.ready    := true.B
-  io.mem_acquire.valid  := (state === s_memReadReq)
-
-  if (prefetchToL1) {
-    switch(state) {
-      is(s_idle) {
-        when(handleEntry.valid && !cancelHandleEntry) {
-          handleEntry.issue := true.B
-          state             := s_memReadReq
-        }
-      }
-    }
-    is(s_memReadReq) {
-      state := Mux(io.mem_acquire.fire, s_memReadResp, s_memReadReq)
-    }
-    is(s_memReadResp) {
-      when (edge.hasData(io.mem_grant.bits) && io.mem_grant.fire) {
-        handleEntry.readBeatCnt := handleEntry.readBeatCnt + 1.U
-        handleEntry.respData(handleEntry.readBeatCnt) := io.mem_grant.bits.data
-        when (handleEntry.readBeatCnt === (refillCycles - 1).U) {
-          assert(refill_done, "refill not done!")
-          state := s_write_back
-          when (!io.fencei && !handleEntry.flash) {
-            handleEntry.issue   := false.B
-            handleEntry.finish  := true.B
-          }
-        }
-      }
-      is(s_write_back) {
-        state             := s_idle
-        handleEntry.valid := false.B
-      }
-    }
-  } else {
-    switch(state) {
-      is(s_idle) {
-        when(handleEntry.valid && !cancelHandleEntry) {
-          state := s_memReadReq
-        }
-      }
-      is(s_memReadReq) {
-        when(io.mem_acquire.fire || cancelHandleEntry) {
-          state := s_idle
-          handleEntry.valid := false.B
-        } otherwise {
-          state := s_memReadReq
-        }
-      }
-    }
-  }
-
-  // the number of prefetch request sent to L2Cache
-  XSPerfAccumulate("prefetch_req_send_L2", io.mem_acquire.fire)
-
-  if (env.EnableDifftest) {
-    val diffipfrefill = DifftestModule(new DiffRefillEvent, dontCare = true)
-    diffipfrefill.coreid   := io.hartId
-    diffipfrefill.index    := 3.U
-    diffipfrefill.valid    := handleEntry.valid && handleEntry.finish
-    diffipfrefill.addr     := handleEntry.paddr
-    diffipfrefill.data     := handleEntry.cacheline.asTypeOf(diffipfrefill.data)
-    diffipfrefill.idtfr    := DontCare
-  }
-}
-
-class FDIPPrefetchIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchBundle {
-  /** commen */
-  val fencei = Input(Bool())
-  val hartId = Input(UInt(hartIdLen.W))
-
-  /** Prefetch Mainpipe IO */
-  val ftqReq              = Flipped(new FtqPrefechBundle)
-  val iTLBInter           = new TlbRequestIO
-  val pmp                 = new ICachePMPBundle
-  val metaReadReq         = Decoupled(new PrefetchMetaReadBundle)
-  val metaReadResp        = Input(new PrefetchMetaRespBundle)
-
-  val ICacheMissUnitInfo  = Flipped(new ICacheMissUnitInfo)
-  val ICacheMainPipeInfo  = Flipped(new ICacheMainPipeInfo)
-
-  /** Prefetch Buffer IO */
-  val IPFBufferRead   = new IPFBufferRead
-  val metaWrite       = DecoupledIO(new ICacheMetaWriteBundle)
-  val dataWrite       = DecoupledIO(new ICacheDataWriteBundle)
-  val IPFReplacer     = new IPFReplacer
-
-  /** Prefetch Queue IO */
-  val PIQRead         = new PIQRead
-  val mem_acquire     = new DecoupledIO(new TLBundleA(edge.bundle))
-  val mem_grant       = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-}
-
-class FDIPPrefetch(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule
-{
-  val io = IO(new FDIPPrefetchIO(edge))
-
-  val prefetchPipe    = Module(new IPrefetchPipe)
-  val prefetchQueue   = Module(new PrefetchQueue(edge))
-
-  io.metaReadReq    <> prefetchPipe.io.metaReadReq
-  io.metaWrite      <> DontCare
-  io.dataWrite      <> DontCare
-  io.IPFReplacer    <> DontCare
-  io.IPFBufferRead  <> DontCare
-  io.mem_acquire    <> prefetchQueue.io.mem_acquire
-  io.mem_grant      <> prefetchQueue.io.mem_grant
-
-  // outside
-  prefetchPipe.io.fencei              <> io.fencei
-  prefetchPipe.io.ftqReq              <> io.ftqReq
-  prefetchPipe.io.iTLBInter           <> io.iTLBInter
-  prefetchPipe.io.pmp                 <> io.pmp
-  prefetchPipe.io.metaReadResp        <> io.metaReadResp
-  prefetchPipe.io.ICacheMissUnitInfo  <> io.ICacheMissUnitInfo
-  prefetchPipe.io.ICacheMainPipeInfo  <> io.ICacheMainPipeInfo
-  // inside
-  prefetchPipe.io.ipfRecentWrite      <> DontCare
-  prefetchPipe.io.IPFFilterRead       <> DontCare
-
-  // outside
-  prefetchQueue.io.hartId         <> io.hartId
-  prefetchQueue.io.fencei         <> io.fencei
-  prefetchQueue.io.PIQRead        <> io.PIQRead
-  // inside
-  prefetchQueue.io.prefetchReq    <> prefetchPipe.io.prefetchReq
-  prefetchQueue.io.PIQFilterRead  <> prefetchPipe.io.PIQFilterRead
-  prefetchQueue.io.IPFBufferWrite <> DontCare
-
-  if (prefetchToL1) {
-    val prefetchBuffer  = Module(new PrefetchBuffer)
-    // outside
-    prefetchBuffer.io.hartId          <> io.hartId
-    prefetchBuffer.io.fencei          <> io.fencei
-    prefetchBuffer.io.IPFBufferRead   <> io.IPFBufferRead
-    prefetchBuffer.io.metaWrite       <> io.metaWrite
-    prefetchBuffer.io.dataWrite       <> io.dataWrite
-    prefetchBuffer.io.IPFReplacer     <> io.IPFReplacer
-    // inside
-    prefetchBuffer.io.IPFFilterRead  <> prefetchPipe.io.IPFFilterRead
-    prefetchBuffer.io.ipfRecentWrite <> prefetchPipe.io.ipfRecentWrite
-    prefetchBuffer.io.IPFBufferWrite <> prefetchQueue.io.IPFBufferWrite
-  }
+  // discard prefetch request by flush
+  // XSPerfAccumulate("fdip_prefetch_discard_by_tlb_except",  p1_discard && p1_tlb_except)
+  // // discard prefetch request by hit icache SRAM
+  // XSPerfAccumulate("fdip_prefetch_discard_by_hit_cache",   p2_discard && p1_meta_hit)
+  // // discard prefetch request by hit wirte SRAM
+  // XSPerfAccumulate("fdip_prefetch_discard_by_p1_monoitor", p1_discard && p1_monitor_hit)
+  // // discard prefetch request by pmp except or mmio
+  // XSPerfAccumulate("fdip_prefetch_discard_by_pmp",         p2_discard && p2_pmp_except)
+  // // discard prefetch request by hit mainPipe info
+  // // XSPerfAccumulate("fdip_prefetch_discard_by_mainPipe",    p2_discard && p2_mainPipe_hit)
 }

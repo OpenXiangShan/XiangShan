@@ -1,5 +1,6 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
   * Copyright (c) 2020-2021 Peng Cheng Laboratory
   *
   * XiangShan is licensed under Mulan PSL v2.
@@ -100,12 +101,12 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val nf = io.in.preInfo.nf
   val isComplex = io.out.isComplex
 
-  val lmul = MuxLookup(vlmul, 1.U(4.W))(Array(
+  val lmul = MuxLookup(vlmul, 1.U(4.W))(Seq(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
   ))
-  val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Array(
+  val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Seq(
     "b001".U -> 1.U,
     "b010".U -> 2.U,
     "b011".U -> 3.U
@@ -113,23 +114,23 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
 
   val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
 
-  val emul = MuxLookup(vemul, 1.U(4.W))(Array(
+  val emul = MuxLookup(vemul, 1.U(4.W))(Seq(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
   ))                                                              //TODO : eew and emul illegal exception need to be handled
-  val simple_emul = MuxLookup(vemul, 0.U(2.W))(Array(
+  val simple_emul = MuxLookup(vemul, 0.U(2.W))(Seq(
     "b001".U -> 1.U,
     "b010".U -> 2.U,
     "b011".U -> 3.U
   ))
 
-  val numOfUopVslide = MuxLookup(vlmul, 1.U(log2Up(MaxUopSize + 1).W))(Array(
+  val numOfUopVslide = MuxLookup(vlmul, 1.U(log2Up(MaxUopSize + 1).W))(Seq(
     "b001".U -> 3.U,
     "b010".U -> 10.U,
     "b011".U -> 36.U
   ))
-  val numOfUopVrgather = MuxLookup(vlmul, 1.U(log2Up(MaxUopSize + 1).W))(Array(
+  val numOfUopVrgather = MuxLookup(vlmul, 1.U(log2Up(MaxUopSize + 1).W))(Seq(
     "b001".U -> 4.U,
     "b010".U -> 16.U,
     "b011".U -> 64.U
@@ -138,19 +139,19 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     Cat(numOfUopVrgather, 0.U(1.W)),
     numOfUopVrgather
   )
-  val numOfUopVcompress = MuxLookup(vlmul, 1.U(4.W))(Array(
+  val numOfUopVcompress = MuxLookup(vlmul, 1.U(4.W))(Seq(
     "b001".U -> 4.U,
     "b010".U -> 13.U,
     "b011".U -> 43.U
   ))
   val numOfUopVFRED = {
     // addTime include add frs1
-     val addTime = MuxLookup(vlmul, 1.U(4.W))(Array(
+     val addTime = MuxLookup(vlmul, 1.U(4.W))(Seq(
        VLmul.m2 -> 2.U,
        VLmul.m4 -> 4.U,
        VLmul.m8 -> 8.U,
      ))
-    val foldLastVlmul = MuxLookup(vsew, "b000".U)(Array(
+    val foldLastVlmul = MuxLookup(vsew, "b000".U)(Seq(
       VSew.e16 -> VLmul.mf8,
       VSew.e32 -> VLmul.mf4,
       VSew.e64 -> VLmul.mf2,
@@ -161,7 +162,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     addTime + foldTime
   }
   val numOfUopVFREDOSUM = {
-    val uvlMax = MuxLookup(vsew, 0.U)(Array(
+    val uvlMax = MuxLookup(vsew, 1.U)(Seq(
       VSew.e16 -> 8.U,
       VSew.e32 -> 4.U,
       VSew.e64 -> 2.U,
@@ -173,7 +174,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   /*
    * when 1 <= lmul <= 4, numOfUopWV = 2 * lmul, otherwise numOfUopWV = 1
    */
-  val numOfUopWV = MuxLookup(vlmul, 1.U(4.W))(Array(
+  val numOfUopWV = MuxLookup(vlmul, 1.U(4.W))(Seq(
     "b000".U -> 2.U,
     "b001".U -> 4.U,
     "b010".U -> 8.U,
@@ -182,7 +183,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
    * need an extra move instruction
    * when 1 <= lmul <= 4, numOfUopWX = 2 * lmul + 1, otherwise numOfUopWX = 2
    */
-  val numOfUopWX = MuxLookup(vlmul, 2.U(4.W))(Array(
+  val numOfUopWX = MuxLookup(vlmul, 2.U(4.W))(Seq(
     "b000".U -> 3.U,
     "b001".U -> 5.U,
     "b010".U -> 9.U,
@@ -194,7 +195,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val numOfUopVLoadStoreIndexed = indexedLSTable.out
 
   //number of uop
-  val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W))(Array(
+  val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W))(Seq(
     UopSplitType.VSET -> 2.U,
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
@@ -225,7 +226,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_SLIDEDOWN -> (numOfUopVslide + 1.U),
     UopSplitType.VEC_M0X -> lmul,
     UopSplitType.VEC_MVV -> (Cat(lmul, 0.U(1.W)) - 1.U),
-    UopSplitType.VEC_M0X_VFIRST -> 1.U,
     UopSplitType.VEC_VWW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
@@ -241,7 +241,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val numOfWB = numOfUop
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
-  isComplex := typeOfSplit =/= UopSplitType.SCA_SIM && numOfUop =/= 1.U
+  isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul

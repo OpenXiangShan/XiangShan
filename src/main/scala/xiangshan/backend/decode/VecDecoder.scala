@@ -153,12 +153,12 @@ case class OPFVF(
   }
 }
 
-case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat, uopSplitType: BitPat = UopSplitType.VSET) extends XSDecodeBase {
+case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, blockBack: Boolean, selImm: BitPat, uopSplitType: BitPat = UopSplitType.VSET) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp
     XSDecode(src1, src2, SrcType.X, FuType.vsetiwf, fuOp, selImm, uopSplitType,
-      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = flushPipe).generate()
+      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = blockBack, flushPipe = flushPipe).generate()
   }
 }
 
@@ -376,7 +376,7 @@ object VecDecoder extends DecodeConstants {
     VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X, src1 = SrcType.no), // vcpop.m rd, vs2, vm
     VDIV_VV      -> OPMVV(T, FuType.vidiv, VidivType.vdiv, F, T, F, UopSplitType.VEC_VVV),
     VDIVU_VV     -> OPMVV(T, FuType.vidiv, VidivType.vdivu, F, T, F, UopSplitType.VEC_VVV),
-    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, UopSplitType.VEC_M0X_VFIRST, src1 = SrcType.no), // vfirst.m rd, vs2, vm
+    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, src1 = SrcType.no), // vfirst.m rd, vs2, vm
     VID_V        -> OPMVV(T, FuType.vipu, VipuType.vid_v, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no, src2 = SrcType.no), // vid.v vd, vm
     VIOTA_M      -> OPMVV(T, FuType.vipu, VipuType.viota_m, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no), // viota.m vd, vs2, vm
 
@@ -702,7 +702,7 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.SCA_SIM), // f[rd] = vs2[0] (rs1=0)
+    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.dummy), // f[rd] = vs2[0] (rs1=0)
     VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.X), // vd[0] = f[rs1] (vs2=0)
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]
@@ -713,9 +713,9 @@ object VecDecoder extends DecodeConstants {
   )
 
   val vset: Array[(BitPat, XSDecodeBase)] = Array(
-    VSETVLI   -> VSET(vli = F, vtypei = T, VSETOpType.uvsetvcfg_xi, flushPipe = F, SelImm.IMM_VSETVLI),
-    VSETIVLI  -> VSET(vli = T, vtypei = T, VSETOpType.uvsetvcfg_ii, flushPipe = F, SelImm.IMM_VSETIVLI),
-    VSETVL    -> VSET(vli = F, vtypei = F, VSETOpType.uvsetvcfg_xx, flushPipe = T, SelImm.X), // flush pipe
+    VSETVLI   -> VSET(vli = F, vtypei = T, VSETOpType.uvsetvcfg_xi, flushPipe = F, blockBack = F, SelImm.IMM_VSETVLI),
+    VSETIVLI  -> VSET(vli = T, vtypei = T, VSETOpType.uvsetvcfg_ii, flushPipe = F, blockBack = F, SelImm.IMM_VSETIVLI),
+    VSETVL    -> VSET(vli = F, vtypei = F, VSETOpType.uvsetvcfg_xx, flushPipe = T, blockBack = T, SelImm.X), // flush pipe
   )
 
   val vls: Array[(BitPat, XSDecodeBase)] = Array(

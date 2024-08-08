@@ -1,0 +1,7 @@
+core:
+  - "!.github/ISSUE_TEMPLATE/**"
+  - "!.github/CODEOWNERS"
+  - "!.github/filters.yaml"
+  - "!**/*.md"
+  - "!LICENSE"
+  - "!images/**"

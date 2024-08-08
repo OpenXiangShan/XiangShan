@@ -43,6 +43,10 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
     hash_pc := index.U
   }
 
+  def tag_match(valid1: Bool, valid2: Bool, new_hash_pc: UInt): Bool = {
+    valid1 && valid2 && hash_pc === new_hash_pc
+  }
+
   def alloc(vaddr: UInt, alloc_hash_pc: UInt) = {
     pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
     stride := 0.U
@@ -95,6 +99,14 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   })
 
   val array = Reg(Vec(STRIDE_ENTRY_NUM, new StrideMetaBundle))
+  val valids = RegInit(VecInit(Seq.fill(STRIDE_ENTRY_NUM)(false.B)))
+
+  def reset_array(i: Int): Unit = {
+    valids(i) := false.B
+    //only need to rest control signals for firendly area
+    // array(i).reset(i)
+  }
+
   val replacement = ReplacementPolicy.fromString("plru", STRIDE_ENTRY_NUM)
 
   // s0: hash pc -> cam all entries
@@ -103,7 +115,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s0_vaddr = io.train_req.bits.vaddr
   val s0_pc = io.train_req.bits.pc
   val s0_pc_hash = pc_hash_tag(s0_pc)
-  val s0_pc_match_vec = VecInit(array.map(_.hash_pc === s0_pc_hash)).asUInt
+  val s0_pc_match_vec = VecInit(array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_pc_hash) }).asUInt
   val s0_hit = s0_pc_match_vec.orR
   val s0_index = Mux(s0_hit, OHToUInt(s0_pc_match_vec), replacement.way)
   io.train_req.ready := s0_can_accept
@@ -135,6 +147,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val always_update = Constantin.createRecord(s"always_update${p(XSCoreParamsKey).HartId}", initValue = ALWAYS_UPDATE_PRE_VADDR)
 
   when(s1_alloc) {
+    valids(s1_index) := true.B
     array(s1_index).alloc(
       vaddr = s1_vaddr,
       alloc_hash_pc = s1_pc_hash
@@ -211,8 +224,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
-      array(i).reset(i)
+    when(GatedValidRegNext(io.flush)) {
+      reset_array(i)
     }
   }
 }

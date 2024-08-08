@@ -20,8 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
-import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux}
+import utils.HasPerfEvents
+import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
@@ -75,7 +75,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val disable_ld_fast_wakeup = Input(Bool())
 
     // ecc error
-    val error = Output(new L1CacheErrorInfo())
+    val error = Output(ValidIO(new L1CacheErrorInfo))
 
     val prefetch_info = new Bundle {
       val naive = new Bundle {
@@ -278,7 +278,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
 
   // data read
-  io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill && !s1_is_prefetch && s1_hit
+  io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill && !s1_is_prefetch
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
   io.banked_data_read.bits.bankMask := s1_bank_oh
@@ -350,13 +350,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_instrtype = s2_req.instrtype
 
-  val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
+  val s2_tag_error = WireInit(false.B)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
 
   val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
   val s2_hit_access = RegEnable(s1_hit_access, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
+
+  val s2_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
+  val s2_data64bit = Fill(2, io.banked_data_resp(0).raw_data)
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -366,11 +369,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
 
+  if(EnableTagEcc) {
+    s2_tag_error := dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
+  }else {
+    s2_tag_error := false.B
+  }
+
   // send load miss to miss queue
   io.miss_req.valid := s2_valid && s2_can_send_miss_req
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
-  io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))
+  io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
@@ -457,7 +466,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack_no_mshr || io.mq_enq_cancel))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------
@@ -474,9 +483,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_req_instrtype = RegEnable(s2_req.instrtype, s2_fire)
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
 
-  val s3_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
-  val s3_data64bit = Fill(2, io.banked_data_resp(0).raw_data)
-  val s3_banked_data_resp_word = Mux(s3_load128Req, s3_data128bit, s3_data64bit)
+  val s3_banked_data_resp_word = RegEnable(Mux(s2_hit, Mux(s2_load128Req, s2_data128bit, s2_data64bit), 0.U), s2_fire)
   val s3_data_error = Mux(s3_load128Req, io.read_error_delayed.asUInt.orR, io.read_error_delayed(0)) && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
@@ -489,13 +496,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.replacementUpdated := io.replace_access.valid
 
   // report tag / data / l2 error (with paddr) to bus error unit
-  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
-  io.error.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
-  io.error.paddr := s3_paddr
-  io.error.source.tag := s3_tag_error
-  io.error.source.data := s3_data_error
-  io.error.source.l2 := s3_flag_error
-  io.error.opType.load := true.B
+  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
+  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
+  io.error.bits.paddr := s3_paddr
+  io.error.bits.source.tag := s3_tag_error
+  io.error.bits.source.data := s3_data_error
+  io.error.bits.source.l2 := s3_flag_error
+  io.error.bits.opType.load := true.B
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 

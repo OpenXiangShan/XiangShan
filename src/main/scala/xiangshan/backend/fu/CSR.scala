@@ -29,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.ExceptionInfo
-import xiangshan.backend.fu.util.CSR.CSRNamedConstant.ContextStatus
+import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 class FpuCsrIO extends Bundle {
@@ -41,21 +41,11 @@ class FpuCsrIO extends Bundle {
 
 class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(UInt(XLEN.W))
-  val vxsat = Input(UInt(1.W))
   val vxrm = Input(UInt(2.W))
-  val vcsr = Input(UInt(XLEN.W))
-  val vl = Input(UInt(XLEN.W))
-  val vtype = Input(UInt(XLEN.W))
-  val vlenb = Input(UInt(XLEN.W))
 
-  val vill = Input(UInt(1.W))
-  val vma = Input(UInt(1.W))
-  val vta = Input(UInt(1.W))
-  val vsew = Input(UInt(3.W))
-  val vlmul = Input(UInt(3.W))
+  val vl = Output(UInt(XLEN.W))
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
-  val set_vl = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
   val set_vxsat = Output(Valid(UInt(1.W)))
 
@@ -65,10 +55,10 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
-  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
+  val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
   val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
-  val retiredInstr = UInt(3.W)
+  val retiredInstr = UInt(7.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
     val bpuInfo = new Bundle {
@@ -109,22 +99,14 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
   // from outside cpu,externalInterrupt
-  val externalInterrupt = new ExternalInterruptIO
+  val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB
   val tlb = Output(new TlbCsrBundle)
   // Debug Mode
   // val singleStep = Output(Bool())
   val debugMode = Output(Bool())
-  // to Fence to disable sfence
-  val disableSfence = Output(Bool())
-  // to Fence to disable hfence.gvma
-  val disableHfenceg = Output(Bool())
-  // to Fence to disable hfence.vvma
-  val disableHfencev = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
-  // distributed csr write
-  val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {
@@ -579,7 +561,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
-  csrio.customCtrl.svinval_enable := srnctl(1)
   csrio.customCtrl.wfi_enable := srnctl(2)
 
   // Hypervisor CSRs
@@ -603,7 +584,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val henvcfg = RegInit(UInt(XLEN.W), 0.U)
   val hgatp = RegInit(UInt(XLEN.W), 0.U)
   val hgatpMask = Cat("h8".U(Hgatp_Mode_len.W), satp_part_wmask(Hgatp_Vmid_len, VmidLength), satp_part_wmask(Hgatp_Addr_len, PAddrBits-12))
-  val htimedelta = RegInit(UInt(XLEN.W), 0.U)
+  // val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
   val hcounterenMask = 0.U(XLEN.W)
@@ -766,7 +747,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   val perf_events = csrio.perf.perfEventsFrontend ++
-                    csrio.perf.perfEventsCtrl ++
+                    csrio.perf.perfEventsBackend ++
                     csrio.perf.perfEventsLsu ++
                     hpm_hc.getPerf
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
@@ -887,7 +868,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     MaskedRegMap(Hgatp, hgatp, hgatpMask, MaskedRegMap.NoSideEffect, hgatpMask),
 
     //--- Hypervisor Counter/Timer Virtualization Registers ---
-    MaskedRegMap(Htimedelta, htimedelta),
+    // MaskedRegMap(Htimedelta, htimedelta),
 
     //--- Virtual Supervisor Registers ---
     MaskedRegMap(Vsstatus, vsstatus, rmask = sstatusRmask, wmask = sstatusWmask, wfn = vsstatusUpdateSideEffect),
@@ -1003,12 +984,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val accessPermitted = !(addr === Satp.U && tvmNotPermit)
   val vtvmNotPermit = (privilegeMode === ModeS && virtMode && hstatusStruct.vtvm.asBool)
   val vaccessPermitted = !(addr === Vsatp.U && vtvmNotPermit)
-  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
-  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
-  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
+//  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
+//  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
+//  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
+  val wen = valid && CSROpType.isCsrAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val HasH = (HasHExtension == true).asBool
@@ -1055,9 +1036,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   when (RegNext(csrio.vpu.set_vtype.valid)) {
     vtype := RegEnable(csrio.vpu.set_vtype.bits, csrio.vpu.set_vtype.valid)
   }
-  when (RegNext(csrio.vpu.set_vl.valid)) {
-    vl := RegEnable(csrio.vpu.set_vl.bits, csrio.vpu.set_vl.valid)
-  }
+  vl := csrio.vpu.vl
   // set vs and sd in mstatus
   when(csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1068,16 +1047,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrio.vpu.vstart := vstart
   csrio.vpu.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
-  csrio.vpu.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
-  csrio.vpu.vcsr := vcsr
-  csrio.vpu.vtype := vtype
-  csrio.vpu.vl := vl
-  csrio.vpu.vlenb := vlenb
-  csrio.vpu.vill := vtype.asTypeOf(new VtypeStruct).vill
-  csrio.vpu.vma := vtype.asTypeOf(new VtypeStruct).vma
-  csrio.vpu.vta := vtype.asTypeOf(new VtypeStruct).vta
-  csrio.vpu.vsew := vtype.asTypeOf(new VtypeStruct).vsew
-  csrio.vpu.vlmul := vtype.asTypeOf(new VtypeStruct).vlmul
 
   // Trigger Ctrl
   val triggerEnableVec = tdata1RegVec.map { tdata1 =>
@@ -1137,7 +1106,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val illegalVWFI = valid && isWFI && ((virtMode && privilegeMode === ModeS && hstatusStruct.vtw === 1.U && mstatusStruct.tw === 0.U)||
       (virtMode && privilegeMode === ModeU && mstatusStruct.tw === 0.U))
   // Illegal privileged instruction check
-  val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
+  val isIllegalAddr = valid && CSROpType.isCsrAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = !virtMode && wen && !(Mux(addrInPerfCnt, perfcntPermitted, csrAccess === 0.U && dcsrPermitted && triggerPermitted) && accessPermitted)
   val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
 
@@ -1156,12 +1125,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Branch control
   val retTarget = WireInit(0.U)
   val resetSatp = (addr === Satp.U || addr === Hgatp.U || addr === Vsatp.U) && wen // write to satp will cause the pipeline be flushed
+  val writeVstart = addr === Vstart.U && wen // write to vstart will cause the pipeline be flushed
+  dontTouch(writeVstart)
 
   val w_fcsr_change_rm = wen && addr === Fcsr.U && wdata(7, 5) =/= fcsr(7, 5)
   val w_frm_change_rm = wen && addr === Frm.U && wdata(2, 0) =/= fcsr(7, 5)
   val frm_change = w_fcsr_change_rm || w_frm_change_rm
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
-  flushPipe := resetSatp || frm_change || isXRet || frontendTriggerUpdate
+  flushPipe := resetSatp || frm_change || isXRet || frontendTriggerUpdate || writeVstart
 
   private val illegalRetTarget = WireInit(false.B)
   when(valid) {
@@ -1553,34 +1524,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vsstatus := vsstatusNew.asUInt
     hstatus := hstatusNew.asUInt
     debugMode := debugModeNew
-  }
-
-  // Distributed CSR update req
-  //
-  // For now we use it to implement customized cache op
-  // It can be delayed if necessary
-
-  val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
-  val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
-  val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
-  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.addr,
-    delayedUpdate1.w.bits.addr
-  )
-  val distributedUpdateData = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.data,
-    delayedUpdate1.w.bits.data
-  )
-
-  assert(!(delayedUpdate0.w.valid && delayedUpdate1.w.valid))
-
-  when(distributedUpdateValid){
-    // cacheopRegs can be distributed updated
-    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
-      when((Scachebase + attribute("offset").toInt).U === distributedUpdateAddr){
-        cacheopRegs(name) := distributedUpdateData
-      }
-    }}
   }
 
   // Cache error debug support

@@ -1,5 +1,6 @@
 /***************************************************************************************
- * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
  * Copyright (c) 2020-2021 Peng Cheng Laboratory
  *
  * XiangShan is licensed under Mulan PSL v2.
@@ -23,7 +24,6 @@ import chiseltest.VerilatorBackendAnnotation
 import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import xiangshan.test.types._
 import xiangshan.transforms.PrintModuleName
 
 import xiangshan.backend.fu._
@@ -68,18 +68,13 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
     val rand = new Random(0x14226)
     val testNum = 1000
 
-    val printModuleNameAnno = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
-      case _ => Seq()
-    }
-
     test(new SRT4DividerWrapper).withAnnotations(Seq(VerilatorBackendAnnotation,
       // LineCoverageAnnotation,
       // ToggleCoverageAnnotation,
       VerilatorFlags(Seq(
         // "--output-split 20", "--output-split-cfuncs 20",
         "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT", "--trace")),
-      ) ++ printModuleNameAnno){ m =>
+      )){ m =>
       println("Test started!")
       m.clock.step(20)
 

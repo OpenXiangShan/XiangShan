@@ -8,6 +8,7 @@ class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
     val in = Vec(n, Flipped(DecoupledIO(gen)))
     val out = Vec(n, DecoupledIO(gen))
     val flush = Input(Bool())
+    val outAllFire = Input(Bool())
   })
 
   // Input Alias
@@ -28,7 +29,7 @@ class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
 
   // Todo: canAccVec for each elem
   // Todo: no outReadys version for better timing and lower performance
-  private[this] val canAcc = ((~valids).asUInt | outReadys).andR
+  private[this] val canAcc = io.outAllFire || !valids.orR
 
   (validVec zip inValids.asBools zip outReadys.asBools).foreach { case ((valid, inValid), outReady) =>
     valid := MuxCase(
@@ -61,6 +62,7 @@ object PipeGroupConnect {
     left: Seq[DecoupledIO[T]],
     right: Vec[DecoupledIO[T]],
     flush: Bool,
+    rightAllFire: Bool,
     suggestName: String = null,
   ): Unit =  {
     require(left.size == right.size, "The sizes of left and right Vec Bundle should be equal in PipeGroupConnect")
@@ -72,6 +74,7 @@ object PipeGroupConnect {
       in.bits := left(i).bits
       left(i).ready := in.ready
     }
+    mod.io.outAllFire := rightAllFire
     right <> mod.io.out
 
     if (suggestName != null)

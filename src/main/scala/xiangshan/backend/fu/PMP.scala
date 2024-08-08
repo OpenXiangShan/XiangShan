@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -369,13 +370,13 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
   val cmd = Output(TlbCmd())
 
-  def apply(addr: UInt, size: UInt, cmd: UInt) {
+  def apply(addr: UInt, size: UInt, cmd: UInt): Unit = {
     this.addr := addr
     this.size := size
     this.cmd := cmd
   }
 
-  def apply(addr: UInt) { // req minimal permission and req align size
+  def apply(addr: UInt): Unit = { // req minimal permission and req align size
     apply(addr, lgMaxSize.U, TlbCmd.read)
   }
 

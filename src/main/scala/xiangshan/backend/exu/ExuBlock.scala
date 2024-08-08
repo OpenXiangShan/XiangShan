@@ -8,10 +8,11 @@ import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
-import utils._
+import utility._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -37,6 +38,7 @@ class ExuBlockImp(
   (ins zip exus zip outs).foreach { case ((input, exu), output) =>
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
+    exu.io.csrin.foreach(exuio => io.csrin.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
@@ -45,6 +47,7 @@ class ExuBlockImp(
     exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
     output <> exu.io.out
+    io.csrToDecode.foreach(toDecode => exu.io.csrToDecode.foreach(exuOut => toDecode := exuOut))
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
 //      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
 //    }
@@ -67,11 +70,14 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
 
-  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
-  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
-  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
-  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVConfig, (Valid(new VType)))
-  val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
-  val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
+  val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val csrin = Option.when(params.hasCSR)(new CSRInput)
+  val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
+
+  val fenceio = Option.when(params.hasFence)(new FenceIO)
+  val frm = Option.when(params.needSrcFrm)(Input(Frm()))
+  val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
+  val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
+  val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
+  val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
 }

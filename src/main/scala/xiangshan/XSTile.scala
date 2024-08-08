@@ -18,12 +18,13 @@ package xiangshan
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
+import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{BusPerfMonitor, ArgParser, Generator}
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
@@ -38,7 +39,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core = LazyModule(new XSCore())
   val l2top = LazyModule(new L2Top())
 
-  val enableCHI = p(EnableCHI)
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
@@ -65,39 +65,24 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (!coreParams.softPTW) {
     l2top.misc_l2_pmu := l2top.ptw_logger := l2top.ptw_to_l2_buffer.node := core.memBlock.ptw_to_l2_buffer.node
   }
-  l2top.l1_xbar :=* l2top.misc_l2_pmu
 
-  // TL2TL L2 Cache
-  val tl2tl_l2cache = l2top.tl2tl_l2cache
-  // l1_xbar to l2
-  tl2tl_l2cache match {
+  // L2 Prefetch
+  l2top.l2cache match {
     case Some(l2) =>
-      l2.node :*= l2top.xbar_l2_buffer :*= l2top.l1_xbar
-      l2.pf_recv_node.map(recv => {
+      l2.pf_recv_node.foreach(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.l2_pf_sender_opt.get
       })
     case None =>
   }
-  
-  val core_l3_tpmeta_source_port = tl2tl_l2cache match {
+
+  val core_l3_tpmeta_source_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
   }
-  val core_l3_tpmeta_sink_port = tl2tl_l2cache match {
+  val core_l3_tpmeta_sink_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_sink_node
     case None => None
-  }
-
-  // TL2CHI L2 Cache
-  val tl2chi_l2cache = l2top.tl2chi_l2cache
-  tl2chi_l2cache match {
-    case Some(l2) =>
-      l2.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L2!")
-        recv := core.memBlock.l2_pf_sender_opt.get
-      })
-    case None =>
   }
 
   // mmio
@@ -108,6 +93,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
+      val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val debugTopDown = new Bundle {
@@ -116,15 +102,20 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val clintTime = Input(ValidIO(UInt(64.W)))
     })
 
     dontTouch(io.hartId)
+    dontTouch(io.msiInfo)
+    if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
 
     l2top.module.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
+    core.module.io.msiInfo := io.msiInfo
+    core.module.io.clintTime := io.clintTime
     l2top.module.reset_vector.fromTile := io.reset_vector
     l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.cpu_halt.toTile
@@ -145,9 +136,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.debugTopDown.l2MissMatch := l2top.module.debugTopDown.l2MissMatch
       l2top.module.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
       l2top.module.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
+      l2top.module.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.l2_tlb_req
     } else {
-      
+
       l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.l2_hint.bits.isKeyword
@@ -168,15 +160,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.chi.foreach(_ <> l2top.module.chi.get)
     l2top.module.nodeID.foreach(_ := io.nodeID.get)
 
-    // Modules are reset one by one
-    // io_reset ----
-    //             |
-    //             v
-    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    // val resetChain = Seq(
-    //   Seq(l2top.module, core.module)
-    // )
-    // ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
+    if (debugOpts.ResetGen && enableL2) {
+      core.module.reset := l2top.module.reset_core
+    }
   }
 
   lazy val module = new XSTileImp(this)

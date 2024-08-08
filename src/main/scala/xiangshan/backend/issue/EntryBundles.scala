@@ -3,8 +3,9 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{MathUtils, OptionWrapper, XSError}
-import utility.HasCircularQueuePtrHelper
+import ujson.IndexedValue.True
+import utils.MathUtils
+import utility.{HasCircularQueuePtrHelper, XSError}
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
@@ -28,7 +29,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val issueTimer            = UInt(2.W)
     val deqPortIdx            = UInt(1.W)
     //vector mem status
-    val vecMem                = OptionWrapper(params.isVecMemIQ, new StatusVecMemPart)
+    val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
 
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
@@ -51,7 +52,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcState              = SrcState()
     val dataSources           = DataSource()
     val srcLoadDependency     = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
-    val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, ExuVec())
+    val srcWakeUpL1ExuOH      = Option.when(params.hasIQWakeUp)(ExuVec())
+    //reg cache
+    val useRegCache           = Option.when(params.needReadRegCache)(Bool())
+    val regCacheIdx           = Option.when(params.needReadRegCache)(UInt(RegCacheIdxWidth.W))
   }
 
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
@@ -60,11 +64,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val numLsElem             = NumLsElem()
   }
 
-  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
+  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val robIdx                = new RobPtr
     val resp                  = RespType()
     val fuType                = FuType()
-    val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
+    val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
+    val sqIdx                 = Option.when(params.needFeedBackSqIdx)(new SqPtr())
+    val lqIdx                 = Option.when(params.needFeedBackLqIdx)(new LqPtr())
   }
 
   object RespType {
@@ -85,7 +91,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
-    val imm                   = OptionWrapper(params.needImm, UInt((params.deqImmTypesMaxLen).W))
+    val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val payload               = new DynInst()
   }
 
@@ -99,8 +105,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val vlIsZero              = Input(Bool())
     val vlIsVlmax             = Input(Bool())
     //cancel
-    val og0Cancel             = Input(ExuOH(backendParams.numExu))
-    val og1Cancel             = Input(ExuOH(backendParams.numExu))
+    val og0Cancel             = Input(ExuVec())
+    val og1Cancel             = Input(ExuVec())
     val ldCancel              = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
     //deq sel
     val deqSel                = Input(Bool())
@@ -109,7 +115,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //trans sel
     val transSel              = Input(Bool())
     // vector mem only
-    val fromLsq = OptionWrapper(params.isVecMemIQ, new Bundle {
+    val fromLsq = Option.when(params.isVecMemIQ)(new Bundle {
       val sqDeqPtr            = Input(new SqPtr)
       val lqDeqPtr            = Input(new LqPtr)
     })
@@ -121,10 +127,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val canIssue              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
-    val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
+    val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
     //src
     val dataSource            = Vec(params.numRegSrc, Output(DataSource()))
-    val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Output(ExuVec())))
+    val srcWakeUpL1ExuOH      = Option.when(params.hasIQWakeUp)(Vec(params.numRegSrc, Output(ExuVec())))
     //deq
     val isFirstIssue          = Output(Bool())
     val entry                 = ValidIO(new EntryBundle)
@@ -138,10 +144,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val entryInValid          = Output(Bool())
     val entryOutDeqValid      = Output(Bool())
     val entryOutTransValid    = Output(Bool())
-    val perfLdCancel          = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Bool())))
-    val perfOg0Cancel         = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Bool())))
+    val perfLdCancel          = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
+    val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
-    val perfWakeupByIQ        = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+    val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -162,11 +168,21 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet        = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
-    common.deqSuccess         := commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
+    common.deqSuccess         := (if (params.isVecMemIQ) status.issued else true.B) &&
+      commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
     common.srcWakeup          := common.srcWakeupByWB.zip(hasIQWakeupGet.srcWakeupByIQ).map { case (x, y) => x || y.asUInt.orR }
-    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
+    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
+                                    val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+                                    if (params.numRegSrc == 5) {
+                                      bundle.bits.wakeUp(psrcSrcTypeVec.take(3), bundle.valid) :+ 
+                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid) :+ 
+                                      bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
+                                    }
+                                    else
+                                      bundle.bits.wakeUp(psrcSrcTypeVec, bundle.valid)
+                                 }.transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
     common.canIssue           := validReg && status.canIssue
-    common.enqReady           := !validReg || common.clear
+    common.enqReady           := !validReg || commonIn.transSel
     common.clear              := common.flushed || common.deqSuccess || commonIn.transSel
     common.srcCancelVec.zip(common.srcLoadCancelVec).zip(hasIQWakeupGet.srcWakeupByIQWithoutCancel).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
       val ldTransCancel = if(params.hasIQWakeUp) Mux1H(wakeUpByIQVec, hasIQWakeupGet.wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), commonIn.ldCancel))) else false.B
@@ -200,9 +216,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   def CommonIQWakeupConnect(common: CommonWireBundle, hasIQWakeupGet: CommonIQWakeupBundle, validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
-    val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
-      bundle.bits.wakeUpFromIQ(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType))
-    ).toSeq.transpose
+    val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map{(bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
+      val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+      if (params.numRegSrc == 5) {
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
+        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+        bundle.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
+      }
+      else
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
+    }.toSeq.transpose
     val cancelSel = params.wakeUpSourceExuIdx.zip(commonIn.wakeUpFromIQ).map { case (x, y) => commonIn.og0Cancel(x) && y.bits.is0Lat }
 
     hasIQWakeupGet.srcWakeupByIQ                    := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
@@ -315,6 +338,20 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       } else {
         srcStatusNext.srcLoadDependency               := common.srcLoadDependencyNext(srcIdx)
       }
+
+      if (params.needReadRegCache) {
+        val wakeupSrcExuWriteRC = wakeupByIQOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.needWriteRegCache)
+        val wakeupRC    = wakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _) && SrcType.isXp(srcStatus.srcType)
+        val wakeupRCIdx = Mux1H(wakeupSrcExuWriteRC.map(_._1), wakeupSrcExuWriteRC.map(_._2.bits.rcDest.get))
+        val replaceRC   = wakeupSrcExuWriteRC.map(x => x._2.bits.rfWen && x._2.bits.rcDest.get === srcStatus.regCacheIdx.get).fold(false.B)(_ || _)
+
+        srcStatusNext.useRegCache.get                 := MuxCase(srcStatus.useRegCache.get, Seq(
+                                                            cancel    -> false.B,
+                                                            wakeupRC  -> true.B,
+                                                            replaceRC -> false.B,
+                                                         ))
+        srcStatusNext.regCacheIdx.get                 := Mux(wakeupRC, wakeupRCIdx, srcStatus.regCacheIdx.get)
+      }
     }
     entryUpdate.status.blocked                        := false.B
     entryUpdate.status.issued                         := MuxCase(status.issued, Seq(
@@ -323,7 +360,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       !status.srcReady                                  -> false.B,
     ))
     entryUpdate.status.firstIssue                     := commonIn.deqSel || status.firstIssue
-    entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, status.issueTimer + 1.U, "b11".U))
+    entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, Mux(status.issueTimer === "b11".U, status.issueTimer, status.issueTimer + 1.U), "b11".U))
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.imm.foreach(_                         := entryReg.imm.get)
     entryUpdate.payload                               := entryReg.payload
@@ -343,6 +380,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupByIQWithoutCancel = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR
       val wakeupByIQWithoutCancelOH = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
       val isWakeupByMemIQ = wakeupByIQWithoutCancelOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+      val useRegCache = status.srcStatus(srcIdx).useRegCache.getOrElse(false.B) && status.srcStatus(srcIdx).dataSources.readReg
       dataSourceOut.value                             := (if (isComp)
                                                             if (params.inVfSchd && params.readVfRf && params.hasWakeupFromMem) {
                                                               MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
@@ -352,10 +390,14 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                             } else {
                                                               MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
                                                                 wakeupByIQWithoutCancel                        -> DataSource.forward,
+                                                                useRegCache                                    -> DataSource.regcache,
                                                               ))
                                                             }
-                                                          else
-                                                            status.srcStatus(srcIdx).dataSources.value)
+                                                          else {
+                                                              MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
+                                                                useRegCache                                    -> DataSource.regcache,
+                                                              ))
+                                                          })
     }
     commonOut.isFirstIssue                            := !status.firstIssue
     commonOut.entry.valid                             := validReg
@@ -432,7 +474,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {
-    val origExuOH = 0.U.asTypeOf(exuOH)
+    val origExuOH = Wire(chiselTypeOf(exuOH))
     when(wakeupByIQOH.asUInt.orR) {
       origExuOH := Mux1H(wakeupByIQOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(p(XSCoreParamsKey).backendParams.numExu.W)).toSeq).asBools
     }.otherwise {
@@ -448,7 +490,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     def apply() = Vec(num, Bool())
 
     def readFuType(fuType: Vec[Bool], fus: Seq[FuType.OHType]): Vec[Bool] = {
-      val res = 0.U.asTypeOf(fuType)
+      val res = WireDefault(0.U.asTypeOf(fuType))
       fus.foreach(x => res(x.id) := fuType(x.id))
       res
     }
@@ -459,7 +501,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     //cancel
-    val og0Cancel             = Input(ExuOH(backendParams.numExu))
+    val srcLoadDependency     = Input(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+    val og0Cancel             = Input(ExuVec())
     val ldCancel              = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
   }
 
@@ -467,19 +510,33 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcWakeUpByWB: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcWakeUpByIQ: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcWakeUpByIQVec: Vec[Vec[Bool]]                    = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
+    val srcCancelByLoad: Vec[Bool]                          = Vec(params.numRegSrc, Bool())
     val shiftedWakeupLoadDependencyByIQVec: Vec[Vec[UInt]]  = Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
   def EnqDelayWakeupConnect(enqDelayIn: EnqDelayInBundle, enqDelayOut: EnqDelayOutBundle, status: Status, delay: Int)(implicit p: Parameters, params: IssueBlockParams) = {
     enqDelayOut.srcWakeUpByWB.zipWithIndex.foreach { case (wakeup, i) =>
-      wakeup := enqDelayIn.wakeUpFromWB.map(x => x.bits.wakeUp(Seq((status.srcStatus(i).psrc, status.srcStatus(i).srcType)), x.valid).head
-      ).reduce(_ || _)
+      wakeup := enqDelayIn.wakeUpFromWB.map{ x => 
+        if (i == 3)
+          x.bits.wakeUpV0((status.srcStatus(i).psrc, status.srcStatus(i).srcType), x.valid)
+        else if (i == 4)
+          x.bits.wakeUpVl((status.srcStatus(i).psrc, status.srcStatus(i).srcType), x.valid)
+        else
+          x.bits.wakeUp(Seq((status.srcStatus(i).psrc, status.srcStatus(i).srcType)), x.valid).head
+      }.reduce(_ || _)
     }
 
     if (params.hasIQWakeUp) {
-      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map( x =>
-        x.bits.wakeUpFromIQ(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType))
-      ).toIndexedSeq.transpose
+      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map{ x =>
+        val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+        if (params.numRegSrc == 5) {
+          x.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
+          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+          x.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
+        }
+        else
+          x.bits.wakeUpFromIQ(psrcSrcTypeVec)
+      }.toIndexedSeq.transpose
       val cancelSel = params.wakeUpSourceExuIdx.zip(enqDelayIn.wakeUpFromIQ).map{ case (x, y) => enqDelayIn.og0Cancel(x) && y.bits.is0Lat}
       enqDelayOut.srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     } else {
@@ -491,8 +548,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         val ldTransCancel = Mux1H(enqDelayOut.srcWakeUpByIQVec(i), enqDelayIn.wakeUpFromIQ.map(_.bits.loadDependency).map(dp => LoadShouldCancel(Some(dp), enqDelayIn.ldCancel)).toSeq)
         wakeup := enqDelayOut.srcWakeUpByIQVec(i).asUInt.orR && !ldTransCancel
       }
+      enqDelayOut.srcCancelByLoad.zipWithIndex.foreach { case (ldCancel, i) =>
+        ldCancel := LoadShouldCancel(Some(enqDelayIn.srcLoadDependency(i)), enqDelayIn.ldCancel)
+      }
     } else {
       enqDelayOut.srcWakeUpByIQ := 0.U.asTypeOf(enqDelayOut.srcWakeUpByIQ)
+      enqDelayOut.srcCancelByLoad := 0.U.asTypeOf(enqDelayOut.srcCancelByLoad)
     }
 
     enqDelayOut.shiftedWakeupLoadDependencyByIQVec.zip(enqDelayIn.wakeUpFromIQ.map(_.bits.loadDependency))

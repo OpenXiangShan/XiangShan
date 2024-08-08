@@ -33,40 +33,66 @@ class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Paramet
   private val intAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.intConflict)
   private val fpAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.fpConflict)
   private val vfAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.vfConflict)
+  private val v0AllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.v0Conflict)
+  private val vlAllWbConflictFlag = io.out.wbConflictRead.flatten.flatten.map(_.vlConflict)
 
   private val intAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.intWbBusyTable)
   private val fpAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.fpWbBusyTable)
   private val vfAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vfWbBusyTable)
+  private val v0AllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.v0WbBusyTable)
+  private val vlAllBusyTable = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vlWbBusyTable)
+
   private val intAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.intDeqRespSet)
   private val fpAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.fpDeqRespSet)
   private val vfAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vfDeqRespSet)
+  private val v0AllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.v0DeqRespSet)
+  private val vlAllDeqRespSet = (intSchdBusyTable ++ fpSchdBusyTable ++ vfSchdBusyTable ++ memSchdBusyTable).flatten.map(_.vlDeqRespSet)
+
   private val intAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.intWbBusyTable)
   private val fpAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.fpWbBusyTable)
   private val vfAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.vfWbBusyTable)
+  private val v0AllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.v0WbBusyTable)
+  private val vlAllRespRead = (intRespRead ++ fpRespRead ++ vfRespRead ++ memRespRead).flatten.map(_.vlWbBusyTable)
 
   private val allExuParams = params.allExuParams
   private val intAllBusyTableWithParms = intAllBusyTable.zip(allExuParams).toSeq
   private val fpAllBusyTableWithParms = fpAllBusyTable.zip(allExuParams).toSeq
   private val vfAllBusyTableWithParms = vfAllBusyTable.zip(allExuParams).toSeq
+  private val v0AllBusyTableWithParms = v0AllBusyTable.zip(allExuParams).toSeq
+  private val vlAllBusyTableWithParms = vlAllBusyTable.zip(allExuParams).toSeq
+
   private val intAllDeqRespSetWithParms = intAllDeqRespSet.zip(allExuParams).toSeq
   private val fpAllDeqRespSetWithParms = fpAllDeqRespSet.zip(allExuParams).toSeq
   private val vfAllDeqRespSetWithParms = vfAllDeqRespSet.zip(allExuParams).toSeq
+  private val v0AllDeqRespSetWithParms = v0AllDeqRespSet.zip(allExuParams).toSeq
+  private val vlAllDeqRespSetWithParms = vlAllDeqRespSet.zip(allExuParams).toSeq
 
   private val intWbLatencyMax = params.getIntWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.intLatencyValMax).max, seq.forall(_.intLatencyCertain)) }
   private val fpWbLatencyMax = params.getFpWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.fpLatencyValMax).max, seq.forall(_.fpLatencyCertain)) }
   private val vfWbLatencyMax = params.getVfWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.vfLatencyValMax).max, seq.forall(_.vfLatencyCertain)) }
+  private val v0WbLatencyMax = params.getV0WBExeGroup.map { case (portId, seq) => (portId, seq.map(_.v0LatencyValMax).max, seq.forall(_.v0LatencyCertain)) }
+  private val vlWbLatencyMax = params.getVlWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.vlLatencyValMax).max, seq.forall(_.vlLatencyCertain)) }
+
   private val intWbBusyTable: Map[Int, Option[UInt]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
   private val fpWbBusyTable = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
   private val vfWbBusyTable = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+  private val v0WbBusyTable = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+  private val vlWbBusyTable = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+
   private val intConflict: Map[Int, Option[Bool]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
   private val fpConflict = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
   private val vfConflict = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
+  private val v0Conflict = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
+  private val vlConflict = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
 
   def hitWbPort[T <: Data](source: Option[T], p: ExeUnitParams, portId: Int, wbType: PregWB) = {
     wbType match {
       case IntWB(_, _) => p.wbPortConfigs.collectFirst { case x: IntWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
       case FpWB(_, _) => p.wbPortConfigs.collectFirst { case x: FpWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
       case VfWB(_, _) => p.wbPortConfigs.collectFirst { case x: VfWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+      case V0WB(_, _) => p.wbPortConfigs.collectFirst { case x: V0WB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+      case VlWB(_, _) => p.wbPortConfigs.collectFirst { case x: VlWB => x.port }.getOrElse(-1) == portId && source.nonEmpty
+      case _ => throw new IllegalArgumentException(s"WbConfig ${wbType} is not permitted")
     }
   }
 
@@ -111,19 +137,26 @@ class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Paramet
   writeBusyTable(intWbBusyTable, intAllBusyTableWithParms, IntWB())
   writeBusyTable(fpWbBusyTable, fpAllBusyTableWithParms, FpWB())
   writeBusyTable(vfWbBusyTable, vfAllBusyTableWithParms, VfWB())
+  writeBusyTable(v0WbBusyTable, v0AllBusyTableWithParms, V0WB())
+  writeBusyTable(vlWbBusyTable, vlAllBusyTableWithParms, VlWB())
   //per wbPort conflict
   writeConflict(intConflict, intAllDeqRespSetWithParms, IntWB())
   writeConflict(fpConflict, fpAllDeqRespSetWithParms, FpWB())
   writeConflict(vfConflict, vfAllDeqRespSetWithParms, VfWB())
+  writeConflict(v0Conflict, v0AllDeqRespSetWithParms, V0WB())
+  writeConflict(vlConflict, vlAllDeqRespSetWithParms, VlWB())
   //read wbPort fuBusyTable to per exe
   readRes(intAllRespRead, intWbBusyTable, IntWB())
   readRes(fpAllRespRead, fpWbBusyTable, FpWB())
   readRes(vfAllRespRead, vfWbBusyTable, VfWB())
+  readRes(v0AllRespRead, v0WbBusyTable, V0WB())
+  readRes(vlAllRespRead, vlWbBusyTable, VlWB())
   //read wbPort conflict to dataPath
   readRes(intAllWbConflictFlag, intConflict, IntWB())
   readRes(fpAllWbConflictFlag, fpConflict, FpWB())
   readRes(vfAllWbConflictFlag, vfConflict, VfWB())
-
+  readRes(v0AllWbConflictFlag, v0Conflict, V0WB())
+  readRes(vlAllWbConflictFlag, vlConflict, VlWB())
 }
 
 class WbFuBusyTableIO(implicit p: Parameters, params: BackendParams) extends XSBundle {

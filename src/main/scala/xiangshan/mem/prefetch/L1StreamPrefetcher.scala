@@ -70,8 +70,8 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     trigger_full_va := 0xdeadbeefL.U
   }
 
-  def tag_match(new_tag: UInt): Bool = {
-    region_hash_tag(tag) === region_hash_tag(new_tag)
+  def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
+    valid1 && valid2 && region_hash_tag(tag) === region_hash_tag(new_tag)
   }
 
   def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool, alloc_full_vaddr: UInt) = {
@@ -175,6 +175,14 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   })
 
   val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
+  val valids = RegInit(VecInit(Seq.fill(BIT_VEC_ARRAY_SIZE)(false.B)))
+
+  def reset_array(i: Int): Unit = {
+    valids(i) := false.B
+    //only need to rest control signals for firendly area
+    // array(i).reset(i)
+  }
+
   val replacement = ReplacementPolicy.fromString("plru", BIT_VEC_ARRAY_SIZE)
 
   // s0: generate region tag, parallel match
@@ -186,9 +194,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_region_tag = get_region_tag(s0_vaddr)
   val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
   val s0_region_tag_minus_one = get_region_tag(s0_vaddr) - 1.U
-  val s0_region_tag_match_vec = array.map(_.tag_match(s0_region_tag))
-  val s0_region_tag_plus_one_match_vec = array.map(_.tag_match(s0_region_tag_plus_one))
-  val s0_region_tag_minus_one_match_vec = array.map(_.tag_match(s0_region_tag_minus_one))
+  val s0_region_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag) }
+  val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_plus_one) }
+  val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_minus_one) }
   val s0_hit = Cat(s0_region_tag_match_vec).orR
   val s0_plus_one_hit = Cat(s0_region_tag_plus_one_match_vec).orR
   val s0_minus_one_hit = Cat(s0_region_tag_minus_one_match_vec).orR
@@ -218,7 +226,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   spf_log_data.Offset := DontCare
   spf_log_data.Score := DontCare
   spf_log_data.Miss := io.train_req.bits.miss
-  
+
   stream_pf_train_debug_table.log(
     data = spf_log_data,
     en = spf_log_enable,
@@ -233,7 +241,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
   assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
   assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && GatedValidRegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
+  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
@@ -282,6 +290,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   when(s1_alloc) {
     // alloc a new entry
+    valids(s1_index) := true.B
     array(s1_index).alloc(
       alloc_tag = s1_region_tag,
       alloc_bit_vec = UIntToOH(s1_region_bits),
@@ -292,7 +301,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   }.elsewhen(s1_update) {
     // update a existing entry
-    assert(array(s1_index).cnt =/= 0.U || array(s1_index).tag === s1_index, "entry should have been allocated before")
+    assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
     array(s1_index).update(
       update_bit_vec = UIntToOH(s1_region_bits),
       update_active = s1_plus_one_hit || s1_minus_one_hit)
@@ -396,7 +405,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // S1: match
   val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
   val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
-  val s1_lookup_tag_match_vec = array.map(_.tag_match(s1_lookup_tag))
+  val s1_lookup_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s1_lookup_valid, s1_lookup_tag) }
   val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
   val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
   // S2: read active out
@@ -412,8 +421,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
-      array(i).reset(i)
+    when(GatedValidRegNext(io.flush)) {
+      reset_array(i)
     }
   }
 

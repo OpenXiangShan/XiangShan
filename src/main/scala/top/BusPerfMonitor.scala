@@ -22,8 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink._
-import utility.{GTimer, MemReqSource, ReqSourceKey}
-import utils.XSPerfAccumulate
+import utility.{GTimer, MemReqSource, ReqSourceKey, XSPerfAccumulate}
 
 class BusPerfMonitor(name: String, stat_latency: Boolean)(implicit p: Parameters) extends LazyModule {
   val node = TLAdapterNode()
@@ -102,6 +101,9 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
 
   if (stat_latency) {
     val nrEdge = outer.node.in.length.toInt
+    if (outer.node.in.isEmpty) {
+      println(s"name = $name")
+    }
     val edgeIn = outer.node.in.head._2
 
     class RecordEntry()(implicit p: Parameters) extends Bundle {

@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -35,14 +36,14 @@ import freechips.rocketchip.tilelink._
 class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   val hit = Bool()
   val pre = Bool()
-  val ppn = if (HasHExtension) UInt((vpnLen max ppnLen).W) else UInt(ppnLen.W)
+  val ppn = UInt(gvpnLen.W)
   val perm = new PtePermBundle()
   val ecc = Bool()
   val level = UInt(2.W)
   val v = Bool()
 
   def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B) {
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
@@ -57,14 +58,14 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
   val hit = Bool()
   val pre = Bool()
-  val ppn = Vec(tlbcontiguous, if(HasHExtension) UInt((vpnLen max ppnLen).W) else UInt(ppnLen.W))
+  val ppn = Vec(tlbcontiguous, UInt(gvpnLen.W))
   val perm = Vec(tlbcontiguous, new PtePermBundle())
   val ecc = Bool()
   val level = UInt(2.W)
   val v = Vec(tlbcontiguous, Bool())
 
   def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)) {
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
@@ -101,10 +102,10 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
     val toFsm = new Bundle {
       val l1Hit = Bool()
       val l2Hit = Bool()
-      val ppn = if(HasHExtension) UInt((vpnLen.max(ppnLen)).W) else UInt(ppnLen.W)
+      val ppn = UInt(gvpnLen.W)
       val stage1Hit = Bool() // find stage 1 pte in cache, but need to search stage 2 pte in cache at PTW
     }
-    val toTlb = new PtwMergeResp()
+    val stage1 = new PtwMergeResp()
     val isHptwReq = Bool()
     val toHptw = new Bundle {
       val l1Hit = Bool()
@@ -124,10 +125,10 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l2 = Bool()
       val l1 = Bool()
       def apply(levelUInt: UInt, valid: Bool) = {
-        sp := RegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
-        l3 := RegNext((levelUInt === 2.U) & valid, false.B)
-        l2 := RegNext((levelUInt === 1.U) & valid, false.B)
-        l1 := RegNext((levelUInt === 0.U) & valid, false.B)
+        sp := GatedValidRegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
+        l3 := GatedValidRegNext((levelUInt === 2.U) & valid, false.B)
+        l2 := GatedValidRegNext((levelUInt === 1.U) & valid, false.B)
+        l1 := GatedValidRegNext((levelUInt === 0.U) & valid, false.B)
       }
     }
     // duplicate level and sel_pte for each page caches, for better fanout
@@ -142,7 +143,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
   val ecc = Code.fromString(l2tlbParams.ecc)
-  val l2EntryType = new PTWEntriesWithEcc(ecc, num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)
+  val l2EntryType = new PTWEntriesWithEcc(ecc, num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false, hasReservedBitforMbist = true)
   val l3EntryType = new PTWEntriesWithEcc(ecc, num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)
 
   // TODO: four caches make the codes dirty, think about how to deal with it
@@ -478,9 +479,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val isAllStage = stageResp.bits.req_info.s2xlate === allStage
   val isOnlyStage2 = stageResp.bits.req_info.s2xlate === onlyStage2
   val stage1Hit = (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
+  val idx = stageResp.bits.req_info.vpn(2, 0)
+  val stage1Pf = !Mux(resp_res.l3.hit, resp_res.l3.v(idx), resp_res.sp.v)
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
-  io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
+  io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && (!isAllStage || isAllStage && stage1Pf)
   io.resp.bits.bypassed := (bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)) && !isAllStage
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq 
@@ -493,34 +496,33 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.id := stageResp.bits.hptwId
   io.resp.bits.toHptw.l1Hit := resp_res.l1.hit && stageResp.bits.isHptwReq 
   io.resp.bits.toHptw.l2Hit := resp_res.l2.hit && stageResp.bits.isHptwReq 
-  io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
-  val idx = stageResp.bits.req_info.vpn(2, 0)
+  io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)(ppnLen - 1, 0)
   io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.vpn
   io.resp.bits.toHptw.resp.entry.asid := DontCare
   io.resp.bits.toHptw.resp.entry.vmid.map(_ := io.csr_dup(0).hgatp.asid)
   io.resp.bits.toHptw.resp.entry.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
-  io.resp.bits.toHptw.resp.entry.ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(idx), resp_res.sp.ppn)
+  io.resp.bits.toHptw.resp.entry.ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(idx), resp_res.sp.ppn)(ppnLen - 1, 0)
   io.resp.bits.toHptw.resp.entry.perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(idx), resp_res.sp.perm))
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l3.hit, resp_res.l3.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B
 
-  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
-  io.resp.bits.toTlb.entry.map(_.asid := Mux(stageResp.bits.req_info.hasS2xlate(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)) // DontCare
-  io.resp.bits.toTlb.entry.map(_.vmid.map(_ := io.csr_dup(0).hgatp.asid))
-  io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level)))
-  io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
+  io.resp.bits.stage1.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
+  io.resp.bits.stage1.entry.map(_.asid := Mux(stageResp.bits.req_info.hasS2xlate(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)) // DontCare
+  io.resp.bits.stage1.entry.map(_.vmid.map(_ := io.csr_dup(0).hgatp.asid))
+  io.resp.bits.stage1.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, Mux(resp_res.sp.hit, resp_res.sp.level, Mux(resp_res.l2.hit, 1.U, 0.U))))) // leaf page is first
+  io.resp.bits.stage1.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
   for (i <- 0 until tlbcontiguous) {
-    io.resp.bits.toTlb.entry(i).ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(ppnLen - 1, sectortlbwidth), resp_res.sp.ppn(ppnLen - 1, sectortlbwidth))
-    io.resp.bits.toTlb.entry(i).ppn_low := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(sectortlbwidth - 1, 0), resp_res.sp.ppn(sectortlbwidth - 1, 0))
-    io.resp.bits.toTlb.entry(i).perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(i), resp_res.sp.perm))
-    io.resp.bits.toTlb.entry(i).v := Mux(resp_res.l3.hit, resp_res.l3.v(i), resp_res.sp.v)
-    io.resp.bits.toTlb.entry(i).pf := !io.resp.bits.toTlb.entry(i).v
-    io.resp.bits.toTlb.entry(i).af := false.B
+    io.resp.bits.stage1.entry(i).ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(gvpnLen - 1, sectortlbwidth), Mux(resp_res.sp.hit, resp_res.sp.ppn(gvpnLen - 1, sectortlbwidth), Mux(resp_res.l2.hit, resp_res.l2.ppn(gvpnLen - 1, sectortlbwidth), resp_res.l1.ppn(gvpnLen - 1, sectortlbwidth))))
+    io.resp.bits.stage1.entry(i).ppn_low := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(sectortlbwidth - 1, 0), Mux(resp_res.sp.hit, resp_res.sp.ppn(sectortlbwidth - 1, 0), Mux(resp_res.l2.hit, resp_res.l2.ppn(sectortlbwidth - 1, 0), resp_res.l1.ppn(sectortlbwidth - 1, 0))))
+    io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(i), resp_res.sp.perm))
+    io.resp.bits.stage1.entry(i).v := Mux(resp_res.l3.hit, resp_res.l3.v(i), Mux(resp_res.sp.hit, resp_res.sp.v, Mux(resp_res.l2.hit, resp_res.l2.v, resp_res.l1.v)))
+    io.resp.bits.stage1.entry(i).pf := !io.resp.bits.stage1.entry(i).v
+    io.resp.bits.stage1.entry(i).af := false.B
   }
-  io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
-  io.resp.bits.toTlb.not_super := Mux(resp_res.l3.hit, true.B, false.B)
+  io.resp.bits.stage1.pteidx := UIntToOH(idx).asBools
+  io.resp.bits.stage1.not_super := Mux(resp_res.l3.hit, true.B, false.B)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
@@ -616,7 +618,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfvOH.suggestName(s"l2_rfvOH")
   }
 
-  when (!flush_dup(2) && refill.levelOH.l3 && !memPte(2).isAf()) {
+  when (!flush_dup(2) && refill.levelOH.l3) {
     val refillIdx = genPtwL3SetIdx(refill.req_info_dup(2).vpn)
     val victimWay = replaceWrapper(getl3vSet(refill.req_info_dup(2).vpn), ptwl3replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -709,7 +711,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // sfence for l3
   val sfence_valid_l3 = sfence_dup(3).valid && !sfence_dup(3).bits.hg && !sfence_dup(3).bits.hv
   when (sfence_valid_l3) {
-    val l3hhit = VecInit(l3h.flatMap(_.map(_ === onlyStage1 && io.csr_dup(0).priv.virt || !io.csr_dup(0).priv.virt))).asUInt
+    val l3hhit = VecInit(l3h.flatMap(_.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate})).asUInt
     val sfence_vpn = sfence_dup(3).bits.addr(sfence_dup(3).bits.addr.getWidth-1, offLen)
     when (sfence_dup(3).bits.rs1/*va*/) {
       when (sfence_dup(3).bits.rs2) {
@@ -717,7 +719,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l3v := l3v & ~l3hhit
       } .otherwise {
         // all va && specific asid except global
-        l3v := l3v & l3g & ~l3hhit
+        l3v := l3v & (l3g | ~l3hhit)
       }
     } .otherwise {
       // val flushMask = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
@@ -834,9 +836,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
       }.otherwise {
-        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }
     }
   }

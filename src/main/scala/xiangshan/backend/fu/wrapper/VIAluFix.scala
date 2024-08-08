@@ -4,8 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.{VecInit, _}
 import chisel3.util._
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
-import utility.DelayN
-import utils.XSError
+import utility.{DelayN, XSError}
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew, ma}
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecPipedFuncUnit}
@@ -136,7 +135,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
 
   // config params
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
@@ -316,7 +315,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   // the result of narrow inst which needs concat
   private val narrowNeedCat = outVecCtrl.vuopIdx(0).asBool && narrow
-  private val outNarrowVd = Mux(narrowNeedCat, Cat(outNarrow, outOldVd(dataWidth / 2 - 1, 0)), outNarrow)
+  private val outNarrowVd = Mux(narrowNeedCat, Cat(outNarrow, outOldVd(dataWidth / 2 - 1, 0)), Cat(outOldVd(dataWidth - 1, dataWidth / 2), outNarrow))
   private val outVxsatReal = Mux(narrowNeedCat, Cat(outVxsat(numBytes / 2 - 1, 0), 0.U((numBytes / 2).W)), outVxsat)
 
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)

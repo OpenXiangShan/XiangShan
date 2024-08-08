@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util.DecoupledIO
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundle, TLClientNode, TLIdentityNode, TLMasterParameters, TLMasterPortParameters}
+import utility.XSDebug
 
 class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
 

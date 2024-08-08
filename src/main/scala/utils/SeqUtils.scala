@@ -14,7 +14,7 @@ object SeqUtils {
     var res = Seq[B]()
     val it = seqLike.iterator
     while (it.hasNext) {
-      val next = it.next
+      val next = it.next()
       if (seen.add(f(next))) {
         res :+= next
       }

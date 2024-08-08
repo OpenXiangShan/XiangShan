@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -91,10 +92,12 @@ trait HasTlbConst extends HasXSParameter {
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
+  val gvpnLen = GPAddrBits - offLen
 
   val tlbcontiguous = 8
   val sectortlbwidth = log2Up(tlbcontiguous)
   val sectorppnLen = ppnLen - sectortlbwidth
+  val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
@@ -150,6 +153,8 @@ trait HasTlbConst extends HasXSParameter {
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
+
+  import scala.language.implicitConversions
 
   implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)

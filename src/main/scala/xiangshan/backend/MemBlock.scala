@@ -41,6 +41,8 @@ import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
+import xiangshan.backend.datapath.NewPipelineConnect
+import system.SoCParamsKey
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -107,7 +109,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val otherFastWakeup = Vec(LdExuCnt, ValidIO(new DynInst))
-  val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -225,9 +226,9 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l2_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
-  val l3_pf_sender_opt = coreParams.prefetcher.map(_ =>
+  val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
-  )
+  ) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -260,7 +261,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fetch_to_mem = new fetch_to_mem
 
     // misc
-    val error = new L1CacheErrorInfo
+    val error = ValidIO(new L1CacheErrorInfo)
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
       val lqFull = Output(Bool())
@@ -270,6 +271,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = new PMPRespBundle
 
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -293,8 +295,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   })
 
   // reset signals of frontend & backend are generated in memblock
-  val reset_io_frontend = IO(Output(Reset()))
-  val reset_io_backend = IO(Output(Reset()))
+  val reset_backend = IO(Output(Reset()))
 
   dontTouch(io.externalInterrupt)
   dontTouch(io.inner_hartId)
@@ -319,10 +320,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
-  io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
-  io.error <> RegNext(RegNext(dcache.io.error))
+  io.error <> DelayNWithValid(dcache.io.error, 2)
   when(!csrCtrl.cache_error_enable){
-    io.error.report_to_beu := false.B
+    io.error.bits.report_to_beu := false.B
     io.error.valid := false.B
   }
 
@@ -348,10 +348,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
+      sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
       sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
       sms
@@ -374,8 +374,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         l1Prefetcher.stride_train(i).bits := source.bits
         l1Prefetcher.stride_train(i).bits.uop.pc := Mux(
           loadUnits(i).io.s2_ptr_chasing,
-          RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
-          RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
+          RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s2_prefetch_spec),
+          RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
         )
       }
       for (i <- 0 until HyuCnt) {
@@ -394,7 +394,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // load prefetch to l1 Dcache
   l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = true, name = Some("pf_queue_to_ldu_reg"))
+    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
     case None =>
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
@@ -442,7 +442,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
   // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPorts = if(LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
+  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
   LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
   hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
 
@@ -452,9 +452,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
     case i => {
-      if(LowConfPorts.contains(i)) {
+      if (LowConfPorts.contains(i)) {
         loadUnits(i).io.canAcceptLowConfPrefetch
-      }else {
+      } else {
         Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
       }
     }
@@ -500,8 +500,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
     l1PrefetcherOpt.foreach(l1_pf => {
-      val sms_pf_to_l2 = ValidIODelay(sms_pf.io.l2_req, 2)
-      val l1_pf_to_l2 = ValidIODelay(l1_pf.io.l2_req, 2)
+      val sms_pf_to_l2 = DelayNWithValid(sms_pf.io.l2_req, 2)
+      val l1_pf_to_l2 = DelayNWithValid(l1_pf.io.l2_req, 2)
 
       outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
       outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
@@ -517,17 +517,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
       val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
-      outer.l3_pf_sender_opt.get.out.head._1.addr_valid := l1_pf_to_l3.valid
-      outer.l3_pf_sender_opt.get.out.head._1.addr := l1_pf_to_l3.bits
-      outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B))
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := l1_pf_to_l3.valid)
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := l1_pf_to_l3.bits)
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B)))
 
       val l3_trace = Wire(new LoadPfDbBundle)
-      l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
+      l3_trace.paddr := outer.l3_pf_sender_opt.map(_.out.head._1.addr).getOrElse(0.U)
       val l3_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
-      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.get.out.head._1.addr_valid)
+      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
       XSPerfAccumulate("l1pf_fire_l2", l1_pf_to_l2.valid)
       XSPerfAccumulate("sms_fire_l2", !l1_pf_to_l2.valid && sms_pf_to_l2.valid)
       XSPerfAccumulate("sms_block_by_l1pf", l1_pf_to_l2.valid && sms_pf_to_l2.valid)
@@ -539,6 +539,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.module
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -552,18 +553,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // dtlb
-  val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
-    tlb_ld.io // let the module have name in waveform
-  })
-  val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-    tlb_st.io // let the module have name in waveform
-  })
-  val dtlb_prefetch = VecInit(Seq.fill(1){
-    val tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
-    tlb_prefetch.io // let the module have name in waveform
-  })
+  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
+  val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
+  val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
+  val dtlb_st = Seq(dtlb_st_tlb_st.io)
+  val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
@@ -613,6 +608,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   ptwio.resp.ready := true.B
 
   val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
+  val tlbreplay_reg = GatedValidRegNext(tlbreplay)
+  val dtlb_ld0_tlbreplay_reg = GatedValidRegNext(dtlb_ld(0).tlbreplay)
   dontTouch(tlbreplay)
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
@@ -651,7 +648,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(DTlbSize)(Module(new PMPChecker(4)).io))
+  val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
+  val pmp_check = pmp_checkers.map(_.io)
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -679,6 +677,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   when(csrCtrl.mem_trigger.tUpdate.valid) {
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
+  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
 
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
@@ -686,6 +685,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
   for (j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
+
+  // The segment instruction is executed atomically.
+  // After the segment instruction directive starts executing, no other instructions should be executed.
+  val vSegmentFlag = RegInit(false.B)
+
+  when(vSegmentUnit.io.in.fire){
+    vSegmentFlag := true.B
+  }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
+    vSegmentFlag := false.B
+  }
 
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
@@ -724,6 +733,32 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       ))
       vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
     }
+
+    // Dcache requests must also be preempted by the segment.
+    when(vSegmentFlag){
+      loadUnits(i).io.dcache.req.ready             := false.B // Dcache is preempted.
+
+      dcache.io.lsu.load(0).pf_source              := vSegmentUnit.io.rdcache.pf_source
+      dcache.io.lsu.load(0).s1_paddr_dup_lsu       := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
+      dcache.io.lsu.load(0).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
+      dcache.io.lsu.load(0).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
+      dcache.io.lsu.load(0).s2_kill                := vSegmentUnit.io.rdcache.s2_kill
+      dcache.io.lsu.load(0).s0_pc                  := vSegmentUnit.io.rdcache.s0_pc
+      dcache.io.lsu.load(0).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
+      dcache.io.lsu.load(0).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
+    }.otherwise {
+      loadUnits(i).io.dcache.req.ready             := dcache.io.lsu.load(i).req.ready
+
+      dcache.io.lsu.load(0).pf_source              := loadUnits(0).io.dcache.pf_source
+      dcache.io.lsu.load(0).s1_paddr_dup_lsu       := loadUnits(0).io.dcache.s1_paddr_dup_lsu
+      dcache.io.lsu.load(0).s1_paddr_dup_dcache    := loadUnits(0).io.dcache.s1_paddr_dup_dcache
+      dcache.io.lsu.load(0).s1_kill                := loadUnits(0).io.dcache.s1_kill
+      dcache.io.lsu.load(0).s2_kill                := loadUnits(0).io.dcache.s2_kill
+      dcache.io.lsu.load(0).s0_pc                  := loadUnits(0).io.dcache.s0_pc
+      dcache.io.lsu.load(0).s1_pc                  := loadUnits(0).io.dcache.s1_pc
+      dcache.io.lsu.load(0).s2_pc                  := loadUnits(0).io.dcache.s2_pc
+    }
+
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
@@ -738,11 +773,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     loadUnits(i).io.tlb <> dtlb_reqs.take(LduCnt)(i)
     if(i == 0 ){ // port 0 assign to vsegmentUnit
-      dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || vSegmentUnit.io.dtlb.req.valid
+      val vsegmentDtlbReqValid = vSegmentUnit.io.dtlb.req.valid // segment tlb resquest need to delay 1 cycle
+      dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || RegNext(vsegmentDtlbReqValid)
       vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
       dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
-        vSegmentUnit.io.dtlb.req.valid -> vSegmentUnit.io.dtlb.req.bits,
-        loadUnits(i).io.tlb.req.valid -> loadUnits(i).io.tlb.req.bits
+        RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
+        loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
     }
     // pmp
@@ -764,8 +800,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.uop.pc := Mux(
         loadUnits(i).io.s2_ptr_chasing,
-        RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
-        RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
+        RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s2_prefetch_spec),
+        RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
       )
     })
     l1PrefetcherOpt.foreach(pf => {
@@ -799,7 +835,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.l2_hint <> l2_hint
     loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
     loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||
-      RegNext(tlbreplay(i)) || RegNext(dtlb_ld(0).tlbreplay(i))
+      tlbreplay_reg(i) || dtlb_ld0_tlbreplay_reg(i)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
@@ -875,7 +911,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dcache refill req
     hybridUnits(i).io.ldu_io.tlb_hint.id := dtlbRepeater.io.hint.get.req(LduCnt + i).id
     hybridUnits(i).io.ldu_io.tlb_hint.full := dtlbRepeater.io.hint.get.req(LduCnt + i).full ||
-      RegNext(tlbreplay(LduCnt + i)) || RegNext(dtlb_ld(0).tlbreplay(LduCnt + i))
+      tlbreplay_reg(LduCnt + i) || dtlb_ld0_tlbreplay_reg(LduCnt + i)
 
     // dtlb
     hybridUnits(i).io.tlb <> dtlb_ld.head.requestor(LduCnt + i)
@@ -987,25 +1023,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    val hyuOut = io.mem_to_ooo.writebackHyuSta(i)
-    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-    val storeTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-
-    when(hybridUnits(i).io.stout.fire &&
-      FuType.isStore(hybridUnits(i).io.stout.bits.uop.fuType)) {
-      for (j <- 0 until TriggerNum) {
-        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
-          hyuOut.bits.debug.vaddr,
-          tdata(j).tdata2,
-          tdata(j).matchType,
-          tEnable(j) && tdata(j).store
-        )
-      }
-      TriggerCheckCanFire(TriggerNum, storeTriggerCanFireVec, storeTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-
-      hyuOut.bits.uop.trigger.backendHit := storeTriggerHitVec
-      hyuOut.bits.uop.trigger.backendCanFire := storeTriggerCanFireVec
-    }
+    hybridUnits(i).io.fromCsrTrigger.tdataVec := tdata
+    hybridUnits(i).io.fromCsrTrigger.tEnableVec := tEnable
+    hybridUnits(i).io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
 
   }
 
@@ -1029,6 +1049,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
+  io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
   // StoreUnit
   for (i <- 0 until StdCnt) {
@@ -1051,6 +1072,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
 
+    // -------------------------
+    // Store Triggers
+    // -------------------------
+    stu.io.fromCsrTrigger.tdataVec := tdata
+    stu.io.fromCsrTrigger.tEnableVec := tEnable
+    stu.io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
 
@@ -1061,12 +1089,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // Lsq to std unit's rs
-    if(i < VstuCnt){
+    if (i < VstuCnt){
       when (vsSplit(i).io.vstd.get.valid) {
         lsq.io.std.storeDataIn(i).valid := true.B
         lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
         stData(i).ready := false.B
-      } .otherwise {
+      }.otherwise {
         lsq.io.std.storeDataIn(i).valid := stData(i).valid
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
         lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
@@ -1075,8 +1103,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
         stData(i).ready := true.B
       }
-    }
-    else{
+    } else {
         lsq.io.std.storeDataIn(i).valid := stData(i).valid
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
         lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
@@ -1104,7 +1131,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
           )
       )
       pf.io.st_in(i).bits := stu.io.prefetch_train.bits
-      pf.io.st_in(i).bits.uop.pc := RegEnable(RegEnable(io.ooo_to_mem.storePc(i), stu.io.s0_prefetch_spec), stu.io.s1_prefetch_spec)
+      pf.io.st_in(i).bits.uop.pc := RegEnable(RegEnable(io.ooo_to_mem.storePc(i), stu.io.s1_prefetch_spec), stu.io.s2_prefetch_spec)
     })
 
     // 1. sync issue info to store set LFST
@@ -1126,26 +1153,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       stu.io.vecstout.ready := false.B
     }
     stu.io.vec_isFirstIssue := true.B // TODO
-    // -------------------------
-    // Store Triggers
-    // -------------------------
-    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-    val storeTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-
-    when(stOut(i).fire) {
-      for (j <- 0 until TriggerNum) {
-        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
-          stOut(i).bits.debug.vaddr,
-          tdata(j).tdata2,
-          tdata(j).matchType,
-          tEnable(j) && tdata(j).store
-        )
-      }
-      TriggerCheckCanFire(TriggerNum, storeTriggerCanFireVec, storeTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-
-      stOut(i).bits.uop.trigger.backendHit := storeTriggerHitVec
-      stOut(i).bits.uop.trigger.backendCanFire := storeTriggerCanFireVec
-    }
   }
 
   // mmio store writeback will use store writeback port 0
@@ -1204,7 +1211,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     )).andR))
     resultOnehot
   }
-  val allRedirect = Seq(lsq.io.nuke_rollback, lsq.io.nack_rollback) ++ loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback)
+  val allRedirect = loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback) ++ Seq(lsq.io.nack_rollback) ++ lsq.io.nuke_rollback
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   io.mem_to_ooo.memoryViolation := oldestRedirect
@@ -1294,10 +1301,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
-  sbuffer.io.vecDifftestInfo    := DontCare
-  lsq.io.sbufferVecDifftestInfo := DontCare
+  sbuffer.io.vecDifftestInfo      := DontCare
+  lsq.io.sbufferVecDifftestInfo   := DontCare
+  vSegmentUnit.io.vecDifftestInfo := DontCare
   if (env.EnableDifftest) {
-    lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
+    sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
+      if (index == 0) {
+        sbufferPort.valid := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
+        sbufferPort.bits  := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
+
+        vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
+        lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready
+      } else {
+         sbufferPort <> lsq.io.sbufferVecDifftestInfo(index)
+      }
+    }
   }
 
   // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
@@ -1306,11 +1324,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  val vLsuCanaccept = (0 until VlduCnt).map(
+  val vlsuCanAccept = (0 until VlduCnt).map(
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
-  val isSegment     = (io.ooo_to_mem.issueVldu.head.bits.uop.vpu.nf =/= 0.U) &&
-                    !(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VlduType.vlr || io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VstuType.vsr)
+  val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
 
   // init port
   /**
@@ -1333,20 +1350,32 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
-                              vLsuCanaccept(i) && !isSegment
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && VstuType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
+                              vlsuCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
-    vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
+    NewPipelineConnect(
+      vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
+      Mux(vsSplit(i).io.out.fire,
+          vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
+          storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
+      Option("VsSplitConnectStu")
+    )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
   }
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
     vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
-                              vLsuCanaccept(i) && !isSegment
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && VlduType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
+                              vlsuCanAccept(i) && !isSegment
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
+    NewPipelineConnect(
+      vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
+      Mux(vlSplit(i).io.out.fire,
+          vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
+          loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
+      Option("VlSplitConnectLdu")
+    )
 
   }
   (0 until LduCnt).foreach{i=>
@@ -1360,7 +1389,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   (0 until VlduCnt).foreach{i=>
-    io.ooo_to_mem.issueVldu(i).ready := vLsuCanaccept(i) || isSegment // segment uop always enqueue
+    io.ooo_to_mem.issueVldu(i).ready := vlsuCanAccept(i)
   }
 
   vlMergeBuffer.io.redirect <> redirect
@@ -1379,24 +1408,23 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   (0 until VstuCnt).foreach{i =>
     // send to RS
-    if(i == 0){
+    if (i == 0){
       io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.valid := vsMergeBuffer(i).io.feedback.head.valid || vSegmentUnit.io.feedback.valid
       io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.bits := Mux1H(Seq(
         vSegmentUnit.io.feedback.valid -> vSegmentUnit.io.feedback.bits,
         vsMergeBuffer(i).io.feedback.head.valid ->  vsMergeBuffer(i).io.feedback.head.bits
       ))
       io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
-    }
-    else {
+    } else {
       vsMergeBuffer(i).io.feedback.head <> io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow
       io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
     }
   }
 
   (0 until VlduCnt).foreach{i=>
-    if(i == 0){ // for segmentUnit, segmentUnit use port0 writeback
+    if (i == 0){ // for segmentUnit, segmentUnit use port0 writeback
       io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid || vSegmentUnit.io.uopwriteback.valid
-      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+      io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
         vSegmentUnit.io.uopwriteback.valid          -> vSegmentUnit.io.uopwriteback.bits,
         vlMergeBuffer.io.uopWriteback(i).valid      -> vlMergeBuffer.io.uopWriteback(i).bits,
         vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
@@ -1404,10 +1432,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vSegmentUnit.io.uopwriteback.valid
       vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid && !vSegmentUnit.io.uopwriteback.valid
       vSegmentUnit.io.uopwriteback.ready := io.mem_to_ooo.writebackVldu(i).ready
-    }
-    else {
+    } else {
       io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid
-      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+      io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
         vlMergeBuffer.io.uopWriteback(i).valid -> vlMergeBuffer.io.uopWriteback(i).bits,
         vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
       ))
@@ -1525,20 +1552,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
     atomicsException := true.B
   }
+
+  val vSegmentException = RegInit(false.B)
+  when (DelayN(redirect.valid, 10) && vSegmentException) {
+    vSegmentException := false.B
+  }.elsewhen (vSegmentUnit.io.exceptionInfo.valid) {
+    vSegmentException := true.B
+  }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.vaddr, atomicsUnit.io.exceptionAddr.valid)
+  val vSegmentExceptionVstart = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vstart, vSegmentUnit.io.exceptionInfo.valid)
+  val vSegmentExceptionVl     = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vl, vSegmentUnit.io.exceptionInfo.valid)
+  val vSegmentExceptionAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vaddr, vSegmentUnit.io.exceptionInfo.valid)
   val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.gpaddr, atomicsUnit.io.exceptionAddr.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
-    lsq.io.exceptionAddr.vaddr
-    // Mux(
-    //   io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
-    //   vsFlowQueue.io.exceptionAddr.vaddr,
-    //   lsq.io.exceptionAddr.vaddr
-    // )
+    Mux(vSegmentException,
+      vSegmentExceptionAddress,
+      lsq.io.exceptionAddr.vaddr)
   ))
-  io.mem_to_ooo.lsqio.vstart := RegNext(lsq.io.exceptionAddr.vstart)
-  io.mem_to_ooo.lsqio.vl     := RegNext(lsq.io.exceptionAddr.vl)
+  // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
+  XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
+  io.mem_to_ooo.lsqio.vstart := RegNext(Mux(vSegmentException,
+                                            vSegmentExceptionVstart,
+                                            lsq.io.exceptionAddr.vstart)
+  )
+  io.mem_to_ooo.lsqio.vl     := RegNext(Mux(vSegmentException,
+                                            vSegmentExceptionVl,
+                                            lsq.io.exceptionAddr.vl)
+  )
 
   io.mem_to_ooo.writeBack.map(wb => {
     wb.bits.uop.trigger.frontendHit := 0.U(TriggerNum.W).asBools
@@ -1564,22 +1606,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
-  if (p(DebugOptionsKey).ResetGen) {
-    val resetTree = ResetGenNode(
-      Seq(
-        CellNode(reset_io_frontend),
-        CellNode(reset_io_backend),
-        ModuleNode(itlbRepeater3),
-        ModuleNode(dtlbRepeater),
-        ModuleNode(ptw),
-        ModuleNode(ptw_to_l2_buffer)
-      )
-    )
-    ResetGen(resetTree, reset, !p(DebugOptionsKey).ResetGen)
-  } else {
-    reset_io_frontend := DontCare
-    reset_io_backend := DontCare
-  }
   // vector segmentUnit
   vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
   vSegmentUnit.io.in.valid := isSegment && io.ooo_to_mem.issueVldu.head.valid// is segment instruction
@@ -1590,6 +1616,37 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vSegmentUnit.io.redirect <> io.redirect
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
+  vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict
+
+  // reset tree of MemBlock
+  if (p(DebugOptionsKey).ResetGen) {
+    val leftResetTree = ResetGenNode(
+      Seq(
+        ModuleNode(ptw),
+        ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(lsq),
+        ModuleNode(dtlb_st_tlb_st),
+        ModuleNode(dtlb_prefetch_tlb_prefetch),
+        ModuleNode(pmp)
+      )
+      ++ pmp_checkers.map(ModuleNode(_))
+      ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
+      ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
+    )
+    val rightResetTree = ResetGenNode(
+      Seq(
+        ModuleNode(sbuffer),
+        ModuleNode(dtlb_ld_tlb_ld),
+        ModuleNode(dcache),
+        ModuleNode(l1d_to_l2_buffer),
+        CellNode(reset_backend)
+      )
+    )
+    ResetGen(leftResetTree, reset, sim = false)
+    ResetGen(rightResetTree, reset, sim = false)
+  } else {
+    reset_backend := DontCare
+  }
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

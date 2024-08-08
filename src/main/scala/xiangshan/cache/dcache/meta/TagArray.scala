@@ -19,8 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.SRAMTemplate
-import utils.XSPerfAccumulate
+import utility.{SRAMTemplate, XSPerfAccumulate}
 import xiangshan.cache.CacheInstrucion._
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
@@ -37,7 +36,13 @@ class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
   val ecc = UInt(eccTagBits.W)
 }
 
-class TagArray(implicit p: Parameters) extends DCacheModule {
+case object HasTagEccParam
+
+abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
+  val TagEccParam = if(EnableTagEcc) Some(HasTagEccParam) else None
+}
+
+class TagArray(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new TagReadReq))
     val resp = Output(Vec(nWays, UInt(tagBits.W)))
@@ -62,8 +67,12 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
-  val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+  val ecc_array = TagEccParam.map {
+    case _ =>
+      val ecc = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
+      shouldReset = false, holdRead = false, singlePort = true))
+    ecc
+  }
 
   val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen
@@ -77,12 +86,16 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   val ecc_waddr = Mux(rst, rst_cnt, io.ecc_write.bits.idx)
   val ecc_wdata = Mux(rst, rstVal, io.ecc_write.bits.ecc)
   val ecc_wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.ecc_write.bits.way_en.asSInt).asBools
-  ecc_array.io.w.req.valid := ecc_wen
-  ecc_array.io.w.req.bits.apply(
-    setIdx = ecc_waddr,
-    data = ecc_wdata,
-    waymask = VecInit(ecc_wmask).asUInt
-  )
+  ecc_array match {
+    case Some(ecc) =>
+      ecc.io.w.req.valid := ecc_wen
+      ecc.io.w.req.bits.apply(
+        setIdx = ecc_waddr,
+        data = ecc_wdata,
+        waymask = VecInit(ecc_wmask).asUInt
+      )
+    case None =>
+  }
 
   // tag read
   val ren = io.read.fire
@@ -93,17 +106,28 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
 
   val ecc_ren = io.ecc_read.fire
-  ecc_array.io.r.req.valid := ecc_ren
-  ecc_array.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
-  io.ecc_resp := ecc_array.io.r.resp.data
+  ecc_array match {
+    case Some(ecc) =>
+      ecc.io.r.req.valid := ecc_ren
+      ecc.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
+      io.ecc_resp := ecc.io.r.resp.data
+    case None =>
+      io.ecc_resp := 0.U.asTypeOf(io.ecc_resp)
+  }
 
   io.write.ready := !rst
   io.read.ready := !wen
-  io.ecc_write.ready := !rst
-  io.ecc_read.ready := !ecc_wen
+  ecc_array match {
+    case Some(ecc) =>
+      io.ecc_write.ready := !rst
+      io.ecc_read.ready := !ecc_wen
+    case None =>
+      io.ecc_write.ready := true.B
+      io.ecc_read.ready := true.B
+  }
 }
 
-class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends DCacheModule {
+class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))

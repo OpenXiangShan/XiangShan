@@ -387,7 +387,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
   // generate free mask
-  val s0_loadFreeSelMask = RegNext(freeMaskVec.asUInt)
+  val s0_loadFreeSelMask = GatedRegNext(freeMaskVec.asUInt)
   val s0_remFreeSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(s0_loadFreeSelMask)(rem)))
 
   // l2 hint wakes up cache missed load
@@ -603,6 +603,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     needEnqueue(i) && !io.enq(i).bits.isLoadReplay
   })
 
+  val canAcceptCount = PopCount(freeList.io.canAllocate)
   for ((enq, w) <- io.enq.zipWithIndex) {
     vaddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
@@ -611,7 +612,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     //  Allocated ready
     val offset = PopCount(newEnqueue.take(w))
-    val canAccept = freeList.io.canAllocate(offset)
+    val canAccept = canAcceptCount >= (w+1).U
     val enqIndex = Mux(enq.bits.isLoadReplay, enq.bits.schedIndex, freeList.io.allocateSlot(offset))
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := Mux(enq.bits.isLoadReplay, true.B, canAccept)
@@ -726,8 +727,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueReplaySize) {
     val fbk = io.vecFeedback
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-      vecLdCommittmp(i)(j) := fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)

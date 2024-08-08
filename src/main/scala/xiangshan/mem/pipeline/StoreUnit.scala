@@ -28,6 +28,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
@@ -49,8 +50,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
     // speculative for gated control
-    val s0_prefetch_spec = Output(Bool())
     val s1_prefetch_spec = Output(Bool())
+    val s2_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
@@ -60,6 +61,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // vector
     val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
+    // trigger
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
@@ -80,7 +83,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_vecstin      = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
   val s0_uop          = Mux(s0_use_flow_rs, s0_stin.uop, s0_vecstin.uop)
   val s0_isFirstIssue = s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
-  val s0_rsIdx        = Mux(s0_use_flow_rs, io.stin.bits.iqIdx, 0.U)
   val s0_size         = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
   val s0_mem_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
@@ -102,14 +104,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_mBIndex      = s0_vecstin.mBIndex
 
   // generate addr
-  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
-  val imm12 = WireInit(s0_uop.imm(11,0))
-  val saddr_lo = s0_stin.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(saddr_lo(12),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12), s0_stin.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_stin.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
   val s0_vaddr = Mux(
     s0_use_flow_rs,
     s0_saddr,
@@ -145,6 +140,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req_kill                    := false.B
   io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
   io.tlb.req.bits.hlvx               := false.B
+  io.tlb.req.bits.pmp_addr           := DontCare
 
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
@@ -164,7 +160,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
-  s0_out.rsIdx        := s0_rsIdx
   s0_out.mask         := s0_mask
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
@@ -252,6 +247,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_feedback.bits.robIdx           := s1_out.uop.robIdx
   s1_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_feedback.bits.dataInvalidSqIdx := DontCare
+  s1_feedback.bits.sqIdx            := s1_out.uop.sqIdx
+  s1_feedback.bits.lqIdx            := s1_out.uop.lqIdx
 
   XSDebug(s1_feedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
@@ -273,6 +270,17 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
+
+  // trigger
+  val storeTrigger = Module(new StoreTrigger)
+  storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+
+  s1_out.uop.trigger.backendHit       := storeTrigger.io.toStore.triggerHitVec
+  s1_out.uop.trigger.backendCanFire   := storeTrigger.io.toStore.triggerCanFireVec
+  s1_out.uop.exceptionVec(breakPoint) := storeTrigger.io.toStore.breakPointExp
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
@@ -318,7 +326,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out.af     := s2_pmp.st && !s2_in.isvec
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
-  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_vecActive
+  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
+                                                s2_pmp.st ||
+                                                (s2_in.isvec && s2_pmp.mmio && RegNext(s1_feedback.bits.hit))
+                                                ) && s2_vecActive
 
   // kill dcache write intent request when mmio or exception
   io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
@@ -327,34 +338,40 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.dcache.resp.ready := true.B
 
   // feedback tlb miss to RS in store_s2
-  io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)) && !RegNext(s1_out.isvec)
-  io.feedback_slow.bits  := RegNext(s1_feedback.bits)
+  val feedback_slow_valid = WireInit(false.B)
+  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec
+  io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
+  io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
   val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
 
   // mmio and exception
   io.lsq_replenish := s2_out
+  io.lsq_replenish.af := s2_out.af && !s2_kill
 
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s3 **
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
+  val s2_prefetch_train_valid = WireInit(false.B)
+  s2_prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
+  if(EnableStorePrefetchSMS) {
+    io.s1_prefetch_spec := s1_fire
+    io.s2_prefetch_spec := s2_prefetch_train_valid
+    io.prefetch_train.valid := RegNext(s2_prefetch_train_valid)
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
+  }else {
+    io.s1_prefetch_spec := false.B
+    io.s2_prefetch_spec := false.B
+    io.prefetch_train.valid := false.B
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
+  }
   // override miss bit
-  io.prefetch_train.bits.miss := RegNext(io.dcache.resp.bits.miss)
+  io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid)
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
-  if(EnableStorePrefetchSMS) {
-    io.s0_prefetch_spec := s0_fire
-    io.s1_prefetch_spec := s1_fire
-    io.prefetch_train.valid := RegNext(s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch)
-  }else {
-    io.s0_prefetch_spec := false.B
-    io.s1_prefetch_spec := false.B
-    io.prefetch_train.valid := false.B
-  }
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -430,6 +447,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
   io.stout.bits := sx_last_in.output
+  io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
 
   io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
   // TODO: implement it!
@@ -439,7 +457,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
   io.vecstout.bits.mmio := sx_last_in.mmio
-  io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
+  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx

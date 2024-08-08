@@ -126,21 +126,25 @@ class TLBFA(
     // Sector tlb may trigger multi-hit, see def "wbhit"
     XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
 
-    resp.valid := RegNext(req.valid)
+    resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
+    val ppnReg   = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val permReg  = RegEnable(VecInit(entries.map(_.perm)), req.fire)
+    val gPermReg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
+    val s2xLate  = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
-        resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
-        resp.bits.g_perm(d) := RegEnable(entries(0).g_perm, req.fire)
-        resp.bits.s2xlate(d) := RegEnable(entries(0).s2xlate, req.fire)
+        resp.bits.ppn(d) := ppnReg(0)
+        resp.bits.perm(d) := permReg(0)
+        resp.bits.g_perm(d) := gPermReg(0)
+        resp.bits.s2xlate(d) := s2xLate(0)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-        resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
-        resp.bits.g_perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.g_perm)), req.fire)
-        resp.bits.s2xlate(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.s2xlate)), req.fire)
+        resp.bits.ppn(d) := Mux1H(hitVecReg zip ppnReg)
+        resp.bits.perm(d) := Mux1H(hitVecReg zip permReg)
+        resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPermReg)
+        resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
       }
     }
 
@@ -162,9 +166,9 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), s2xlate = io.w.bits.data.s2xlate) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
-  val refill_vpn_reg = RegNext(io.w.bits.data.s1.entry.tag)
-  val refill_wayIdx_reg = RegNext(io.w.bits.wayIdx)
-  when (RegNext(io.w.valid)) {
+  val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
+  val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
+  when (GatedValidRegNext(io.w.valid)) {
     io.access.map { access =>
       access.sets := get_set_idx(refill_vpn_reg, nSets)
       access.touch_ways.valid := true.B
@@ -280,11 +284,11 @@ class TLBFakeFA(
 
     val pte = helper.pte.asTypeOf(new PteBundle)
     val ppn = pte.ppn
-    val vpn_reg = RegNext(req.bits.vpn)
+    val vpn_reg = RegEnable(req.bits.vpn, req.valid)
     val pf = helper.pf
     val level = helper.level
 
-    resp.valid := RegNext(req.valid)
+    resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := true.B
     for (d <- 0 until nDups) {
       resp.bits.perm(d).pf := pf

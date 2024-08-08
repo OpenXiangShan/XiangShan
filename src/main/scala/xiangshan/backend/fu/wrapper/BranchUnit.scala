@@ -11,10 +11,15 @@ import xiangshan.{RedirectLevel, XSModule}
 class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val pc = Input(UInt(len.W))
+    val taken = Input(Bool())
+    val isRVC = Input(Bool())
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(len.W))
   })
-  io.target := io.pc + SignExt(ImmUnion.B.toImm32(io.offset), len)
+  io.target := io.pc + Mux(io.taken,
+    SignExt(ImmUnion.B.toImm32(io.offset), len),
+    Mux(io.isRVC, 2.U, 4.U)
+  )
 }
 
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
@@ -27,6 +32,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   addModule.io.pc := io.in.bits.data.pc.get // pc
   addModule.io.offset := io.in.bits.data.imm // imm
+  addModule.io.taken := dataModule.io.taken
+  addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
 
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -44,6 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
+      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
   }
   connect0LatencyCtrlSingal
 }

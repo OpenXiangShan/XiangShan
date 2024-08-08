@@ -32,9 +32,11 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 
 class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  val enqPortNum = LoadPipelineWidth + VecLoadPipelineWidth + 1 // 1 for mmio bus non-data error
+
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))
-    val req           = Vec(LoadPipelineWidth + VecLoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
+    val req           = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -47,16 +49,17 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
   // s2: delay 1 cycle
-  val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until LoadPipelineWidth + VecLoadPipelineWidth).map(i =>
+  val s2_req = (0 until enqPortNum).map(i => {
+    RegEnable(s1_req(i), s1_valid(i))})
+  val s2_valid = (0 until enqPortNum).map(i =>
     RegNext(s1_valid(i)) &&
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
 
-  val s2_enqueue = Wire(Vec(LoadPipelineWidth + VecLoadPipelineWidth, Bool()))
-  for (w <- 0 until LoadPipelineWidth + VecLoadPipelineWidth) {
+  val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
+  for (w <- 0 until enqPortNum) {
     s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 

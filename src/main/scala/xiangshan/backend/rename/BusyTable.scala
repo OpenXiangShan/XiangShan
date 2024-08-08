@@ -42,7 +42,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     // fast wakeup
     val wakeUp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
     // cancelFromDatapath
-    val cancel = Vec(backendParams.numExu, Flipped(ValidIO(new CancelSignal)))
+    val og0Cancel = Input(ExuVec())
     // cancelFromMem
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
     // read preg state
@@ -70,9 +70,11 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   wakeupOHVec.zipWithIndex.foreach{ case (wakeupOH, idx) =>
     val tmp = pregWB match {
-      case IntWB(_, _) => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
-      case FpWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.fpWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
-      case VfWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case IntWB(_, _) => io.wakeUp.map(x => x.valid && x.bits.rfWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case FpWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.fpWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case VfWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case V0WB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.v0Wen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case VlWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vlWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
     }
     wakeupOH := (if (io.wakeUp.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
@@ -80,16 +82,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
   val wakeUpMask = VecInit(wakeupOHVec.map(_.orR).toSeq).asUInt
-  val cancelMask = pregWB match {
-    case IntWB(_, _) => io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
-    case FpWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.fpWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
-    case VfWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.vecWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
-    case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
-  }
   val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel))
 
   loadDependency.zipWithIndex.foreach{ case (ldDp, idx) =>
-    when(allocMask(idx) || cancelMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
+    when(allocMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
       ldDp := 0.U.asTypeOf(ldDp)
     }.elsewhen(wakeUpMask(idx)) {
       ldDp := (if (io.wakeUp.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
@@ -108,11 +104,11 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   the bypass state lasts for a maximum of one cycle, cancel(=> busy) or else(=> regFile)
    */
   val table = VecInit((0 until numPhyPregs).zip(tableUpdate).map{ case (idx, update) =>
-    RegEnable(update, 0.U(1.W), allocMask(idx) || cancelMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
+    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
   }).asUInt
 
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(allocMask(idx) || cancelMask(idx) || ldCancelMask(idx)) {
+    when(allocMask(idx) || ldCancelMask(idx)) {
       update := true.B                                    //busy
       if (idx == 0 && pregWB.isInstanceOf[IntWB]) {
           // Int RegFile 0 is always ready
@@ -137,10 +133,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                      ),
-    ("std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U    ),
-    ("std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U),
-    ("std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                  )
+    ("bt_std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                      ),
+    ("bt_std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U    ),
+    ("bt_std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U),
+    ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                  )
   )
   generatePerfEvent()
 }

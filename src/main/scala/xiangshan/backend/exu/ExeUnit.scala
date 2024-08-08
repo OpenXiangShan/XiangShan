@@ -21,8 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{ClockGate, DelayN}
-import utils._
+import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
@@ -30,18 +29,21 @@ import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(params)))
   val out = DecoupledIO(new ExuOutput(params))
-  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
-  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
-  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
-  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVConfig, (Valid(new VType)))
-  val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
-  val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
+  val csrin = Option.when(params.hasCSR)(new CSRInput)
+  val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
+  val fenceio = Option.when(params.hasFence)(new FenceIO)
+  val frm = Option.when(params.needSrcFrm)(Input(Frm()))
+  val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
+  val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
+  val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
+  val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -75,11 +77,9 @@ class ExeUnitImp(
       def latReal: Int = cfg.latency.latencyVal.getOrElse(0)
       def extralat: Int = cfg.latency.extraLatencyVal.getOrElse(0)
 
-      val uncerLat = cfg.latency.uncertainLatencyVal.nonEmpty
+      val uncerLat = cfg.latency.uncertainEnable.nonEmpty
       val lat0 = (latReal == 0 && !uncerLat).asBool
-      val latN = (latReal > 0&& !uncerLat).asBool
-
-
+      val latN = (latReal >  0 && !uncerLat).asBool
 
       val fuVldVec = (io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
       val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ io.out.ready
@@ -237,6 +237,8 @@ class ExeUnitImp(
       sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.rfWen.get)
       sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.fpWen.get)
       sink.bits.ctrl.vecWen      .foreach(x => x := source.bits.vecWen.get)
+      sink.bits.ctrl.v0Wen       .foreach(x => x := source.bits.v0Wen.get)
+      sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.vlWen.get)
       sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.flushPipe.get)
       sink.bits.ctrl.preDecode   .foreach(x => x := source.bits.preDecode.get)
       sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
@@ -244,6 +246,9 @@ class ExeUnitImp(
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
   }
 
@@ -266,19 +271,51 @@ class ExeUnitImp(
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
   private val fuIntWenVec = funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
-  private val fuFpWenVec  = funcUnits.map(x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
+  private val fuFpWenVec  = funcUnits.map( x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
   private val fuVecWenVec = funcUnits.map(x => x.cfg.needVecWen.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
+  private val fuV0WenVec = funcUnits.map(x => x.cfg.needV0Wen.B && x.io.out.bits.ctrl.v0Wen.getOrElse(false.B))
+  private val fuVlWenVec = funcUnits.map(x => x.cfg.needVlWen.B && x.io.out.bits.ctrl.vlWen.getOrElse(false.B))
   // FunctionUnits <---> ExeUnit.out
+
+  private val outDataVec = Seq(
+    Some(fuOutresVec.map(_.data)),
+    Option.when(funcUnits.exists(_.cfg.writeIntRf))
+      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeFpRf))
+      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeVecRf))
+      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeV0Rf))
+      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeVlRf))
+      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuout) => fuout.data}),
+  ).flatten
+  private val outDataValidOH = Seq(
+    Some(fuOutValidOH),
+    Option.when(funcUnits.exists(_.cfg.writeIntRf))
+      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeFpRf))
+      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeVecRf))
+      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeV0Rf))
+      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeVlRf))
+      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
+  ).flatten
+
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
 
   // select one fu's result
-  io.out.bits.data := Mux1H(fuOutValidOH, fuOutresVec.map(_.data))
+  io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
+  io.out.bits.v0Wen.foreach(x => x := Mux1H(fuOutValidOH, fuV0WenVec))
+  io.out.bits.vlWen.foreach(x => x := Mux1H(fuOutValidOH, fuVlWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
   io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
   io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).wflags)))
@@ -293,6 +330,8 @@ class ExeUnitImp(
       exuio <> fuio
       fuio.exception := DelayN(exuio.exception, 2)
   }))
+  io.csrin.foreach(exuio => funcUnits.foreach(fu => fu.io.csrin.foreach{fuio => fuio := exuio}))
+  io.csrToDecode.foreach(toDecode => funcUnits.foreach(fu => fu.io.csrToDecode.foreach(fuOut => toDecode := fuOut)))
 
   io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => exuio := fuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
@@ -329,7 +368,7 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
     out.bits := io.in.bits
   }
 
-  io.in.ready := Mux1H(acceptVec,io.out.map(_.ready))
+  io.in.ready := Cat(io.out.map(_.ready)).andR
 }
 
 class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
