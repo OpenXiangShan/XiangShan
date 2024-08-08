@@ -129,12 +129,16 @@ class TLBFA(
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     val ppnReg   = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val pbmtReg  = RegEnable(VecInit(entries.map(_.pbmt)), req.fire)
+    val gpbmtReg  = RegEnable(VecInit(entries.map(_.g_pbmt)), req.fire)
     val permReg  = RegEnable(VecInit(entries.map(_.perm)), req.fire)
     val gPermReg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
     val s2xLate  = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := ppnReg(0)
+        resp.bits.pbmt(d) := pbmtReg(0)
+        resp.bits.g_pbmt(d) := gpbmtReg(0)
         resp.bits.perm(d) := permReg(0)
         resp.bits.g_perm(d) := gPermReg(0)
         resp.bits.s2xlate(d) := s2xLate(0)
@@ -142,6 +146,8 @@ class TLBFA(
     } else {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := Mux1H(hitVecReg zip ppnReg)
+        resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmtReg)
+        resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmtReg)
         resp.bits.perm(d) := Mux1H(hitVecReg zip permReg)
         resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPermReg)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
@@ -154,6 +160,8 @@ class TLBFA(
 
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
+    resp.bits.pbmt.suggestName("pbmt")
+    resp.bits.g_pbmt.suggestName("g_pbmt")
     resp.bits.perm.suggestName("perm")
     resp.bits.g_perm.suggestName("g_perm")
   }
@@ -300,7 +308,7 @@ class TLBFakeFA(
       resp.bits.perm(d).x := pte.perm.x
       resp.bits.perm(d).w := pte.perm.w
       resp.bits.perm(d).r := pte.perm.r
-
+      resp.bits.pbmt(d) := pte.pbmt
       resp.bits.ppn(d) := MuxLookup(level, 0.U)(Seq(
         0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
         1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
@@ -385,6 +393,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.perm(d).r := p.bits.perm(d).r
       rp.bits.s2xlate(d) := p.bits.s2xlate(d)
       rp.bits.g_perm(d) := p.bits.g_perm(d)
+      rp.bits.pbmt(d) := p.bits.pbmt(d)
+      rp.bits.g_pbmt(d) := p.bits.g_pbmt(d)
     }
   }
 
