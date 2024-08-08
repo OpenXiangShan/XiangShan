@@ -294,8 +294,15 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
-  // merge s1 itlb/pmp exceptions, itlb has higher priority
-  val s1_exception_out = ExceptionType.merge(s1_itlb_exception, s1_pmp_exception)
+  // also raise af when meta array corrupt is detected, to cancel prefetch
+  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC))
+
+  // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
+  val s1_exception_out = ExceptionType.merge(
+    s1_itlb_exception,
+    s1_pmp_exception,
+    s1_meta_exception
+  )
 
   /**
     ******************************************************************************
@@ -362,7 +369,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_fire)
   val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_fire)
   val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_fire)
-  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exceptions
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp/meta exception
   val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_fire)
   val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_fire)
 
@@ -389,12 +396,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_SRAM_hits = s2_waymasks.map(_.orR)
   val s2_hits = VecInit((0 until PortNumber).map(i => s2_MSHR_hits(i) || s2_SRAM_hits(i)))
 
-  /* s2_exception includes itlb pf/gpf/af and pmp af, neither of which should be prefetched
+  /* s2_exception includes itlb pf/gpf/af, pmp af and meta corruption (af), neither of which should be prefetched
    * mmio should not be prefetched
-   * also, if port0 has exception, port1 should not be prefetched
-   * miss = this port not hit && need this port && no exception found before and in this port
+   * also, if previous has exception, latter port should also not be prefetched
    */
-  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
       s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&
