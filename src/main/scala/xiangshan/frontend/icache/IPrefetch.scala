@@ -35,6 +35,7 @@ abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
   val csr_pf_enable     = Input(Bool())
+  val csr_parity_enable = Input(Bool())
   val flush             = Input(Bool())
 
   val ftqReq            = Flipped(new FtqToPrefetchIO)
@@ -295,7 +296,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
   // also raise af when meta array corrupt is detected, to cancel prefetch
-  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC))
+  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
 
   // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
   val s1_exception_out = ExceptionType.merge(

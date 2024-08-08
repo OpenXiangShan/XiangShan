@@ -141,8 +141,8 @@ object ExceptionType {
   }
 
   // raise af if meta/data array ecc check failed or l2 cache respond with tilelink corrupt
-  def fromECC(corrupt: Bool): UInt = {
-    Mux(corrupt, af, none)
+  def fromECC(enable: Bool, corrupt: Bool): UInt = {
+    Mux(enable && corrupt, af, none)
   }
 
   /**Generates exception mux tree

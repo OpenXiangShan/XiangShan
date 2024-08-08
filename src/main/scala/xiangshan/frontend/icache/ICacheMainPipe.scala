@@ -252,7 +252,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
   // also raise af when meta array corrupt is detected, to cancel fetch
-  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC))
+  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
 
   // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
   val s1_exception_out = ExceptionType.merge(
@@ -423,7 +423,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_fetch_finish = !s2_miss.reduce(_||_)
   val s2_exception_out = ExceptionType.merge(
     s2_exception,
-    VecInit(s2_l2_corrupt.map(ExceptionType.fromECC))
+    VecInit(s2_l2_corrupt.map(ExceptionType.fromECC(true.B, _)))
     // FIXME: maybe we should also raise af if meta/data error is detected
 //     VecInit((s2_meta_corrupt zip s2_data_corrupt zip s2_l2_corrupt).map{ case ((m, d), l2) => ExceptionType.fromECC(m || d || l2)}
   )
