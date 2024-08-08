@@ -76,8 +76,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
   val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alterPartial({
+    LazyModule(new XSTile()(p.alter((site, here, up) => {
       case XSCoreParamsKey => coreParams
+      case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = coreParams.HartId)
     })))
   )
 
@@ -88,6 +89,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case MaxHartIdBits => p(MaxHartIdBits)
+      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
+      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })))
   )
 
@@ -231,8 +234,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
+    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(new MsiInfoBundle)))
+
+
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+      core.module.io.msiInfo := msiInfo
+      core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
       core.module.io.reset_vector := io.riscv_rst_vec(i)
       chi_dummyllc_opt.foreach { case llc =>

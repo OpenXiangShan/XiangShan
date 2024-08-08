@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -316,7 +317,7 @@ class Sbuffer(implicit p: Parameters)
 
   val inptags = io.in.map(in => getPTag(in.bits.addr))
   val invtags = io.in.map(in => getVTag(in.bits.vaddr))
-  val sameTag = inptags(0) === inptags(1)
+  val sameTag = inptags(0) === inptags(1) && io.in(0).valid && io.in(1).valid && io.in(0).bits.vecValid && io.in(1).bits.vecValid
   val firstWord = getVWord(io.in(0).bits.addr)
   val secondWord = getVWord(io.in(1).bits.addr)
   // merge condition
@@ -623,7 +624,7 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate &&
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready

@@ -49,7 +49,8 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
   // s2: delay 1 cycle
-  val s2_req = RegNext(s1_req)
+  val s2_req = (0 until enqPortNum).map(i => {
+    RegEnable(s1_req(i), s1_valid(i))})
   val s2_valid = (0 until enqPortNum).map(i =>
     RegNext(s1_valid(i)) &&
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&

@@ -271,6 +271,10 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
 
     acquire
   }
+
+  def block_match(release_addr: UInt): Bool = {
+    reg_valid() && get_block(req.addr) === get_block(release_addr)
+  }
 }
 
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule 
@@ -315,6 +319,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
+
+    val req_addr = ValidIO(UInt(PAddrBits.W))
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -735,7 +741,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
 
-  io.refill_info.valid := w_grantlast
+  io.req_addr.valid := req_valid
+  io.req_addr.bits := req.addr
+
+  io.refill_info.valid := req_valid && w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
@@ -821,6 +830,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val probe_addr = Input(UInt(PAddrBits.W))
     val probe_block = Output(Bool())
 
+    // block replace when release an addr valid in mshr
+    val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
+    val replace_block = Output(Bool())
+
     val full = Output(Bool())
 
     // forward missqueue
@@ -876,7 +889,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
    */
-  miss_req_pipe_reg.req     := io.req.bits
+  when(io.req.valid){
+    miss_req_pipe_reg.req     := io.req.bits
+  }
+  // miss_req_pipe_reg.req     := io.req.bits
   miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel
   miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel
   miss_req_pipe_reg.mshr_id := io.resp.id
@@ -1006,6 +1022,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
+
+  io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 

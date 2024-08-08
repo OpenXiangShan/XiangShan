@@ -23,6 +23,7 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -32,7 +33,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-            --with-dramsim3 --threads 16 --spike --mfc                    \
+            --with-dramsim3 --threads 16 --spike                          \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
             --llvm-profdata llvm-profdata
       - name: Random Checkpoint 0
@@ -40,6 +41,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_0.txt
       - name: Random Checkpoint 1
@@ -47,6 +49,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_1.txt
       - name: Random Checkpoint 2
@@ -54,6 +57,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_2.txt
       - name: Random Checkpoint 3
@@ -61,6 +65,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_3.txt
       - name: Random Checkpoint 4
@@ -68,6 +73,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_4.txt
       - name: Random Checkpoint 5
@@ -75,6 +81,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_5.txt
       - name: Random Checkpoint 6
@@ -82,6 +89,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_6.txt
       - name: Random Checkpoint 7
@@ -89,5 +97,6 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \
             --wave-dump $WAVE_HOME --threads 16 --numa             \
             --spike --ci random --timeout 3600 --ram-size=16GB     \
+            --gcpt-restore-bin $GCPT_RESTORE_BIN                   \
             2> perf.log
           cat perf.log | sort | tee $PERF_HOME/random_7.txt

@@ -5,8 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{Constantin, SelectOne}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
@@ -15,6 +14,7 @@ import xiangshan.backend.Bundles.{DynInst, ExuOH}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.dispatch.Dispatch2IqFpImp
+import xiangshan.backend.regcache.RCTagTableReadPort
 import scala.collection._
 
 class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -70,6 +70,10 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
     case VfScheduler() | MemScheduler() => numRegSrcVl * numIn
     case _ => 0
   }
+  val numRCTagTableStateRead = schdBlockParams.schdType match {
+    case IntScheduler() | MemScheduler() => numRegSrcInt * numIn
+    case _ => 0
+  }
 
   val isMem = schdBlockParams.schdType == MemScheduler()
 
@@ -97,6 +101,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   val numVfStateRead = wrapper.numVfStateRead
   val numV0StateRead = wrapper.numV0StateRead
   val numVlStateRead = wrapper.numVlStateRead
+  val numRCTagTableStateRead = wrapper.numRCTagTableStateRead
   val numIssueBlock = wrapper.issueBlockParams.size
 
   val io = IO(new Bundle() {
@@ -107,6 +112,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
     val readV0State = if (numV0StateRead > 0) Some(Vec(numV0StateRead, Flipped(new BusyTableReadIO))) else None
     val readVlState = if (numVlStateRead > 0) Some(Vec(numVlStateRead, Flipped(new BusyTableReadIO))) else None
+    val readRCTagTableState = Option.when(numRCTagTableStateRead > 0)(Vec(numRCTagTableStateRead, Flipped(new RCTagTableReadPort(RegCacheIdxWidth, params.pregIdxWidth))))
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
     val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
@@ -127,22 +133,25 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   private val vfReqPsrcVec:  IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcVf))
   private val v0ReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 2))
   private val vlReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 1))
-  private val intSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, SrcState())))
-  private val fpSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, SrcState()))) 
-  private val vfSrcStateVec  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, SrcState()))) 
-  private val v0SrcStateVec  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, SrcState())))
-  private val vlSrcStateVec  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, SrcState())))
-  private val intAllSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val fpAllSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val vecAllSrcStateVec = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vfSrcLoadDependency  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val v0SrcLoadDependency  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vlSrcLoadDependency  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val intAllSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpAllSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vecAllSrcLoadDependency = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val intRenVec:     IndexedSeq[Bool] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcInt).map(x => in.valid))
+  private val intSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIntStateRead, SrcState())))
+  private val fpSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, SrcState()))) 
+  private val vfSrcStateVec  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, SrcState()))) 
+  private val v0SrcStateVec  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, SrcState())))
+  private val vlSrcStateVec  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, SrcState())))
+  private val intAllSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val fpAllSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val vecAllSrcStateVec = Option.when(io.readVfState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val intSrcLoadDependency = Option.when(io.readIntState.isDefined)(Wire(Vec(numIntStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpSrcLoadDependency  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vfSrcLoadDependency  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val v0SrcLoadDependency  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vlSrcLoadDependency  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val intAllSrcLoadDependency = Option.when(io.readIntState.isDefined)(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpAllSrcLoadDependency  = Option.when(io.readFpState.isDefined )(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vecAllSrcLoadDependency = Option.when(io.readVfState.isDefined )(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val rcTagTableStateVec   = Option.when(io.readRCTagTableState.isDefined)(Wire(Vec(numRCTagTableStateRead, Bool())))
+  private val rcTagTableAddrVec    = Option.when(io.readRCTagTableState.isDefined)(Wire(Vec(numRCTagTableStateRead, UInt(RegCacheIdxWidth.W))))
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
@@ -208,6 +217,14 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
       vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 1) := vlSrcLoadDependency.get(i);
     }
   }
+  if (io.readRCTagTableState.isDefined) {
+    require(io.readRCTagTableState.get.size == intReqPsrcVec.size,
+      s"[Dispatch2IqImp] readRCTagTableState size: ${io.readRCTagTableState.get.size}, int psrc size: ${intReqPsrcVec.size}")
+    io.readRCTagTableState.get.map(_.ren).zip(intRenVec).foreach(x => x._1 := x._2)
+    io.readRCTagTableState.get.map(_.tag).zip(intReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readRCTagTableState.get.map(_.valid).zip(rcTagTableStateVec.get).foreach(x => x._2 := x._1)
+    io.readRCTagTableState.get.map(_.addr).zip(rcTagTableAddrVec.get).foreach(x => x._2 := x._1)
+  }
 
   uopsIn
     .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
@@ -244,6 +261,18 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
         }.otherwise {
           ldp := 0.U.asTypeOf(ldp)
         }
+    }
+
+  uopsIn
+    .flatMap(x => x.bits.useRegCache.take(numRegSrc) lazyZip x.bits.regCacheIdx.take(numRegSrc) lazyZip x.bits.srcType.take(numRegSrc))
+    .zip(
+      rcTagTableStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(false.B).toSeq)) zip 
+      rcTagTableAddrVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(0.U).toSeq))
+    )
+    .foreach {
+      case ((useRC, rcIdx, srcType), (state, addr)) =>
+        useRC := state && SrcType.isXp(srcType)
+        rcIdx := addr
     }
 
   /**

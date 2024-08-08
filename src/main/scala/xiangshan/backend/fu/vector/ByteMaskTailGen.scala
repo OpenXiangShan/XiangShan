@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.utils.{MaskExtractor, UIntToContLow0s, UIntToContLow1s}
-import _root_.utils.XSDebug
+import utility.XSDebug
 import yunsuan.vector.SewOH
 import yunsuan.util.LookupTree
 

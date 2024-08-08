@@ -27,6 +27,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
@@ -151,6 +152,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
+
+    // for store trigger
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
@@ -168,7 +172,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_mask          = Wire(UInt((VLEN/8).W))
   val s0_uop           = Wire(new DynInst)
   val s0_has_rob_entry = Wire(Bool())
-  val s0_rsIdx         = Wire(UInt(log2Up(MemIQSizeMax).W))
   val s0_mshrid        = Wire(UInt())
   val s0_try_l2l       = Wire(Bool())
   val s0_rep_carry     = Wire(new ReplayCarry(nWays))
@@ -352,7 +355,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := 0.U.asTypeOf(new DynInst)
     s0_try_l2l       := false.B
     s0_has_rob_entry := false.B
-    s0_rsIdx         := 0.U
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     s0_isFirstIssue  := false.B
@@ -373,7 +375,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_has_rob_entry := src.hasROBEntry
     s0_rep_carry     := src.rep_info.rep_carry
     s0_mshrid        := src.rep_info.mshr_id
-    s0_rsIdx         := src.rsIdx
     s0_isFirstIssue  := false.B
     s0_fast_rep      := true.B
     s0_ld_rep        := src.isLoadReplay
@@ -390,7 +391,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
-    s0_rsIdx         := src.rsIdx
     s0_rep_carry     := src.replayCarry
     s0_mshrid        := src.mshrid
     s0_isFirstIssue  := false.B
@@ -409,7 +409,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := DontCare
     s0_try_l2l       := false.B
     s0_has_rob_entry := false.B
-    s0_rsIdx         := 0.U
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     s0_isFirstIssue  := false.B
@@ -428,7 +427,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
-    s0_rsIdx         := src.iqIdx
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     s0_isFirstIssue  := true.B
@@ -448,7 +446,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
-    s0_rsIdx         := 0.U
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     // s0_isFirstIssue  := src.isFirstIssue
@@ -476,7 +473,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     s0_has_rob_entry      := false.B
-    s0_rsIdx              := 0.U
     s0_mshrid             := 0.U
     s0_rep_carry          := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_isFirstIssue       := true.B
@@ -516,7 +512,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
-  s0_out.rsIdx         := s0_rsIdx
   s0_out.vaddr         := s0_vaddr
   s0_out.mask          := s0_mask
   s0_out.uop           := s0_uop
@@ -695,10 +690,16 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.paddr             := s1_paddr_dup_lsu
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
-  s1_out.rsIdx             := s1_in.rsIdx
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.lateKill          := s1_late_kill
+
+  // trigger
+  val storeTrigger = Module(new StoreTrigger)
+  storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
 
   when (s1_ld_flow) {
     when (!s1_late_kill) {
@@ -715,6 +716,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
     s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
     s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
+    s1_out.uop.trigger.backendHit                  := storeTrigger.io.toStore.triggerHitVec
+    s1_out.uop.trigger.backendCanFire              := storeTrigger.io.toStore.triggerCanFireVec
+    s1_out.uop.exceptionVec(breakPoint)            := storeTrigger.io.toStore.breakPointExp
   }
 
   // pointer chasing
@@ -751,7 +755,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
 
       s1_in.uop           := io.lsin.bits.uop
-      s1_in.rsIdx         := io.lsin.bits.iqIdx
       s1_in.isFirstIssue  := io.lsin.bits.isFirstIssue
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)

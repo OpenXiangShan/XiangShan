@@ -13,6 +13,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -25,9 +26,9 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, new FtqPtr)
-  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, UInt(log2Up(PredictWidth).W))
-  val predictInfo = OptionWrapper(cfg.hasRedirect, new Bundle {
+  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
+  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(log2Up(PredictWidth).W))
+  val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })
@@ -84,7 +85,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
+  val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
+  val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))

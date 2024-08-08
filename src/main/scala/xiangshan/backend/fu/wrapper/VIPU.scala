@@ -1,5 +1,6 @@
 /****************************************************************************************
- * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
  * Copyright (c) 2020-2021 Peng Cheng Laboratory
  *
  * XiangShan is licensed under Mulan PSL v2.
@@ -23,7 +24,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import utility._
-import utils.XSError
 import xiangshan.{SelImm, SrcType, UopSplitType, XSCoreParamsKey, XSModule}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
@@ -32,8 +32,6 @@ import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModu
 import xiangshan.SrcType
 import yunsuan.vector.alu.{VAluOpcode, VIAlu}
 import yunsuan.{OpType, VipuType}
-
-import scala.collection.Seq
 
 class VIAluDecodeResultBundle extends Bundle {
   val opcode = UInt(6.W)
@@ -97,7 +95,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val needClearVs1 = (VipuType.vcpop_m === io.in.bits.ctrl.fuOpType && vuopIdx === 0.U) ||
     (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
     (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
-  private val lmul = MuxLookup(vlmul, 1.U(4.W))(Array(
+  private val lmul = MuxLookup(vlmul, 1.U(4.W))(Seq(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U

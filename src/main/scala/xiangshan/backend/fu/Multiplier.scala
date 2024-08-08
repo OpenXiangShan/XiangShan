@@ -118,7 +118,7 @@ class ArrayMulDataModule(len: Int) extends Module {
   }
 
   def max(in: Iterable[Int]): Int = in.reduce((a, b) => if(a>b) a else b)
-  def addAll(cols: Array[Seq[Bool]], depth: Int): (UInt, UInt) = {
+  def addAll(cols: Seq[Seq[Bool]], depth: Int): (UInt, UInt) = {
     if(max(cols.map(_.size)) <= 2){
       val sum = Cat(cols.map(_(0)).reverse)
       var k = 0
@@ -141,12 +141,12 @@ class ArrayMulDataModule(len: Int) extends Module {
       else
         columns_next
 
-      addAll(toNextLayer, depth+1)
+      addAll(toNextLayer.toSeq, depth+1)
     }
   }
 
   val columns_reg = columns.map(col => col.map(b => RegEnable(b, io.regEnables(0))))
-  val (sum, carry) = addAll(cols = columns_reg, depth = 0)
+  val (sum, carry) = addAll(cols = columns_reg.toSeq, depth = 0)
 
   io.result := sum + carry
 }

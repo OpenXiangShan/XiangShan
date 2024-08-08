@@ -61,6 +61,10 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
+  def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
+
+  def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
+
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max
@@ -192,6 +196,12 @@ case class IssueBlockParams(
   def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
+
+  def numWriteRegCache: Int = exuBlockParams.map(x => if (x.needWriteRegCache) 1 else 0).sum
+
+  def needWriteRegCache: Boolean = numWriteRegCache > 0
+
+  def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
 
   /**
     * Get the regfile type that this issue queue need to read
@@ -375,12 +385,12 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(_ => new Valid(new EntryDeqRespBundle)))
   }
 
-  def genWbFuBusyTableWriteBundle()(implicit p: Parameters) = {
+  def genWbFuBusyTableWriteBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(x => new WbFuBusyTableWriteBundle(x)))
   }
 
-  def genWbFuBusyTableReadBundle()(implicit p: Parameters) = {
+  def genWbFuBusyTableReadBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map{ x =>
       new WbFuBusyTableReadBundle(x)

@@ -3,6 +3,7 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.VtypeStruct
@@ -27,12 +28,13 @@ object Bundles {
     * we need to get 3 bits vsew in Vtype struct, then vset module can check if it is reserved.
     * and we use 2 bits to store vsew in other places to save space
     */
-  class VsetVType(implicit p: Parameters) extends Bundle {
-    val illegal = Bool()
-    val vma     = Bool()
-    val vta     = Bool()
-    val vsew    = VtypeVSew()
-    val vlmul   = VLmul()
+  class VsetVType(implicit p: Parameters) extends XSBundle {
+    val illegal  = Bool()
+    val reserved = UInt((XLEN - 9).W)
+    val vma      = Bool()
+    val vta      = Bool()
+    val vsew     = VtypeVSew()
+    val vlmul    = VLmul()
   }
 
   object VType {
@@ -69,6 +71,16 @@ object Bundles {
       res.vlmul := vtype.vlmul
       res
     }
+
+    def initVtype()(implicit p: Parameters) : VType = {
+      val res = Wire(VType())
+      res.illegal := true.B
+      res.vma := false.B
+      res.vta := false.B
+      res.vsew := 0.U
+      res.vlmul := 0.U
+      res
+    }
   }
 
   object VsetVType {
@@ -83,6 +95,7 @@ object Bundles {
       res.vsew  := instVType.vsew
       res.vlmul := instVType.vlmul
       res.illegal := false.B
+      res.reserved := instVType.reserved
       res
     }
 
@@ -93,6 +106,7 @@ object Bundles {
       res.vta := vtypeStruct.vta
       res.vsew := vtypeStruct.vsew
       res.vlmul := vtypeStruct.vlmul
+      res.reserved := vtypeStruct.reserved
       res
     }
   }
@@ -157,13 +171,19 @@ object Bundles {
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
   }
 
+  object Vstart {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth - 1
+  }
+
   object Vxsat extends NamedUInt(1)
 
   object Vxrm extends NamedUInt(2)
 
   object Nf extends NamedUInt(3)
 
-  object VEew extends NamedUInt(3)
+  object VEew extends NamedUInt(2)
 
   object NumLsElem {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)

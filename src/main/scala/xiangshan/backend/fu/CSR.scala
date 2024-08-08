@@ -29,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.ExceptionInfo
-import xiangshan.backend.fu.util.CSR.CSRNamedConstant.ContextStatus
+import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 class FpuCsrIO extends Bundle {
@@ -55,10 +55,10 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
-  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
+  val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
   val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
-  val retiredInstr = UInt(3.W)
+  val retiredInstr = UInt(7.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
     val bpuInfo = new Bundle {
@@ -99,22 +99,14 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
   // from outside cpu,externalInterrupt
-  val externalInterrupt = new ExternalInterruptIO
+  val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB
   val tlb = Output(new TlbCsrBundle)
   // Debug Mode
   // val singleStep = Output(Bool())
   val debugMode = Output(Bool())
-  // to Fence to disable sfence
-  val disableSfence = Output(Bool())
-  // to Fence to disable hfence.gvma
-  val disableHfenceg = Output(Bool())
-  // to Fence to disable hfence.vvma
-  val disableHfencev = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
-  // distributed csr write
-  val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
   // instruction fetch address translation type
   val instrAddrTransType = Output(new AddrTransType)
 }
@@ -571,7 +563,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
-  csrio.customCtrl.svinval_enable := srnctl(1)
   csrio.customCtrl.wfi_enable := srnctl(2)
 
   // Hypervisor CSRs
@@ -758,7 +749,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   val perf_events = csrio.perf.perfEventsFrontend ++
-                    csrio.perf.perfEventsCtrl ++
+                    csrio.perf.perfEventsBackend ++
                     csrio.perf.perfEventsLsu ++
                     hpm_hc.getPerf
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
@@ -995,12 +986,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val accessPermitted = !(addr === Satp.U && tvmNotPermit)
   val vtvmNotPermit = (privilegeMode === ModeS && virtMode && hstatusStruct.vtvm.asBool)
   val vaccessPermitted = !(addr === Vsatp.U && vtvmNotPermit)
-  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
-  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
-  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
+//  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
+//  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
+//  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
+  val wen = valid && CSROpType.isCsrAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val HasH = (HasHExtension == true).asBool
@@ -1117,7 +1108,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val illegalVWFI = valid && isWFI && ((virtMode && privilegeMode === ModeS && hstatusStruct.vtw === 1.U && mstatusStruct.tw === 0.U)||
       (virtMode && privilegeMode === ModeU && mstatusStruct.tw === 0.U))
   // Illegal privileged instruction check
-  val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
+  val isIllegalAddr = valid && CSROpType.isCsrAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = !virtMode && wen && !(Mux(addrInPerfCnt, perfcntPermitted, csrAccess === 0.U && dcsrPermitted && triggerPermitted) && accessPermitted)
   val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
 
@@ -1290,7 +1281,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
-  val iexceptionPC = Mux(csrio.exception.bits.exceptionFromBackend,
+  val iexceptionPC = Mux(csrio.exception.bits.isFetchMalAddr,
     1.U << 63,
     Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
   )
@@ -1302,7 +1293,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // exceptions from rob need to handle
   val exceptionVecFromRob    = csrio.exception.bits.exceptionVec
-  val exceptionFromBackend   = csrio.exception.bits.exceptionFromBackend
+  val isFetchMalAddr         = csrio.exception.bits.isFetchMalAddr
   val hasException           = csrio.exception.valid && !csrio.exception.bits.isInterrupt
   val hasInstrPageFault      = hasException && exceptionVecFromRob(instrPageFault)
   val hasLoadPageFault       = hasException && exceptionVecFromRob(loadPageFault)
@@ -1383,7 +1374,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
         RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault || hasBreakPoint)),
-        Mux(RegNext(RegNext(exceptionFromBackend)), 1.U << (XLEN - 1), RegNext(RegNext(Mux(
+        Mux(RegNext(RegNext(isFetchMalAddr)), 1.U << (XLEN - 1), RegNext(RegNext(Mux(
           csrio.exception.bits.crossPageIPFFix,
           SignExt(csrio.exception.bits.pc + 2.U, XLEN),
           iexceptionPC
@@ -1549,34 +1540,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
                                    virtMode && tlbBundle.vsatp.mode === 8.U
   csrio.instrAddrTransType.sv39x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 8.U
   assert(PopCount(csrio.instrAddrTransType.asUInt) === 1.U, "Exactly one instr fetch addr trans type can be asserted.")
-
-  // Distributed CSR update req
-  //
-  // For now we use it to implement customized cache op
-  // It can be delayed if necessary
-
-  val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
-  val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
-  val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
-  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.addr,
-    delayedUpdate1.w.bits.addr
-  )
-  val distributedUpdateData = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.data,
-    delayedUpdate1.w.bits.data
-  )
-
-  assert(!(delayedUpdate0.w.valid && delayedUpdate1.w.valid))
-
-  when(distributedUpdateValid){
-    // cacheopRegs can be distributed updated
-    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
-      when((Scachebase + attribute("offset").toInt).U === distributedUpdateAddr){
-        cacheopRegs(name) := distributedUpdateData
-      }
-    }}
-  }
 
   // Cache error debug support
   if(HasCustomCSRCacheOp){

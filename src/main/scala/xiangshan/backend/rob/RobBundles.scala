@@ -1,5 +1,6 @@
 /***************************************************************************************
- * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
  * Copyright (c) 2020-2021 Peng Cheng Laboratory
  *
  * XiangShan is licensed under Mulan PSL v2.
@@ -116,7 +117,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
-    def dirtyFs = fpWen
+    val dirtyFs = Bool()
     val dirtyVs = Bool()
   }
 
@@ -163,6 +164,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.instrSize := robEntry.instrSize
     robCommitEntry.loadWaitBit := robEntry.loadWaitBit
     robCommitEntry.isMove := robEntry.eliminatedMove
+    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
@@ -188,7 +190,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
 
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
 
-  def lineHeadPtr()(implicit p: Parameters): RobPtr = {
+  def lineHeadPtr(implicit p: Parameters): RobPtr = {
     val CommitWidth = p(XSCoreParamsKey).CommitWidth
     val out = Wire(new RobPtr)
     out.flag := this.flag
@@ -267,8 +269,10 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  // set 1 if there is 1 exists in exceptionVec
+  val hasException = Bool()
   val exceptionVec = ExceptionVec()
-  val exceptionFromBackend = Bool()
+  val isFetchMalAddr = Bool()
   val flushPipe = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
@@ -278,10 +282,10 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.canFire
-  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.canFire
+  def has_exception = hasException || flushPipe || singleStep || replayInst || trigger.canFire
+  def not_commit = hasException || singleStep || replayInst || trigger.canFire
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.canFire
+  def can_writeback = hasException || singleStep || trigger.canFire
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

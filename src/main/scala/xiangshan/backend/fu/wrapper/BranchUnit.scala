@@ -11,10 +11,15 @@ import xiangshan.{RedirectLevel, XSModule}
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val pc = Input(UInt(VAddrBits.W))
+    val taken = Input(Bool())
+    val isRVC = Input(Bool())
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(XLEN.W))
   })
-  io.target := SignExt(SignExt(io.pc, VAddrBits + 1) + SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1), XLEN)
+  io.target := SignExt(SignExt(io.pc, VAddrBits + 1) + Mux(io.taken,
+    SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1),
+    Mux(io.isRVC, 2.U, 4.U)
+  ), XLEN)
 }
 
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
@@ -27,6 +32,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   addModule.io.pc := io.in.bits.data.pc.get // pc
   addModule.io.offset := io.in.bits.data.imm // imm
+  addModule.io.taken := dataModule.io.taken
+  addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
 
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -44,6 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
+      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
       redirect.bits.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
       redirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
       redirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)

@@ -50,7 +50,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
-    val csrUpdate = new DistributedCSRUpdateReq
     val error  = ValidIO(new L1CacheErrorInfo)
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
@@ -90,7 +89,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := RegNext(io.reset_vector)
+  bpu.io.reset_vector := RegEnable(io.reset_vector, reset.asBool)
 
 // pmp
   val PortNumber = ICacheParameters().PortNumber
@@ -147,12 +146,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  io.csrUpdate := DontCare
-
   icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
   icache.io.csr_parity_enable := RegNext(csrCtrl.icache_parity_enable)
 
-  icache.io.fencei := io.fencei
+  icache.io.fencei := RegNext(io.fencei)
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

@@ -92,10 +92,10 @@ package object xiangshan {
     def vlse      = "b01_10_00000".U // strided
     def vloxe     = "b01_11_00000".U // index
 
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
   }
 
@@ -118,10 +118,10 @@ package object xiangshan {
     def vsse      = "b10_10_00000".U // strided
     def vsoxe     = "b10_11_00000".U // index
 
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecSt  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
   }
 
@@ -208,15 +208,24 @@ package object xiangshan {
 
 
   object CSROpType {
-    def jmp  = "b000".U
-    def wrt  = "b001".U
-    def set  = "b010".U
-    def clr  = "b011".U
-    def wfi  = "b100".U
-    def wrti = "b101".U
-    def seti = "b110".U
-    def clri = "b111".U
-    def needAccess(op: UInt): Bool = op(1, 0) =/= 0.U
+    def jmp  = "b010_000".U
+    def wfi  = "b100_000".U
+    def wrt  = "b001_001".U
+    def set  = "b001_010".U
+    def clr  = "b001_011".U
+    def wrti = "b001_101".U
+    def seti = "b001_110".U
+    def clri = "b001_111".U
+    def ro   = "b001_000".U
+
+    def isSystemOp (op: UInt): Bool = op(4)
+    def isWfi      (op: UInt): Bool = op(5)
+    def isCsrAccess(op: UInt): Bool = op(3)
+    def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
+    def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
+
+    def getCSROp(op: UInt) = op(1, 0)
+    def needImm(op: UInt) = op(2)
   }
 
   // jump
@@ -299,14 +308,6 @@ package object xiangshan {
     def minu       = "b011_0101".U
     def max        = "b011_0110".U
     def min        = "b011_0111".U
-
-    // branch
-    def beq        = "b111_0000".U
-    def bne        = "b111_0010".U
-    def blt        = "b111_1000".U
-    def bge        = "b111_1010".U
-    def bltu       = "b111_1100".U
-    def bgeu       = "b111_1110".U
 
     // Zicond
     def czero_eqz  = "b111_0100".U
@@ -397,6 +398,10 @@ package object xiangshan {
     //     uop1: w(rd)                  | vli, vtypei    -> x[rd]
     def uvsetvcfg_ii        = "b0010_0000".U
     def uvsetrd_ii          = "b0000_0000".U
+
+    // read vec, write int
+    // keep vl
+    def csrrvl              = "b0001_0110".U
 
     def isVsetvl  (func: UInt)  = func(6)
     def isVsetvli (func: UInt)  = func(7)
@@ -494,6 +499,7 @@ package object xiangshan {
   }
 
   object LSUOpType {
+    // The max length is 6 bits
     // load pipeline
 
     // normal load
@@ -508,17 +514,17 @@ package object xiangshan {
     def lwu      = "b0110".U
     // hypervior load
     // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
-    def hlvb = "b10000".U
-    def hlvh = "b10001".U
-    def hlvw = "b10010".U
-    def hlvd = "b10011".U
-    def hlvbu = "b10100".U
-    def hlvhu = "b10101".U
-    def hlvwu = "b10110".U
-    def hlvxhu = "b011101".U
-    def hlvxwu = "b011110".U
-    def isHlv(op: UInt): Bool = op(4) && (op(8, 5) === "b0000".U)
-    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(8, 5) === "b0000".U)
+    def hlvb   = "b10000".U
+    def hlvh   = "b10001".U
+    def hlvw   = "b10010".U
+    def hlvd   = "b10011".U
+    def hlvbu  = "b10100".U
+    def hlvhu  = "b10101".U
+    def hlvwu  = "b10110".U
+    def hlvxhu = "b11101".U
+    def hlvxwu = "b11110".U
+    def isHlv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
+    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -526,7 +532,7 @@ package object xiangshan {
     def prefetch_r = "b1001".U
     def prefetch_w = "b1010".U
 
-    def isPrefetch(op: UInt): Bool = op(3)
+    def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U) && (op(8, 7) === "b00".U)
 
     // store pipeline
     // normal store
@@ -542,8 +548,7 @@ package object xiangshan {
     def hsvh = "b10001".U
     def hsvw = "b10010".U
     def hsvd = "b10011".U
-    def isHsv(op: UInt): Bool = op(4)
-
+    def isHsv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
     // l1 cache op
     // bit encoding: | cbo_zero 01 | size(2bit) 11 |
     def cbo_zero  = "b0111".U
@@ -554,7 +559,7 @@ package object xiangshan {
     def cbo_flush = "b1101".U
     def cbo_inval = "b1110".U
 
-    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U
+    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
 
     // atomics
     // bit(1, 0) are size
@@ -589,16 +594,12 @@ package object xiangshan {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isVecLd(fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
-    def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
-    def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
-
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
-    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
   }
 
   object BKUOpType {
@@ -791,6 +792,44 @@ package object xiangshan {
     def loadGuestPageFault  = 21
     def virtualInstr        = 22
     def storeGuestPageFault = 23
+
+    // Just alias
+    def EX_IAM    = instrAddrMisaligned
+    def EX_IAF    = instrAccessFault
+    def EX_II     = illegalInstr
+    def EX_BP     = breakPoint
+    def EX_LAM    = loadAddrMisaligned
+    def EX_LAF    = loadAccessFault
+    def EX_SAM    = storeAddrMisaligned
+    def EX_SAF    = storeAccessFault
+    def EX_UCALL  = ecallU
+    def EX_HSCALL = ecallS
+    def EX_VSCALL = ecallVS
+    def EX_MCALL  = ecallM
+    def EX_IPF    = instrPageFault
+    def EX_LPF    = loadPageFault
+    def EX_SPF    = storePageFault
+    def EX_IGPF   = instrGuestPageFault
+    def EX_LGPF   = loadGuestPageFault
+    def EX_VI     = virtualInstr
+    def EX_SGPF   = storeGuestPageFault
+
+    def getAddressMisaligned = Seq(EX_IAM, EX_LAM, EX_SAM)
+
+    def getAccessFault = Seq(EX_IAF, EX_LAF, EX_SAF)
+
+    def getPageFault = Seq(EX_IPF, EX_LPF, EX_SPF)
+
+    def getGuestPageFault = Seq(EX_IGPF, EX_LGPF, EX_SGPF)
+
+    def getLSGuestPageFault = Seq(EX_LGPF, EX_SGPF)
+
+    def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
+
+    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
+
+    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
+
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
@@ -809,6 +848,13 @@ package object xiangshan {
       storeAccessFault,
       loadAccessFault
     )
+
+    def getHigherExcpThan(excp: Int): Seq[Int] = {
+      val idx = this.priorities.indexOf(excp, 0)
+      require(idx != -1, s"The irq($excp) does not exists in IntPriority Seq")
+      this.priorities.slice(0, idx)
+    }
+
     def all = priorities.distinct.sorted
     def frontendSet = Seq(
       instrAddrMisaligned,

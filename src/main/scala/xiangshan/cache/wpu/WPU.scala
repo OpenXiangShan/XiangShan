@@ -3,7 +3,7 @@ package xiangshan.cache.wpu
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utility.XSPerfAccumulate
 import xiangshan.cache.{HasL1CacheParameters, L1CacheParameters}
 import xiangshan.{XSBundle, XSModule}
 

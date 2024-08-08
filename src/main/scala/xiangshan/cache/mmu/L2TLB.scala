@@ -228,6 +228,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw.io.sfence := sfence_dup(1)
   llptw.io.csr := csr_dup(1)
+  val llptw_stage1 = Reg(Vec(l2tlbParams.llptwsize, new PtwMergeResp()))
+  when(llptw.io.in.fire){
+    llptw_stage1(llptw.io.mem.enq_ptr) := cache.io.resp.bits.stage1
+  }
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info := arb2.io.out.bits.req_info
@@ -256,7 +260,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   ptw.io.req.bits.stage1Hit := cache.io.resp.bits.toFsm.stage1Hit
-  ptw.io.req.bits.stage1 := cache.io.resp.bits.toTlb
+  ptw.io.req.bits.stage1 := cache.io.resp.bits.stage1
   ptw.io.sfence := sfence_dup(7)
   ptw.io.csr := csr_dup(6)
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
@@ -479,7 +483,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   for (i <- 0 until PtwWidth) {
     mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U && !cache.io.resp.bits.isHptwReq 
     mergeArb(i).in(outArbCachePort).bits.s2xlate := cache.io.resp.bits.req_info.s2xlate
-    mergeArb(i).in(outArbCachePort).bits.s1 := cache.io.resp.bits.toTlb
+    mergeArb(i).in(outArbCachePort).bits.s1 := cache.io.resp.bits.stage1
     mergeArb(i).in(outArbCachePort).bits.s2 := cache.io.resp.bits.toHptw.resp
     mergeArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     mergeArb(i).in(outArbFsmPort).bits.s2xlate := ptw.io.resp.bits.s2xlate
@@ -487,7 +491,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbFsmPort).bits.s2 := ptw.io.resp.bits.h_resp
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
-    mergeArb(i).in(outArbMqPort).bits.s1 := contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate)
+    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id), contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate))
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
@@ -545,7 +549,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
       ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(2.U) || !pte_in.isLeaf())
-      ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && (af || pte_in.isAf())
+      ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && (af || Mux(s2xlate === allStage, false.B, pte_in.isAf()))
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)
@@ -639,11 +643,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val isWritePageCacheTable = Constantin.createRecord(s"isWritePageCacheTable$hartId")
   val PageCacheTable = ChiselDB.createTable(s"PageCache_hart$hartId", new PageCacheDB)
   val PageCacheDB = Wire(new PageCacheDB)
-  PageCacheDB.vpn := Cat(cache.io.resp.bits.toTlb.entry(0).tag, OHToUInt(cache.io.resp.bits.toTlb.pteidx))
+  PageCacheDB.vpn := Cat(cache.io.resp.bits.stage1.entry(0).tag, OHToUInt(cache.io.resp.bits.stage1.pteidx))
   PageCacheDB.source := cache.io.resp.bits.req_info.source
   PageCacheDB.bypassed := cache.io.resp.bits.bypassed
   PageCacheDB.is_first := cache.io.resp.bits.isFirst
-  PageCacheDB.prefetched := cache.io.resp.bits.toTlb.entry(0).prefetch
+  PageCacheDB.prefetched := cache.io.resp.bits.stage1.entry(0).prefetch
   PageCacheDB.prefetch := cache.io.resp.bits.prefetch
   PageCacheDB.l2Hit := cache.io.resp.bits.toFsm.l2Hit
   PageCacheDB.l1Hit := cache.io.resp.bits.toFsm.l1Hit

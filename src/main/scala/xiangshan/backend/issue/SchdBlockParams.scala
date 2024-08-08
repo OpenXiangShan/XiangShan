@@ -123,6 +123,10 @@ case class SchdBlockParams(
     backendParam = param
   }
 
+  def numWriteRegCache: Int = issueBlockParams.map(_.numWriteRegCache).sum
+
+  def needWriteRegCache: Boolean = numWriteRegCache > 0
+
   def genExuInputBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
   }

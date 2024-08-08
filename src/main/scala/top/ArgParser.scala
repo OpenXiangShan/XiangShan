@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -25,6 +26,7 @@ import difftest.DifftestModule
 import scala.annotation.tailrec
 import scala.sys.exit
 import chisel3.util.log2Up
+import utility._
 
 object ArgParser {
   // TODO: add more explainations
@@ -68,6 +70,10 @@ object ArgParser {
           nextOption(config, tail)
         case "--config" :: confString :: tail =>
           nextOption(getConfigByName(confString), tail)
+        case "--issue" :: issueString :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIIssue => issueString
+          }), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => (0 until value.toInt) map { i =>
@@ -124,7 +130,7 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
-        case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
+        case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)
@@ -142,7 +148,18 @@ object ArgParser {
       }
     }
     val newArgs = DifftestModule.parseArgs(args)
-    var config = nextOption(default, newArgs.toList)
+    val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
+      case LogUtilsOptionsKey => LogUtilsOptions(
+        here(DebugOptionsKey).EnableDebug,
+        here(DebugOptionsKey).EnablePerfDebug,
+        here(DebugOptionsKey).FPGAPlatform
+      )
+      case PerfCounterOptionsKey => PerfCounterOptions(
+        here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        0
+      )
+    })
     (config, firrtlOpts, firtoolOpts)
   }
 }

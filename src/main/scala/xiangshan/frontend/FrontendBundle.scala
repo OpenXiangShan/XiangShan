@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -477,13 +478,13 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // the vec indicating if ghr should shift on each branch
   def shouldShiftVec =
     VecInit(br_valids.zipWithIndex.map{ case (v, i) =>
-      v && !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B)})
+      v && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
 
   def lastBrPosOH =
     VecInit((!hit || !br_valids.reduce(_||_)) +: // not hit or no brs in entry
       (0 until numBr).map(i =>
         br_valids(i) &&
-        !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
+        !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
         (real_br_taken_mask()(i) || !br_valids.drop(i+1).reduceOption(_||_).getOrElse(false.B)) && // no brs behind it
         hit
       )

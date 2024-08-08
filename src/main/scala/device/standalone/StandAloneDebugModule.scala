@@ -17,6 +17,7 @@
 package device.standalone
 
 import chisel3._
+import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.tilelink._
@@ -26,6 +27,7 @@ import system.SoCParamsKey
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
 import device.DebugModule
+import utility.{IntBuffer, RegNextN}
 
 class StandAloneDebugModule (
   useTL: Boolean = false,
@@ -45,12 +47,16 @@ class StandAloneDebugModule (
 
   // interrupts
   val debugModuleIntNode = IntSinkNode(IntSinkPortSimple(hartNum, 1))
-  debugModuleIntNode :*= debugModule.debug.dmOuter.dmOuter.intnode
+  debugModuleIntNode :*= IntBuffer() :*= debugModule.debug.dmOuter.dmOuter.intnode
   val int = InModuleBody(debugModuleIntNode.makeIOs())
 
   class StandAloneDebugModuleImp(val outer: StandAloneDebugModule)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val io = IO(new outer.debugModule.DebugModuleIO)
     io <> outer.debugModule.module.io
+    outer.debugModule.module.io.resetCtrl.hartIsInReset :=
+      RegNextN(io.resetCtrl.hartIsInReset, 2, Some(0.U.asTypeOf(io.resetCtrl.hartIsInReset)))
+    io.resetCtrl.hartResetReq.foreach(req =>
+      req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.get, 0.U.asTypeOf(req)))
   }
 
   override lazy val module = new StandAloneDebugModuleImp(this)

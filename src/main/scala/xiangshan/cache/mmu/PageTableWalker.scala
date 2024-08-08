@@ -131,6 +131,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_resp_stage2 = Reg(Bool()) 
 
   val ppn_af = Mux(s2xlate, pte.isStage1Af(), pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
+  val guest_fault = hptw_pageFault || hptw_accessFault
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
@@ -152,10 +153,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
   io.req.ready := idle
+  val pte_valid = RegInit(false.B) // avoid the x states
+  val fake_pte = 0.U.asTypeOf(pte)
+  fake_pte.perm.v := true.B
+  fake_pte.perm.r := true.B
+  fake_pte.perm.w := true.B
+  fake_pte.perm.x := true.B
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(pte_valid, pte, fake_pte), vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
-  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
+  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guest_fault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
@@ -179,7 +186,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.id := FsmReqID.U(bMemID.W)
   mem.req.bits.hptw_bypassed := false.B
 
-  io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, req_s2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
+  io.refill.req_info.s2xlate := req_s2xlate
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -195,6 +202,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
     last_s2xlate := false.B
+    hptw_pageFault := false.B
+    hptw_accessFault := false.B
   }
 
   when (io.hptw.resp.fire && w_hptw_resp === false.B && stage1Hit){
@@ -216,6 +225,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     accessFault := false.B
     idle := false.B
     hptw_pageFault := false.B
+    hptw_accessFault := false.B
+    pte_valid := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       last_s2xlate := true.B
@@ -238,7 +249,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     when(onlyS2xlate){
       mem_addr_update := true.B
       last_s2xlate := false.B
-    }.otherwise {
+    }.elsewhen(!(io.hptw.resp.bits.h_resp.gpf || io.hptw.resp.bits.h_resp.gaf)) {
       s_pmp_check := false.B
     }
   }
@@ -274,6 +285,19 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     last_s2xlate := false.B
   }
 
+  when(guest_fault && idle === false.B){
+    s_pmp_check := true.B
+    s_mem_req := true.B
+    w_mem_resp := true.B
+    s_llptw_req := true.B
+    s_hptw_req := true.B
+    w_hptw_resp := true.B
+    s_last_hptw_req := true.B
+    w_last_hptw_resp := true.B
+    mem_addr_update := true.B
+    last_s2xlate := false.B
+  }
+
   when (mem.req.fire){
     s_mem_req := true.B
     w_mem_resp := false.B
@@ -284,10 +308,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := af_level + 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
+    pte_valid := true.B
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !onlyS2xlate && !(find_pte || accessFault)){
+    when(level === 0.U && !onlyS2xlate && !(guest_fault || find_pte || accessFault)){
       level := levelNext
       when(s2xlate){
         s_hptw_req := false.B
@@ -384,6 +409,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req_info = Output(new L2TlbInnerBundle())
     val id = Output(UInt(bMemID.W))
     val h_resp = Output(new HptwResp)
+    val first_s2xlate_fault = Output(Bool()) // Whether the first stage 2 translation occurs pf/af 
     val af = Output(Bool())
   })
   val mem = new Bundle {
@@ -421,6 +447,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
   val hptw_resp = new HptwResp()
+  val first_s2xlate_fault = Output(Bool())
 }
 
 
@@ -448,19 +475,19 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
   val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
-  val mem_arb = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
+  val mem_arb = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     mem_arb.io.in(i).bits := entries(i)
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
   
   // process hptw requests in serial
-  val hyper_arb1 = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
+  val hyper_arb1 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb1.io.in(i).bits := entries(i)
     hyper_arb1.io.in(i).valid := is_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
   }
-  val hyper_arb2 = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
+  val hyper_arb2 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for(i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb2.io.in(i).bits := entries(i)
     hyper_arb2.io.in(i).valid := is_last_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
@@ -475,7 +502,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn) && io.in.bits.req_info.s2xlate === entries(i).req_info.s2xlate
   )
   val dup_req_fire = mem_arb.io.out.fire && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) && io.in.bits.req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate // dup with the req fire entry
-  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
+  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entries, sending mem req already
   val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
   val dup_vec_last_hptw = dup_vec.zipWithIndex.map{case (d, i) => d && (is_last_hptw_req(i) || is_last_hptw_resp(i))}
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
@@ -512,6 +539,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
     entries(enq_ptr).hptw_resp := Mux(to_last_hptw_req, entries(last_hptw_req_id).hptw_resp, Mux(to_wait, entries(wait_id).hptw_resp, entries(enq_ptr).hptw_resp))
+    entries(enq_ptr).first_s2xlate_fault := false.B
     mem_resp_hit(enq_ptr) := to_mem_out || to_last_hptw_req
   }
 
@@ -556,11 +584,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.mem.resp.fire) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
-        state(i) := Mux(entries(i).req_info.s2xlate === allStage, state_last_hptw_req, state_mem_out)
-        mem_resp_hit(i) := true.B
         val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
         val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
         val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
+        state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(ptes(index).isPf(2.U) || !ptes(index).isLeaf() || ptes(index).isAf()), state_last_hptw_req, state_mem_out)
+        mem_resp_hit(i) := true.B
         entries(i).ppn := ptes(index).getPPN() // for last stage 2 translation
       }
     }
@@ -590,6 +618,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         when (io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+          entries(i).first_s2xlate_fault := io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf
         }.otherwise{ // change the entry that is waiting hptw resp
           val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
           val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
@@ -628,6 +657,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
   io.out.bits.h_resp := entries(mem_ptr).hptw_resp
+  io.out.bits.first_s2xlate_fault := entries(mem_ptr).first_s2xlate_fault
 
   val hptw_req_arb = Module(new Arbiter(new Bundle{
       val source = UInt(bSourceWidth.W)
@@ -661,7 +691,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem_arb.io.out.ready := io.mem.req.ready
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
-  io.mem.refill.s2xlate := Mux(entries(mem_refill_id).req_info.s2xlate === noS2xlate, noS2xlate, onlyStage1) // llptw refill the pte of stage 1 
+  io.mem.refill.s2xlate := entries(mem_refill_id).req_info.s2xlate
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 

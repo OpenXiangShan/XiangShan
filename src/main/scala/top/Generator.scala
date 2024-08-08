@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -18,19 +19,12 @@ package top
 
 import circt.stage._
 import chisel3.stage.ChiselGeneratorAnnotation
-import xiangshan.types.RunFirrtlTransformAnnotation
 import xiangshan.transforms._
 
 object Generator {
   def execute(args: Array[String], mod: => chisel3.RawModule, firtoolOpts: Array[String]) = {
-    val annotations = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(
-        RunFirrtlTransformAnnotation(new PrintControl),
-        RunFirrtlTransformAnnotation(new PrintModuleName)
-      )
-      case _ => firtoolOpts.map(FirtoolOption.apply).toSeq
-    }
+    val annotations = firtoolOpts.map(FirtoolOption.apply).toSeq
 
-    (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(mod _) +: annotations)
+    (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(() => mod) +: annotations)
   }
 }

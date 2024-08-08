@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSError
+import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
@@ -265,6 +265,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsVfRedUnordered = outCtrl.fuOpType === VfaluType.vfredusum ||
     outCtrl.fuOpType === VfaluType.vfredmax ||
     outCtrl.fuOpType === VfaluType.vfredmin
+  val outIsVfRedUnComp = outCtrl.fuOpType === VfaluType.vfredmax ||
+    outCtrl.fuOpType === VfaluType.vfredmin
+  val outIsVfRedUnSum = outCtrl.fuOpType === VfaluType.vfredusum
   val outIsVfRedOrdered = outCtrl.fuOpType === VfaluType.vfredosum ||
     outCtrl.fuOpType === VfaluType.vfwredosum
 
@@ -301,19 +304,21 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outCtrl_s0 = ctrlVec.head
   val outVecCtrl_s0 = ctrlVec.head.vpu.get
   val outEew_s0 = Mux(resWiden, outVecCtrl_s0.vsew + 1.U, outVecCtrl_s0.vsew)
-  val outEew = Mux(RegEnable(resWiden, io.in.fire), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  val outWiden = RegEnable(resWiden, io.in.fire)
+  val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val vlMax_s0 = ((VLEN/8).U >> outEew_s0).asUInt
   val vlMax = ((VLEN/8).U >> outEew).asUInt
-  val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1,0)).asUInt + 1.U, outVecCtrl.vlmul(1,0))
+  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul + 1.U, outVecCtrl.vlmul)
+  val lmulAbs = Mux(outVlmulFix(2), (~outVlmulFix(1,0)).asUInt + 1.U, outVlmulFix(1,0))
   //  vfmv_f_s need vl=1, reduction last uop need vl=1, other uop need vl=vlmax
   numOfUopVFRED := {
     // addTime include add frs1
-    val addTime = MuxLookup(outVecCtrl_s0.vlmul, 1.U(4.W))(Array(
+    val addTime = MuxLookup(outVecCtrl_s0.vlmul, 1.U(4.W))(Seq(
       VLmul.m2 -> 2.U,
       VLmul.m4 -> 4.U,
       VLmul.m8 -> 8.U,
     ))
-    val foldLastVlmul = MuxLookup(outVecCtrl_s0.vsew, "b000".U)(Array(
+    val foldLastVlmul = MuxLookup(outVecCtrl_s0.vsew, "b000".U)(Seq(
       VSew.e16 -> VLmul.mf8,
       VSew.e32 -> VLmul.mf4,
       VSew.e64 -> VLmul.mf2,
@@ -359,8 +364,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsFisrtGroup = outVuopidx === 0.U ||
     (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
-  val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnordered
-  val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnordered
+  val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnComp
+  val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnComp
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
     outCtrl.fuOpType === VfaluType.vfmv_s_f ||
     outIsResuction ||
@@ -401,8 +406,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(allFFlagsEn)
     dontTouch(fflagsRedMask)
   }
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum) & fflagsRedMask(4*numVecModule - 1, 1),
+    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
@@ -454,7 +459,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   )
   val outOldVdForRED = Mux(outCtrl.fuOpType === VfaluType.vfredosum, outOldVdForREDO, outOldVdForWREDO)
   val numOfUopVFREDOSUM = {
-    val uvlMax = MuxLookup(outVecCtrl.vsew, 0.U)(Array(
+    val uvlMax = MuxLookup(outVecCtrl.vsew, 0.U)(Seq(
       VSew.e16 -> 8.U,
       VSew.e32 -> 4.U,
       VSew.e64 -> 2.U,

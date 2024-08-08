@@ -100,21 +100,22 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_gpa_refill = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
 
-  // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = (0 until Width).map(i => if (EnbaleTlbDebug) (satp.mode === 8.U)
+  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
+    if (EnbaleTlbDebug) (satp.mode === 8.U)
     else (satp.mode === 8.U) && (mode(i) < ModeM))
+  )
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
 
-  val refill = (0 until Width).map(i => ptw.resp.fire && !(ptw.resp.bits.getGpa) && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate =/= noS2xlate))
+  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !flush_mmu
   refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
-    entries.io.w_apply(refill(i), ptw.resp.bits)
+    entries.io.w_apply(refill, ptw.resp.bits)
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
@@ -130,7 +131,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
-    pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    when (RegNext(req(i).bits.no_translate)) {
+      pmp_check(req(i).bits.pmp_addr, req_out(i).size, req_out(i).cmd, i)
+    } .otherwise {
+      pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    }
     for (d <- 0 until nRespDups) {
       perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
     }

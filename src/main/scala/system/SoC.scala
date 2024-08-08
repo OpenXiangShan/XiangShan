@@ -49,8 +49,11 @@ case class SoCParameters
   )),
   XSTopPrefix: Option[String] = None,
   NodeIDWidth: Int = 7,
+  NumHart: Int = 64,
+  NumIRFiles: Int = 7,
+  NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
-  IMSICUseTL: Boolean = false
+  IMSICUseTL: Boolean = false,
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -79,6 +82,10 @@ trait HasSoCParameter {
   val L3OuterBusWidth = soc.L3OuterBusWidth
 
   val NrExtIntr = soc.extIntrs
+
+  val SetIpNumValidSize = soc.NumHart * soc.NumIRFiles
+
+  val NumIRSrc = soc.NumIRSrc
 }
 
 class ILABundle extends Bundle {}
@@ -176,7 +183,7 @@ trait HaveAXI4MemPort {
       TLWidthWidget(8) :=
       TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
       peripheralXbar.get
-    
+
     axi4mem_node :=
       TLToAXI4() :=
       TLSourceShrinker(64) :=
@@ -238,7 +245,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4UserYanker() :=
     // AXI4Deinterleaver(8) :=
     axi4peripheral_node
-  
+
   if (enableCHI) {
     val error = LazyModule(new TLError(
       params = DevNullParams(
@@ -252,6 +259,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       AXI4Deinterleaver(8) :=
       TLToAXI4() :=
       error_xbar.get :=
+      TLBuffer.chainNode(2, Some("llc_to_peripheral_buffer")) :=
       TLFIFOFixer() :=
       TLWidthWidget(L3OuterBusWidth / 8) :=
       AXI4ToTL() :=
@@ -373,6 +381,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
+    val clintTime = IO(Output(ValidIO(UInt(64.W))))
 
     debugModule.module.io <> debug_module_io
 
@@ -393,6 +402,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
+
+    clintTime := clint.module.io.time
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 

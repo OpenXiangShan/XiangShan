@@ -38,6 +38,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.fu.NewCSR.{Mcontrol, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -95,7 +96,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(log2Up(RasCtrSize).W)
+  val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
@@ -320,6 +321,19 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   def flushItself() = RedirectLevel.flushItself(level)
 }
 
+object Redirect extends HasCircularQueuePtrHelper {
+
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
+  }
+}
+
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
@@ -421,7 +435,8 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val flushState = Bool()
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
-  val uopIdx     = OptionWrapper(isVector, UopIdx())
+  val sqIdx = new SqPtr
+  val lqIdx = new LqPtr
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
@@ -456,6 +471,7 @@ class SatpStruct(implicit p: Parameters) extends XSBundle {
 class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
   val changed = Bool()
 
+  // Todo: remove it
   def apply(satp_value: UInt): Unit = {
     require(satp_value.getWidth == XLEN)
     val sa = satp_value.asTypeOf(new SatpStruct)
@@ -549,8 +565,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Rename
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())
-  // Decode
-  val svinval_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
@@ -665,18 +679,34 @@ class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val triggerCanRaiseBpExp  = Output(Bool())
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType = Output(UInt(2.W))
-  val select = Output(Bool())
-  val timing = Output(Bool())
-  val action = Output(Bool())
-  val chain = Output(Bool())
-  val execute = Output(Bool())
-  val store = Output(Bool())
-  val load = Output(Bool())
-  val tdata2 = Output(UInt(64.W))
+  val select    = Output(Bool()) // todo: delete
+  val timing    = Output(Bool())
+  val action    = Output(Bool()) // todo: delete
+  val chain     = Output(Bool())
+  val execute   = Output(Bool()) // todo: delete
+  val store     = Output(Bool())
+  val load      = Output(Bool())
+  val tdata2    = Output(UInt(64.W))
+
+  def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: Tdata2Bundle): MatchTriggerIO = {
+    val mcontrol = Wire(new Mcontrol)
+    mcontrol := tdata1.DATA.asUInt
+    this.matchType := mcontrol.MATCH.asUInt
+    this.select    := mcontrol.SELECT.asBool
+    this.timing    := mcontrol.TIMING.asBool
+    this.action    := mcontrol.ACTION.asUInt
+    this.chain     := mcontrol.CHAIN.asBool
+    this.execute   := mcontrol.EXECUTE.asBool
+    this.load      := mcontrol.LOAD.asBool
+    this.store     := mcontrol.STORE.asBool
+    this.tdata2    := tdata2.asUInt
+    this
+  }
 }
 
 class StallReasonIO(width: Int) extends Bundle {

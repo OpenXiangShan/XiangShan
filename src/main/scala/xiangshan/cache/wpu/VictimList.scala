@@ -53,21 +53,11 @@ class WayConflictPredictor (nPorts: Int) (implicit p: Parameters) extends WayCon
 
   for (i <- 0 until nPorts){
     io.pred(i).way_conflict := io.pred(i).en & PredTable(get_addr_idx(io.pred(i).vaddr))(CounterSize-1)
-    // saturation counter
-    when(io.update(i).en && io.update(i).sa_hit) {
-      when(PredTable(get_addr_idx(io.update(i).vaddr)) === Fill(CounterSize, 1.U)) {
-        PredTable(get_addr_idx(io.update(i).vaddr)) := PredTable(get_addr_idx(io.update(i).vaddr))
-      }.otherwise {
-        PredTable(get_addr_idx(io.update(i).vaddr)) := PredTable(get_addr_idx(io.update(i).vaddr)) + 1.U
-      }
-    }.elsewhen(io.update(i).en && io.update(i).dm_hit) {
-      when(PredTable(get_addr_idx(io.update(i).vaddr)) === Fill(CounterSize, 0.U)) {
-        PredTable(get_addr_idx(io.update(i).vaddr)) := PredTable(get_addr_idx(io.update(i).vaddr))
-      }.otherwise {
-        PredTable(get_addr_idx(io.update(i).vaddr)) := PredTable(get_addr_idx(io.update(i).vaddr)) - 1.U
-      }
-    }.otherwise {
-      PredTable(get_addr_idx(io.update(i).vaddr)) := PredTable(get_addr_idx(io.update(i).vaddr))
+    val ptVal = PredTable(get_addr_idx(io.update(i).vaddr))
+    when(io.update(i).en && io.update(i).sa_hit && ptVal =/= Fill(CounterSize, 1.U)) {
+      PredTable(get_addr_idx(io.update(i).vaddr)) := ptVal + 1.U
+    }.elsewhen(io.update(i).en && io.update(i).dm_hit && ptVal =/= Fill(CounterSize, 0.U)) {
+      PredTable(get_addr_idx(io.update(i).vaddr)) := ptVal - 1.U
     }
   }
 

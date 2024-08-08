@@ -4,7 +4,7 @@ import chisel3._
 import chiseltest._
 import chiseltest.{VerilatorBackendAnnotation, WriteVcdAnnotation}
 import chiseltest.simulator.{VerilatorCFlags, VerilatorFlags}
-import test.types.AnnotationSeq
+import firrtl2.AnnotationSeq
 import org.scalatest.flatspec._
 import org.scalatest.matchers.should._
 import top.{ArgParser, DefaultConfig}

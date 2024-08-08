@@ -28,7 +28,7 @@ $(STANDALONE_DEVICES_PATH): $(SCALA_FILE)
 	echo $@
 	echo $(notdir $(@D))
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain device.standalone.Main \
+	$(TIME_CMD) mill -i xiangshan.runMain device.standalone.Main \
 		-td $(@D) --num-cores $(NUM_CORES) $(RELEASE_ARGS) $(DEVICE_ARGS) \
 		--standalone-device $(GOALS) --device-base-addr $(DEVICE_BASE_ADDR) \
 		--device-addr-width $(DEVICE_ADDR_WIDTH) --device-data-width $(DEVICE_DATA_WIDTH)

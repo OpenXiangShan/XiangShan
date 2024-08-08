@@ -188,6 +188,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.srcLoadDependency := DontCare
     uop.numLsElem       :=  DontCare
     uop.hasException  :=  DontCare
+    uop.useRegCache   := DontCare
+    uop.regCacheIdx   := DontCare
   })
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
@@ -235,7 +237,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
   val needV0Dest     = Wire(Vec(RenameWidth, Bool()))
   val needVlDest     = Wire(Vec(RenameWidth, Bool()))
-  val hasValid = Cat(io.in.map(_.valid)).orR
   private val inHeadValid = io.in.head.valid
 
   val isMove = Wire(Vec(RenameWidth, Bool()))
@@ -299,7 +300,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
-    io.in(i).ready := canOut
+    io.in(i).ready := !io.in(0).valid || canOut
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)

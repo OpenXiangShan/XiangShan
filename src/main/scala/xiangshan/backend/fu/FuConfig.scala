@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{ FPToFP, FPToInt, IntToFP, IntFPToVec}
+import xiangshan.backend.fu.fpu.{IntToFP, IntFPToVec}
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -141,8 +141,8 @@ case class FuConfig (
     getSrcMaxWidthVec.map(w => UInt(w.W))
   }
 
-  // csr's redirect is in its exception bundle
-  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
+  // csr's redirect also uses redirect bundle
+  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
   def hasPredecode: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
 
@@ -292,8 +292,9 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    piped = true,
+    piped = false,
     writeIntRf = true,
+    latency = UncertainLatency(),
     exceptionOut = Seq(illegalInstr, virtualInstr, breakPoint, ecallU, ecallS, ecallVS, ecallM),
     flushPipe = true,
   )
@@ -342,8 +343,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
-    piped = true,
-    latency = CertainLatency(0),
+    piped = false,
+    latency = UncertainLatency(),
     exceptionOut = Seq(illegalInstr, virtualInstr),
     flushPipe = true
   )
@@ -431,7 +432,7 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint),
     trigger = true,
     immType = Set(SelImm.IMM_S),
   )

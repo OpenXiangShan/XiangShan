@@ -36,7 +36,12 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-MFC ?= 1
+ISSUE ?= B
+
+SUPPORT_CHI_ISSUE = B E.b
+ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
+$(error "Unsupported CHI issue: $(ISSUE)")
+endif
 
 ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
 $(error At most one target can be specified)
@@ -49,8 +54,6 @@ GOALS = $(MAKECMDGOALS)
 endif
 
 # common chisel args
-ifeq ($(MFC),1)
-CHISEL_VERSION = chisel
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
 MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
@@ -58,11 +61,6 @@ MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
 PLDM_ARGS += $(MFC_ARGS)
-else
-CHISEL_VERSION = chisel3
-FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
-SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
-endif
 
 ifneq ($(XSTOP_PREFIX),)
 RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
@@ -140,16 +138,14 @@ endif
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
+	mill -i xiangshan.runMain $(FPGATOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
-		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
+	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
-ifeq ($(MFC),1)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
-endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -164,12 +160,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
-		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
+	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
-ifeq ($(MFC),1)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
-endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -187,9 +181,7 @@ else
 	sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 endif
-ifeq ($(MFC),1)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
-endif
 
 sim-verilog: $(SIM_TOP_V)
 
@@ -208,7 +200,7 @@ bsp:
 	mill -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.scalalib.GenIdea/idea
+	mill -i mill.idea.GenIdea/idea
 
 # verilator simulation
 emu: sim-verilog

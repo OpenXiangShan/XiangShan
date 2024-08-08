@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.ZeroExt
 import xiangshan.{VSETOpType, CSROpType}
-import xiangshan.backend.decode.Imm_VSETIVLI
+import xiangshan.backend.decode.{Imm_VSETIVLI, Imm_VSETVLI}
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.vector.Bundles.VsetVType
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
@@ -24,7 +24,7 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val avlImm = Imm_VSETIVLI().getAvl(in.data.src(1))
   protected val avl = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), avlImm, in.data.src(0))
 
-  protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.data.src(1))
+  protected val instVType: InstVType = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), Imm_VSETIVLI().getVType(in.data.src(1)), Imm_VSETVLI().getVType(in.data.src(1)))
   protected val vtypeImm: VsetVType = VsetVType.fromInstVType(instVType)
   protected val vtype: VsetVType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VsetVType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
@@ -102,14 +102,15 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val res = WireInit(0.U.asTypeOf(VConfig()))
   val vlmax = vsetModule.io.out.vlmax
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
-  val isReadVl = in.ctrl.fuOpType === CSROpType.set
+  val isReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
               Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype
 
   out.res.data := Mux(isReadVl, oldVL,
                     Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
-                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl)))
+                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType),
+                        Mux(oldVL < vlmax, oldVL, vlmax), vsetModule.io.out.vconfig.vl)))
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
