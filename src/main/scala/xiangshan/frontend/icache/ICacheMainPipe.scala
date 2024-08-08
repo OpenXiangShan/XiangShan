@@ -421,11 +421,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall",  toMSHR.valid && !toMSHR.ready)
 
   val s2_fetch_finish = !s2_miss.reduce(_||_)
+
+  // also raise af if data/l2 corrupt is detected
+  val s2_data_exception = VecInit(s2_data_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+  val s2_l2_exception   = VecInit(s2_l2_corrupt.map(ExceptionType.fromECC(true.B, _)))
+
+  // merge s2 exceptions, itlb has the highest priority, meta next, meta/data/l2 lowest (and we dont care about prioritizing between this three)
   val s2_exception_out = ExceptionType.merge(
-    s2_exception,
-    VecInit(s2_l2_corrupt.map(ExceptionType.fromECC(true.B, _)))
-    // FIXME: maybe we should also raise af if meta/data error is detected
-//     VecInit((s2_meta_corrupt zip s2_data_corrupt zip s2_l2_corrupt).map{ case ((m, d), l2) => ExceptionType.fromECC(m || d || l2)}
+    s2_exception,  // includes itlb/pmp/meta exception
+    s2_data_exception,
+    s2_l2_exception
   )
 
   /**
