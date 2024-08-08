@@ -203,10 +203,10 @@ idea:
 	mill -i mill.idea.GenIdea/idea
 
 check-format:
-	mill xiangshan[$(CHISEL_VERSION)].checkFormat
+	mill xiangshan.checkFormat
 
 reformat:
-	mill xiangshan[$(CHISEL_VERSION)].reformat
+	mill xiangshan.reformat
 
 # verilator simulation
 emu: sim-verilog
