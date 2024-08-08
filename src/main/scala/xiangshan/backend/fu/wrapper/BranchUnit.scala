@@ -46,6 +46,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.target := addModule.io.target
       redirect.bits.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
       redirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
+      redirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
   }
   connect0LatencyCtrlSingal
 }

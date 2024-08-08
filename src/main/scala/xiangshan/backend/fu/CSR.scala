@@ -1182,7 +1182,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       mstatusNew.ie.m := mstatusOld.pie.m
       privilegeMode := mstatusOld.mpp
       if (HasHExtension) {
-        virtMode := mstatusOld.mpv
+        virtMode := Mux(mstatusOld.mpp === ModeM, false.B, mstatusOld.mpv)
         mstatusNew.mpv := 0.U
       }
       mstatusNew.pie.m := true.B
@@ -1290,8 +1290,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
-  val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
-  val iexceptionGPAddr = Mux(ivmEnable, SignExt(csrio.exception.bits.gpaddr, XLEN), csrio.exception.bits.gpaddr)
+  val iexceptionPC = Mux(csrio.exception.bits.exceptionFromBackend,
+    1.U << 63,
+    Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
+  )
+  val iexceptionGPAddr = csrio.exception.bits.gpaddr
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
   XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
@@ -1299,6 +1302,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // exceptions from rob need to handle
   val exceptionVecFromRob    = csrio.exception.bits.exceptionVec
+  val exceptionFromBackend   = csrio.exception.bits.exceptionFromBackend
   val hasException           = csrio.exception.valid && !csrio.exception.bits.isInterrupt
   val hasInstrPageFault      = hasException && exceptionVecFromRob(instrPageFault)
   val hasLoadPageFault       = hasException && exceptionVecFromRob(loadPageFault)
@@ -1356,7 +1360,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // mtval write logic
   // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  val memExceptionGPAddr = SignExt(csrio.memExceptionGPAddr, XLEN)
+  val memExceptionGPAddr = csrio.memExceptionGPAddr
   val updateTval = VecInit(Seq(
     hasInstrPageFault,
     hasLoadPageFault,
@@ -1379,11 +1383,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
         RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault || hasBreakPoint)),
-        RegNext(RegNext(Mux(
+        Mux(RegNext(RegNext(exceptionFromBackend)), 1.U << (XLEN - 1), RegNext(RegNext(Mux(
           csrio.exception.bits.crossPageIPFFix,
           SignExt(csrio.exception.bits.pc + 2.U, XLEN),
           iexceptionPC
-        ))),
+        )))),
         memExceptionAddr
     )
     // because we update tval two beats later, we can choose xtval according to the privilegeMode which has been updated
@@ -1403,7 +1407,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       RegNext(RegNext(hasInstGuestPageFault)),
       RegNext(RegNext(Mux(
         csrio.exception.bits.crossPageIPFFix,
-        SignExt(csrio.exception.bits.gpaddr + 2.U, XLEN),
+        csrio.exception.bits.gpaddr + 2.U,
         iexceptionGPAddr
       ))),
       memExceptionGPAddr
@@ -1488,7 +1492,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       //do nothing
     }.elsewhen (delegVS) {
       vscause := (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO - 1.U, exceptionNO)
-      vsepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
+      vsepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
       vsstatusNew.spp := privilegeMode
       vsstatusNew.pie.s := vsstatusOld.ie.s
       vsstatusNew.ie.s := false.B
@@ -1507,7 +1511,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       }
       virtMode := false.B
       scause := causeNO
-      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := privilegeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -1523,7 +1527,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       mstatusNew.mpv := virtMode
       virtMode := false.B
       mcause := causeNO
-      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := privilegeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B

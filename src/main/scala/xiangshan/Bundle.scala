@@ -118,6 +118,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val shift = UInt((log2Ceil(numBr)+1).W)
   val addIntoHist = Bool()
   // raise exceptions from backend
+  val backendIGPF = Bool() // instruction guest page fault
   val backendIPF = Bool() // instruction page fault
   val backendIAF = Bool() // instruction access fault
 
@@ -593,8 +594,8 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
   val bare, sv39, sv39x4 = Bool()
 
   def checkAccessFault(target: UInt): Bool = bare && target(XLEN - 1, PAddrBits).orR
-  def checkPageFault(target: UInt): Bool = sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt ||
-                                           sv39x4 && target(XLEN - 1, 41) =/= VecInit.fill(XLEN - 41)(target(40)).asUInt
+  def checkPageFault(target: UInt): Bool = sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt
+  def checkGuestPageFault(target: UInt): Bool = sv39x4 && target(XLEN - 1, 41).orR
 }
 
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {

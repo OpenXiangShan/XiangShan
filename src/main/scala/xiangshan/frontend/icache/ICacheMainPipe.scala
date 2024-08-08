@@ -182,8 +182,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_req_gpaddr   = fromWayLookup.bits.gpaddr
   val s0_excp_tlb_af  = VecInit(fromWayLookup.bits.excp_tlb_af.map(_ || fromFtq.bits.backendIaf))
   val s0_excp_tlb_pf  = VecInit(fromWayLookup.bits.excp_tlb_pf.map(_ || fromFtq.bits.backendIpf))
-  val s0_excp_tlb_gpf = fromWayLookup.bits.excp_tlb_gpf
-  val s0_excp_fromBackend = fromFtq.bits.backendIaf || fromFtq.bits.backendIpf
+  val s0_excp_tlb_gpf = VecInit(fromWayLookup.bits.excp_tlb_gpf.map(_ || fromFtq.bits.backendIgpf))
+  val s0_excp_fromBackend = fromFtq.bits.backendIaf || fromFtq.bits.backendIpf || fromFtq.bits.backendIgpf
   val s0_meta_errors  = fromWayLookup.bits.meta_errors
   val s0_hits         = VecInit((0 until PortNumber).map(i=> s0_waymasks(i).reduce(_||_)))
 

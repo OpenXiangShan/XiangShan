@@ -268,6 +268,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val exceptionVec = ExceptionVec()
+  val exceptionFromBackend = Bool()
   val flushPipe = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself

@@ -291,9 +291,10 @@ class CtrlBlockImp(
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
-    // TODO: trap/xtvec may cause IAF/IPF
+    // TODO: trap/xtvec may cause IAF/IPF/IGPF
     io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := false.B
     io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := false.B
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := false.B
   }
 
   for (i <- 0 until DecodeWidth) {

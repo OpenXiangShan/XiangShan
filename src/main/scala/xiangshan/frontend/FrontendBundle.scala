@@ -89,6 +89,7 @@ class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasI
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
   val backendIpf          = Bool()
+  val backendIgpf         = Bool()
   val backendIaf          = Bool()
 }
 

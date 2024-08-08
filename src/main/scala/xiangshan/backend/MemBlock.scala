@@ -1248,9 +1248,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val allRedirect = Seq(lsq.io.nuke_rollback, lsq.io.nack_rollback) ++ loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback)
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
-  // memory replay would not cause IAF/IPF
+  // memory replay would not cause IAF/IPF/IGPF
   oldestRedirect.bits.cfiUpdate.backendIAF := false.B
   oldestRedirect.bits.cfiUpdate.backendIPF := false.B
+  oldestRedirect.bits.cfiUpdate.backendIGPF := false.B
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept

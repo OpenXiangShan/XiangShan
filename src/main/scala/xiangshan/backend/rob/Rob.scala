@@ -522,6 +522,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
+  io.exception.bits.exceptionFromBackend := RegEnable(exceptionDataRead.bits.exceptionFromBackend, exceptionHappen)
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
@@ -1024,6 +1025,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.ftqPtr := io.enq.req(i).bits.ftqPtr
     exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
+    exceptionGen.io.enq(i).bits.exceptionFromBackend := io.enq.req(i).bits.exceptionFromBackend
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.flushPipe
     exceptionGen.io.enq(i).bits.isVset := io.enq.req(i).bits.isVset
     exceptionGen.io.enq(i).bits.replayInst := false.B
@@ -1049,6 +1051,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
     exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
     exc_wb.bits.exceptionVec    := wb.bits.exceptionVec.get
+    exc_wb.bits.exceptionFromBackend := false.B
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
     exc_wb.bits.isVset          := false.B
     exc_wb.bits.replayInst      := wb.bits.replay.getOrElse(false.B)
