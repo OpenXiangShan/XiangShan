@@ -1537,7 +1537,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!loadUnits(0).io.ldout.valid)
   }
 
-  lsq.io.flushSbuffer.empty := stIsEmpty
+  lsq.io.flushSbuffer.empty := sbuffer.io.sbempty
 
   for (i <- 0 until StaCnt) {
     when (state === s_atomics(i)) {
