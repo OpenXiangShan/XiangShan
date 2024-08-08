@@ -267,8 +267,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   (0 until PortNumber).foreach { i =>
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
-    toWayLookup.bits.exception(i)    := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
-    toWayLookup.bits.meta_corrupt(i) := excpValid && s1_meta_corrupt(i)
+    toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
@@ -362,7 +362,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_fire)
   val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_fire)
   val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_fire)
-  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exceptions
   val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_fire)
   val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_fire)
 

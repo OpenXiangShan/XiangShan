@@ -169,12 +169,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   fromWayLookup.ready := s0_fire
-  val s0_waymasks     = VecInit(fromWayLookup.bits.waymask.map(_.asTypeOf(Vec(nWays, Bool()))))
-  val s0_req_ptags    = fromWayLookup.bits.ptag
-  val s0_req_gpaddr   = fromWayLookup.bits.gpaddr
-  val s0_exception    = fromWayLookup.bits.exception
-  val s0_meta_corrupt = fromWayLookup.bits.meta_corrupt
-  val s0_hits         = VecInit(fromWayLookup.bits.waymask.map(_.orR))
+  val s0_waymasks       = VecInit(fromWayLookup.bits.waymask.map(_.asTypeOf(Vec(nWays, Bool()))))
+  val s0_req_ptags      = fromWayLookup.bits.ptag
+  val s0_req_gpaddr     = fromWayLookup.bits.gpaddr
+  val s0_itlb_exception = fromWayLookup.bits.itlb_exception
+  val s0_meta_corrupt   = fromWayLookup.bits.meta_corrupt
+  val s0_hits           = VecInit(fromWayLookup.bits.waymask.map(_.orR))
 
   when(s0_fire){
     assert((0 until PortNumber).map(i => s0_req_vSetIdx(i) === fromWayLookup.bits.vSetIdx(i)).reduce(_&&_),
@@ -211,14 +211,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr    = RegEnable(s0_req_vaddr,    0.U.asTypeOf(s0_req_vaddr),   s0_fire)
-  val s1_req_ptags    = RegEnable(s0_req_ptags,    0.U.asTypeOf(s0_req_ptags),   s0_fire)
-  val s1_req_gpaddr   = RegEnable(s0_req_gpaddr,   0.U.asTypeOf(s0_req_gpaddr),  s0_fire)
-  val s1_doubleline   = RegEnable(s0_doubleline,   0.U.asTypeOf(s0_doubleline),  s0_fire)
-  val s1_SRAMhits     = RegEnable(s0_hits,         0.U.asTypeOf(s0_hits),        s0_fire)
-  val s1_exception    = RegEnable(s0_exception,    0.U.asTypeOf(s0_exception),   s0_fire)
-  val s1_waymasks     = RegEnable(s0_waymasks,     0.U.asTypeOf(s0_waymasks),    s0_fire)
-  val s1_meta_corrupt = RegEnable(s0_meta_corrupt, 0.U.asTypeOf(s0_meta_corrupt), s0_fire)
+  val s1_req_vaddr      = RegEnable(s0_req_vaddr,      0.U.asTypeOf(s0_req_vaddr),      s0_fire)
+  val s1_req_ptags      = RegEnable(s0_req_ptags,      0.U.asTypeOf(s0_req_ptags),      s0_fire)
+  val s1_req_gpaddr     = RegEnable(s0_req_gpaddr,     0.U.asTypeOf(s0_req_gpaddr),     s0_fire)
+  val s1_doubleline     = RegEnable(s0_doubleline,     0.U.asTypeOf(s0_doubleline),     s0_fire)
+  val s1_SRAMhits       = RegEnable(s0_hits,           0.U.asTypeOf(s0_hits),           s0_fire)
+  val s1_itlb_exception = RegEnable(s0_itlb_exception, 0.U.asTypeOf(s0_itlb_exception), s0_fire)
+  val s1_waymasks       = RegEnable(s0_waymasks,       0.U.asTypeOf(s0_waymasks),       s0_fire)
+  val s1_meta_corrupt   = RegEnable(s0_meta_corrupt,   0.U.asTypeOf(s0_meta_corrupt),   s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx)
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
@@ -243,7 +243,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   toPMP.zipWithIndex.foreach { case (p, i) =>
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
-    p.valid     := s1_valid // && s1_exception === ExceptionType.none
+    p.valid     := s1_valid // && s1_itlb_exception === ExceptionType.none
     p.bits.addr := s1_req_paddr(i)
     p.bits.size := 3.U // TODO
     p.bits.cmd  := TlbCmd.exec
@@ -252,7 +252,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
   // merge s1 itlb/pmp exceptions, itlb has higher priority
-  val s1_exception_out = ExceptionType.merge(s1_exception, s1_pmp_exception)
+  val s1_exception_out = ExceptionType.merge(s1_itlb_exception, s1_pmp_exception)
 
   /**
     ******************************************************************************
@@ -294,7 +294,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_req_ptags    = RegEnable(s1_req_ptags,     0.U.asTypeOf(s1_req_ptags),     s1_fire)
   val s2_req_gpaddr   = RegEnable(s1_req_gpaddr,    0.U.asTypeOf(s1_req_gpaddr),    s1_fire)
   val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_fire)
-  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exception
   val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx)

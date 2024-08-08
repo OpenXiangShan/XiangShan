@@ -29,15 +29,15 @@ import xiangshan.frontend.ExceptionType
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx      : Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask      : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val ptag         : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val exception    : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val meta_corrupt : Vec[Bool] = Vec(PortNumber, Bool())
+  val vSetIdx        : Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask        : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
+  val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val meta_corrupt   : Vec[Bool] = Vec(PortNumber, Bool())
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  val gpaddr       : UInt      = UInt(GPAddrBits.W)
+  val gpaddr         : UInt      = UInt(GPAddrBits.W)
 }
 
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
@@ -45,12 +45,12 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGPFEntry
 
   // for compatibility
-  def vSetIdx      : Vec[UInt] = entry.vSetIdx
-  def waymask      : Vec[UInt] = entry.waymask
-  def ptag         : Vec[UInt] = entry.ptag
-  def exception    : Vec[UInt] = entry.exception
-  def meta_corrupt : Vec[Bool] = entry.meta_corrupt
-  def gpaddr       : UInt      = gpf.gpaddr
+  def vSetIdx        : Vec[UInt] = entry.vSetIdx
+  def waymask        : Vec[UInt] = entry.waymask
+  def ptag           : Vec[UInt] = entry.ptag
+  def itlb_exception : Vec[UInt] = entry.itlb_exception
+  def meta_corrupt   : Vec[Bool] = entry.meta_corrupt
+  def gpaddr         : UInt      = gpf.gpaddr
 }
 
 
@@ -171,7 +171,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
     // save gpf iff no gpf is already saved
-    when(!gpf_entry.valid && io.write.bits.exception.map(_ === ExceptionType.gpf).reduce(_||_)) {
+    when(!gpf_entry.valid && io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_||_)) {
       gpf_entry.valid := true.B
       gpf_entry.bits  := io.write.bits.gpf
       gpfPtr := writePtr
