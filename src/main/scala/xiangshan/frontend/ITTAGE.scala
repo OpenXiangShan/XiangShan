@@ -52,7 +52,6 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
 // reuse TAGE implementation
 
 trait ITTageHasFoldedHistory {
-  // val histLen: Int
   def compute_folded_hist(hist: UInt, histLen: Int, l: Int) = {
     if (histLen > 0) {
       val nChunks = (histLen + l - 1) / l
@@ -89,7 +88,7 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
-  val ghist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   // update tag and ctr
   val correct = Bool()
   val alloc = Bool()
@@ -207,13 +206,9 @@ class ITTageTable
   io.resp.bits.u := table_read_data.useful
   io.resp.bits.target := table_read_data.target
 
-  // Use fetchpc to compute hash
-  val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  // Use updating buffered folded_hist
+  val update_folded_hist = io.update.bits.folded_hist
 
-  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, log2Ceil(nRows))
-  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, tagLen)
-  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, tagLen-1)
-  dontTouch(update_folded_hist)
   val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.bits.pc), update_folded_hist)
   val update_target = io.update.bits.target
   val update_wdata = Wire(new ITTageEntry)
@@ -443,8 +438,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_req_stall_ftq  = RegInit(false.B)
   val delay_full_target = RegInit(0.U.asTypeOf(update.full_target)) //if update target need buffer
   val delay_u_pc     = RegInit(0.U.asTypeOf(update.pc))
-  val delay_u_ghist  = RegInit(0.U.asTypeOf(update.ghist))
-  val u_req_folded_hist_buff = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val delay_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
 
   val u_req_valid  = (updateValid || u_req_buff_valid) && !(io.s1_fire(3) && s1_isIndirect)
   val u_req_valid_reg = RegNext(u_req_valid)
@@ -454,10 +448,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   //If a read request is sent during the update process，it need clean
   when(u_req_conflict){
     u_req_buff_valid := true.B
-    u_req_folded_hist_buff := ufolded_hist
   }.elsewhen(u_req_valid){
     u_req_buff_valid := false.B
-    u_req_folded_hist_buff := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
   }
   //For reading during updates, even if there are no conflicts, it is necessary to block FTQ and store the update information.
   //Release when it can be written
@@ -465,11 +457,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     u_req_stall_ftq := true.B
     delay_full_target := update.full_target
     delay_u_pc := update.pc
-    delay_u_ghist := update.ghist
     delay_updateMisPred := update.mispred_mask(numBr)
+    delay_ufolded_hist := ufolded_hist
   }.elsewhen(u_req_valid_reg){
     u_req_stall_ftq := false.B
     delay_full_target := 0.U.asTypeOf(update.full_target)
+    delay_ufolded_hist := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
     delay_updateMisPred := update.mispred_mask(numBr)
   }
 
@@ -490,7 +483,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   tables.map { t => {
       t.io.req.valid := io.s1_fire(3) && s1_isIndirect || u_req_valid
       t.io.req.bits.pc := Mux(u_req_valid, Mux(u_req_buff_valid, delay_u_pc, update.pc), s1_pc_dup(3))
-      t.io.req.bits.folded_hist := Mux(u_req_valid, Mux(u_req_buff_valid, u_req_folded_hist_buff, ufolded_hist), io.in.bits.s1_folded_hist(3))
+      t.io.req.bits.folded_hist := Mux(u_req_valid, Mux(u_req_buff_valid, delay_ufolded_hist, ufolded_hist), io.in.bits.s1_folded_hist(3))
     }
   }
 
@@ -621,7 +614,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.bits.u := RegEnable(updateU(i), updateMask(i))
     tables(i).io.update.bits.pc := RegEnable(delay_u_pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.bits.ghist := RegEnable(delay_u_ghist, updateMask(i))
+    tables(i).io.update.bits.folded_hist := RegEnable(delay_ufolded_hist, updateMask(i))
   }
 
 
