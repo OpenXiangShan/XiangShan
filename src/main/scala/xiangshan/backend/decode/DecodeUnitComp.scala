@@ -78,7 +78,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
 
 trait VectorConstants {
   val MAX_VLMUL = 8
-  val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
+  val VECTOR_TMP_REG_LMUL = 32 // 32~46  ->  15
   val VECTOR_COMPRESS = 1 // in v0 regfile
   val MAX_INDEXED_LS_UOPNUM = 64
 }
