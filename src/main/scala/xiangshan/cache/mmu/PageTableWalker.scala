@@ -182,10 +182,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gvpn_gpf = Mux(req_s2xlate === noS2xlate, false.B, gpaddr(gpaddr.getWidth - 1, GPAddrBits) =/= 0.U)
   val guest_fault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
+  val fake_h_resp = 0.U.asTypeOf(new HptwResp)
+  fake_h_resp.gpf := true.B
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level, level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level, level), pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
   val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guest_fault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
   val stageHit_resp = idle === false.B && hptw_resp_stage2
