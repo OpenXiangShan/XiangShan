@@ -132,7 +132,6 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
     }.elsewhen(lastInstEndVec(i)) {
       traceRangeVec(i) := curPC === curTrace.pcVA
       inst.valid := traceRangeVec(i)
-      pdValidVec(i) := inst.valid
 
       when (inst.valid) {
         inst.bits := curTrace
