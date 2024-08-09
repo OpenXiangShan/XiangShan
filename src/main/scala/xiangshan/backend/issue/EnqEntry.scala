@@ -52,7 +52,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)
 
   when(io.commonIn.enq.valid) {
-    assert(common.enqReady, "Entry is not ready when enq is valid\n")
+    assert(common.enqReady, s"${params.getIQName}'s EnqEntry is not ready when enq is valid\n")
   }
 
   when(io.commonIn.enq.valid && common.enqReady) {

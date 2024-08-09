@@ -124,6 +124,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class CommonOutBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //status
     val valid                 = Output(Bool())
+    val issued                = Output(Bool())
     val canIssue              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
@@ -372,6 +373,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     commonOut.valid                                   := validReg
+    commonOut.issued                                  := entryReg.status.issued
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
@@ -445,7 +447,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
 
     commonOut.enqReady                                := common.enqReady
-    commonOut.transEntry.valid                        := validReg && !common.flushed && !common.deqSuccess
+    commonOut.transEntry.valid                        := validReg && !common.flushed && !status.issued
     commonOut.transEntry.bits                         := entryUpdate
     // debug
     commonOut.entryInValid                            := commonIn.enq.valid
