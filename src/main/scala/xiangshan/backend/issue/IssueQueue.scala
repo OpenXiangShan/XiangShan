@@ -217,6 +217,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val finalDeqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
   val validVec = VecInit(entries.io.valid.asBools)
+  val issuedVec = VecInit(entries.io.issued.asBools)
+  val requestForTrans = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
   dontTouch(canIssueVec)
   val deqFirstIssueVec = entries.io.isFirstIssue
@@ -443,9 +445,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     else {
       simpAgeDetectRequest.get(0) := canIssueVec.asUInt(params.numEnq + params.numSimp - 1, params.numEnq)
       simpAgeDetectRequest.get(1) := DontCare
-      simpAgeDetectRequest.get(params.numDeq) := VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt
+      simpAgeDetectRequest.get(params.numDeq) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt
       if (params.numEnq == 2) {
-        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt & ~simpEntryOldestSel.get(params.numDeq).bits
+        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt & ~simpEntryOldestSel.get(params.numDeq).bits
       }
 
       simpEntryOldestSel.get := AgeDetector(numEntries = params.numSimp,
@@ -513,9 +515,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       deqCanIssue.zipWithIndex.foreach { case (req, i) =>
         simpAgeDetectRequest.get(i) := req(params.numEnq + params.numSimp - 1, params.numEnq)
       }
-      simpAgeDetectRequest.get(params.numDeq) := VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt
+      simpAgeDetectRequest.get(params.numDeq) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt
       if (params.numEnq == 2) {
-        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt & ~simpEntryOldestSel.get(params.numDeq).bits
+        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt & ~simpEntryOldestSel.get(params.numDeq).bits
       }
 
       simpEntryOldestSel.get := AgeDetector(numEntries = params.numSimp,
@@ -816,6 +818,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   // Todo: better counter implementation
   private val enqHasValid = validVec.take(params.numEnq).reduce(_ | _)
+  private val enqHasIssued = validVec.zip(issuedVec).take(params.numEnq).map(x => x._1 & x._2).reduce(_ | _)
   private val enqEntryValidCnt = PopCount(validVec.take(params.numEnq))
   private val othersValidCnt = PopCount(validVec.drop(params.numEnq))
   private val enqEntryValidCntDeq0 = PopCount(
@@ -849,7 +852,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq)).asUInt).reduce(_ | _)
   private val othersCanotIn = othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
 
-  io.enq.foreach(_.ready := !othersCanotIn || !enqHasValid)
+  io.enq.foreach(_.ready := (!othersCanotIn || !enqHasValid) && !enqHasIssued)
   io.status.empty := !Cat(validVec).orR
   io.status.full := othersCanotIn
   io.status.validCnt := PopCount(validVec)
