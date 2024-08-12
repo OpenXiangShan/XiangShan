@@ -230,6 +230,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
     last_s2xlate := false.B
+    hptw_pageFault := false.B
+    hptw_accessFault := false.B
   }
 
   when (io.hptw.resp.fire && w_hptw_resp === false.B && stage1Hit){
