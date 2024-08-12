@@ -1,6 +1,8 @@
 package xiangshan.backend.datapath
 
 import chisel3.util.log2Up
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.XSCoreParamsKey
 
 object DataConfig {
   sealed abstract class DataConfig (
@@ -14,7 +16,7 @@ object DataConfig {
   case class FpData() extends DataConfig("fp", 64)
   case class VecData() extends DataConfig("vec", 128)
   case class ImmData(len: Int) extends DataConfig("int", len)
-  case class VAddrData() extends DataConfig("vaddr", 39) // Todo: associate it with the width of vaddr
+  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", VAddrBits)
   case class V0Data() extends DataConfig("v0", 128)
   case class VlData() extends DataConfig("vl", log2Up(VecData().dataWidth) + 1 ) // 8
   case class FakeIntData() extends DataConfig("fakeint", 64)
@@ -29,4 +31,15 @@ object DataConfig {
 
 
   def RegDataMaxWidth : Int = RegSrcDataSet.map(_.dataWidth).max
+
+  def VAddrBits(implicit p: Parameters): Int = {
+    def coreParams = p(XSCoreParamsKey)
+    def HasHExtension = coreParams.HasHExtension
+    if(HasHExtension){
+      coreParams.GPAddrBits
+    }else{
+      coreParams.VAddrBits
+    }
+    // VAddrBits is Virtual Memory addr bits
+  }
 }

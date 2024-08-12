@@ -102,8 +102,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val vpn = Reg(UInt(vpnLen.W)) // vpn or gvpn(onlyS2xlate)
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
-  val pte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-
+  val pte_valid = RegInit(false.B) // avoid the x states
+  val fake_pte = 0.U.asTypeOf(new PteBundle())
+  fake_pte.perm.v := true.B
+  fake_pte.perm.r := true.B
+  fake_pte.perm.w := true.B
+  fake_pte.perm.x := true.B
+  val pte = Mux(pte_valid, mem.resp.bits.asTypeOf(new PteBundle()), fake_pte)
   // s/w register
   val s_pmp_check = RegInit(true.B)
   val s_mem_req = RegInit(true.B)
@@ -153,13 +158,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
   io.req.ready := idle
-  val fake_pte = 0.U.asTypeOf(pte)
-  fake_pte.perm.v := true.B
-  fake_pte.perm.r := true.B
-  fake_pte.perm.w := true.B
-  fake_pte.perm.x := true.B
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(guest_fault && level === 0.U, fake_pte, pte), vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
   val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guest_fault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
@@ -185,7 +185,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.id := FsmReqID.U(bMemID.W)
   mem.req.bits.hptw_bypassed := false.B
 
-  io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, req_s2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
+  io.refill.req_info.s2xlate := req_s2xlate
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -225,6 +225,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     idle := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
+    pte_valid := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       last_s2xlate := true.B
@@ -306,6 +307,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := af_level + 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
+    pte_valid := true.B
   }
 
   when(mem_addr_update){
@@ -688,7 +690,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem_arb.io.out.ready := io.mem.req.ready
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
-  io.mem.refill.s2xlate := Mux(entries(mem_refill_id).req_info.s2xlate === noS2xlate, noS2xlate, onlyStage1) // llptw refill the pte of stage 1 
+  io.mem.refill.s2xlate := entries(mem_refill_id).req_info.s2xlate
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 

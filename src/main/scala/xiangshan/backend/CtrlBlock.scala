@@ -280,8 +280,6 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
 
-  io.frontend.canAccept := decode.io.canAccept
-
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid
@@ -357,6 +355,7 @@ class CtrlBlockImp(
     decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
+  io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts

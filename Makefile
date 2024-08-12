@@ -36,6 +36,12 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
+ISSUE ?= B
+
+SUPPORT_CHI_ISSUE = B E.b
+ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
+$(error "Unsupported CHI issue: $(ISSUE)")
+endif
 
 ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
 $(error At most one target can be specified)
@@ -134,10 +140,19 @@ endif
 help:
 	mill -i xiangshan.runMain $(FPGATOP) --help
 
+version:
+	mill -i xiangshan.runMain $(FPGATOP) --version
+
+jar:
+	mill -i xiangshan.assembly
+
+test-jar:
+	mill -i xiangshan.test.assembly
+
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
-		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
@@ -155,7 +170,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
-		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__

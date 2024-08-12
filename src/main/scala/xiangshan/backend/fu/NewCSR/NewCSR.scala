@@ -305,6 +305,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.medeleg := medeleg.regOut
   trapHandleMod.io.in.hideleg := hideleg.regOut
   trapHandleMod.io.in.hedeleg := hedeleg.regOut
+  trapHandleMod.io.in.mvien := mvien.regOut
+  trapHandleMod.io.in.hvien := hvien.regOut
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut

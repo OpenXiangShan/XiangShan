@@ -24,6 +24,13 @@ import $file.huancun.common
 import $file.coupledL2.common
 import $file.openLLC.common
 
+/* for publishVersion */
+import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
+import de.tobiasroeser.mill.vcs.version.VcsVersion
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import scala.util.matching.Regex
+
 val defaultScalaVersion = "2.13.14"
 
 def defaultVersions = Map(
@@ -237,6 +244,28 @@ object xiangshan extends XiangShanModule with HasChisel {
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+
+  def publishVersion: T[String] = VcsVersion.vcsState().format(
+    revHashDigits = 8,
+    dirtyHashDigits = 0,
+    commitCountPad = -1,
+    countSep = "",
+    tagModifier = (tag: String) => "[Rr]elease.*".r.findFirstMatchIn(tag) match {
+      case Some(_) => "Kunminghu-Release-" + LocalDateTime.now().format(
+                                 DateTimeFormatter.ofPattern("MMM-dd-yyyy"))
+      case None => "Kunminghu-dev"
+    },
+    /* add "username, buildhost, buildtime" for non-release version */
+    untaggedSuffix = " (%s@%s) # %s".format(
+      System.getProperty("user.name"),
+      java.net.InetAddress.getLocalHost().getHostName(),
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy"))),
+  )
+
+  override def resources = T.sources {
+    os.write(T.dest / "publishVersion", publishVersion())
+    super.resources() ++ Seq(PathRef(T.dest))
+  }
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
     override def forkArgs = Seq("-Xmx40G", "-Xss256m")

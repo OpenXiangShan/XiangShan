@@ -206,7 +206,7 @@ case class ExeUnitParams(
 
   def fpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (fpLatencyCertain)
-      writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if (needOg2) writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else
       Map()
   }

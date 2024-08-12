@@ -34,6 +34,7 @@ object ArgParser {
     """
       |XiangShan Options
       |--xs-help                  print this help message
+      |--version                  print version info
       |--config <ConfigClassName>
       |--num-cores <Int>
       |--hartidbits <Int>
@@ -68,8 +69,16 @@ object ArgParser {
           println(usage)
           if(tail == Nil) exit(0)
           nextOption(config, tail)
+        case "--version" :: tail =>
+          println(os.read(os.resource / "publishVersion"))
+          if(tail == Nil) exit(0)
+          nextOption(config, tail)
         case "--config" :: confString :: tail =>
           nextOption(getConfigByName(confString), tail)
+        case "--issue" :: issueString :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIIssue => issueString
+          }), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => (0 until value.toInt) map { i =>

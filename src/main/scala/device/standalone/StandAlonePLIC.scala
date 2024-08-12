@@ -21,6 +21,7 @@ import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
+import utility.IntBuffer
 
 class StandAlonePLIC (
   useTL: Boolean = false,
@@ -40,7 +41,7 @@ class StandAlonePLIC (
 
   // interrupts
   val plicIntNode = IntSinkNode(IntSinkPortSimple(hartNum * 2, 1))
-  plicIntNode :*= plic.intnode
+  plicIntNode :*= IntBuffer() :*= plic.intnode
   val int = InModuleBody(plicIntNode.makeIOs())
 
 }

@@ -292,8 +292,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     p.bits.size := 3.U // TODO
     p.bits.cmd  := TlbCmd.exec
   }
-  val pmpExcp = VecInit(Seq(fromPMP(0).instr || fromPMP(0).mmio,
-                             fromPMP(0).instr || fromPMP(1).instr || fromPMP(0).mmio))
+  val pmpExcp = VecInit((0 until PortNumber).map( i => fromPMP(i).instr || fromPMP(i).mmio ))
 
   /**
     ******************************************************************************
@@ -373,14 +372,28 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * Monitor the requests from missUnit to write to SRAM
     ******************************************************************************
     */
-  val s2_MSHR_match = VecInit((0 until PortNumber).map(i => (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
-                                                            (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
-                                                            s2_valid && fromMSHR.valid && !fromMSHR.bits.corrupt))
+
+  /* NOTE: If fromMSHR.bits.corrupt, we should set s2_MSHR_hits to false.B, and send prefetch requests again.
+   * This is the opposite of how mainPipe handles fromMSHR.bits.corrupt,
+   *   in which we should set s2_MSHR_hits to true.B, and send error to ifu.
+   */
+  val s2_MSHR_match = VecInit((0 until PortNumber).map(i =>
+    (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
+    (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
+    s2_valid && fromMSHR.valid && !fromMSHR.bits.corrupt
+  ))
   val s2_MSHR_hits = (0 until PortNumber).map(i => ValidHoldBypass(s2_MSHR_match(i), s2_fire || s2_flush))
 
-  val s2_hits = s2_waymasks.map(_.orR)
-  val s2_miss = VecInit(Seq(!s2_itlbExcp(0) && !s2_pmpExcp(0) && !s2_hits(0) && !s2_MSHR_hits(0),
-                            !s2_itlbExcp(0) && !s2_pmpExcp(0) && !s2_itlbExcp(1) && !s2_pmpExcp(1) && !s2_hits(1) && !s2_MSHR_hits(1) && s2_doubleline))
+  val s2_SRAM_hits = s2_waymasks.map(_.orR)
+  val s2_hits = VecInit((0 until PortNumber).map(i => s2_MSHR_hits(i) || s2_SRAM_hits(i)))
+
+  // pmpExcp includes access fault and mmio, neither of which should be prefetched
+  // also, if port0 has exception, port1 should not be prefetched
+  // miss = this port not hit && need this port && no exception found before and in this port
+  val s2_miss = VecInit((0 until PortNumber).map { i =>
+    !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
+      !s2_itlbExcp.take(i+1).reduce(_||_) && !s2_pmpExcp.take(i+1).reduce(_||_)
+  })
 
   /**
     ******************************************************************************
@@ -390,7 +403,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
   
   // To avoid sending duplicate requests.
-  val has_send = RegInit(VecInit(Seq.fill(2)(false.B)))
+  val has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
       has_send(i) := false.B

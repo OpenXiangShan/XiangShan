@@ -294,7 +294,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -307,7 +307,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     })
 
     // select logic
-    val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
+    val lqSelect: (Seq[Bool], Seq[XSBundleWithMicroOp]) = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 
     // select one inst
     val lqViolation = lqSelect._1(0)
