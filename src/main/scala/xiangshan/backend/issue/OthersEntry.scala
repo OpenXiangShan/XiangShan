@@ -44,7 +44,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   }
 
   when(io.commonIn.enq.valid) {
-    assert(common.enqReady, "Entry is not ready when enq is valid\n")
+    assert(common.enqReady, s"${params.getIQName}'s OthersEntry is not ready when enq is valid\n")
   }
 
   when(io.commonIn.enq.valid) {

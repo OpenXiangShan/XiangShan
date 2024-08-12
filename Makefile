@@ -140,6 +140,15 @@ endif
 help:
 	mill -i xiangshan.runMain $(FPGATOP) --help
 
+version:
+	mill -i xiangshan.runMain $(FPGATOP) --version
+
+jar:
+	mill -i xiangshan.assembly
+
+test-jar:
+	mill -i xiangshan.test.assembly
+
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \

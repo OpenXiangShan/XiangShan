@@ -32,7 +32,7 @@ import utility._
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
-class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
+class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
   val csr_pf_enable     = Input(Bool())
   val flush             = Input(Bool())
@@ -48,7 +48,7 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
 
 class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 {
-  val io = IO(new IPredfetchIO)
+  val io: IPrefetchIO = IO(new IPrefetchIO)
 
   val fromFtq = io.ftqReq
   val (toITLB,  fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
@@ -57,6 +57,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val (toMSHR, fromMSHR)  = (io.MSHRReq, io.MSHRResp)
   val toWayLookup = io.wayLookupWrite
 
+  // FIXME: csr_pf_enable/enableBit is not used now
   val enableBit = RegInit(false.B)
   enableBit := io.csr_pf_enable
 
@@ -84,7 +85,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s0_req_vaddr    = VecInit(Seq(fromFtq.req.bits.startAddr, fromFtq.req.bits.nextlineStart))
   val s0_req_ftqIdx   = fromFtq.req.bits.ftqIdx
   val s0_doubleline   = fromFtq.req.bits.crossCacheline
-  val s0_req_vSetIdx  = s0_req_vaddr.map(get_idx(_))
+  val s0_req_vSetIdx  = s0_req_vaddr.map(get_idx)
 
   from_bpu_s0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
                        fromFtq.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx)
@@ -109,7 +110,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_req_vaddr    = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
   val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
   val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
-  val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx(_)))
+  val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx))
 
   val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
   val state = RegInit(m_idle)
@@ -158,20 +159,20 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * Receive resp from ITLB
     ******************************************************************************
     */
-  val s1_req_paddr_wire   = VecInit(fromITLB.map(_.bits.paddr(0)))
-  val s1_req_paddr_reg    = VecInit((0 until PortNumber).map(i =>
-                                RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))))
-  val s1_req_paddr        = VecInit((0 until PortNumber).map(i => 
-                                Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))))
-  val s1_req_gpaddr_tmp   = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))))
-  val itlbExcpPF          = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).pf.instr), data = fromITLB(i).bits.excp(0).pf.instr)))
-  val itlbExcpGPF         = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).gpf.instr), data = fromITLB(i).bits.excp(0).gpf.instr)))
-  val itlbExcpAF          = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).af.instr), data = fromITLB(i).bits.excp(0).af.instr)))
-  val itlbExcp            = VecInit((0 until PortNumber).map(i => itlbExcpAF(i) || itlbExcpPF(i) || itlbExcpGPF(i)))
+  val s1_req_paddr_wire     = VecInit(fromITLB.map(_.bits.paddr(0)))
+  val s1_req_paddr_reg      = VecInit((0 until PortNumber).map( i =>
+    RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))
+  ))
+  val s1_req_paddr          = VecInit((0 until PortNumber).map( i =>
+    Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))
+  ))
+  val s1_req_gpaddr_tmp     = VecInit((0 until PortNumber).map( i =>
+    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))
+  ))
+  val s1_itlb_exception     = VecInit((0 until PortNumber).map( i =>
+    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits))
+  ))
+  val s1_itlb_exception_gpf = VecInit(s1_itlb_exception.map(_ === ExceptionType.gpf))
 
   /* Select gpaddr with the first gpf
    * Note: the backend wants the base guest physical address of a fetch block
@@ -180,7 +181,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
    *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
    */
   val s1_req_gpaddr = PriorityMuxDefault(
-    itlbExcpGPF zip (0 until PortNumber).map(i => s1_req_gpaddr_tmp(i) - (i << blockOffBits).U),
+    s1_itlb_exception_gpf zip (0 until PortNumber).map(i => s1_req_gpaddr_tmp(i) - (i << blockOffBits).U),
     0.U.asTypeOf(s1_req_gpaddr_tmp(0))
   )
 
@@ -203,17 +204,15 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * Receive resp from IMeta and check
     ******************************************************************************
     */
-  val s1_req_ptags    = VecInit(s1_req_paddr.map(get_phy_tag(_)))
+  val s1_req_ptags    = VecInit(s1_req_paddr.map(get_phy_tag))
 
   val s1_meta_ptags   = fromMeta.tags
   val s1_meta_valids  = fromMeta.entryValid
-  val s1_meta_errors = VecInit((0 until PortNumber).map( p =>
-    // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
-    fromMeta.errors(p).asUInt.orR
-  ))
+  // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
+  val s1_meta_corrupt = VecInit(fromMeta.errors.map(_.asUInt.orR))
 
   def get_waymask(paddrs: Vec[UInt]): Vec[UInt] = {
-    val ptags         = paddrs.map(get_phy_tag(_))
+    val ptags         = paddrs.map(get_phy_tag)
     val tag_eq_vec    = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w => s1_meta_ptags(p)(w) === ptags(p)))))
     val tag_match_vec = VecInit((0 until PortNumber).map( k => VecInit(tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_valids(k)(w)})))
     val waymasks      = VecInit(tag_match_vec.map(_.asUInt))
@@ -236,7 +235,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
     val way_same  = fromMSHR.bits.waymask === mask
     when(valid && vset_same) {
-      when(ptag_same) { 
+      when(ptag_same) {
         new_mask := fromMSHR.bits.waymask
       }.elsewhen(way_same) {
         new_mask := 0.U
@@ -267,10 +266,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toWayLookup.bits.gpaddr       := s1_req_gpaddr
   (0 until PortNumber).foreach { i =>
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
-    toWayLookup.bits.excp_tlb_af(i)  := excpValid && itlbExcpAF(i)
-    toWayLookup.bits.excp_tlb_pf(i)  := excpValid && itlbExcpPF(i)
-    toWayLookup.bits.excp_tlb_gpf(i) := excpValid && itlbExcpGPF(i)
-    toWayLookup.bits.meta_errors(i)  := excpValid && s1_meta_errors(i)
+    // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
+    toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
@@ -286,13 +284,18 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * PMP check
     ******************************************************************************
     */
-  toPMP.zipWithIndex.map { case (p, i) =>
-    p.valid     := s1_valid
+  toPMP.zipWithIndex.foreach { case (p, i) =>
+    // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
+    p.valid     := s1_valid // && s1_itlb_exception === ExceptionType.none
     p.bits.addr := s1_req_paddr(i)
     p.bits.size := 3.U // TODO
     p.bits.cmd  := TlbCmd.exec
   }
-  val pmpExcp = VecInit((0 until PortNumber).map( i => fromPMP(i).instr || fromPMP(i).mmio ))
+  val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
+  val s1_mmio          = VecInit(fromPMP.map(_.mmio))
+
+  // merge s1 itlb/pmp exceptions, itlb has higher priority
+  val s1_exception_out = ExceptionType.merge(s1_itlb_exception, s1_pmp_exception)
 
   /**
     ******************************************************************************
@@ -356,16 +359,15 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val s2_valid  = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
 
-  val s2_req_vaddr    = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
-  val s2_doubleline   = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
-  val s2_req_paddr    = RegEnable(s1_req_paddr, 0.U.asTypeOf(s1_req_paddr), s1_fire)
+  val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_fire)
+  val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_fire)
+  val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_fire)
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exceptions
+  val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_fire)
+  val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_fire)
 
-  val s2_pmpExcp      = RegEnable(pmpExcp, 0.U.asTypeOf(pmpExcp), s1_fire)
-  val s2_itlbExcp     = RegEnable(itlbExcp, 0.U.asTypeOf(itlbExcp), s1_fire)
-  val s2_waymasks     = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
-
-  val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
-  val s2_req_ptags    = s2_req_paddr.map(get_phy_tag(_))
+  val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx)
+  val s2_req_ptags    = s2_req_paddr.map(get_phy_tag)
 
   /**
     ******************************************************************************
@@ -387,12 +389,16 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_SRAM_hits = s2_waymasks.map(_.orR)
   val s2_hits = VecInit((0 until PortNumber).map(i => s2_MSHR_hits(i) || s2_SRAM_hits(i)))
 
-  // pmpExcp includes access fault and mmio, neither of which should be prefetched
-  // also, if port0 has exception, port1 should not be prefetched
-  // miss = this port not hit && need this port && no exception found before and in this port
+  /* s2_exception includes itlb pf/gpf/af and pmp af, neither of which should be prefetched
+   * mmio should not be prefetched
+   * also, if port0 has exception, port1 should not be prefetched
+   * miss = this port not hit && need this port && no exception found before and in this port
+   */
+  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
-      !s2_itlbExcp.take(i+1).reduce(_||_) && !s2_pmpExcp.take(i+1).reduce(_||_)
+      s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&
+      s2_mmio.take(i+1).map(!_).reduce(_&&_)
   })
 
   /**
