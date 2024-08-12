@@ -188,7 +188,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(Mux(pte_valid, pageFault && !accessFault && !ppn_af, false.B), Mux(pte_valid, accessFault || ppn_af, false.B), Mux(accessFault, af_level, level), pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(Mux(pte_valid, pageFault && !accessFault && !ppn_af, false.B), accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
   val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
