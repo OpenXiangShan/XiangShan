@@ -444,6 +444,24 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_req_valid_reg = RegNext(u_req_valid)
   val u_req_conflict = updateValid && io.s1_fire(3) && s1_isIndirect
 
+  //Read during updates
+  val u_updateValid       = RegNext(u_req_valid_reg, init = false.B)
+  val u_providerTarget    = RegEnable(s2_providerTarget, u_req_valid_reg)
+  val u_altProviderTarget = RegEnable(s2_altProviderTarget, u_req_valid_reg)
+  val u_provided          = RegEnable(s2_provided, u_req_valid_reg)
+  val u_provider          = RegEnable(s2_provider, u_req_valid_reg)
+  val u_altProvided       = RegEnable(s2_altProvided, u_req_valid_reg)
+  val u_altProvider       = RegEnable(s2_altProvider, u_req_valid_reg)
+  val u_providerU         = RegEnable(s2_providerU, false.B, u_req_valid_reg)
+  val u_providerCtr       = RegEnable(s2_providerCtr, u_req_valid_reg)
+  val u_altProviderCtr    = RegEnable(s2_altProviderCtr, u_req_valid_reg)
+  val u_allocate          = RegInit(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))))
+  val u_altDiffers        = Mux(u_altProvided, u_altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
+  val u_write_pc          = RegEnable(delay_u_pc, u_req_valid_reg)
+  val u_write_full_target = RegEnable(delay_full_target, u_req_valid_reg)
+  val u_write_updateMisPred = RegEnable(delay_updateMisPred, u_req_valid_reg)
+  val u_write_folded_hist = RegEnable(delay_ufolded_hist, u_req_valid_reg)
+
   //when a conflict occurs, need storage the update data.
   //If a read request is sent during the update process，it need clean
   when(u_req_conflict){
@@ -465,19 +483,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     delay_ufolded_hist := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
     delay_updateMisPred := update.mispred_mask(numBr)
   }
-
-  //Read during updates
-  val u_providerTarget    = s2_providerTarget
-  val u_altProviderTarget = s2_altProviderTarget
-  val u_provided          = s2_provided
-  val u_provider          = s2_provider
-  val u_altProvided       = s2_altProvided
-  val u_altProvider       = s2_altProvider
-  val u_providerU         = s2_providerU
-  val u_providerCtr       = s2_providerCtr
-  val u_altProviderCtr    = s2_altProviderCtr
-  val u_allocate          = Wire(ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W)))
-  val u_altDiffers        = Mux(u_altProvided, u_altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
 
   // Predict
   tables.map { t => {
@@ -544,16 +549,18 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
 
   // Update in loop
-  u_allocate.valid       := s2_allocatableSlots =/= 0.U
-  u_allocate.bits        := s2_allocEntry
-  val updateRealTarget = delay_full_target
-  when (u_req_valid_reg) {
+  when(u_req_valid_reg){
+    u_allocate.valid       := s2_allocatableSlots =/= 0.U
+    u_allocate.bits        := s2_allocEntry
+  }
+  val updateRealTarget = u_write_full_target
+  when (u_updateValid) {
     when (u_provided) {
       val provider = u_provider
       XSDebug(true.B, p"update provider $provider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
       val altProvider = u_altProvider
       val usedAltpred = u_altProvided && u_providerCtr === 0.U
-      when (usedAltpred && delay_updateMisPred) { // update altpred if used as pred
+      when (usedAltpred && u_write_updateMisPred) { // update altpred if used as pred
         XSDebug(true.B, p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
 
         updateMask(altProvider)    := true.B
@@ -565,11 +572,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         updateOldTarget(altProvider) := u_altProviderTarget
       }
 
-
       updateMask(provider)   := true.B
       updateUMask(provider)  := true.B
 
-      updateU(provider) := Mux(!u_altDiffers, u_providerU, !delay_updateMisPred)
+      updateU(provider) := Mux(!u_altDiffers, u_providerU, !u_write_updateMisPred)
       updateCorrect(provider)  := u_providerTarget === updateRealTarget
       updateTarget(provider) := updateRealTarget
       updateOldTarget(provider) := u_providerTarget
@@ -582,7 +588,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // provider offered correct target but used altpred due to unconfident
   val providerCorrect = u_provided && u_providerTarget === updateRealTarget
   val providerUnconf = u_providerCtr === 0.U
-  when (u_req_valid_reg && delay_updateMisPred && !(providerCorrect && providerUnconf)) {
+  when (u_updateValid && u_write_updateMisPred && !(providerCorrect && providerUnconf)) {
     val allocate = u_allocate
     tickCtr := satUpdate(tickCtr, TickWidth, !allocate.valid)
     when (allocate.valid) {
@@ -612,9 +618,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
     tables(i).io.update.bits.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
     tables(i).io.update.bits.u := RegEnable(updateU(i), updateMask(i))
-    tables(i).io.update.bits.pc := RegEnable(delay_u_pc, updateMask(i))
+    tables(i).io.update.bits.pc := RegEnable(u_write_pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.bits.folded_hist := RegEnable(delay_ufolded_hist, updateMask(i))
+    tables(i).io.update.bits.folded_hist := RegEnable(u_write_folded_hist, updateMask(i))
   }
 
 
