@@ -1359,7 +1359,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow
-  s3_fast_rep := GatedValidRegNext(s2_fast_rep)
+  s3_fast_rep := RegNext(s2_fast_rep)
 
   val s3_fb_no_waiting = !s3_in.isLoadReplay &&
                         (!(s3_fast_rep && !s3_fast_rep_canceled)) &&
