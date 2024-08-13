@@ -1309,16 +1309,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
   }
 
-
-  wb.io.miss_req.valid := missReqArb.io.out.valid
-  wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
-
-  // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
-  missReqArb.io.out <> missQueue.io.req
-  when(wb.io.block_miss_req) {
-    missQueue.io.req.bits.cancel := true.B
-    missReqArb.io.out.ready := false.B
+  for(w <- 0 until LoadPipelineWidth) {
+    wb.io.miss_req_conflict_check(w) := ldu(w).io.wbq_conflict_check
+    ldu(w).io.wbq_block_miss_req     := wb.io.block_miss_req(w)
   }
+
+  wb.io.miss_req_conflict_check(3) := mainPipe.io.wbq_conflict_check
+  mainPipe.io.wbq_block_miss_req   := wb.io.block_miss_req(3)
+  
+  wb.io.miss_req_conflict_check(4).valid := missReqArb.io.out.valid
+  wb.io.miss_req_conflict_check(4).bits  := missReqArb.io.out.bits.addr
+  missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
+
+  missReqArb.io.out <> missQueue.io.req
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
