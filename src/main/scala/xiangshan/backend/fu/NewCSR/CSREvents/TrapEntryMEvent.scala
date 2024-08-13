@@ -100,7 +100,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   ))
 
   private val tval2 = Mux1H(Seq(
-    (isFetchGuestExcp                  ) -> trapPC,
+    (isFetchGuestExcp                  ) -> trapPCGPA,
     (isFetchGuestExcp && fetchCrossPage) -> (trapPCGPA + 2.U),
     (isLSGuestExcp                     ) -> trapMemGPA,
   ))
