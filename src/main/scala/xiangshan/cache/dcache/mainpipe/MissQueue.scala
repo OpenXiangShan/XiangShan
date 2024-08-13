@@ -155,6 +155,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   val merge         = Bool()
   // this request is about to allocate a new mshr
   val alloc         = Bool()
+  val cancel        = Bool()
   val mshr_id       = UInt(log2Up(cfg.nMissEntries).W)
 
   def reg_valid(): Bool = {
@@ -287,6 +288,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // client requests
     // MSHR update request, MSHR state and addr will be updated when req.fire
     val req = Flipped(ValidIO(new MissReqWoStoreData))
+    val wbq_block_miss_req = Input(Bool())
     // pipeline reg
     val miss_req_pipe_reg = Input(new MissReqPipeRegBundle(edge))
     // allocate this entry for new req
@@ -413,11 +415,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
 
   // allocate current miss queue entry for a miss req
-  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
+  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel && !io.wbq_block_miss_req)
+  val primary_accept = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
   // merge miss req to current miss queue entry
-  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
+  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel && !io.wbq_block_miss_req)
+  val secondary_accept = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
 
-  val req_handled_by_this_entry = primary_fire || secondary_fire
+  val req_handled_by_this_entry = primary_accept || secondary_accept
 
   // for perf use
   val secondary_fired = RegInit(false.B)
@@ -433,7 +437,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     req_valid := false.B
   }
 
-  when (io.miss_req_pipe_reg.alloc) {
+  when (io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel) {
     assert(RegNext(primary_fire), "after 1 cycle of primary_fire, entry will be allocated")
     req_valid := true.B
 
@@ -475,7 +479,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     secondary_fired := false.B
   }
 
-  when (io.miss_req_pipe_reg.merge) {
+  when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
@@ -673,7 +677,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   // if the entry has a pending merge req, wait for it
   // Note: now, only wait for store, because store may acquire T
-  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore) 
+  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) 
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
     fromSource = io.id,
@@ -788,7 +792,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
   XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
-  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
+  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(GatedValidRegNextN(primary_fire, 2), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
@@ -833,6 +837,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // block replace when release an addr valid in mshr
     val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
     val replace_block = Output(Bool())
+
+    // req blocked by wbq
+    val wbq_block_miss_req = Input(Bool())
 
     val full = Output(Bool())
 
@@ -893,8 +900,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     miss_req_pipe_reg.req     := io.req.bits
   }
   // miss_req_pipe_reg.req     := io.req.bits
-  miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel
-  miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel
+  miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel && !io.wbq_block_miss_req
+  miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel && !io.wbq_block_miss_req
+  miss_req_pipe_reg.cancel  := io.wbq_block_miss_req
   miss_req_pipe_reg.mshr_id := io.resp.id
 
   assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
@@ -960,6 +968,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       e.io.id := i.U
       e.io.l2_pf_store_only := io.l2_pf_store_only
       e.io.req.valid := io.req.valid
+      e.io.wbq_block_miss_req := io.wbq_block_miss_req
       e.io.primary_valid := io.req.valid &&
         !merge &&
         !reject &&

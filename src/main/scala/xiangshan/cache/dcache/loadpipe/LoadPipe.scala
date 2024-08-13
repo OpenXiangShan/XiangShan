@@ -66,6 +66,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Input(new MissResp)
 
+    // send miss request to wbq
+    val wbq_conflict_check = Valid(UInt())
+    val wbq_block_miss_req = Input(Bool())
+
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
@@ -339,11 +343,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack_hit = RegEnable(s1_nack, s1_fire)
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
+  // block with a wbq valid req
+  val s2_nack_wbq_conflict = io.miss_req.valid && io.wbq_block_miss_req
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
-  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict
   // s2 miss merged
-  val s2_miss_merged = io.miss_req.fire && !io.mq_enq_cancel && io.miss_resp.merged
+  val s2_miss_merged = io.miss_req.fire && !io.mq_enq_cancel && !io.wbq_block_miss_req && io.miss_resp.merged
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   dontTouch(s2_bank_addr)
@@ -387,6 +393,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
+
+  //send load miss to wbq
+  io.wbq_conflict_check.valid := s2_valid && s2_can_send_miss_req
+  io.wbq_conflict_check.bits := get_block_addr(s2_paddr)
+
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid := s2_valid
@@ -412,7 +423,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.meta_access := s2_hit_access
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
-  resp.bits.handled := io.miss_req.fire && !io.mq_enq_cancel && io.miss_resp.handled
+  resp.bits.handled := io.miss_req.fire && !io.mq_enq_cancel && !io.wbq_block_miss_req && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
@@ -466,7 +477,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack_no_mshr || io.mq_enq_cancel))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack_no_mshr || io.mq_enq_cancel || io.wbq_block_miss_req))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------
@@ -505,12 +516,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.bits.opType.load := true.B
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
-
-  // update plru in s3
-  val s3_miss_merged = RegNext(s2_miss_merged)
-  val first_update = RegNext(RegNext(RegNext(!io.lsu.replacementUpdated)))
-  val hit_update_replace_en  = RegNext(s2_valid) && RegNext(!resp.bits.miss)
-  val miss_update_replace_en = RegNext(io.miss_req.fire) && RegNext(!io.mq_enq_cancel) && RegNext(io.miss_resp.handled)
 
   io.replace_access.valid := s3_valid && s3_hit
   io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
