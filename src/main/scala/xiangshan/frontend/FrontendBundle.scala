@@ -141,6 +141,19 @@ object ExceptionType {
   }
 
   // raise af if meta/data array ecc check failed or l2 cache respond with tilelink corrupt
+  /* FIXME: RISC-V Machine ISA v1.13 (draft) introduced a "hardware error" exception, described as:
+   * > A Hardware Error exception is a synchronous exception triggered when corrupted or
+   * > uncorrectable data is accessed explicitly or implicitly by an instruction. In this context,
+   * > "data" encompasses all types of information used within a RISC-V hart. Upon a hardware
+   * > error exception, the xepc register is set to the address of the instruction that attempted to
+   * > access corrupted data, while the xtval register is set either to 0 or to the virtual address
+   * > of an instruction fetch, load, or store that attempted to access corrupted data. The priority
+   * > of Hardware Error exception is implementation-defined, but any given occurrence is
+   * > generally expected to be recognized at the point in the overall priority order at which the
+   * > hardware error is discovered.
+   * Maybe it's better to raise hardware error instead of access fault when ECC check failed.
+   * But it's draft and XiangShan backend does not implement this exception code yet, so we still raise af here.
+   */
   def fromECC(enable: Bool, corrupt: Bool): UInt = {
     Mux(enable && corrupt, af, none)
   }
