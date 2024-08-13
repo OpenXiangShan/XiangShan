@@ -270,7 +270,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def MakeAddr(ppn: UInt, off: UInt) = {
     require(off.getWidth == 9)
-    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
+    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))
   }
 
   def MakeGPAddr(ppn: UInt, off: UInt) = {

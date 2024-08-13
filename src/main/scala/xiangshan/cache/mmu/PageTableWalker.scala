@@ -139,7 +139,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val stage1 = RegEnable(io.req.bits.stage1, io.req.fire)
   val hptw_resp_stage2 = Reg(Bool())
 
-  val ppn_af = Mux(s2xlate, false.B, pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
+  val ppn_af = Mux(enableS2xlate, Mux(onlyS1xlate, pte.isAf() && !pte.isStage1Gpf(), false.B), pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
@@ -173,7 +173,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     ))),
     0.U(offLen.W))
   ))
-  val gvpn_gpf = Mux(req_s2xlate === noS2xlate, false.B, gpaddr(gpaddr.getWidth - 1, GPAddrBits) =/= 0.U)
+  val gvpn_gpf = Mux(enableS2xlate, gpaddr(gpaddr.getWidth - 1, GPAddrBits) =/= 0.U, false.B)
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val fake_h_resp = 0.U.asTypeOf(new HptwResp)
@@ -503,7 +503,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed
-  val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
+  val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: Nil = Enum(10)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
 
