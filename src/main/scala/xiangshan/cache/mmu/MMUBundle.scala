@@ -661,8 +661,12 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
         level === 3.U && ppn(vpnnLen*3-1, 0) === 0.U)
   }
 
+  def isLeaf() = {
+    (perm.r || perm.x || perm.w) && perm.v
+  }
+  
   def isPf(level: UInt) = {
-    !perm.v || (!perm.r && perm.w) || unaligned(level)
+    !perm.v || (!perm.r && perm.w) || unaligned(level) || (isLeaf() && (perm.u || perm.a || perm.d ))
   }
 
   // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits
@@ -683,10 +687,6 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 
   def isStage1Gpf() = {
     !((Cat(ppn_high, ppn) >> gvpnLen) === 0.U)
-  }
-
-  def isLeaf() = {
-    perm.r || perm.x || perm.w
   }
 
   def getPerm() = {
@@ -712,7 +712,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val tag = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = if (HasHExtension) Some(UInt(vmidLen.W)) else None
-  val ppn = UInt(ppnLen.W)
+  val ppn = UInt(gvpnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level + 1).W)) else None
   val prefetch = Bool()
@@ -825,7 +825,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
   val tag  = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = Some(UInt(vmidLen.W))
-  val ppns = Vec(num, UInt(ptePPNLen.W))
+  val ppns = Vec(num, UInt(gvpnLen.W))
   val vs   = Vec(num, Bool())
   val af   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None

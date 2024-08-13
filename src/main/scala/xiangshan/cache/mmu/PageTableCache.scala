@@ -622,7 +622,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
           Mux(resp_res.l1.hit, resp_res.l1.v,
             resp_res.l2.v)))
     }
-    io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(i), resp_res.sp.perm))
+    io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(i),  Mux(resp_res.sp.hit, resp_res.sp.perm, 0.U.asTypeOf(new PtePermBundle))))
     io.resp.bits.stage1.entry(i).pf := !io.resp.bits.stage1.entry(i).v
     io.resp.bits.stage1.entry(i).af := Mux(resp_res.l0.hit, resp_res.l0.af(i), false.B)
   }
