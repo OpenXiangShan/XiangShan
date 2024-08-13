@@ -376,7 +376,10 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
-    iq.io.ldCancel := io.ldCancel
+    if (iq.params.needLoadDependency)
+      iq.io.ldCancel := io.ldCancel
+    else
+      iq.io.ldCancel := 0.U.asTypeOf(io.ldCancel)
   }
 
   // connect the vl writeback informatino to the issue queues
@@ -478,6 +481,9 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
+    if (!iq.params.needLoadDependency) {
+      iq.io.enq.map(x => x.bits.srcLoadDependency := 0.U.asTypeOf(x.bits.srcLoadDependency))
+    }
     val intWBIQ = params.schdType match {
       case IntScheduler() => wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1)
       case FpScheduler() => wakeupFromFpWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromFpWBPort.keys.toSeq.contains(x._2)).map(_._1)
@@ -526,6 +532,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
+    if (!iq.params.needLoadDependency) {
+      iq.io.enq.map(x => x.bits.srcLoadDependency := 0.U.asTypeOf(x.bits.srcLoadDependency))
+    }
     iq.io.wakeupFromWB.zip(
       wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1) ++
       wakeupFromFpWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromFpWBPort.keys.toSeq.contains(x._2)).map(_._1) ++

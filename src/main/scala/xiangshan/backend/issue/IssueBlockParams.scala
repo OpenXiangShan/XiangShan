@@ -65,6 +65,8 @@ case class IssueBlockParams(
 
   def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
 
+  def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
+
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max

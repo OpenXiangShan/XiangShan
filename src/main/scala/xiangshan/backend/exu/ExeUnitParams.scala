@@ -28,6 +28,7 @@ case class ExeUnitParams(
   // calculated configs
   var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
   var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
+  var needLoadDependency: Boolean = false
   // used in bypass to select data of exu output
   var exuIdx: Int = -1
   var backendParam: BackendParams = null
@@ -319,6 +320,11 @@ case class ExeUnitParams(
     if (this.isIQWakeUpSource) {
       require(!this.hasUncertainLatency || hasLoadFu || hasHyldaFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
     }
+    val loadWakeUpSourcePairs = cfgs.filter(x => x.source.getExuParam(backendParam.allExuParams).hasLoadFu || x.source.getExuParam(backendParam.allExuParams).hasHyldaFu)
+    val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
+    val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet
+    this.needLoadDependency = !(wakeUpByLoadNames & thisWakeUpByNames).isEmpty
+    println(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
   }
 
   def updateExuIdx(idx: Int): Unit = {
