@@ -1398,18 +1398,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // data from dcache hit
   val s3_ld_raw_data_frm_cache = Wire(new LoadDataFromDcacheBundle)
-  s3_ld_raw_data_frm_cache.respDcacheData       := io.dcache.resp.bits.data_delayed
+  s3_ld_raw_data_frm_cache.respDcacheData       := io.dcache.resp.bits.data
+  s3_ld_raw_data_frm_cache.forward_D            := s2_fwd_frm_d_chan
+  s3_ld_raw_data_frm_cache.forwardData_D        := s2_fwd_data_frm_d_chan
+  s3_ld_raw_data_frm_cache.forward_mshr         := s2_fwd_frm_mshr
+  s3_ld_raw_data_frm_cache.forwardData_mshr     := s2_fwd_data_frm_mshr
+  s3_ld_raw_data_frm_cache.forward_result_valid := s2_fwd_data_valid
+
   s3_ld_raw_data_frm_cache.forwardMask          := RegEnable(s2_fwd_mask, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData          := RegEnable(s2_fwd_data, s2_valid)
   s3_ld_raw_data_frm_cache.uop                  := RegEnable(s2_out.uop, s2_valid)
   s3_ld_raw_data_frm_cache.addrOffset           := RegEnable(s2_out.paddr(3, 0), s2_valid)
-  s3_ld_raw_data_frm_cache.forward_D            := RegEnable(s2_fwd_frm_d_chan, false.B, s2_valid)
-  s3_ld_raw_data_frm_cache.forwardData_D        := RegEnable(s2_fwd_data_frm_d_chan, s2_valid)
-  s3_ld_raw_data_frm_cache.forward_mshr         := RegEnable(s2_fwd_frm_mshr, false.B, s2_valid)
-  s3_ld_raw_data_frm_cache.forwardData_mshr     := RegEnable(s2_fwd_data_frm_mshr, s2_valid)
-  s3_ld_raw_data_frm_cache.forward_result_valid := RegEnable(s2_fwd_data_valid, false.B, s2_valid)
 
-  val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergedData()
+  val s3_merged_data_frm_tlD   = RegEnable(s3_ld_raw_data_frm_cache.mergeTLData(), s2_valid)
+  val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergeLsqFwdData(s3_merged_data_frm_tlD)
   val s3_data_frm_cache = Seq(
     s3_merged_data_frm_cache(63,    0),
     s3_merged_data_frm_cache(63,    8),
