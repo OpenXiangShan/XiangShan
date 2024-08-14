@@ -171,6 +171,8 @@ object FuType extends OHEnumeration {
 
   def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
 
+  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
+
   def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
