@@ -148,6 +148,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
 
+    // IfetchPrefetch
+    val IfetchPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
+
     // load to load fast path
     val l2l_fwd_in    = Input(new LoadToLoadIO)
     val l2l_fwd_out   = Output(new LoadToLoadIO)
@@ -755,6 +758,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_wakeup_uop = ParallelPriorityMux(s0_wakeup_selector, s0_wakeup_format)
   io.wakeup.valid := !s0_sel_src.isvec && s0_fire && (s0_super_ld_rep_valid || s0_ld_fast_rep_valid || s0_ld_rep_valid || (s0_int_iss_valid && !s0_sel_src.prf) && !s0_vec_iss_valid && !s0_high_conf_prf_valid) || s0_mmio_fire
   io.wakeup.bits := s0_wakeup_uop
+
+  // prefetch.i(Zicbop)
+  io.IfetchPrefetch.valid := s0_int_iss_valid && s0_sel_src.prf_i
+  io.IfetchPrefetch.bits.vaddr := s0_out.vaddr
 
   XSDebug(io.dcache.req.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.pc)}, vaddr ${Hexadecimal(s0_dcache_vaddr)}\n"
