@@ -309,6 +309,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val llptw_out = llptw.io.out
   val llptw_mem = llptw.io.mem
+  llptw_mem.flush_latch := waiting_resp.take(l2tlbParams.llptwsize)
   llptw_mem.req_mask := waiting_resp.take(l2tlbParams.llptwsize)
   ptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize)
   hptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize + 1)
