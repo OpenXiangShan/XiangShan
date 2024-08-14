@@ -198,7 +198,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.bits.h_resp := Mux(gvpn_gpf, fake_h_resp, hptw_resp)
   io.resp.bits.s2xlate := req_s2xlate
 
-  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
+  io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault && !guestFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.req_info.s2xlate := req_s2xlate
