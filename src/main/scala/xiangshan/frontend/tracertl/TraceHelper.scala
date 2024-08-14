@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.util.Annotated.resetVector
 
 class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val pcVA = UInt(TracePCWidth.W)
@@ -31,6 +32,7 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val memorySize = UInt(8.W)
   val branchType = UInt(8.W)
   val branchTaken = UInt(8.W)
+  val exception = UInt(8.W)
 
   val InstID = UInt(64.W)
 }
@@ -143,6 +145,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte memory_size,
        |  output byte branch_type,
        |  output byte branch_taken,
+       |  output byte exception,
        |  output longint InstID,
        |  input  byte idx,
        |);
@@ -159,6 +162,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
              |      ${destName}_${i}_target, ${destName}_${i}_inst,
              |      ${destName}_${i}_memoryType, ${destName}_${i}_memorySize,
              |      ${destName}_${i}_branchType, ${destName}_${i}_branchTaken,
+             |      ${destName}_${i}_exception,
              |      ${destName}_${i}_InstID,
              |      $i);
              |""".stripMargin
@@ -480,4 +484,126 @@ class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
   io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
   io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
   io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+}
+
+// Fake MMU, input is vaddr, output is paddr and hit
+
+class TraceATSBundle(implicit p: Parameters) extends TraceBundle {
+  val valid = Input(Bool())
+  val vaddr = Input(UInt(VAddrBits.W))
+  val paddr = Output(UInt(PAddrBits.W))
+  val hit   = Output(Bool())
+}
+
+class TraceATSHelper extends ExtModule
+  with HasExtModuleInline {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val asid  = IO(Input(UInt(16.W)))
+  val vmid  = IO(Input(UInt(16.W)))
+  val valid = IO(Input(Bool()))
+  val vaddr = IO(Input(UInt(64.W)))
+  val paddr = IO(Output(UInt(64.W)))
+  val hit   = IO(Output(Bool()))
+
+  def getVerilog: String = {
+    def getDPIC: String = {
+      s"""
+         |import "DPI-C" function longint trace_tlb_ats(
+         |  input  longint vaddr,
+         |  input  shortint asid,
+         |  input  shortint vmid
+         |);
+         |import "DPI-C" function byte trace_tlb_ats_hit(
+         |  input  longint vaddr,
+         |  input  shortint asid,
+         |  input  shortint vmid
+         |);
+         |""".stripMargin
+    }
+
+    def logicDeclare: String = {
+      s"""
+         |  logic [63:0] logic_paddr;
+         |  logic        logic_hit;
+         |  reg [63:0]   reg_paddr;
+         |  reg          reg_hit;
+         |""".stripMargin
+    }
+
+    def callDPIC: String = {
+      s"""
+         |always @(negedge clock) begin
+         |  if (!reset && valid) begin
+         |    logic_hit   <= trace_tlb_ats_hit(vaddr, asid, vmid);
+         |    logic_paddr <= trace_tlb_ats(vaddr, asid, vmid);
+         |  end
+         |  else begin
+         |    logic_hit <= 0;
+         |    logic_paddr <= 0;
+         |  end
+         |end
+         |""".stripMargin
+    }
+
+    def assignToReg: String = {
+      s"""
+         |always @(posedge clock) begin
+         |  if (!reset && valid) begin
+         |    reg_paddr <= logic_paddr;
+         |    reg_hit   <= logic_hit;
+         |  end
+         |end
+         |""".stripMargin
+    }
+
+    def assignToIO: String = {
+      s"""
+         |assign paddr = reg_paddr;
+         |assign hit   = reg_hit;
+         |""".stripMargin
+    }
+
+    s"""
+       |$getDPIC
+       |
+       |module TraceATSHelper(
+       |  input              clock,
+       |  input              reset,
+       |  input              valid,
+       |  input       [15:0] asid,
+       |  input       [15:0] vmid,
+       |  input       [63:0] vaddr,
+       |  output      [63:0] paddr,
+       |  output             hit
+       |);
+       |$logicDeclare
+       |
+       |$callDPIC
+       |
+       |$assignToReg
+       |
+       |$assignToIO
+       |
+       |endmodule
+       |
+       |""".stripMargin
+  }
+
+  setInline(s"$desiredName.v", getVerilog)
+}
+
+
+class TraceFakeMMU()(implicit p: Parameters) extends TraceModule {
+  val io = IO(new TraceATSBundle())
+
+  val atsHelper = Module(new TraceATSHelper())
+  atsHelper.clock := clock
+  atsHelper.reset := reset
+  atsHelper.vaddr := io.vaddr
+  atsHelper.valid := io.valid
+  atsHelper.asid := 0.U
+  atsHelper.vmid := 0.U
+  io.paddr := atsHelper.paddr
+  io.hit   := atsHelper.hit
 }

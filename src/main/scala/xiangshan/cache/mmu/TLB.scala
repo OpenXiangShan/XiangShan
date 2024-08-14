@@ -28,6 +28,7 @@ import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPConfig => XSPMPConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.rocket.PMPConfig
+import xiangshan.frontend.tracertl.TraceFakeMMU
 
 /** TLB module
   * support block request and non-block request io at the same time
@@ -130,13 +131,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   // read TLB, get hit/miss, paddr, perm bits
   val readResult = (0 until Width).map(TLBRead(_))
-  val hitVec = readResult.map(_._1)
-  val missVec = readResult.map(_._2)
-  val pmp_addr = readResult.map(_._3)
-  val perm = readResult.map(_._4)
-  val g_perm = readResult.map(_._5)
-  val pbmt = readResult.map(_._6)
-  val g_pbmt = readResult.map(_._7)
+  val hitVec = Wire(Vec(Width, Bool()))
+  val missVec = Wire(Vec(Width, Bool()))
+  val pmp_addr = Wire(Vec(Width, UInt(PAddrBits.W)))
+  val perm = Wire(Vec(Width, Vec(nRespDups, new TlbPermBundle)))
+  val g_perm = Wire(Vec(Width, Vec(nRespDups, new TlbPermBundle)))
+  val pbmt = Wire(Vec(Width, UInt(nRespDups, UInt(ptePbmtLen.W))))
+  val g_pbmt = Wire(Vec(Width, UInt(nRespDups, UInt(ptePbmtLen.W))))
+  hitVec.zip(readResult.map(_._1)).map(x => x._1 := x._2)
+  missVec.zip(readResult.map(_._2)).map(x => x._1 := x._2)
+  pmp_addr.zip(readResult.map(_._3)).map(x => x._1 := x._2)
+  perm.zip(readResult.map(_._4)).map(x => x._1 := x._2)
+  g_perm.zip(readResult.map(_._5)).map(x => x._1 := x._2)
+  pbmt.zip(readResult.map(_._6)).map(x => x._1 := x._2)
+  g_pbmt.zip(readResult.map(_._7)).map(x => x._1 := x._2)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
@@ -159,6 +167,37 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     else handle_nonblock(i)
   }
   io.ptw.resp.ready := true.B
+
+  if (env.TraceRTLMode) {
+    (0 until Width).foreach { case idx: Int =>
+      val ats = Module(new TraceFakeMMU())
+      ats.io.valid := req(idx).valid && portTranslateEnable(idx)
+      ats.io.vaddr := req(idx).bits.vaddr
+      // next cycle
+      val paddr = ats.io.paddr
+      val hit = ats.io.hit // always should be hit, this hit is not use for ptw
+
+      hitVec(idx) := true.B
+      missVec(idx) := false.B
+      pmp_addr(idx) := paddr
+
+      resp(idx).valid := req_out_v(idx)
+      resp(idx).bits.paddr.foreach { _ := paddr }
+      resp(idx).bits.gpaddr.foreach { _ := paddr }
+      resp(idx).bits.excp.foreach { case excep =>
+        excep.gpf := 0.U.asTypeOf(new TlbExceptionBundle)
+        excep.pf := 0.U.asTypeOf(new TlbExceptionBundle)
+        excep.af := 0.U.asTypeOf(new TlbExceptionBundle)
+      }
+
+      XSError(resp(idx).bits.miss, s"TLB $idx should not miss")
+      XSError(resp(idx).bits.ptwBack, s"TLB $idx should not ptwBack")
+    }
+    io.ptw.req.map(_.valid := false.B)
+
+    XSError(io.ptw.resp.valid, "When at TraceRTL mode, should not ptw resp")
+  }
+
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
@@ -341,7 +380,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.vsatp.mode === 0.U) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-   
+
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, true, false)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
@@ -500,7 +539,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
-  XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
+  XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(hitVec.asUInt)} miss:${Binary(missVec.asUInt)}\n")
   for (i <- ptw.req.indices) {
     XSDebug(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
   }
