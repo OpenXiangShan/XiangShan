@@ -1042,7 +1042,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
   val s2_data_select  = genRdataOH(s2_out.uop)
-  val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(3, 0))
+  val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(2, 0))
   val s2_frm_mabuf = s2_in.isFrmMisAlignBuf
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
@@ -1499,23 +1499,35 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_merged_data_frm_tlD   = RegEnable(s3_ld_raw_data_frm_cache.mergeTLData(), s2_valid)
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergeLsqFwdData(s3_merged_data_frm_tlD)
+
+  val s3_fwd_mask_clip = RegEnable(Mux(
+    s2_out.paddr(3),
+    (s2_fwd_mask.asUInt)(VLEN / 8 - 1, 8),
+    (s2_fwd_mask.asUInt)(7, 0)
+  ).asTypeOf(Vec(XLEN / 8, Bool())), s2_valid)
+  val s3_fwd_data_clip = RegEnable(Mux(
+    s2_out.paddr(3),
+    (s2_fwd_data.asUInt)(VLEN - 1, 64),
+    (s2_fwd_data.asUInt)(63, 0)
+  ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
+  val s3_merged_data_frm_tld_clip = RegEnable(Mux(
+    s2_out.paddr(3),
+    s3_ld_raw_data_frm_cache.mergeTLData()(VLEN - 1, 64),
+    s3_ld_raw_data_frm_cache.mergeTLData()(63, 0)
+  ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
+  val s3_merged_data_frm_cache_clip = VecInit((0 until XLEN / 8).map(j =>
+      Mux(s3_fwd_mask_clip(j), s3_fwd_data_clip(j), s3_merged_data_frm_tld_clip(j))
+  )).asUInt
+
   val s3_data_frm_cache = Seq(
-    s3_merged_data_frm_cache(63,    0),
-    s3_merged_data_frm_cache(63,    8),
-    s3_merged_data_frm_cache(63,   16),
-    s3_merged_data_frm_cache(63,   24),
-    s3_merged_data_frm_cache(63,   32),
-    s3_merged_data_frm_cache(63,   40),
-    s3_merged_data_frm_cache(63,   48),
-    s3_merged_data_frm_cache(63,   56),
-    s3_merged_data_frm_cache(127,  64),
-    s3_merged_data_frm_cache(127,  72),
-    s3_merged_data_frm_cache(127,  80),
-    s3_merged_data_frm_cache(127,  88),
-    s3_merged_data_frm_cache(127,  96),
-    s3_merged_data_frm_cache(127, 104),
-    s3_merged_data_frm_cache(127, 112),
-    s3_merged_data_frm_cache(127, 120)
+    s3_merged_data_frm_cache_clip(63,    0),
+    s3_merged_data_frm_cache_clip(63,    8),
+    s3_merged_data_frm_cache_clip(63,   16),
+    s3_merged_data_frm_cache_clip(63,   24),
+    s3_merged_data_frm_cache_clip(63,   32),
+    s3_merged_data_frm_cache_clip(63,   40),
+    s3_merged_data_frm_cache_clip(63,   48),
+    s3_merged_data_frm_cache_clip(63,   56),
   )
   val s3_picked_data_frm_cache = Mux1H(s3_data_select_by_offset, s3_data_frm_cache)
   val s3_ld_data_frm_cache = newRdataHelper(s3_data_select, s3_picked_data_frm_cache)
