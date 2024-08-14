@@ -957,6 +957,12 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isCsrrVlenb = isCSRR && inst.CSRIDX === CSRs.vlenb.U
   val isCsrrVl    = isCSRR && inst.CSRIDX === CSRs.vl.U
 
+  // decode for SoftPrefetch instructions (prefetch.w / prefetch.r / prefetch.i)
+  val isSoftPrefetch = inst.OPCODE === BitPat("b0010011") && inst.FUNCT3 === BitPat("b110") && inst.RD === 0.U
+  val isPreW = isSoftPrefetch && inst.RS2 === 3.U(5.W)
+  val isPreR = isSoftPrefetch && inst.RS2 === 1.U(5.W)
+  val isPreI = isSoftPrefetch && inst.RS2 === 0.U(5.W)
+
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -980,21 +986,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.blockBackward := false.B
     decodedInst.canRobCompress := true.B
     decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
-  }
-
-  // decode for SoftPrefetch instructions (prefetch.w / prefetch.r / prefetch.i)
-  val isSoftPrefetch = inst.OPCODE === BitPat("b0010011") && inst.FUNCT3 === BitPat("b110") && inst.RD === 0.U
-  val isPreW = isSoftPrefetch && inst.RS2 === 3.U(5.W)
-  val isPreR = isSoftPrefetch && inst.RS2 === 1.U(5.W)
-  val isPreI = isSoftPrefetch && inst.RS2 === 0.U(5.W)
-
-  when(isPreW || isPreR || isPreI){
+  }.elsewhen(isPreW || isPreR || isPreI){
     decodedInst.selImm := SelImm.IMM_S
     decodedInst.fuType := FuType.ldu.U
     decodedInst.canRobCompress := false.B
-    decodedInst.fuOpType := Mux(isPreW,
-                                LSUOpType.prefetch_w,
-                                Mux(isPreR, LSUOpType.prefetch_r, LSUOpType.prefetch_i))
+    decodedInst.fuOpType := Mux1H(Seq(
+      isPreW -> LSUOpType.prefetch_w,
+      isPreR -> LSUOpType.prefetch_r,
+      isPreI -> LSUOpType.prefetch_i,
+    ))
+
   }
 
   io.deq.decodedInst := decodedInst
