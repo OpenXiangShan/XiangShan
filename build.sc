@@ -17,6 +17,7 @@
 
 import mill._
 import scalalib._
+import scalafmt._
 import $file.`rocket-chip`.common
 import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
@@ -215,7 +216,7 @@ trait XiangShanModule extends ScalaModule {
   override def forkEnv = Map("PATH" -> envPATH)
 }
 
-object xiangshan extends XiangShanModule with HasChisel {
+object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def millSourcePath = os.pwd
 

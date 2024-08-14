@@ -1,0 +1,23 @@
+name: Format Checking
+
+on: [push]
+
+jobs:
+  scalafmt:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 900
+    name: Check Format
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      - run: |
+          mkdir ~/.local/bin
+          sh -c "curl -L https://github.com/com-lihaoyi/mill/releases/download/0.11.7/0.11.7 > ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
+          export PATH=~/.local/bin:$PATH
+      - run: make check-format
