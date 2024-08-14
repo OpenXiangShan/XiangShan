@@ -55,6 +55,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
+  dontTouch(io.in.bits.uop.traceInfo)
+
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
