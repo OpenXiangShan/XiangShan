@@ -430,19 +430,18 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 
   val forward_result_valid = Bool()
 
-  def dcacheData(): UInt = {
-    // old dcache
-    // val dcache_data = Mux1H(bank_oh, bankedDcacheData)
-    // new dcache
+  def mergeTLData(): UInt = {
+    // merge TL D or MSHR data at load s2
     val dcache_data = respDcacheData
     val use_D = forward_D && forward_result_valid
     val use_mshr = forward_mshr && forward_result_valid
     Mux(use_D, forwardData_D.asUInt, Mux(use_mshr, forwardData_mshr.asUInt, dcache_data))
   }
 
-  def mergedData(): UInt = {
+  def mergeLsqFwdData(dcacheData: UInt): UInt = {
+    // merge dcache and lsq forward data at load s3
     val rdataVec = VecInit((0 until VLEN / 8).map(j =>
-      Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
+      Mux(forwardMask(j), forwardData(j), dcacheData(8*(j+1)-1, 8*j))
     ))
     rdataVec.asUInt
   }
