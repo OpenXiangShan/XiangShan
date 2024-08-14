@@ -26,6 +26,7 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.frontend.tracertl.{TraceRTLChoose}
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
@@ -130,11 +131,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val flushPipe = Wire(Bool())
 
-  val (valid, src1, src2, func) = (
+  val (valid, src1, src2, func, traceInfo) = (
     io.in.valid,
     io.in.bits.data.src(0),
     io.in.bits.data.imm,
-    io.in.bits.ctrl.fuOpType
+    io.in.bits.ctrl.fuOpType,
+    io.in.bits.ctrl.traceInfo
   )
 
   // CSR define
@@ -1155,6 +1157,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     }.otherwise {
       illegalRetTarget := true.B
     }
+    if (env.TraceRTLMode) {
+      retTarget := traceInfo.target
+    }
   }.otherwise {
     illegalRetTarget := true.B // when illegalRetTarget setted, retTarget should never be used
   }
@@ -1445,12 +1450,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
-  csrio.trapTarget := RegEnable(
-    MuxCase(pcFromXtvec, Seq(
+  csrio.trapTarget := TraceRTLChoose(
+    RegEnable(MuxCase(pcFromXtvec, Seq(
       (isXRetFlag && !illegalXret) -> retTargetReg,
       ((hasDebugTrap && !debugMode) || ebreakEnterParkLoop) -> debugTrapTarget
-    )),
-    isXRetFlag || csrio.exception.valid)
+    )), isXRetFlag || csrio.exception.valid),
+    RegEnable(Mux(csrio.exception.valid, csrio.exception.bits.traceInfo.target, retTargetReg),
+      csrio.exception.valid || isXRetFlag
+    )
+  )
 
   when(hasExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))

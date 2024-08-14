@@ -869,6 +869,7 @@ object Bundles {
     val isHls = Bool()
     val vls = Bool()
     val trigger = TriggerAction()
+    val traceInfo = new TraceInstrBundle()
   }
 
   object UopIdx {

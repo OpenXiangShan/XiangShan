@@ -37,6 +37,7 @@ import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import xiangshan.frontend.tracertl.ChiselRecordForField._
+import xiangshan.frontend.tracertl.{TraceRTLChoose}
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -567,6 +568,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.isHls := RegEnable(deqDispatchData.isHls, exceptionHappen)
   io.exception.bits.vls := RegEnable(robEntries(deqPtr.value).vls, exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
+  io.exception.bits.traceInfo := RegEnable(debug_deqUop.traceInfo, exceptionHappen)
 
   // data will be one cycle after valid
   io.readGPAMemAddr.valid := exceptionHappen
