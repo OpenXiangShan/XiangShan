@@ -487,6 +487,7 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
+  rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
