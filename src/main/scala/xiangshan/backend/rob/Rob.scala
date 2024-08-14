@@ -1026,7 +1026,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // However, we cannot determine whether a load/store instruction is MMIO.
       // Thus, we don't allow load/store instructions to trigger an interrupt.
       // TODO: support non-MMIO load-store instructions to trigger interrupts
-      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) && !FuType.isFence(io.enq.req(i).bits.fuType)
+      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) && !FuType.isFence(io.enq.req(i).bits.fuType) && !FuType.isCsr(io.enq.req(i).bits.fuType)
       robEntries(RegEnable(allocatePtrVec(i).value, canEnqueue(i))).interrupt_safe := RegEnable(allow_interrupts, canEnqueue(i))
     }
   }
