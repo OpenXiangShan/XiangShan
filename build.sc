@@ -29,6 +29,7 @@ import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import scala.util.matching.Regex
 
 val defaultScalaVersion = "2.13.14"
@@ -252,14 +253,14 @@ object xiangshan extends XiangShanModule with HasChisel {
     countSep = "",
     tagModifier = (tag: String) => "[Rr]elease.*".r.findFirstMatchIn(tag) match {
       case Some(_) => "Kunminghu-Release-" + LocalDateTime.now().format(
-                                 DateTimeFormatter.ofPattern("MMM-dd-yyyy"))
+                                 DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en")))
       case None => "Kunminghu-dev"
     },
     /* add "username, buildhost, buildtime" for non-release version */
     untaggedSuffix = " (%s@%s) # %s".format(
       System.getProperty("user.name"),
       java.net.InetAddress.getLocalHost().getHostName(),
-      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy"))),
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
   override def resources = T.sources {
