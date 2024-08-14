@@ -881,6 +881,7 @@ object Bundles {
     val vls = Bool()
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
+    val traceInfo = new TraceInstrBundle()
   }
 
   object UopIdx {
