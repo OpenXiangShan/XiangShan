@@ -54,6 +54,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
+  dontTouch(io.in.bits.uop.traceInfo)
+
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
@@ -427,7 +429,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
   io.out.bits.uop.trigger                  := triggerAction
 
-  
+
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
     difftest.coreid := io.hartId
