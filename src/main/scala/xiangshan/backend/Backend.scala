@@ -224,6 +224,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
   ctrlBlock.io.csrCtrl <> intExuBlock.io.csrio.get.customCtrl
+  ctrlBlock.io.trapInst <> intExuBlock.io.csrio.get.trapInst
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet

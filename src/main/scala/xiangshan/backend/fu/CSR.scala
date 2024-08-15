@@ -28,7 +28,7 @@ import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
-import xiangshan.backend.Bundles.ExceptionInfo
+import xiangshan.backend.Bundles.{ExceptionInfo, TrapInst}
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
@@ -88,6 +88,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val fpu = Flipped(new FpuCsrIO)
   // to VPU
   val vpu = Flipped(new VpuCsrIO)
+  // from decode
+  val trapInst = Input(ValidIO(new TrapInst))
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   // to ROB

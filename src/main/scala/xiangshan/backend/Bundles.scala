@@ -140,6 +140,17 @@ object Bundles {
     }
   }
 
+  class TrapInst(implicit p: Parameters) extends XSBundle {
+    val instr = UInt(32.W)
+    val ftqIdx = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+
+    def needFlush(ftqIdx: FtqPtr, ftqOffset: UInt): Bool ={
+      val sameFlush = this.ftqIdx === ftqIdx && this.ftqOffset > ftqOffset
+      sameFlush || isAfter(this.ftqIdx, ftqIdx)
+    }
+  }
+
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
