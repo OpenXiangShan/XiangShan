@@ -28,6 +28,8 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
+import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.frontend.FtqPtr
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -43,6 +45,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val vtypeRedirect = Input(Bool())
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
+    val illBuf = Input(UInt(32.W))
     // to Rename
     val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
     // RAT read
@@ -55,6 +58,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+    val trapInst = Output(ValidIO(new TrapInst))
     // vtype update
     val isResumeVType = Input(Bool())
     val commitVType = new Bundle {
@@ -96,6 +100,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
+
+  val isIllegalInstVec = VecInit(inValids.zip(decoders.map(_.io.deq.decodedInst.exceptionVec(illegalInstr))).map{
+    case (valid, isIllegalInst) => valid && isIllegalInst })
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(decoders.map(_.io.deq.decodedInst)),0.U.asTypeOf(new DecodedInst))
+  io.trapInst.valid := isIllegalInstVec.reduce(_ || _)
+  io.trapInst.bits.instr := Mux(illegalInst.preDecodeInfo.isRVC, io.illBuf, illegalInst.instr)
+  io.trapInst.bits.ftqIdx := illegalInst.ftqPtr
+  io.trapInst.bits.ftqOffset := illegalInst.ftqOffset
 
   val complexNum = Wire(UInt(3.W))
   // (0, 1, 2, 3, 4, 5) + complexNum

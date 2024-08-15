@@ -18,6 +18,7 @@ import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
+import xiangshan.ExceptionNO._
 
 import scala.collection.immutable.SeqMap
 
@@ -38,6 +39,8 @@ object CSRConfig {
   final val VGEINWidth = 6
 
   final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
+
+  final val InstWidth = 32
 
   final val XLEN = 64 // Todo: use XSParams
 
@@ -100,6 +103,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val sret = Input(Bool())
       val dret = Input(Bool())
     }))
+    val trapInstRdata = Input(UInt(InstWidth.W))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
       val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
@@ -108,7 +112,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
         val pcGPA = UInt(VaddrMaxWidth.W)
-        val instr = UInt(32.W)
+        val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
         val trigger = TriggerAction()
@@ -125,6 +129,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val EX_II = Bool()
       val EX_VI = Bool()
       val flushPipe = Bool()
+      val trapInstRen = Bool()
       val rData = UInt(64.W)
       val targetPc = UInt(VaddrMaxWidth.W)
       val regOut = UInt(64.W)
@@ -600,6 +605,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
+        in.trapInst := io.trapInstRdata
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
 
@@ -803,6 +809,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     state === s_waitIMSIC && stateNext === s_idle
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
+  io.out.bits.trapInstRen := trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_II.U && !trapHandleMod.io.out.causeNO.Interrupt.asBool
   io.out.bits.flushPipe := flushPipe
 
   io.out.bits.rData := MuxCase(0.U, Seq(

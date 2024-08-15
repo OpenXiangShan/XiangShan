@@ -227,21 +227,22 @@ package object xiangshan {
 
 
   object CSROpType {
-    def jmp  = "b010_000".U
-    def wfi  = "b100_000".U
-    def wrt  = "b001_001".U
-    def set  = "b001_010".U
-    def clr  = "b001_011".U
-    def wrti = "b001_101".U
-    def seti = "b001_110".U
-    def clri = "b001_111".U
-    def ro   = "b001_000".U
+    def jmp   = "b010_000".U
+    def wfi   = "b100_000".U
+    def wrt   = "b001_001".U
+    def set   = "b001_010".U
+    def clr   = "b001_011".U
+    def wrti  = "b001_101".U
+    def seti  = "b001_110".U
+    def clri  = "b001_111".U
+    def roset = "b001_000".U
+    def roclr = "b001_100".U
 
     def isSystemOp (op: UInt): Bool = op(4)
     def isWfi      (op: UInt): Bool = op(5)
     def isCsrAccess(op: UInt): Bool = op(3)
-    def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
-    def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
+    def isReadOnly (op: UInt): Bool = op(3) && op(1, 0) === 0.U
+    def notReadOnly(op: UInt): Bool = op(3) && op(1, 0) =/= 0.U
 
     def getCSROp(op: UInt) = op(1, 0)
     def needImm(op: UInt) = op(2)
