@@ -1413,37 +1413,53 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_merged_data_frm_tlD   = RegEnable(s3_ld_raw_data_frm_cache.mergeTLData(), s2_valid)
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergeLsqFwdData(s3_merged_data_frm_tlD)
 
-  val s3_fwd_mask_clip = RegEnable(Mux(
-    s2_out.paddr(3),
-    (s2_fwd_mask.asUInt)(VLEN / 8 - 1, 8),
-    (s2_fwd_mask.asUInt)(7, 0)
-  ).asTypeOf(Vec(XLEN / 8, Bool())), s2_valid)
-  val s3_fwd_data_clip = RegEnable(Mux(
-    s2_out.paddr(3),
-    (s2_fwd_data.asUInt)(VLEN - 1, 64),
-    (s2_fwd_data.asUInt)(63, 0)
-  ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
-  val s3_merged_data_frm_tld_clip = RegEnable(Mux(
-    s2_out.paddr(3),
-    s3_ld_raw_data_frm_cache.mergeTLData()(VLEN - 1, 64),
-    s3_ld_raw_data_frm_cache.mergeTLData()(63, 0)
-  ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
-  val s3_merged_data_frm_cache_clip = VecInit((0 until XLEN / 8).map(j =>
-      Mux(s3_fwd_mask_clip(j), s3_fwd_data_clip(j), s3_merged_data_frm_tld_clip(j))
-  )).asUInt
+  // duplicate reg for ldout and vecldout
+  private val LdDataDup = 2
+  require(LdDataDup >= 2)
+  // truncate forward data and cache data to XLEN width to writeback
+  val s3_fwd_mask_clip = VecInit(List.fill(LdDataDup)(
+    RegEnable(Mux(
+      s2_out.paddr(3),
+      (s2_fwd_mask.asUInt)(VLEN / 8 - 1, 8),
+      (s2_fwd_mask.asUInt)(7, 0)
+    ).asTypeOf(Vec(XLEN / 8, Bool())), s2_valid)
+  ))
+  val s3_fwd_data_clip = VecInit(List.fill(LdDataDup)(
+    RegEnable(Mux(
+      s2_out.paddr(3),
+      (s2_fwd_data.asUInt)(VLEN - 1, 64),
+      (s2_fwd_data.asUInt)(63, 0)
+    ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
+  ))
+  val s3_merged_data_frm_tld_clip = VecInit(List.fill(LdDataDup)(
+    RegEnable(Mux(
+      s2_out.paddr(3),
+      s3_ld_raw_data_frm_cache.mergeTLData()(VLEN - 1, 64),
+      s3_ld_raw_data_frm_cache.mergeTLData()(63, 0)
+    ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), s2_valid)
+  ))
+  val s3_merged_data_frm_cache_clip = VecInit((0 until LdDataDup).map(i => {
+    VecInit((0 until XLEN / 8).map(j =>
+      Mux(s3_fwd_mask_clip(i)(j), s3_fwd_data_clip(i)(j), s3_merged_data_frm_tld_clip(i)(j))
+    )).asUInt
+  }))
 
-  val s3_data_frm_cache = Seq(
-    s3_merged_data_frm_cache_clip(63,    0),
-    s3_merged_data_frm_cache_clip(63,    8),
-    s3_merged_data_frm_cache_clip(63,   16),
-    s3_merged_data_frm_cache_clip(63,   24),
-    s3_merged_data_frm_cache_clip(63,   32),
-    s3_merged_data_frm_cache_clip(63,   40),
-    s3_merged_data_frm_cache_clip(63,   48),
-    s3_merged_data_frm_cache_clip(63,   56),
-  )
-  val s3_picked_data_frm_cache = Mux1H(s3_data_select_by_offset, s3_data_frm_cache)
-  val s3_ld_data_frm_cache = newRdataHelper(s3_data_select, s3_picked_data_frm_cache)
+  val s3_data_frm_cache = VecInit((0 until LdDataDup).map(i => {
+    VecInit(Seq(
+      s3_merged_data_frm_cache_clip(i)(63,    0),
+      s3_merged_data_frm_cache_clip(i)(63,    8),
+      s3_merged_data_frm_cache_clip(i)(63,   16),
+      s3_merged_data_frm_cache_clip(i)(63,   24),
+      s3_merged_data_frm_cache_clip(i)(63,   32),
+      s3_merged_data_frm_cache_clip(i)(63,   40),
+      s3_merged_data_frm_cache_clip(i)(63,   48),
+      s3_merged_data_frm_cache_clip(i)(63,   56),
+    ))
+  }))
+  val s3_picked_data_frm_cache = VecInit((0 until LdDataDup).map(i => {
+    Mux1H(s3_data_select_by_offset, s3_data_frm_cache(i))
+  }))
+  val s3_ld_data_frm_cache = newRdataHelper(s3_data_select, s3_picked_data_frm_cache(0))
 
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
@@ -1472,7 +1488,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // vec feedback
   io.vecldout.bits.vecFeedback := vecFeedback
   // TODO: VLSU, uncache data logic
-  val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
+  val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache(1))
+  // only 128 bits load uses s3_merged_data_frm_cache
   io.vecldout.bits.vecdata.get := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
   io.vecldout.bits.isvec := s3_vecout.isvec
   io.vecldout.bits.elemIdx := s3_vecout.elemIdx
