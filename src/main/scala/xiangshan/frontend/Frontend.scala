@@ -47,7 +47,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO()
     val backend = new FrontendToCtrlIO
-    val softPrefetch = Flipped(ValidIO(new SoftIfetchPrefetchBundle))
+    val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)

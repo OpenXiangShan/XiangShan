@@ -448,7 +448,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
   val hartId      = Input(UInt(hartIdLen.W))
   val ftqPrefetch  = Flipped(new FtqToPrefetchIO)
-  val softPrefetch = Flipped(ValidIO(new SoftIfetchPrefetchBundle))
+  val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle
   val toIFU       = Output(Bool())
@@ -523,17 +523,26 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   // cache softPrefetch
   private val softPrefetchValid = RegInit(false.B)
   private val softPrefetch = RegInit(0.U.asTypeOf(new IPrefetchReq))
-  when (io.softPrefetch.valid) {
-    // If there is already a pending softPrefetch request, it will be overwritten
+  /* FIXME:
+   * If there is already a pending softPrefetch request, it will be overwritten.
+   * Also, if there are multiple softPrefetch requests in the same cycle, only the first one will be accepted.
+   * We should implement a softPrefetchQueue (like ibuffer, multi-in, single-out) to solve this.
+   * However, the impact on performance still needs to be assessed.
+   * Considering that the frequency of prefetch.i may not be high, let's start with a temporary dummy solution.
+   */
+  when (io.softPrefetch.map(_.valid).reduce(_||_)) {
     softPrefetchValid := true.B
-    softPrefetch.fromSoftPrefetch(io.softPrefetch.bits)
+    softPrefetch.fromSoftPrefetch(MuxCase(
+      0.U.asTypeOf(new SoftIfetchPrefetchBundle),
+      io.softPrefetch.map(req => (req.valid -> req.bits))
+    ))
   }.elsewhen (prefetcher.io.req.fire) {
     softPrefetchValid := false.B
   }
-  // bypass ftqPrefetch
+  // pass ftqPrefetch
   private val ftqPrefetch = WireInit(0.U.asTypeOf(new IPrefetchReq))
   ftqPrefetch.fromFtqICacheInfo(io.ftqPrefetch.req.bits)
-  // software  prefetch has higher priority
+  // software prefetch has higher priority
   prefetcher.io.req.valid := softPrefetchValid || io.ftqPrefetch.req.valid
   prefetcher.io.req.bits  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
   io.ftqPrefetch.req.ready := prefetcher.io.req.ready && !softPrefetchValid
@@ -592,8 +601,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.error.bits <> RegEnable(Mux1H(errors.map(e => e.valid -> e.bits)), 0.U.asTypeOf(errors(0).bits), errors_valid)
   io.error.valid := RegNext(errors_valid, false.B)
 
-  XSPerfAccumulate("softPrefetch_drop", io.softPrefetch.valid && softPrefetchValid && !prefetcher.io.req.fire)
-  XSPerfAccumulate("softPrefetch_block_tlb", softPrefetchValid && io.ftqPrefetch.req.valid)
+  XSPerfAccumulate("softPrefetch_drop_not_ready", io.softPrefetch.map(_.valid).reduce(_||_) && softPrefetchValid && !prefetcher.io.req.fire)
+  XSPerfAccumulate("softPrefetch_drop_multi_req", PopCount(io.softPrefetch.map(_.valid)) > 1.U)
+  XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.ftqPrefetch.req.valid)
 
   val perfEvents = Seq(
     ("icache_miss_cnt  ", false.B),

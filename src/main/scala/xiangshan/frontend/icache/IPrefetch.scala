@@ -372,6 +372,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       } // .otherwise { next_state := m_metaResend }  // !toMeta.ready
     }
     is(m_enqWay) {
+      // sanity check
+      assert(!s1_isSoftPrefetch, "Soft prefetch enters m_enqWay")
       when(toWayLookup.fire && !s2_ready) {
         next_state := m_enterS2
       }.elsewhen(toWayLookup.fire && s2_ready) {
@@ -384,9 +386,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       }
     }
   }
-
-  // sanity check
-  assert(!(next_state === m_enqWay && s1_isSoftPrefetch), "Soft prefetch enqWau")
 
   when(s1_flush) {
     next_state := m_idle
