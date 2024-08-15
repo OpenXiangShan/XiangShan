@@ -447,7 +447,8 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
   val hartId      = Input(UInt(hartIdLen.W))
-  val prefetch    = Flipped(new FtqToPrefetchIO)
+  val ftqPrefetch  = Flipped(new FtqToPrefetchIO)
+  val softPrefetch = Flipped(ValidIO(new SoftIfetchPrefetchBundle))
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle
   val toIFU       = Output(Bool())
@@ -517,8 +518,25 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetcher.io.flush             := io.flush
   prefetcher.io.csr_pf_enable     := io.csr_pf_enable
   prefetcher.io.csr_parity_enable := io.csr_parity_enable
-  prefetcher.io.ftqReq            <> io.prefetch
   prefetcher.io.MSHRResp          := missUnit.io.fetch_resp
+  prefetcher.io.flushFromBpu      := io.ftqPrefetch.flushFromBpu
+  // cache softPrefetch
+  private val softPrefetchValid = RegInit(false.B)
+  private val softPrefetch = RegInit(0.U.asTypeOf(new IPrefetchReq))
+  when (io.softPrefetch.valid) {
+    // If there is already a pending softPrefetch request, it will be overwritten
+    softPrefetchValid := true.B
+    softPrefetch.fromSoftPrefetch(io.softPrefetch.bits)
+  }.elsewhen (prefetcher.io.req.fire) {
+    softPrefetchValid := false.B
+  }
+  // bypass ftqPrefetch
+  private val ftqPrefetch = WireInit(0.U.asTypeOf(new IPrefetchReq))
+  ftqPrefetch.fromFtqICacheInfo(io.ftqPrefetch.req.bits)
+  // software  prefetch has higher priority
+  prefetcher.io.req.valid := softPrefetchValid || io.ftqPrefetch.req.valid
+  prefetcher.io.req.bits  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
+  io.ftqPrefetch.req.ready := prefetcher.io.req.ready && !softPrefetchValid
 
   missUnit.io.hartId            := io.hartId
   missUnit.io.fencei            := io.fencei
@@ -573,6 +591,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val errors_valid = errors.map(e => e.valid).reduce(_ | _)
   io.error.bits <> RegEnable(Mux1H(errors.map(e => e.valid -> e.bits)), 0.U.asTypeOf(errors(0).bits), errors_valid)
   io.error.valid := RegNext(errors_valid, false.B)
+
+  XSPerfAccumulate("softPrefetch_drop", io.softPrefetch.valid && softPrefetchValid && !prefetcher.io.req.fire)
+  XSPerfAccumulate("softPrefetch_block_tlb", softPrefetchValid && io.ftqPrefetch.req.valid)
 
   val perfEvents = Seq(
     ("icache_miss_cnt  ", false.B),

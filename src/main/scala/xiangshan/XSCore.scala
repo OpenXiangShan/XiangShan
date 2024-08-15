@@ -105,6 +105,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   frontend.io.hartId := memBlock.io.inner_hartId
   frontend.io.reset_vector := memBlock.io.inner_reset_vector
+  frontend.io.softPrefetch <> memBlock.io.IfetchPrefetch
   frontend.io.backend <> backend.io.frontend
   frontend.io.sfence <> backend.io.frontendSfence
   frontend.io.tlbCsr <> backend.io.frontendTlbCsr

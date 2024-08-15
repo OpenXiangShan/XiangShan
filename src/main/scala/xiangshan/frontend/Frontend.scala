@@ -47,6 +47,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO()
     val backend = new FrontendToCtrlIO
+    val softPrefetch = Flipped(ValidIO(new SoftIfetchPrefetchBundle))
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
@@ -120,8 +121,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  icache.io.prefetch <> ftq.io.toPrefetch
-
+  icache.io.ftqPrefetch <> ftq.io.toPrefetch
+  icache.io.softPrefetch <> io.softPrefetch
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
