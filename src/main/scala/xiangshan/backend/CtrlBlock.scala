@@ -303,11 +303,25 @@ class CtrlBlockImp(
   val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
   val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
   when (s6_flushFromRobValid) {
+    // ROB flush:
+    // 1. exception should flushAfter <- exception instr should commit
+    // 2. interrupt should flush      <= interrupt instr should not commit
+    // 3. fence should flushAfter     <- fence instr should commit
+    // However, FTQ in frontend will take "level === flushAfter" at bpu mispredict.
+    // set level to flush to avoid to take rob.flush at bpu mispredict.
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
-    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := TraceRTLDontCareValue(RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead))
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := TraceRTLDontCareValue(RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead))
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := TraceRTLDontCareValue(RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead))
+
+    if (env.TraceRTLMode) {
+      // tracertl need a right level for instID plus.
+      val actualLevel = frontendFlushBits.level
+      when (actualLevel === RedirectLevel.flushAfter) {
+        io.frontend.toFtq.redirect.bits.traceInfo.InstID := frontendFlushBits.traceInfo.InstID + 1.U
+      }
+    }
   }
 
   for (i <- 0 until DecodeWidth) {
