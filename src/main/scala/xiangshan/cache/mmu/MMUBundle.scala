@@ -666,7 +666,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   }
   
   def isPf(level: UInt) = {
-    !perm.v || (!perm.r && perm.w) || unaligned(level) || (isLeaf() && (perm.u || perm.a || perm.d ))
+    !perm.v || (!perm.r && perm.w) || unaligned(level) || (!isLeaf() && (perm.u || perm.a || perm.d ))
   }
 
   // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits
