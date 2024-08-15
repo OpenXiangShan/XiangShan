@@ -455,12 +455,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pd             = preDecoderOut.pd
   val f2_jump_offset    = preDecoderOut.jumpOffset
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
-  val f2_crossPageFault = VecInit((0 until PredictWidth).map( i =>
-    isLastInLine(f2_pc(i)) && (f2_exception(0) =/= ExceptionType.pf) && f2_doubleLine && (f2_exception(1) === ExceptionType.pf) && !f2_pd(i).isRVC
-  ))
-  val f2_crossGuestPageFault = VecInit((0 until PredictWidth).map( i =>
-    isLastInLine(f2_pc(i)) && (f2_exception(0) =/= ExceptionType.gpf) && f2_doubleLine && (f2_exception(1) === ExceptionType.gpf) && !f2_pd(i).isRVC
-  ))
+  /* if there is a cross-page RVI instruction, and the former page has no exception,
+   * whether it has exception is actually depends on the latter page
+   */
+  val f2_crossPage_exception_vec = VecInit((0 until PredictWidth).map { i => Mux(
+    isLastInLine(f2_pc(i)) && !f2_pd(i).isRVC && f2_doubleLine && f2_exception(0) === ExceptionType.none,
+    f2_exception(1),
+    ExceptionType.none
+  )})
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
@@ -501,6 +503,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pd              = WireInit(f3_pd_wire)
   val f3_jump_offset     = RegEnable(f2_jump_offset,   f2_fire)
   val f3_exception_vec   = RegEnable(f2_exception_vec, f2_fire)
+  val f3_crossPage_exception_vec = RegEnable(f2_crossPage_exception_vec, f2_fire)
 
   val f3_pc_lower_result = RegEnable(f2_pc_lower_result, f2_fire)
   val f3_pc_high         = RegEnable(f2_pc_high, f2_fire)
@@ -529,8 +532,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
   val f3_foldpc         = RegEnable(f2_foldpc,      f2_fire)
-  val f3_crossPageFault = RegEnable(f2_crossPageFault,           f2_fire)
-  val f3_crossGuestPageFault = RegEnable(f2_crossGuestPageFault, f2_fire)
   val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,             f2_fire)
   val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
   val f3_gpaddr         = RegEnable(f2_gpaddr,  f2_fire)
@@ -802,8 +803,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pc          := f3_pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
-  io.toIbuffer.bits.exceptionType := f3_exception_vec
-  io.toIbuffer.bits.crossPageIPFFix := (0 until PredictWidth).map(i => f3_crossPageFault(i) || f3_crossGuestPageFault(i))
+  io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+  io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
   io.toIbuffer.bits.triggered   := f3_triggered
 
   when(f3_lastHalf.valid){
@@ -865,9 +866,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isRet   := isRet
 
     io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
-    // resend must be cross-page
-    // FIXME: should gpf set crossPageIPFFix to true? See https://github.com/OpenXiangShan/XiangShan/blame/89c99ce9fd7fc54dd7e7521527e6099040868e4c/src/main/scala/xiangshan/frontend/IFU.scala#L822
-    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception === ExceptionType.pf // || mmio_resend_exception === ExceptionType.gpf
+    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception =/= ExceptionType.none
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
 
