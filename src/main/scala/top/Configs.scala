@@ -38,6 +38,7 @@ import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
+import openLLC.{OpenLLCParam}
 import coupledL2._
 import coupledL2.prefetch._
 import xiangshan.frontend.icache.ICacheParameters
@@ -335,6 +336,17 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         simulation = !site(DebugOptionsKey).FPGAPlatform,
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
+      )),
+      OpenLLCParamsOpt = Some(OpenLLCParam(
+        name = "LLC",
+        ways = ways,
+        sets = sets,
+        banks = banks,
+        fullAddressBits = 36,
+        clientCaches = tiles.map { core =>
+          val l2params = core.L2CacheParamsOpt.get
+          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
+        }
       ))
     )
 })
