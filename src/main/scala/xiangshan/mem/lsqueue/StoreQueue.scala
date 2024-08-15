@@ -280,8 +280,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val commitCount = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val scommit = GatedRegNext(io.rob.scommit)
 
-  val doMisalignSt = (rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr)
-  val finishMisalignSt = doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException
+  // RegNext misalign control for better timing
+  val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr))
+  val finishMisalignSt = GatedValidRegNext(doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException)
   val misalignBlock = doMisalignSt && !finishMisalignSt
   
   // store miss align info
