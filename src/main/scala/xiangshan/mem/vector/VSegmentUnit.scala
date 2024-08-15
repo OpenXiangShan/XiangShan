@@ -201,6 +201,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
   val segmentActive                   = (mask & UIntToOH(segmentIdx)).orR
 
+  // sbuffer write interface
+  val sbufferOut                      = Wire(Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
+
   // Segment instruction's FSM
   /*
   * s_idle: wait request
@@ -502,8 +505,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * write data to sbuffer
    * */
-  val sbufferOut                   = Wire(Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
-
   sbufferOut.bits                  := DontCare
   sbufferOut.valid                 := state === s_send_data && segmentActive
   sbufferOut.bits.vecValid         := state === s_send_data && segmentActive
