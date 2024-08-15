@@ -33,6 +33,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.vector.Bundles.VConfig
+import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
@@ -275,7 +276,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     }
     /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
-    when(!io.sbuffer.fire && segmentActive) {
+    when(!sbufferOut.fire && segmentActive) {
       stateNext := s_send_data
     }.elsewhen(((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) ||
                ((segmentIdx === maxSegIdx) && !segmentActive)) {
@@ -501,16 +502,23 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * write data to sbuffer
    * */
+  val sbufferOut                   = Wire(Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
 
-  io.sbuffer.bits                  := DontCare
-  io.sbuffer.valid                 := state === s_send_data && segmentActive
-  io.sbuffer.bits.vecValid         := state === s_send_data && segmentActive
-  io.sbuffer.bits.mask             := wmask
-  io.sbuffer.bits.data             := flowData
-  io.sbuffer.bits.vaddr            := latchVaddr
-  io.sbuffer.bits.cmd              := MemoryOpConstants.M_XWR
-  io.sbuffer.bits.id               := DontCare
-  io.sbuffer.bits.addr             := instMicroOp.paddr
+  sbufferOut.bits                  := DontCare
+  sbufferOut.valid                 := state === s_send_data && segmentActive
+  sbufferOut.bits.vecValid         := state === s_send_data && segmentActive
+  sbufferOut.bits.mask             := wmask
+  sbufferOut.bits.data             := flowData
+  sbufferOut.bits.vaddr            := latchVaddr
+  sbufferOut.bits.cmd              := MemoryOpConstants.M_XWR
+  sbufferOut.bits.id               := DontCare
+  sbufferOut.bits.addr             := instMicroOp.paddr
+
+  NewPipelineConnect(
+    sbufferOut, io.sbuffer, io.sbuffer.fire,
+    false.B,
+    Option(s"VSegmentUnitPipelineConnect")
+  )
 
   io.vecDifftestInfo.valid         := state === s_send_data && segmentActive
   io.vecDifftestInfo.bits          := uopq(deqPtr.value).uop
@@ -518,8 +526,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * update ptr
    * */
-  private val fieldActiveWirteFinish = io.sbuffer.fire && segmentActive // writedata finish and is a active segment
-  XSError(io.sbuffer.fire && !segmentActive, "Attempt write inactive segment to sbuffer, something wrong!\n")
+  private val fieldActiveWirteFinish = sbufferOut.fire && segmentActive // writedata finish and is a active segment
+  XSError(sbufferOut.fire && !segmentActive, "Attempt write inactive segment to sbuffer, something wrong!\n")
 
   private val segmentInactiveFinish = ((state === s_latch_and_merge_data) || (state === s_send_data)) && !segmentActive
 
