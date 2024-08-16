@@ -13,7 +13,7 @@ if __name__ == "__main__":
     with open(f"{sys.argv[1]}/filelist.f", "r") as f:
         for line in f:
             files.append(line.strip())
-            if line.startswith("XSTile"):
+            if line.startswith("XSTile") and not line.startswith("XSTileWrap"):
                 count_xstile += 1
                 if count_xstile > 1:
                     err("filelist.f", line, line_number,
