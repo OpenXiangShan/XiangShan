@@ -865,6 +865,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
+  val s1_pbmt             = Mux(io.tlb.resp.valid, io.tlb.resp.bits.pbmt(0), 0.U(2.W))
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
   val s1_sw_prf           = s1_prf && !s1_hw_prf
@@ -1040,6 +1041,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_data_select  = genRdataOH(s2_out.uop)
   val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(3, 0))
   val s2_frm_mabuf = s2_in.isFrmMisAlignBuf
+  val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1079,7 +1081,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // writeback access fault caused by ecc error / bus error
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
-  val s2_actually_mmio = s2_pmp.mmio
+  val s2_actually_mmio = s2_pmp.mmio || (s2_pbmt === 1.U) || (s2_pbmt === 2.U)
   val s2_mmio          = !s2_prf &&
                           s2_actually_mmio &&
                          !s2_exception &&
