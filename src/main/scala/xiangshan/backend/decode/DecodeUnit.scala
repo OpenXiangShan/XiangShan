@@ -554,6 +554,26 @@ case class Imm_Z() extends Imm(12 + 5 + 5){
   override def minBitsFromInstr(instr: UInt): UInt = {
     Cat(instr(11, 7), instr(19, 15), instr(31, 20))
   }
+
+  def getCSRAddr(imm: UInt): UInt = {
+    require(imm.getWidth == this.len)
+    imm(11, 0)
+  }
+
+  def getRS1(imm: UInt): UInt = {
+    require(imm.getWidth == this.len)
+    imm(16, 12)
+  }
+
+  def getRD(imm: UInt): UInt = {
+    require(imm.getWidth == this.len)
+    imm(21, 17)
+  }
+
+  def getImm5(imm: UInt): UInt = {
+    require(imm.getWidth == this.len)
+    imm(16, 12)
+  }
 }
 
 case class Imm_B6() extends Imm(6){
@@ -1042,7 +1062,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInst.fuOpType := MuxCase(decodedInst.fuOpType, Seq(
     isCsrrVl    -> VSETOpType.csrrvl,
     isCsrrVlenb -> ALUOpType.add,
-    isCSRR      -> CSROpType.ro,
   ))
 
   io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(

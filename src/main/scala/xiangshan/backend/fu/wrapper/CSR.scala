@@ -10,7 +10,8 @@ import xiangshan.backend.fu.util._
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import device._
 import system.HasSoCParameter
-import xiangshan.backend.Bundles.TrapInst
+import xiangshan.backend.Bundles.TrapInstInfo
+import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.frontend.FtqPtr
@@ -34,18 +35,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val flushPipe = Wire(Bool())
   val flush = io.flush.valid
 
-  val (valid, src1, src2, func) = (
+  val (valid, src1, imm, func) = (
     io.in.valid,
     io.in.bits.data.src(0),
-    io.in.bits.data.imm,
+    io.in.bits.data.imm(Imm_Z().len - 1, 0),
     io.in.bits.ctrl.fuOpType
   )
 
   // split imm/src1/rd from IMM_Z: src1/rd for tval
-  val rd   = src2(21, 17)
-  val addr = src2(11,  0)
-  val rs1  = src2(16, 12)
-  val csri = ZeroExt(src2(16, 12), XLEN)
+  val addr = Imm_Z().getCSRAddr(imm)
+  val rd   = Imm_Z().getRD(imm)
+  val rs1  = Imm_Z().getRS1(imm)
+  val imm5 = Imm_Z().getImm5(imm)
+  val csri = ZeroExt(imm5, XLEN)
 
   import CSRConst._
 
@@ -58,6 +60,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val isCSRAcc = CSROpType.isCsrAccess(func)
 
   val csrMod = Module(new NewCSR)
+  val trapInstMod = Module(new TrapInstMod)
 
   private val privState = csrMod.io.status.privState
   // The real reg value in CSR, with no read mask
@@ -73,52 +76,20 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   ))
 
   private val csrAccess = valid && CSROpType.isCsrAccess(func)
-  private val csrWen = valid && CSROpType.notReadOnly(func)
-  //trap inst
-  private val hasWrittenReg = RegInit(false.B)
-  private val isCSRIllegalInst = csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI
-  // restore CSR inst
-  private val func3 = LookupTree(func, Seq(
-    CSROpType.wrt   -> "b001".U,
-    CSROpType.set   -> "b010".U,
-    CSROpType.clr   -> "b011".U,
-    CSROpType.wrti  -> "b101".U,
-    CSROpType.seti  -> "b110".U,
-    CSROpType.clri  -> "b111".U,
-    CSROpType.roset -> "b010".U,
-    CSROpType.roclr -> "b011".U,
-  ))
-  val CSRTrapInstr = Cat(addr, rs1, func3, rd, "b1110011".U)
-  val CSRTrapInst = Wire(new TrapInst)
-  CSRTrapInst.instr := CSRTrapInstr
-  CSRTrapInst.ftqIdx := io.in.bits.ctrl.ftqIdx.get
-  CSRTrapInst.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-
-  // csr EXII is always older then decode EXII
-  val trapInstWen = isCSRIllegalInst || (csrIn.trapInst.valid  && !hasWrittenReg)
-  val trapInstWdata = Mux(isCSRIllegalInst, CSRTrapInst, csrIn.trapInst.bits)
-  when(trapInstWen && !hasWrittenReg) {
-    hasWrittenReg := true.B
-  }
-  val trapInstReg = RegEnable(trapInstWdata, 0.U.asTypeOf(new TrapInst), trapInstWen)
-  val trapInstRen   = csrMod.io.out.bits.trapInstRen
-  val trapInstRdata = WireInit(0.U(32.W))
-  val needFlush = trapInstReg.needFlush(io.flush.bits.ftqIdx, io.flush.bits.ftqOffset) && io.flush.valid
-  dontTouch(needFlush)
-  when(trapInstRen && hasWrittenReg ) {
-    trapInstRdata := trapInstReg.instr
-    hasWrittenReg := false.B
-  }
-  when(needFlush) {
-    trapInstReg := 0.U.asTypeOf(new TrapInst)
-    hasWrittenReg := false.B
-  }
+  private val csrWen = valid && (
+    CSROpType.isCSRRW(func) ||
+    CSROpType.isCSRRSorRC(func) && rs1 =/= 0.U
+  )
+  private val csrRen = valid && (
+    CSROpType.isCSRRW(func) && rd =/= 0.U ||
+    CSROpType.isCSRRSorRC(func)
+  )
 
   csrMod.io.in match {
     case in =>
       in.valid := valid
       in.bits.wen := csrWen
-      in.bits.ren := csrAccess
+      in.bits.ren := csrRen
       in.bits.op  := CSROpType.getCSROp(func)
       in.bits.addr := addr
       in.bits.src := src
@@ -127,7 +98,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.sret := isSret
       in.bits.dret := isDret
   }
-  csrMod.io.trapInstRdata := trapInstRdata
+  csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
   csrMod.io.fromMem.excpGPA := csrIn.memExceptionGPAddr
 
@@ -177,6 +148,16 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
+
+  trapInstMod.io.fromDecode.trapInstInfo := io.csrin.get.trapInstInfo
+  trapInstMod.io.fromRob.flush.valid := io.flush.valid
+  trapInstMod.io.fromRob.flush.bits.ftqPtr := io.flush.bits.ftqIdx
+  trapInstMod.io.fromRob.flush.bits.ftqOffset := io.flush.bits.ftqOffset
+  trapInstMod.io.faultCsrUop.valid := csrMod.io.out.valid && (csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI)
+  trapInstMod.io.faultCsrUop.bits.fuOpType := DataHoldBypass(io.in.bits.ctrl.fuOpType, io.in.fire)
+  trapInstMod.io.faultCsrUop.bits.imm := DataHoldBypass(io.in.bits.data.imm, io.in.fire)
+  // Clear trap instruction when any trap occurs.
+  trapInstMod.io.readClear := csrMod.io.fromRob.trap.valid
 
   private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
   imsic.i.hartId := io.csrin.get.hartId
@@ -340,6 +321,7 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
   val clintTime = Input(ValidIO(UInt(64.W)))
+  val trapInstInfo = Input(ValidIO(new TrapInstInfo))
 }
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
