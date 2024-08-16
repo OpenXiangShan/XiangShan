@@ -45,6 +45,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val rabCommits = Input(new RabCommitIO)
+    // from csr
+    val singleStep = Input(Bool())
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
@@ -156,7 +158,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
   compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
-    sink.valid := source.valid
+    sink.valid := source.valid && !io.singleStep
     sink.bits := source.bits
   }
   val needRobFlags = compressUnit.io.out.needRobFlags
