@@ -53,7 +53,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   }
 
   // xstile
-  val core_with_l2 = LazyModule(new XSTile()(p.alter((site, here, up) => {
+  val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
   })))
@@ -66,10 +66,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  core_with_l2.clint_int_node := IntBuffer(2) := clintIntNode
-  core_with_l2.debug_int_node := IntBuffer(2) := debugIntNode
-  core_with_l2.plic_int_node :*= IntBuffer(2) :*= plicIntNode
-  beuIntNode := IntBuffer(2) := core_with_l2.beu_int_source
+  core_with_l2.tile.clint_int_node := IntBuffer(2) := clintIntNode
+  core_with_l2.tile.debug_int_node := IntBuffer(2) := debugIntNode
+  core_with_l2.tile.plic_int_node :*= IntBuffer(2) :*= plicIntNode
+  beuIntNode := IntBuffer(2) := core_with_l2.tile.beu_int_source
   val clint = InModuleBody(clintIntNode.makeIOs())
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
@@ -77,7 +77,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
-  core_with_l2.core_reset_sink := core_rst_node
+  core_with_l2.tile.core_reset_sink := core_rst_node
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper) {
     FileRegisters.add("dts", dts)
@@ -87,8 +87,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
-    val bus_clock = IO(Input(Clock()))
-    val bus_reset = IO(Input(AsyncReset()))
+    val noc_clock = IO(Input(Clock()))
+    val noc_reset = IO(Input(AsyncReset()))
+    val soc_clock = IO(Input(Clock()))
+    val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
@@ -105,15 +107,16 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
 
     val reset_sync = withClockAndReset(clock, reset) { ResetGen() }
-    val bus_reset_sync = withClockAndReset(bus_clock, bus_reset) { ResetGen() }
+    val noc_reset_sync = withClockAndReset(noc_clock, noc_reset) { ResetGen() }
+    val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
     childReset := reset_sync
 
-    // bus clock and reset
-    wrapper.u_imsic_bus_top.module.clock := bus_clock
-    wrapper.u_imsic_bus_top.module.reset := bus_reset_sync
+    // device clock and reset
+    wrapper.u_imsic_bus_top.module.clock := soc_clock
+    wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
 
     // imsic axi4lite io connection
     wrapper.u_imsic_bus_top.module.m_s.foreach(_ <> imsic_m_s.get)
@@ -133,8 +136,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
     val clintTimeAsyncQueue = Module(new AsyncQueue(UInt(64.W), AsyncQueueParams(1)))
-    clintTimeAsyncQueue.io.enq_clock := bus_clock
-    clintTimeAsyncQueue.io.enq_reset := bus_reset_sync.asBool
+    clintTimeAsyncQueue.io.enq_clock := soc_clock
+    clintTimeAsyncQueue.io.enq_reset := soc_reset_sync.asBool
     clintTimeAsyncQueue.io.deq_clock := clock
     clintTimeAsyncQueue.io.deq_reset := reset_sync.asBool
     clintTimeAsyncQueue.io.enq.valid := io.clintTime.valid
