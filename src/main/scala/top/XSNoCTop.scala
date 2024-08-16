@@ -66,9 +66,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  core_with_l2.tile.clint_int_node := IntBuffer(2) := clintIntNode
-  core_with_l2.tile.debug_int_node := IntBuffer(2) := debugIntNode
-  core_with_l2.tile.plic_int_node :*= IntBuffer(2) :*= plicIntNode
+  core_with_l2.clintIntNode := clintIntNode
+  core_with_l2.debugIntNode := debugIntNode
+  core_with_l2.plicIntNode :*= plicIntNode
   beuIntNode := IntBuffer(2) := core_with_l2.tile.beu_int_source
   val clint = InModuleBody(clintIntNode.makeIOs())
   val debug = InModuleBody(debugIntNode.makeIOs())

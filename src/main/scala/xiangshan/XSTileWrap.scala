@@ -20,16 +20,27 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.interrupts._
 import system.HasSoCParameter
 import device.MsiInfoBundle
 import coupledL2.tl2chi.PortIO
+import utility.IntBuffer
 
 class XSTileWrap()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
   override def shouldBeInlined: Boolean = false
+
   val tile = LazyModule(new XSTile())
+
+  // interrupts sync
+  val clintIntNode = IntIdentityNode()
+  val debugIntNode = IntIdentityNode()
+  val plicIntNode = IntIdentityNode()
+  tile.clint_int_node := IntBuffer(2) := clintIntNode
+  tile.debug_int_node := IntBuffer(2) := debugIntNode
+  tile.plic_int_node :*= IntBuffer(2) :*= plicIntNode
   class XSTileWrapImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
