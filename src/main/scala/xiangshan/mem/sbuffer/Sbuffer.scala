@@ -968,7 +968,7 @@ class Sbuffer(implicit p: Parameters)
           difftest.data   := io.in(i).bits.data
           difftest.mask   := ((1 << wordBytes) - 1).U
         }
-        assert(io.in(i).bits.data === 0.U, "wline only supports whole zero write now")
+        assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
       } .otherwise{
         val storeCommit       = io.in(i).fire
         val waddr             = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
