@@ -48,7 +48,7 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
-  NodeIDWidth: Int = 7,
+  NodeIDWidth: Int = 11,
   NumHart: Int = 64,
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
