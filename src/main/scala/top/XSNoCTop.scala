@@ -30,7 +30,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import coupledL2.tl2chi.PortIO
 import freechips.rocketchip.tile.MaxHartIdBits
-import freechips.rocketchip.util.{AsyncQueue, AsyncQueueParams}
+import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
@@ -135,16 +135,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
-    val clintTimeAsyncQueue = Module(new AsyncQueue(UInt(64.W), AsyncQueueParams(1)))
-    clintTimeAsyncQueue.io.enq_clock := soc_clock
-    clintTimeAsyncQueue.io.enq_reset := soc_reset_sync.asBool
-    clintTimeAsyncQueue.io.deq_clock := clock
-    clintTimeAsyncQueue.io.deq_reset := reset_sync.asBool
-    clintTimeAsyncQueue.io.enq.valid := io.clintTime.valid
-    clintTimeAsyncQueue.io.enq.bits := io.clintTime.bits
-    clintTimeAsyncQueue.io.deq.ready := true.B
-    core_with_l2.module.io.clintTime.valid := clintTimeAsyncQueue.io.deq.valid
-    core_with_l2.module.io.clintTime.bits := clintTimeAsyncQueue.io.deq.bits
+    val clintTimeAsyncQueueSource = withClockAndReset(soc_clock, soc_reset_sync) { Module(new AsyncQueueSource(UInt(64.W), AsyncQueueParams(1))) }
+    clintTimeAsyncQueueSource.io.enq.valid := io.clintTime.valid
+    clintTimeAsyncQueueSource.io.enq.bits := io.clintTime.bits
+    core_with_l2.module.io.clintTimeAsync <> clintTimeAsyncQueueSource.io.async
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
     core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info
