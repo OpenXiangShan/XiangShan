@@ -211,6 +211,12 @@ bsp:
 idea:
 	mill -i mill.idea.GenIdea/idea
 
+check-format:
+	mill xiangshan.checkFormat
+
+reformat:
+	mill xiangshan.reformat
+
 # verilator simulation
 emu: sim-verilog
 	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)

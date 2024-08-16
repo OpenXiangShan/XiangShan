@@ -16,12 +16,12 @@
 
 package xiangshan.frontend
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
+import xiangshan._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
@@ -35,15 +35,15 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     io.out.s1 := fast_pred.io.out.s1
   }
 
-  var metas = 0.U(1.W)
+  var metas   = 0.U(1.W)
   var meta_sz = 0
   for (c <- components) {
-    c.io.reset_vector        := io.reset_vector
-    c.io.in.valid            := io.in.valid
-    c.io.in.bits.s0_pc       := io.in.bits.s0_pc
-    c.io.in.bits.folded_hist := io.in.bits.folded_hist
+    c.io.reset_vector           := io.reset_vector
+    c.io.in.valid               := io.in.valid
+    c.io.in.bits.s0_pc          := io.in.bits.s0_pc
+    c.io.in.bits.folded_hist    := io.in.bits.folded_hist
     c.io.in.bits.s1_folded_hist := io.in.bits.s1_folded_hist
-    c.io.in.bits.ghist       := io.in.bits.ghist
+    c.io.in.bits.ghist          := io.in.bits.ghist
 
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire
@@ -53,17 +53,16 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.s2_redirect := io.s2_redirect
     c.io.s3_redirect := io.s3_redirect
 
-    c.io.redirect := io.redirect
-    c.io.ctrl := DelayN(io.ctrl, 1)
+    c.io.redirect        := io.redirect
+    c.io.ctrl            := DelayN(io.ctrl, 1)
     c.io.redirectFromIFU := io.redirectFromIFU
 
     if (c.meta_size > 0) {
-      metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size-1,0)
+      metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size - 1, 0)
     }
     meta_sz = meta_sz + c.meta_size
   }
   println(s"total meta size: $meta_sz\n\n")
-
 
   io.in.ready := components.map(_.io.s1_ready).reduce(_ && _)
 
@@ -75,7 +74,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {
-    c.io.update := io.update
+    c.io.update           := io.update
     c.io.update.bits.meta := update_meta
     update_meta = update_meta >> c.meta_size
   }
@@ -90,8 +89,8 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     metas(idx)
   }
 
-  override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_++_))
+  override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_ ++ _))
 
-  override val perfEvents = components.map(_.getPerfEvents).reduce(_++_)
+  override val perfEvents = components.map(_.getPerfEvents).reduce(_ ++ _)
   generatePerfEvent()
 }

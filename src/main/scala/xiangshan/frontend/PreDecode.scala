@@ -16,39 +16,41 @@
 
 package xiangshan.frontend
 
-import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
-import chisel3.{util, _}
+import chisel3._
+import chisel3.util
 import chisel3.util._
-import utils._
-import utility._
-import xiangshan._
-import xiangshan.frontend.icache._
-import xiangshan.backend.decode.isa.predecode.PreDecodeInst
+import freechips.rocketchip.rocket.ExpandedInstruction
+import freechips.rocketchip.rocket.RVCDecoder
 import java.lang.reflect.Parameter
+import org.chipsalliance.cde.config.Parameters
+import utility._
+import utils._
+import xiangshan._
+import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.frontend.icache._
 
-trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst{
-  def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
-  def isLink(reg:UInt) = reg === 1.U || reg === 5.U
+trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst {
+  def isRVC(inst: UInt) = inst(1, 0) =/= 3.U
+  def isLink(reg: UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
-    val brType::Nil = ListLookup(instr, List(BrType.notCFI), PreDecodeInst.brTable)
-    val rd = Mux(isRVC(instr), instr(12), instr(11,7))
-    val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
+    val brType :: Nil = ListLookup(instr, List(BrType.notCFI), PreDecodeInst.brTable)
+    val rd            = Mux(isRVC(instr), instr(12), instr(11, 7))
+    val rs            = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
     val isCall = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
-    val isRet = brType === BrType.jalr && isLink(rs) && !isCall
+    val isRet  = brType === BrType.jalr && isLink(rs) && !isCall
     List(brType, isCall, isRet)
   }
   def jal_offset(inst: UInt, rvc: Bool): UInt = {
     val rvc_offset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))
     val rvi_offset = Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
-    val max_width = rvi_offset.getWidth
+    val max_width  = rvi_offset.getWidth
     SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
   def br_offset(inst: UInt, rvc: Bool): UInt = {
     val rvc_offset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
     val rvi_offset = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
-    val max_width = rvi_offset.getWidth
+    val max_width  = rvi_offset.getWidth
     SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
 
@@ -56,59 +58,59 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
 }
 
 object BrType {
-  def notCFI   = "b00".U
+  def notCFI  = "b00".U
   def branch  = "b01".U
   def jal     = "b10".U
   def jalr    = "b11".U
   def apply() = UInt(2.W)
 }
 
-object ExcType {  //TODO:add exctype
-  def notExc = "b000".U
+object ExcType { // TODO:add exctype
+  def notExc  = "b000".U
   def apply() = UInt(3.W)
 }
 
-class PreDecodeInfo extends Bundle {  // 8 bit
-  val valid   = Bool()
-  val isRVC   = Bool()
-  val brType  = UInt(2.W)
-  val isCall  = Bool()
-  val isRet   = Bool()
-  //val excType = UInt(3.W)
-  def isBr    = brType === BrType.branch
-  def isJal   = brType === BrType.jal
-  def isJalr  = brType === BrType.jalr
-  def notCFI  = brType === BrType.notCFI
+class PreDecodeInfo extends Bundle { // 8 bit
+  val valid  = Bool()
+  val isRVC  = Bool()
+  val brType = UInt(2.W)
+  val isCall = Bool()
+  val isRet  = Bool()
+  // val excType = UInt(3.W)
+  def isBr   = brType === BrType.branch
+  def isJal  = brType === BrType.jal
+  def isJalr = brType === BrType.jalr
+  def notCFI = brType === BrType.notCFI
 }
 
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
+  val pd           = Vec(PredictWidth, new PreDecodeInfo)
   val hasHalfValid = Vec(PredictWidth, Bool())
-  //val expInstr = Vec(PredictWidth, UInt(32.W))
+  // val expInstr = Vec(PredictWidth, UInt(32.W))
   val instr      = Vec(PredictWidth, UInt(32.W))
   val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
 //  val hasLastHalf = Bool()
-  val triggered    = Vec(PredictWidth, new TriggerCf)
+  val triggered = Vec(PredictWidth, new TriggerCf)
 }
 
-class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
+class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst {
   val io = IO(new Bundle() {
-    val in = Input(ValidIO(new IfuToPreDecode))
+    val in  = Input(ValidIO(new IfuToPreDecode))
     val out = Output(new PreDecodeResp)
   })
 
-  val data          = io.in.bits.data
+  val data = io.in.bits.data
 //  val lastHalfMatch = io.in.lastHalfMatch
-  val validStart, validEnd = Wire(Vec(PredictWidth, Bool()))
+  val validStart, validEnd     = Wire(Vec(PredictWidth, Bool()))
   val h_validStart, h_validEnd = Wire(Vec(PredictWidth, Bool()))
 
-  val validStart_half, validEnd_half = Wire(Vec(PredictWidth, Bool()))
+  val validStart_half, validEnd_half     = Wire(Vec(PredictWidth, Bool()))
   val h_validStart_half, h_validEnd_half = Wire(Vec(PredictWidth, Bool()))
 
-  val validStart_halfPlus1, validEnd_halfPlus1 = Wire(Vec(PredictWidth, Bool()))
+  val validStart_halfPlus1, validEnd_halfPlus1     = Wire(Vec(PredictWidth, Bool()))
   val h_validStart_halfPlus1, h_validEnd_halfPlus1 = Wire(Vec(PredictWidth, Bool()))
 
-  val validStart_diff, validEnd_diff = Wire(Vec(PredictWidth, Bool()))
+  val validStart_diff, validEnd_diff     = Wire(Vec(PredictWidth, Bool()))
   val h_validStart_diff, h_validEnd_diff = Wire(Vec(PredictWidth, Bool()))
 
   val currentIsRVC = Wire(Vec(PredictWidth, Bool()))
@@ -123,108 +125,117 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   h_validStart_halfPlus1.map(_ := false.B)
   h_validEnd_halfPlus1.map(_ := false.B)
 
-  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
-  else         VecInit((0 until PredictWidth).map(i => data(i)))
+  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
+  else VecInit((0 until PredictWidth).map(i => data(i)))
 
   for (i <- 0 until PredictWidth) {
-    val inst           = WireInit(rawInsts(i))
-    //val expander       = Module(new RVCExpander)
-    currentIsRVC(i)   := isRVC(inst)
-    val currentPC      = io.in.bits.pc(i)
-    //expander.io.in             := inst
+    val inst = WireInit(rawInsts(i))
+    // val expander       = Module(new RVCExpander)
+    currentIsRVC(i) := isRVC(inst)
+    val currentPC = io.in.bits.pc(i)
+    // expander.io.in             := inst
 
-    val brType::isCall::isRet::Nil = brInfo(inst)
-    val jalOffset = jal_offset(inst, currentIsRVC(i))
-    val brOffset  = br_offset(inst, currentIsRVC(i))
+    val brType :: isCall :: isRet :: Nil = brInfo(inst)
+    val jalOffset                        = jal_offset(inst, currentIsRVC(i))
+    val brOffset                         = br_offset(inst, currentIsRVC(i))
 
-    io.out.hasHalfValid(i)        := h_validStart(i)
+    io.out.hasHalfValid(i) := h_validStart(i)
 
-    io.out.triggered(i)   := DontCare//VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i) := DontCare // VecInit(Seq.fill(10)(false.B))
 
-
-    io.out.pd(i).valid         := validStart(i)
-    io.out.pd(i).isRVC         := currentIsRVC(i)
+    io.out.pd(i).valid := validStart(i)
+    io.out.pd(i).isRVC := currentIsRVC(i)
 
     // for diff purpose only
-    io.out.pd(i).brType        := brType
-    io.out.pd(i).isCall        := isCall
-    io.out.pd(i).isRet         := isRet
+    io.out.pd(i).brType := brType
+    io.out.pd(i).isCall := isCall
+    io.out.pd(i).isRet  := isRet
 
-    //io.out.expInstr(i)         := expander.io.out.bits
-    io.out.instr(i)              :=inst
-    io.out.jumpOffset(i)       := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    // io.out.expInstr(i)         := expander.io.out.bits
+    io.out.instr(i)      := inst
+    io.out.jumpOffset(i) := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
   }
 
   // the first half is always reliable
   for (i <- 0 until PredictWidth / 2) {
-    val lastIsValidEnd =   if (i == 0) { true.B } else { validEnd(i-1) || !HasCExtension.B }
-    validStart(i)   := (lastIsValidEnd || !HasCExtension.B)
-    validEnd(i)     := validStart(i) && currentIsRVC(i) || !validStart(i) || !HasCExtension.B
+    val lastIsValidEnd = if (i == 0) { true.B }
+    else { validEnd(i - 1) || !HasCExtension.B }
+    validStart(i) := (lastIsValidEnd || !HasCExtension.B)
+    validEnd(i)   := validStart(i) && currentIsRVC(i) || !validStart(i) || !HasCExtension.B
 
-    //prepared for last half match
-    val h_lastIsValidEnd = if (i == 0) { false.B } else { h_validEnd(i-1) || !HasCExtension.B }
-    h_validStart(i)   := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd(i)     := h_validStart(i) && currentIsRVC(i) || !h_validStart(i) || !HasCExtension.B
+    // prepared for last half match
+    val h_lastIsValidEnd = if (i == 0) { false.B }
+    else { h_validEnd(i - 1) || !HasCExtension.B }
+    h_validStart(i) := (h_lastIsValidEnd || !HasCExtension.B)
+    h_validEnd(i)   := h_validStart(i) && currentIsRVC(i) || !h_validStart(i) || !HasCExtension.B
   }
 
   for (i <- 0 until PredictWidth) {
-    val lastIsValidEnd =   if (i == 0) { true.B } else { validEnd_diff(i-1) || !HasCExtension.B }
-    validStart_diff(i)   := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_diff(i)     := validStart_diff(i) && currentIsRVC(i) || !validStart_diff(i) || !HasCExtension.B
+    val lastIsValidEnd = if (i == 0) { true.B }
+    else { validEnd_diff(i - 1) || !HasCExtension.B }
+    validStart_diff(i) := (lastIsValidEnd || !HasCExtension.B)
+    validEnd_diff(i)   := validStart_diff(i) && currentIsRVC(i) || !validStart_diff(i) || !HasCExtension.B
 
-    //prepared for last half match
-    val h_lastIsValidEnd = if (i == 0) { false.B } else { h_validEnd_diff(i-1) || !HasCExtension.B }
-    h_validStart_diff(i)   := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_diff(i)     := h_validStart_diff(i) && currentIsRVC(i) || !h_validStart_diff(i) || !HasCExtension.B
+    // prepared for last half match
+    val h_lastIsValidEnd = if (i == 0) { false.B }
+    else { h_validEnd_diff(i - 1) || !HasCExtension.B }
+    h_validStart_diff(i) := (h_lastIsValidEnd || !HasCExtension.B)
+    h_validEnd_diff(i)   := h_validStart_diff(i) && currentIsRVC(i) || !h_validStart_diff(i) || !HasCExtension.B
   }
 
   // assume PredictWidth / 2 is a valid start
   for (i <- PredictWidth / 2 until PredictWidth) {
-    val lastIsValidEnd =   if (i == PredictWidth / 2) { true.B } else { validEnd_half(i-1) || !HasCExtension.B }
-    validStart_half(i)   := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_half(i)     := validStart_half(i) && currentIsRVC(i) || !validStart_half(i) || !HasCExtension.B
+    val lastIsValidEnd = if (i == PredictWidth / 2) { true.B }
+    else { validEnd_half(i - 1) || !HasCExtension.B }
+    validStart_half(i) := (lastIsValidEnd || !HasCExtension.B)
+    validEnd_half(i)   := validStart_half(i) && currentIsRVC(i) || !validStart_half(i) || !HasCExtension.B
 
-    //prepared for last half match
-    val h_lastIsValidEnd = if (i == PredictWidth / 2) { true.B } else { h_validEnd_half(i-1) || !HasCExtension.B }
-    h_validStart_half(i)   := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_half(i)     := h_validStart_half(i) && currentIsRVC(i) || !h_validStart_half(i) || !HasCExtension.B
+    // prepared for last half match
+    val h_lastIsValidEnd = if (i == PredictWidth / 2) { true.B }
+    else { h_validEnd_half(i - 1) || !HasCExtension.B }
+    h_validStart_half(i) := (h_lastIsValidEnd || !HasCExtension.B)
+    h_validEnd_half(i)   := h_validStart_half(i) && currentIsRVC(i) || !h_validStart_half(i) || !HasCExtension.B
   }
 
   // assume PredictWidth / 2 + 1 is a valid start (and PredictWidth / 2 is last half of RVI)
   for (i <- PredictWidth / 2 + 1 until PredictWidth) {
-    val lastIsValidEnd =   if (i == PredictWidth / 2 + 1) { true.B } else { validEnd_halfPlus1(i-1) || !HasCExtension.B }
-    validStart_halfPlus1(i)   := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_halfPlus1(i)     := validStart_halfPlus1(i) && currentIsRVC(i) || !validStart_halfPlus1(i) || !HasCExtension.B
+    val lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
+    else { validEnd_halfPlus1(i - 1) || !HasCExtension.B }
+    validStart_halfPlus1(i) := (lastIsValidEnd || !HasCExtension.B)
+    validEnd_halfPlus1(i) := validStart_halfPlus1(i) && currentIsRVC(i) || !validStart_halfPlus1(i) || !HasCExtension.B
 
-    //prepared for last half match
-    val h_lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B } else { h_validEnd_halfPlus1(i-1) || !HasCExtension.B }
-    h_validStart_halfPlus1(i)   := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_halfPlus1(i)     := h_validStart_halfPlus1(i) && currentIsRVC(i) || !h_validStart_halfPlus1(i) || !HasCExtension.B
+    // prepared for last half match
+    val h_lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
+    else { h_validEnd_halfPlus1(i - 1) || !HasCExtension.B }
+    h_validStart_halfPlus1(i) := (h_lastIsValidEnd || !HasCExtension.B)
+    h_validEnd_halfPlus1(i) := h_validStart_halfPlus1(i) && currentIsRVC(i) || !h_validStart_halfPlus1(
+      i
+    ) || !HasCExtension.B
   }
   validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
-  validEnd_halfPlus1(PredictWidth / 2) := true.B
+  validEnd_halfPlus1(PredictWidth / 2)   := true.B
 
   // assume h_PredictWidth / 2 is an end
   h_validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
-  h_validEnd_halfPlus1(PredictWidth / 2) := true.B
+  h_validEnd_halfPlus1(PredictWidth / 2)   := true.B
 
   // if PredictWidth / 2 - 1 is a valid end, PredictWidth / 2 is a valid start
   for (i <- PredictWidth / 2 until PredictWidth) {
-    validStart(i) := Mux(validEnd(PredictWidth / 2 - 1), validStart_half(i), validStart_halfPlus1(i))
-    validEnd(i) := Mux(validEnd(PredictWidth / 2 - 1), validEnd_half(i), validEnd_halfPlus1(i))
+    validStart(i)   := Mux(validEnd(PredictWidth / 2 - 1), validStart_half(i), validStart_halfPlus1(i))
+    validEnd(i)     := Mux(validEnd(PredictWidth / 2 - 1), validEnd_half(i), validEnd_halfPlus1(i))
     h_validStart(i) := Mux(h_validEnd(PredictWidth / 2 - 1), h_validStart_half(i), h_validStart_halfPlus1(i))
-    h_validEnd(i) := Mux(h_validEnd(PredictWidth / 2 - 1), h_validEnd_half(i), h_validEnd_halfPlus1(i))
+    h_validEnd(i)   := Mux(h_validEnd(PredictWidth / 2 - 1), h_validEnd_half(i), h_validEnd_halfPlus1(i))
   }
 
-  val validStartMismatch = Wire(Bool())
-  val validEndMismatch = Wire(Bool())
+  val validStartMismatch        = Wire(Bool())
+  val validEndMismatch          = Wire(Bool())
   val validH_ValidStartMismatch = Wire(Bool())
-  val validH_ValidEndMismatch = Wire(Bool())
+  val validH_ValidEndMismatch   = Wire(Bool())
 
-  validStartMismatch := validStart.zip(validStart_diff).map{case(a,b) => a =/= b}.reduce(_||_)
-  validEndMismatch := validEnd.zip(validEnd_diff).map{case(a,b) => a =/= b}.reduce(_||_)
-  validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map{case(a,b) => a =/= b}.reduce(_||_)
-  validH_ValidEndMismatch := h_validEnd.zip(h_validEnd_diff).map{case(a,b) => a =/= b}.reduce(_||_)
+  validStartMismatch        := validStart.zip(validStart_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
+  validEndMismatch          := validEnd.zip(validEnd_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
+  validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
+  validH_ValidEndMismatch   := h_validEnd.zip(h_validEnd_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
 
   XSError(io.in.valid && validStartMismatch, p"validStart mismatch\n")
   XSError(io.in.valid && validEndMismatch, p"validEnd mismatch\n")
@@ -234,7 +245,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 //  io.out.hasLastHalf := !io.out.pd(PredictWidth - 1).isRVC && io.out.pd(PredictWidth - 1).valid
 
   for (i <- 0 until PredictWidth) {
-    XSDebug(true.B,
+    XSDebug(
+      true.B,
       p"instr ${Hexadecimal(io.out.instr(i))}, " +
         p"validStart ${Binary(validStart(i))}, " +
         p"validEnd ${Binary(validEnd(i))}, " +
@@ -247,7 +259,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 }
 
 class IfuToF3PreDecode(implicit p: Parameters) extends XSBundle with HasPdConst {
-  val instr      = Vec(PredictWidth, UInt(32.W))
+  val instr = Vec(PredictWidth, UInt(32.W))
 }
 
 class F3PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
@@ -255,22 +267,22 @@ class F3PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
 }
 class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
   val io = IO(new Bundle() {
-    val in = Input(new IfuToF3PreDecode)
+    val in  = Input(new IfuToF3PreDecode)
     val out = Output(new F3PreDecodeResp)
   })
-  io.out.pd.zipWithIndex.map{ case (pd,i) =>
-    pd.valid := DontCare
-    pd.isRVC := DontCare
+  io.out.pd.zipWithIndex.map { case (pd, i) =>
+    pd.valid  := DontCare
+    pd.isRVC  := DontCare
     pd.brType := brInfo(io.in.instr(i))(0)
     pd.isCall := brInfo(io.in.instr(i))(1)
-    pd.isRet := brInfo(io.in.instr(i))(2)
+    pd.isRet  := brInfo(io.in.instr(i))(2)
   }
 
 }
 
 class RVCExpander(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val in = Input(UInt(32.W))
+    val in  = Input(UInt(32.W))
     val out = Output(new ExpandedInstruction)
   })
 
@@ -288,50 +300,49 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
  */
 
 object FaultType {
-  def noFault         = "b000".U
-  def jalFault        = "b001".U    //not CFI taken or invalid instruction taken
-  def retFault        = "b010".U    //not CFI taken or invalid instruction taken
-  def targetFault     = "b011".U
-  def notCFIFault    = "b100".U    //not CFI taken or invalid instruction taken
-  def invalidTaken    = "b101".U
-  def apply() = UInt(3.W)
+  def noFault      = "b000".U
+  def jalFault     = "b001".U // not CFI taken or invalid instruction taken
+  def retFault     = "b010".U // not CFI taken or invalid instruction taken
+  def targetFault  = "b011".U
+  def notCFIFault  = "b100".U // not CFI taken or invalid instruction taken
+  def invalidTaken = "b101".U
+  def apply()      = UInt(3.W)
 }
 
-class CheckInfo extends Bundle {  // 8 bit
-  val value  = UInt(3.W)
-  def isjalFault      = value === FaultType.jalFault
-  def isRetFault      = value === FaultType.retFault
-  def istargetFault   = value === FaultType.targetFault
-  def invalidTakenFault    = value === FaultType.invalidTaken
-  def notCFIFault          = value === FaultType.notCFIFault
+class CheckInfo extends Bundle { // 8 bit
+  val value             = UInt(3.W)
+  def isjalFault        = value === FaultType.jalFault
+  def isRetFault        = value === FaultType.retFault
+  def istargetFault     = value === FaultType.targetFault
+  def invalidTakenFault = value === FaultType.invalidTaken
+  def notCFIFault       = value === FaultType.notCFIFault
 }
 
 class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
-  //to Ibuffer write port  (stage 1)
-  val stage1Out = new Bundle{
-    val fixedRange  = Vec(PredictWidth, Bool())
-    val fixedTaken  = Vec(PredictWidth, Bool())
+  // to Ibuffer write port  (stage 1)
+  val stage1Out = new Bundle {
+    val fixedRange = Vec(PredictWidth, Bool())
+    val fixedTaken = Vec(PredictWidth, Bool())
   }
-  //to Ftq write back port (stage 2)
-  val stage2Out = new Bundle{
-    val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
-    val jalTarget = Vec(PredictWidth, UInt(VAddrBits.W))
-    val fixedMissPred = Vec(PredictWidth,  Bool())
-    val faultType   = Vec(PredictWidth, new CheckInfo)
+  // to Ftq write back port (stage 2)
+  val stage2Out = new Bundle {
+    val fixedTarget   = Vec(PredictWidth, UInt(VAddrBits.W))
+    val jalTarget     = Vec(PredictWidth, UInt(VAddrBits.W))
+    val fixedMissPred = Vec(PredictWidth, Bool())
+    val faultType     = Vec(PredictWidth, new CheckInfo)
   }
 }
 
-
 class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
-  val io = IO( new Bundle{
-    val in = Input(new IfuToPredChecker)
+  val io = IO(new Bundle {
+    val in  = Input(new IfuToPredChecker)
     val out = Output(new PredCheckerResp)
   })
 
-  val (takenIdx, predTaken)     = (io.in.ftqOffset.bits, io.in.ftqOffset.valid)
-  val predTarget                = (io.in.target)
-  val (instrRange, instrValid)  = (io.in.instrRange, io.in.instrValid)
-  val (pds, pc, jumpOffset)     = (io.in.pds, io.in.pc, io.in.jumpOffset)
+  val (takenIdx, predTaken)    = (io.in.ftqOffset.bits, io.in.ftqOffset.valid)
+  val predTarget               = io.in.target
+  val (instrRange, instrValid) = (io.in.instrRange, io.in.instrValid)
+  val (pds, pc, jumpOffset)    = (io.in.pds, io.in.pc, io.in.jumpOffset)
 
   val jalFaultVec, retFaultVec, targetFault, notCFITaken, invalidTaken = Wire(Vec(PredictWidth, Bool()))
 
@@ -340,71 +351,104 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
     * we first detecct remask fault and then use fixedRange to do second check
     **/
 
-  //Stage 1: detect remask fault
+  // Stage 1: detect remask fault
   /** first check: remask Fault */
-  jalFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isJal && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
-  retFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
-  val remaskFault      = VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || retFaultVec(i)))
-  val remaskIdx        = ParallelPriorityEncoder(remaskFault.asUInt)
-  val needRemask       = ParallelOR(remaskFault)
-  val fixedRange       = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
+  jalFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    pd.isJal && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken)
+  })
+  retFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    pd.isRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken)
+  })
+  val remaskFault = VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || retFaultVec(i)))
+  val remaskIdx   = ParallelPriorityEncoder(remaskFault.asUInt)
+  val needRemask  = ParallelOR(remaskFault)
+  val fixedRange  = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
 
-  io.out.stage1Out.fixedRange := fixedRange.asTypeOf((Vec(PredictWidth, Bool())))
+  io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
 
-  io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
+  io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    instrValid(i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)
+  })
 
   /** second check: faulse prediction fault and target fault */
-  notCFITaken  := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken })
-  invalidTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && !instrValid(i)  && i.U === takenIdx  && predTaken })
+  notCFITaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken
+  })
+  invalidTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    fixedRange(i) && !instrValid(i) && i.U === takenIdx && predTaken
+  })
 
-  val jumpTargets          = VecInit(pds.zipWithIndex.map{case(pd,i) => (pc(i) + jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))})
-  val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U ) ))
+  val jumpTargets = VecInit(pds.zipWithIndex.map { case (pd, i) =>
+    (pc(i) + jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
+  })
+  val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U)))
 
-  //Stage 2: detect target fault
+  // Stage 2: detect target fault
   /** target calculation: in the next stage  */
-  val fixedRangeNext = RegEnable(fixedRange, io.in.fire_in)
-  val instrValidNext = RegEnable(instrValid, io.in.fire_in)
-  val takenIdxNext   = RegEnable(takenIdx, io.in.fire_in)
-  val predTakenNext  = RegEnable(predTaken, io.in.fire_in)
-  val predTargetNext = RegEnable(predTarget, io.in.fire_in)
-  val jumpTargetsNext = RegEnable(jumpTargets, io.in.fire_in)
-  val seqTargetsNext = RegEnable(seqTargets, io.in.fire_in)
-  val pdsNext = RegEnable(pds, io.in.fire_in)
-  val jalFaultVecNext = RegEnable(jalFaultVec, io.in.fire_in)
-  val retFaultVecNext = RegEnable(retFaultVec, io.in.fire_in)
-  val notCFITakenNext = RegEnable(notCFITaken, io.in.fire_in)
+  val fixedRangeNext   = RegEnable(fixedRange, io.in.fire_in)
+  val instrValidNext   = RegEnable(instrValid, io.in.fire_in)
+  val takenIdxNext     = RegEnable(takenIdx, io.in.fire_in)
+  val predTakenNext    = RegEnable(predTaken, io.in.fire_in)
+  val predTargetNext   = RegEnable(predTarget, io.in.fire_in)
+  val jumpTargetsNext  = RegEnable(jumpTargets, io.in.fire_in)
+  val seqTargetsNext   = RegEnable(seqTargets, io.in.fire_in)
+  val pdsNext          = RegEnable(pds, io.in.fire_in)
+  val jalFaultVecNext  = RegEnable(jalFaultVec, io.in.fire_in)
+  val retFaultVecNext  = RegEnable(retFaultVec, io.in.fire_in)
+  val notCFITakenNext  = RegEnable(notCFITaken, io.in.fire_in)
   val invalidTakenNext = RegEnable(invalidTaken, io.in.fire_in)
 
-  targetFault      := VecInit(pdsNext.zipWithIndex.map{case(pd,i) => fixedRangeNext(i) && instrValidNext(i) && (pd.isJal || pd.isBr) && takenIdxNext === i.U && predTakenNext  && (predTargetNext =/= jumpTargetsNext(i))})
+  targetFault := VecInit(pdsNext.zipWithIndex.map { case (pd, i) =>
+    fixedRangeNext(i) && instrValidNext(
+      i
+    ) && (pd.isJal || pd.isBr) && takenIdxNext === i.U && predTakenNext && (predTargetNext =/= jumpTargetsNext(i))
+  })
 
+  io.out.stage2Out.faultType.zipWithIndex.foreach { case (faultType, i) =>
+    faultType.value := Mux(
+      jalFaultVecNext(i),
+      FaultType.jalFault,
+      Mux(
+        retFaultVecNext(i),
+        FaultType.retFault,
+        Mux(
+          targetFault(i),
+          FaultType.targetFault,
+          Mux(
+            notCFITakenNext(i),
+            FaultType.notCFIFault,
+            Mux(invalidTakenNext(i), FaultType.invalidTaken, FaultType.noFault)
+          )
+        )
+      )
+    )
+  }
 
-  io.out.stage2Out.faultType.zipWithIndex.foreach{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
-                                                                             Mux(retFaultVecNext(i), FaultType.retFault ,
-                                                                             Mux(targetFault(i), FaultType.targetFault ,
-                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault,
-                                                                             Mux(invalidTakenNext(i), FaultType.invalidTaken,  FaultType.noFault)))))}
-
-  io.out.stage2Out.fixedMissPred.zipWithIndex.foreach{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
-  io.out.stage2Out.fixedTarget.zipWithIndex.foreach{case(target, i) => target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i),  seqTargetsNext(i) )}
-  io.out.stage2Out.jalTarget.zipWithIndex.foreach{case(target, i) => target := jumpTargetsNext(i) }
+  io.out.stage2Out.fixedMissPred.zipWithIndex.foreach { case (missPred, i) =>
+    missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)
+  }
+  io.out.stage2Out.fixedTarget.zipWithIndex.foreach { case (target, i) =>
+    target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i), seqTargetsNext(i))
+  }
+  io.out.stage2Out.jalTarget.zipWithIndex.foreach { case (target, i) => target := jumpTargetsNext(i) }
 
 }
 
 class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
-  val io = IO(new Bundle(){
+  val io = IO(new Bundle() {
     val frontendTrigger = Input(new FrontendTdataDistributeIO)
-    val triggered     = Output(Vec(PredictWidth, new TriggerCf))
+    val triggered       = Output(Vec(PredictWidth, new TriggerCf))
 
-    val pds           = Input(Vec(PredictWidth, new PreDecodeInfo))
-    val pc            = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
-    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
-                        else Input(Vec(PredictWidth, UInt(32.W)))
+    val pds = Input(Vec(PredictWidth, new PreDecodeInfo))
+    val pc  = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
+    val data = if (HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
+    else Input(Vec(PredictWidth, UInt(32.W)))
   })
 
-  val data          = io.data
+  val data = io.data
 
-  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
-  else         VecInit((0 until PredictWidth).map(i => data(i)))
+  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
+  else VecInit((0 until PredictWidth).map(i => data(i)))
 
   val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   when(io.frontendTrigger.tUpdate.valid) {
@@ -415,14 +459,15 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
   XSDebug(triggerEnableVec.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
 
   val triggerTimingVec = VecInit(tdata.map(_.timing))
-  val triggerChainVec = VecInit(tdata.map(_.chain))
+  val triggerChainVec  = VecInit(tdata.map(_.chain))
 
   for (i <- 0 until TriggerNum) { PrintTriggerInfo(triggerEnableVec(i), tdata(i)) }
 
-  //val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
+  // val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
   val triggerHitVec = (0 until TriggerNum).map(j =>
-      TriggerCmpConsecutive(io.pc, tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j)).map(
-        hit => hit && !tdata(j).select)
+    TriggerCmpConsecutive(io.pc, tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j)).map(hit =>
+      hit && !tdata(j).select
+    )
   ).transpose
 
   for (i <- 0 until PredictWidth) {
@@ -432,7 +477,10 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
     io.triggered(i).frontendHit := triggerHitVec(i)
     // can fire, exception will be handled at rob enq
     io.triggered(i).frontendCanFire := triggerCanFireVec
-    XSDebug(io.triggered(i).getFrontendCanFire, p"Debug Mode: Predecode Inst No. ${i} has trigger fire vec ${io.triggered(i).frontendCanFire}\n")
+    XSDebug(
+      io.triggered(i).getFrontendCanFire,
+      p"Debug Mode: Predecode Inst No. ${i} has trigger fire vec ${io.triggered(i).frontendCanFire}\n"
+    )
   }
   io.triggered.foreach(_.backendCanFire := VecInit(Seq.fill(TriggerNum)(false.B)))
   io.triggered.foreach(_.backendHit := VecInit(Seq.fill(TriggerNum)(false.B)))

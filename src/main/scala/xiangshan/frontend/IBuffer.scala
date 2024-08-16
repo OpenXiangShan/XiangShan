@@ -16,91 +16,84 @@
 
 package xiangshan.frontend
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
+import xiangshan._
 import xiangshan.ExceptionNO._
 
-class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](
-  p => p(XSCoreParamsKey).IBufSize
-) {
-}
+class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](p => p(XSCoreParamsKey).IBufSize) {}
 
-class IBufInBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufInBankPtr](
-  p => p(XSCoreParamsKey).IBufSize / p(XSCoreParamsKey).IBufNBank
-) {
-}
+class IBufInBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufInBankPtr](p =>
+      p(XSCoreParamsKey).IBufSize / p(XSCoreParamsKey).IBufNBank
+    ) {}
 
-class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
-  p => p(XSCoreParamsKey).IBufNBank
-) {
-}
+class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](p => p(XSCoreParamsKey).IBufNBank) {}
 
 class IBufferIO(implicit p: Parameters) extends XSBundle {
-  val flush = Input(Bool())
-  val ControlRedirect = Input(Bool())
+  val flush                = Input(Bool())
+  val ControlRedirect      = Input(Bool())
   val ControlBTBMissBubble = Input(Bool())
-  val TAGEMissBubble = Input(Bool())
-  val SCMissBubble = Input(Bool())
-  val ITTAGEMissBubble = Input(Bool())
-  val RASMissBubble = Input(Bool())
-  val MemVioRedirect = Input(Bool())
-  val in = Flipped(DecoupledIO(new FetchToIBuffer))
-  val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-  val full = Output(Bool())
-  val decodeCanAccept = Input(Bool())
-  val stallReason = new StallReasonIO(DecodeWidth)
+  val TAGEMissBubble       = Input(Bool())
+  val SCMissBubble         = Input(Bool())
+  val ITTAGEMissBubble     = Input(Bool())
+  val RASMissBubble        = Input(Bool())
+  val MemVioRedirect       = Input(Bool())
+  val in                   = Flipped(DecoupledIO(new FetchToIBuffer))
+  val out                  = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val full                 = Output(Bool())
+  val decodeCanAccept      = Input(Bool())
+  val stallReason          = new StallReasonIO(DecodeWidth)
 }
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
-  val inst = UInt(32.W)
-  val pc = UInt(VAddrBits.W)
-  val foldpc = UInt(MemPredPCWidth.W)
-  val pd = new PreDecodeInfo
-  val pred_taken = Bool()
-  val ftqPtr = new FtqPtr
-  val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType = UInt(ExceptionType.width.W)
+  val inst            = UInt(32.W)
+  val pc              = UInt(VAddrBits.W)
+  val foldpc          = UInt(MemPredPCWidth.W)
+  val pd              = new PreDecodeInfo
+  val pred_taken      = Bool()
+  val ftqPtr          = new FtqPtr
+  val ftqOffset       = UInt(log2Ceil(PredictWidth).W)
+  val exceptionType   = UInt(ExceptionType.width.W)
   val crossPageIPFFix = Bool()
-  val triggered = new TriggerCf
+  val triggered       = new TriggerCf
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst   := fetch.instrs(i)
-    pc     := fetch.pc(i)
-    foldpc := fetch.foldpc(i)
-    pd     := fetch.pd(i)
-    pred_taken := fetch.ftqOffset(i).valid
-    ftqPtr := fetch.ftqPtr
-    ftqOffset := fetch.ftqOffset(i).bits
-    exceptionType := fetch.exceptionType(i)
+    inst            := fetch.instrs(i)
+    pc              := fetch.pc(i)
+    foldpc          := fetch.foldpc(i)
+    pd              := fetch.pd(i)
+    pred_taken      := fetch.ftqOffset(i).valid
+    ftqPtr          := fetch.ftqPtr
+    ftqOffset       := fetch.ftqOffset(i).bits
+    exceptionType   := fetch.exceptionType(i)
     crossPageIPFFix := fetch.crossPageIPFFix(i)
-    triggered := fetch.triggered(i)
+    triggered       := fetch.triggered(i)
     this
   }
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
-    cf.instr := inst
-    cf.pc := pc
-    cf.foldpc := foldpc
-    cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.pf
+    cf.instr                             := inst
+    cf.pc                                := pc
+    cf.foldpc                            := foldpc
+    cf.exceptionVec                      := 0.U.asTypeOf(ExceptionVec())
+    cf.exceptionVec(instrPageFault)      := exceptionType === ExceptionType.pf
     cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.gpf
-    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.af
-    cf.trigger := triggered
-    cf.pd := pd
-    cf.pred_taken := pred_taken
-    cf.crossPageIPFFix := crossPageIPFFix
-    cf.storeSetHit := DontCare
-    cf.waitForRobIdx := DontCare
-    cf.loadWaitBit := DontCare
-    cf.loadWaitStrict := DontCare
-    cf.ssid := DontCare
-    cf.ftqPtr := ftqPtr
-    cf.ftqOffset := ftqOffset
+    cf.exceptionVec(instrAccessFault)    := exceptionType === ExceptionType.af
+    cf.trigger                           := triggered
+    cf.pd                                := pd
+    cf.pred_taken                        := pred_taken
+    cf.crossPageIPFFix                   := crossPageIPFFix
+    cf.storeSetHit                       := DontCare
+    cf.waitForRobIdx                     := DontCare
+    cf.loadWaitBit                       := DontCare
+    cf.loadWaitStrict                    := DontCare
+    cf.ssid                              := DontCare
+    cf.ftqPtr                            := ftqPtr
+    cf.ftqOffset                         := ftqOffset
     cf
   }
 }
@@ -114,8 +107,10 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Parameter Check
   private val bankSize = IBufSize / IBufNBank
   require(IBufSize % IBufNBank == 0, s"IBufNBank should divide IBufSize, IBufNBank: $IBufNBank, IBufSize: $IBufSize")
-  require(IBufNBank >= DecodeWidth,
-    s"IBufNBank should be equal or larger than DecodeWidth, IBufNBank: $IBufNBank, DecodeWidth: $DecodeWidth")
+  require(
+    IBufNBank >= DecodeWidth,
+    s"IBufNBank should be equal or larger than DecodeWidth, IBufNBank: $IBufNBank, DecodeWidth: $DecodeWidth"
+  )
 
   // IBuffer is organized as raw registers
   // This is due to IBuffer is a huge queue, read & write port logic should be precisely controlled
@@ -129,12 +124,9 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Enqueue writes cannot benefit from this characteristic unless use a SRAM
   // For detail see Enqueue and Dequeue below
   private val ibuf: Vec[IBufEntry] = RegInit(VecInit.fill(IBufSize)(0.U.asTypeOf(new IBufEntry)))
-  private val bankedIBufView: Vec[Vec[IBufEntry]] = VecInit.tabulate(IBufNBank)(
-    bankID => VecInit.tabulate(bankSize)(
-      inBankOffset => ibuf(bankID + inBankOffset * IBufNBank)
-    )
+  private val bankedIBufView: Vec[Vec[IBufEntry]] = VecInit.tabulate(IBufNBank)(bankID =>
+    VecInit.tabulate(bankSize)(inBankOffset => ibuf(bankID + inBankOffset * IBufNBank))
   )
-
 
   // Bypass wire
   private val bypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
@@ -142,24 +134,25 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
   private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
-  private val outputEntriesValidNum = PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse.toSeq, 0.U)
+  private val outputEntriesValidNum =
+    PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse.toSeq, 0.U)
 
   // Between Bank
   private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
-  private val deqBankPtr: IBufBankPtr = deqBankPtrVec(0)
+  private val deqBankPtr:    IBufBankPtr      = deqBankPtrVec(0)
   private val deqBankPtrVecNext = Wire(deqBankPtrVec.cloneType)
   // Inside Bank
   private val deqInBankPtr: Vec[IBufInBankPtr] = RegInit(VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr)))
   private val deqInBankPtrNext = Wire(deqInBankPtr.cloneType)
 
-  val deqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
+  val deqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
   val deqPtrNext = Wire(deqPtr.cloneType)
 
   val enqPtrVec = RegInit(VecInit.tabulate(PredictWidth)(_.U.asTypeOf(new IBufPtr)))
-  val enqPtr = enqPtrVec(0)
+  val enqPtr    = enqPtrVec(0)
 
   val numTryEnq = WireDefault(0.U)
-  val numEnq = Mux(io.in.fire, numTryEnq, 0.U)
+  val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
 
   // empty and decode can accept insts
   val useBypass = enqPtr === deqPtr && decodeCanAccept
@@ -170,19 +163,19 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   private val numDeq = numOut
 
   // counter current number of valid
-  val numValid = distanceBetween(enqPtr, deqPtr)
+  val numValid         = distanceBetween(enqPtr, deqPtr)
   val numValidAfterDeq = numValid - numDeq
   // counter next number of valid
   val numValidNext = numValid + numEnq - numDeq
-  val allowEnq = RegInit(true.B)
+  val allowEnq     = RegInit(true.B)
   val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
 
   allowEnq := (IBufSize - PredictWidth).U >= numValidNext // Disable when almost full
 
   val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
-  val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
+  val enqData   = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
 
-  val outputEntriesIsNotFull = !outputEntries(DecodeWidth-1).valid
+  val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
   when(decodeCanAccept) {
     numOut := Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid)
   }.elsewhen(outputEntriesIsNotFull) {
@@ -196,11 +189,11 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     when(numFromFetch >= DecodeWidth.U) {
       numTryEnq := numFromFetch - DecodeWidth.U
       numBypass := DecodeWidth.U
-    } .otherwise {
+    }.otherwise {
       numTryEnq := 0.U
       numBypass := numFromFetch
     }
-  } .otherwise {
+  }.otherwise {
     numTryEnq := numFromFetch
     numBypass := 0.U
   }
@@ -214,11 +207,11 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       val validOH = Range(0, PredictWidth).map {
         i =>
           io.in.bits.valid(i) &&
-            io.in.bits.enqEnable(i) &&
-            enqOffset(i) === idx.asUInt
+          io.in.bits.enqEnable(i) &&
+          enqOffset(i) === idx.asUInt
       } // Should be OneHot
       entry.valid := validOH.reduce(_ || _) && io.in.fire && !io.flush
-      entry.bits := Mux1H(validOH, enqData)
+      entry.bits  := Mux1H(validOH, enqData)
 
       // Debug Assertion
       XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
@@ -229,7 +222,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   io.out zip outputEntries foreach {
     case (io, reg) =>
       io.valid := reg.valid
-      io.bits := reg.bits.toCtrlFlow
+      io.bits  := reg.bits.toCtrlFlow
   }
   (outputEntries zip bypassEntries).zipWithIndex.foreach {
     case ((out, bypass), i) =>
@@ -239,9 +232,13 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
         }.otherwise {
           out := deqEntries(i)
         }
-      }.elsewhen(outputEntriesIsNotFull){
+      }.elsewhen(outputEntriesIsNotFull) {
         out.valid := deqEntries(i).valid
-        out.bits := Mux(i.U < outputEntriesValidNum, out.bits, VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum))
+        out.bits := Mux(
+          i.U < outputEntriesValidNum,
+          out.bits,
+          VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum)
+        )
       }
   }
 
@@ -274,7 +271,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     }
   }
   // Pointer maintenance
-  when (io.in.fire && !io.flush) {
+  when(io.in.fire && !io.flush) {
     enqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq))
   }
 
@@ -295,40 +292,40 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   // Read port
   // 2-stage, IBufNBank * (bankSize -> 1) + IBufNBank -> 1
   // Should be better than IBufSize -> 1 in area, with no significant latency increase
-  private val readStage1: Vec[IBufEntry] = VecInit.tabulate(IBufNBank)(
-    bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID))
-  )
+  private val readStage1: Vec[IBufEntry] =
+    VecInit.tabulate(IBufNBank)(bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID)))
   for (i <- 0 until DecodeWidth) {
     deqEntries(i).valid := validVec(i)
-    deqEntries(i).bits := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
+    deqEntries(i).bits  := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
   deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
-  deqPtrNext := deqPtr + numDeq
+  deqPtrNext        := deqPtr + numDeq
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach {
     case ((ptrNext, ptr), idx) => {
       // validVec[k] == bankValid[deqBankPtr + k]
       // So bankValid[n] == validVec[n - deqBankPtr]
-      val validIdx = Mux(idx.asUInt >= deqBankPtr.value,
+      val validIdx = Mux(
+        idx.asUInt >= deqBankPtr.value,
         idx.asUInt - deqBankPtr.value,
         ((idx + IBufNBank).asUInt - deqBankPtr.value)(log2Ceil(IBufNBank) - 1, 0)
       )(log2Ceil(DecodeWidth) - 1, 0)
       val bankAdvance = numOut > validIdx
-      ptrNext := Mux(bankAdvance , ptr + 1.U, ptr)
+      ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
     }
   }
 
   // Flush
-  when (io.flush) {
-    allowEnq := true.B
-    enqPtrVec := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+  when(io.flush) {
+    allowEnq      := true.B
+    enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
-    deqInBankPtr := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
-    deqPtr := 0.U.asTypeOf(new IBufPtr())
+    deqInBankPtr  := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
+    deqPtr        := 0.U.asTypeOf(new IBufPtr())
     outputEntries.foreach(_.valid := false.B)
   }.otherwise {
-    deqPtr := deqPtrNext
-    deqInBankPtr := deqInBankPtrNext
+    deqPtr        := deqPtrNext
+    deqInBankPtr  := deqInBankPtrNext
     deqBankPtrVec := deqBankPtrVecNext
   }
   io.full := !allowEnq
@@ -358,13 +355,12 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     }
   }
 
-
   val dequeueInsufficient = Wire(Bool())
-  val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
-  val deqValidCount = PopCount(validVec.asBools)
-  val deqWasteCount = DecodeWidth.U - deqValidCount
+  val matchBubble         = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
+  val deqValidCount       = PopCount(validVec.asBools)
+  val deqWasteCount       = DecodeWidth.U - deqValidCount
   dequeueInsufficient := deqValidCount < DecodeWidth.U
-  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
+  matchBubble         := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
 
   io.stallReason.reason.map(_ := 0.U)
   for (i <- 0 until DecodeWidth) {
@@ -399,28 +395,30 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   when(io.in.fire) {
     XSDebug("Enque:\n")
     XSDebug(p"MASK=${Binary(io.in.bits.valid)}\n")
-    for(i <- 0 until PredictWidth){
+    for (i <- 0 until PredictWidth) {
       XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
   }
 
   for (i <- 0 until DecodeWidth) {
-    XSDebug(io.out(i).fire,
+    XSDebug(
+      io.out(i).fire,
       p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)}" +
-      p"v=${io.out(i).valid} r=${io.out(i).ready} " +
-      p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
+        p"v=${io.out(i).valid} r=${io.out(i).ready} " +
+        p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n"
+    )
   }
 
   XSDebug(p"numValid: ${numValid}\n")
   XSDebug(p"EnqNum: ${numEnq}\n")
   XSDebug(p"DeqNum: ${numDeq}\n")
 
-  val afterInit = RegInit(false.B)
+  val afterInit  = RegInit(false.B)
   val headBubble = RegInit(false.B)
-  when (io.in.fire) { afterInit := true.B }
-  when (io.flush) {
+  when(io.in.fire)(afterInit := true.B)
+  when(io.flush) {
     headBubble := true.B
-  } .elsewhen(numValid =/= 0.U) {
+  }.elsewhen(numValid =/= 0.U) {
     headBubble := false.B
   }
   val instrHungry = afterInit && (numValid === 0.U) && !headBubble
@@ -447,16 +445,16 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   XSPerfAccumulate("SCMissBubble", Mux(matchBubbleVec(TopDownCounters.SCMissBubble.id), deqWasteCount, 0.U))
   XSPerfAccumulate("ITTAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.ITTAGEMissBubble.id), deqWasteCount, 0.U))
   XSPerfAccumulate("RASMissBubble", Mux(matchBubbleVec(TopDownCounters.RASMissBubble.id), deqWasteCount, 0.U))
-  */
+   */
 
   val perfEvents = Seq(
-    ("IBuffer_Flushed  ", io.flush                                                                     ),
-    ("IBuffer_hungry   ", instrHungry                                                                  ),
-    ("IBuffer_1_4_valid", (numValid >  (0*(IBufSize/4)).U) & (numValid < (1*(IBufSize/4)).U)   ),
-    ("IBuffer_2_4_valid", (numValid >= (1*(IBufSize/4)).U) & (numValid < (2*(IBufSize/4)).U)   ),
-    ("IBuffer_3_4_valid", (numValid >= (2*(IBufSize/4)).U) & (numValid < (3*(IBufSize/4)).U)   ),
-    ("IBuffer_4_4_valid", (numValid >= (3*(IBufSize/4)).U) & (numValid < (4*(IBufSize/4)).U)   ),
-    ("IBuffer_full     ",  numValid.andR                                                           ),
+    ("IBuffer_Flushed  ", io.flush),
+    ("IBuffer_hungry   ", instrHungry),
+    ("IBuffer_1_4_valid", (numValid > (0 * (IBufSize / 4)).U) & (numValid < (1 * (IBufSize / 4)).U)),
+    ("IBuffer_2_4_valid", (numValid >= (1 * (IBufSize / 4)).U) & (numValid < (2 * (IBufSize / 4)).U)),
+    ("IBuffer_3_4_valid", (numValid >= (2 * (IBufSize / 4)).U) & (numValid < (3 * (IBufSize / 4)).U)),
+    ("IBuffer_4_4_valid", (numValid >= (3 * (IBufSize / 4)).U) & (numValid < (4 * (IBufSize / 4)).U)),
+    ("IBuffer_full     ", numValid.andR),
     ("Front_Bubble     ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid)))
   )
   generatePerfEvent()

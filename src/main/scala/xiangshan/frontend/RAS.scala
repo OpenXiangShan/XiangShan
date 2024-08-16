@@ -306,4 +306,4 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   generatePerfEvent()
 }
-*/
+ */

@@ -16,9 +16,9 @@
 
 package xiangshan.frontend.icache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.frontend.ExceptionType
 
@@ -29,15 +29,15 @@ import xiangshan.frontend.ExceptionType
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx        : Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask        : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val meta_corrupt   : Vec[Bool] = Vec(PortNumber, Bool())
+  val vSetIdx:        Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:        Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val ptag:           Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
+  val itlb_exception: Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val meta_corrupt:   Vec[Bool] = Vec(PortNumber, Bool())
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  val gpaddr         : UInt      = UInt(GPAddrBits.W)
+  val gpaddr: UInt = UInt(GPAddrBits.W)
 }
 
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
@@ -45,14 +45,13 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGPFEntry
 
   // for compatibility
-  def vSetIdx        : Vec[UInt] = entry.vSetIdx
-  def waymask        : Vec[UInt] = entry.waymask
-  def ptag           : Vec[UInt] = entry.ptag
-  def itlb_exception : Vec[UInt] = entry.itlb_exception
-  def meta_corrupt   : Vec[Bool] = entry.meta_corrupt
-  def gpaddr         : UInt      = gpf.gpaddr
+  def vSetIdx:        Vec[UInt] = entry.vSetIdx
+  def waymask:        Vec[UInt] = entry.waymask
+  def ptag:           Vec[UInt] = entry.ptag
+  def itlb_exception: Vec[UInt] = entry.itlb_exception
+  def meta_corrupt:   Vec[Bool] = entry.meta_corrupt
+  def gpaddr:         UInt      = gpf.gpaddr
 }
-
 
 // class WayLookupRead(implicit p: Parameters) extends ICacheBundle {
 //   val vSetIdx     = Vec(PortNumber, UInt(idxBits.W))
@@ -71,10 +70,10 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
 // }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
-  val flush   = Input(Bool())
-  val read    = DecoupledIO(new WayLookupInfo)
-  val write   = Flipped(DecoupledIO(new WayLookupInfo))
-  val update  = Flipped(ValidIO(new ICacheMissResp))
+  val flush  = Input(Bool())
+  val read   = DecoupledIO(new WayLookupInfo)
+  val write  = Flipped(DecoupledIO(new WayLookupInfo))
+  val update = Flipped(ValidIO(new ICacheMissResp))
 }
 
 class WayLookup(implicit p: Parameters) extends ICacheModule {
@@ -84,7 +83,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
   private object WayLookupPtr {
     def apply(f: Bool, v: UInt)(implicit p: Parameters): WayLookupPtr = {
       val ptr = Wire(new WayLookupPtr)
-      ptr.flag := f
+      ptr.flag  := f
       ptr.value := v
       ptr
     }
@@ -126,12 +125,12 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     ******************************************************************************
     */
   private val hits = Wire(Vec(nWayLookupSize, Bool()))
-  entries.zip(hits).foreach{ case(entry, hit) =>
+  entries.zip(hits).foreach { case (entry, hit) =>
     val hit_vec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
       val vset_same = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
       val ptag_same = getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i)
-      val way_same = io.update.bits.waymask === entry.waymask(i)
+      val way_same  = io.update.bits.waymask === entry.waymask(i)
       when(vset_same) {
         when(ptag_same) {
           // miss -> hit
@@ -146,7 +145,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)
     }
-    hit := hit_vec.reduce(_||_)
+    hit := hit_vec.reduce(_ || _)
   }
 
   /**
@@ -155,11 +154,11 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     ******************************************************************************
     */
   io.read.valid := !empty || io.write.valid
-  when (empty && io.write.valid) {  // bypass
+  when(empty && io.write.valid) { // bypass
     io.read.bits := io.write.bits
   }.otherwise {
     io.read.bits.entry := entries(readPtr.value)
-    io.read.bits.gpf   := Mux(readPtr === gpfPtr && gpf_entry.valid, gpf_entry.bits, 0.U.asTypeOf(new WayLookupGPFEntry))
+    io.read.bits.gpf := Mux(readPtr === gpfPtr && gpf_entry.valid, gpf_entry.bits, 0.U.asTypeOf(new WayLookupGPFEntry))
   }
 
   /**
@@ -171,10 +170,10 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
     // save gpf iff no gpf is already saved
-    when(!gpf_entry.valid && io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_||_)) {
+    when(!gpf_entry.valid && io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_ || _)) {
       gpf_entry.valid := true.B
       gpf_entry.bits  := io.write.bits.gpf
-      gpfPtr := writePtr
+      gpfPtr          := writePtr
     }
   }
 }
