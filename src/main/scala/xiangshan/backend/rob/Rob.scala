@@ -639,7 +639,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   when(deqHasCommitted){
     deqHasFlushed := false.B
-  }.elsewhen(deqNeedFlush && io.flushOut.valid){
+  }.elsewhen(deqNeedFlush && io.flushOut.valid && !io.flushOut.bits.flushItself()){
     deqHasFlushed := true.B
   }
   val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed) || deqFlushBlock
