@@ -963,7 +963,7 @@ class Sbuffer(implicit p: Parameters)
 
           difftest.coreid := io.hartId
           difftest.index  := (i*VecMemFLOWMaxNumber + index).U
-          difftest.valid  := storeCommit
+          difftest.valid  := storeCommit && isWline
           difftest.addr   := blockAddr + (index.U << wordOffBits)
           difftest.data   := io.in(i).bits.data
           difftest.mask   := ((1 << wordBytes) - 1).U
