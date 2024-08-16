@@ -581,11 +581,12 @@ class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
-  val s1_kill  = Output(Bool())
-  val s2_kill  = Output(Bool())
-  val s0_pc = Output(UInt(VAddrBits.W))
-  val s1_pc = Output(UInt(VAddrBits.W))
-  val s2_pc = Output(UInt(VAddrBits.W))
+  val s1_kill_data_read = Output(Bool()) // only kill bandedDataRead at s1
+  val s1_kill           = Output(Bool()) // kill loadpipe req at s1
+  val s2_kill           = Output(Bool())
+  val s0_pc             = Output(UInt(VAddrBits.W))
+  val s1_pc             = Output(UInt(VAddrBits.W))
+  val s2_pc             = Output(UInt(VAddrBits.W))
   // cycle 0: load has updated replacement before
   val replacementUpdated = Output(Bool())
   val is128Req = Bool()
