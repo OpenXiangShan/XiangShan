@@ -32,6 +32,7 @@ import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 import coupledL2.EnableCHI
+import coupledL2.tl2chi.CHIIssue
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -48,7 +49,10 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
-  NodeIDWidth: Int = 7,
+  NodeIDWidthList: Map[String, Int] = Map(
+    "B" -> 7,
+    "E.b" -> 11
+  ),
   NumHart: Int = 64,
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
@@ -69,6 +73,7 @@ trait HasSoCParameter {
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
+  val issue = p(CHIIssue)
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA

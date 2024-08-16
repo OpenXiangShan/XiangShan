@@ -96,7 +96,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       val riscv_halt = Output(Bool())
       val riscv_rst_vec = Input(UInt(38.W))
       val chi = new PortIO
-      val nodeID = Input(UInt(p(SoCParamsKey).NodeIDWidth.W))
+      val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
     // imsic axi4lite io
