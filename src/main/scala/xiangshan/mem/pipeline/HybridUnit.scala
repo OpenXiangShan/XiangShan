@@ -649,6 +649,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
   io.ldu_io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
   io.ldu_io.dcache.s1_kill             := s1_kill || s1_tlb_miss || s1_exception
+  io.ldu_io.dcache.s1_kill_data_read   := s1_kill || s1_tlb_miss
 
   // store to load forwarding
   io.ldu_io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
