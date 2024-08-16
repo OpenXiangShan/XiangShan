@@ -81,7 +81,6 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter        = new TlbRequestIO
   val pmp              = new ICachePMPBundle
   val mmioCommitRead   = new mmioCommitRead
-  val illBuf          = Output(UInt(32.W))  
 }
 
 // record the situation in which fallThruAddr falls into
@@ -490,6 +489,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ******************************************************************************
     */
 
+  val expanders = Seq.fill(PredictWidth)(Module(new RVCExpander))
+
   val f3_valid          = RegInit(false.B)
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
@@ -501,16 +502,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_exception      = RegEnable(f2_exception,  f2_fire)
   val f3_mmio           = RegEnable(f2_mmio,       f2_fire)
 
-  //val f3_expd_instr     = RegEnable(f2_expd_instr,  f2_fire)
   val f3_instr          = RegEnable(f2_instr, f2_fire)
-  val f3_expd           = (0 until PredictWidth).map{ i =>
-    val expander       = Module(new RVCExpander)
+
+  expanders.zipWithIndex.foreach { case (expander, i) =>
     expander.io.in := f3_instr(i)
-    (expander.io.out.bits, expander.io.ill)
   }
-  val f3_expd_instr     = VecInit(f3_expd.map(_._1))
-  val f3_ill_raw        = VecInit(f3_expd.map(_._2))
-  
+  // Use expanded instruction only when input is legal.
+  // Otherwise use origin illegal RVC instruction.
+  val f3_expd_instr     = VecInit(expanders.map { expander: RVCExpander =>
+    Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
+  })
+  val f3_ill            = VecInit(expanders.map(_.io.ill))
 
   val f3_pd_wire         = RegEnable(f2_pd,            f2_fire)
   val f3_pd              = WireInit(f3_pd_wire)
@@ -757,28 +759,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio_range      = VecInit((0 until PredictWidth).map(i => if(i ==0) true.B else false.B))
   val f3_instr_valid     = Wire(Vec(PredictWidth, Bool()))
 
-  // Illegal instruction record
-  val f3_ill            = VecInit((0 until PredictWidth).map{ i =>
-    f3_ill_raw(i) && f3_instr_valid(i)
-  })
-  val f4_instr = RegEnable(f3_instr, f3_fire)
-  val f4_ill = RegEnable(f3_ill, f3_fire)
-  val illegalBuf = RegInit(0.U(32.W))
-
-  val illBufClear = RegInit(true.B)
-
-  dontTouch(illegalBuf)
-  when (f4_ill.asUInt.orR && RegNext(f3_fire) && illBufClear) {
-    illegalBuf := ParallelPriorityMux(f4_ill, f4_instr)
-    illBufClear := false.B
-  }
-
-  when (backend_redirect || wb_redirect) {
-    illBufClear := true.B
-  }
-
-  io.illBuf := illegalBuf
-
   /*** prediction result check   ***/
   checkerIn.ftqOffset   := f3_ftq_req.ftqOffset
   checkerIn.jumpOffset  := f3_jump_offset
@@ -840,6 +820,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
+  io.toIbuffer.bits.illegalInstr:= f3_ill
   io.toIbuffer.bits.triggered   := f3_triggered
 
   when(f3_lastHalf.valid){

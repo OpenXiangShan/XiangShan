@@ -156,8 +156,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.toIbuffer    <> ibuffer.io.in
 
   ftq.io.fromBackend <> io.backend.toFtq
-  io.backend.fromFtq <> ftq.io.toBackend
-  io.backend.fromIfu <> ifu.io.toBackend
+  io.backend.fromFtq := ftq.io.toBackend
+  io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
@@ -174,9 +174,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
                         ftq.io.toBackend.newest_entry_target,
                         checkPcMem(checkTargetIdx(i) + 1.U).startAddr)
   }
-
-  // IFU-backend
-  io.backend.illBuf := ifu.io.illBuf
 
   // commented out for this br could be the last instruction in the fetch block
   def checkNotTakenConsecutive = {

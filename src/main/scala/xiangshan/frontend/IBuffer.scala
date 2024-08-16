@@ -63,8 +63,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType = UInt(ExceptionType.width.W)
-  val crossPageIPFFix = Bool()
+  val exceptionType = IBufferExceptionType()
   val triggered = TriggerAction()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
@@ -75,8 +74,11 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
     ftqOffset := fetch.ftqOffset(i).bits
-    exceptionType := fetch.exceptionType(i)
-    crossPageIPFFix := fetch.crossPageIPFFix(i)
+    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+      fetch.exceptionType(i),
+      fetch.crossPageIPFFix(i),
+      fetch.illegalInstr(i),
+    )
     triggered := fetch.triggered(i)
     this
   }
@@ -87,13 +89,14 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.pc := pc
     cf.foldpc := foldpc
     cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.pf
-    cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.gpf
-    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.af
+    cf.exceptionVec(instrPageFault)      := IBufferExceptionType.isPF (this.exceptionType)
+    cf.exceptionVec(instrGuestPageFault) := IBufferExceptionType.isGPF(this.exceptionType)
+    cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF (this.exceptionType)
+    cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
     cf.trigger := triggered
     cf.pd := pd
     cf.pred_taken := pred_taken
-    cf.crossPageIPFFix := crossPageIPFFix
+    cf.crossPageIPFFix := IBufferExceptionType.isCrossPage(this.exceptionType)
     cf.storeSetHit := DontCare
     cf.waitForRobIdx := DontCare
     cf.loadWaitBit := DontCare
@@ -102,6 +105,44 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
     cf
+  }
+
+  object IBufferExceptionType extends NamedUInt(3) {
+    def None         = "b000".U
+    def NonCrossPF   = "b001".U
+    def NonCrossGPF  = "b010".U
+    def NonCrossAF   = "b011".U
+    // illegal instruction
+    def rvcII        = "b100".U
+    def CrossPF      = "b101".U
+    def CrossGPF     = "b110".U
+    def CrossAF      = "b111".U
+
+    def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: UInt, crossPage: Bool, rvcIll: Bool): UInt = {
+      require(
+        fetchExcp.getWidth == ExceptionType.width,
+        s"The width(${fetchExcp.getWidth}) of fetchExcp should be equal to " +
+        s"the width(${ExceptionType.width}) of frontend.ExceptionType."
+      )
+      MuxCase(fetchExcp, Seq(
+        rvcIll    -> this.rvcII,
+        crossPage -> Cat(1.U(1.W), fetchExcp),
+      ))
+    }
+
+    def isRVCII(uint: UInt): Bool = {
+      this.checkInputWidth(uint)
+      uint(2) && uint(1, 0) === 0.U
+    }
+
+    def isCrossPage(uint: UInt): Bool = {
+      this.checkInputWidth(uint)
+      uint(2) && uint(1, 0) =/= 0.U
+    }
+
+    def isPF (uint: UInt): Bool = uint(1, 0) === this.NonCrossPF (1, 0)
+    def isGPF(uint: UInt): Bool = uint(1, 0) === this.NonCrossGPF(1, 0)
+    def isAF (uint: UInt): Bool = uint(1, 0) === this.NonCrossAF (1, 0)
   }
 }
 

@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst, TrapInst}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst, TrapInstInfo}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -364,7 +364,6 @@ class CtrlBlockImp(
   decode.io.vlRat <> rat.io.vlReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
   decode.io.stallReason.in <> io.frontend.stallReason
-  decode.io.illBuf := io.frontend.illBuf
 
   // snapshot check
   class CFIRobIdx extends Bundle {
@@ -587,7 +586,6 @@ class CtrlBlockImp(
 
   io.redirect := s1_s3_redirect
 
-  io.trapInst := decode.io.trapInst
   // rob to int block
   io.robio.csr <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
@@ -624,6 +622,8 @@ class CtrlBlockImp(
   decode.io.vstart := io.toDecode.vstart
   // backend to rob
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
+
+  io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -664,6 +664,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
   }
+  val toCSR = new Bundle {
+    val trapInstInfo = Output(ValidIO(new TrapInstInfo))
+  }
   val intIQValidNumVec = Input(MixedVec(params.genIntIQValidNumBundle))
   val fpIQValidNumVec = Input(MixedVec(params.genFpIQValidNumBundle))
   val fromWB = new Bundle {
@@ -679,7 +682,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val memHyPcRead = Vec(params.HyuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
-  val trapInst = Output(ValidIO(new TrapInst))
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)

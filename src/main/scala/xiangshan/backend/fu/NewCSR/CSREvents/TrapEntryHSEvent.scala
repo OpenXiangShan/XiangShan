@@ -71,6 +71,8 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
 
+  private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
+
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
 
@@ -101,7 +103,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
     (isLSGuestExcp                  ) -> trapMemVA,
-    (tvalFillInst                   ) -> in.trapInst,
+    (tvalFillInst                   ) -> trapInst,
   ))
 
   private val tval2 = Mux1H(Seq(

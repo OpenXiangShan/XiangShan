@@ -103,7 +103,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val sret = Input(Bool())
       val dret = Input(Bool())
     }))
-    val trapInstRdata = Input(UInt(InstWidth.W))
+    val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
       val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
@@ -129,7 +129,6 @@ class NewCSR(implicit val p: Parameters) extends Module
       val EX_II = Bool()
       val EX_VI = Bool()
       val flushPipe = Bool()
-      val trapInstRen = Bool()
       val rData = UInt(64.W)
       val targetPc = UInt(VaddrMaxWidth.W)
       val regOut = UInt(64.W)
@@ -605,7 +604,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
-        in.trapInst := io.trapInstRdata
+        in.trapInst := io.trapInst
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
 
@@ -808,8 +807,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     state === s_waitIMSIC && stateNext === s_idle
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
-  io.out.bits.trapInstRen := (trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_II.U ||
-    trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_VI.U) && !trapHandleMod.io.out.causeNO.Interrupt.asBool
 
   io.out.bits.flushPipe := flushPipe
 
