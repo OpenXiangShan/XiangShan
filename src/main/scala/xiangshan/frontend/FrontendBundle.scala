@@ -614,7 +614,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     !real_slot_taken_mask().init.reduce(_||_) &&
     real_slot_taken_mask().last && !is_br_sharing
   def hit_taken_on_call = hit_taken_on_jmp && is_call
-  def hit_taken_on_ret  = hit_taken_on_jmp && is_ret
+  def hit_taken_on_only_ret  = hit_taken_on_jmp && is_ret && !is_call
   def hit_taken_on_jalr = hit_taken_on_jmp && is_jalr
 
   def cfiIndex = {
@@ -759,7 +759,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
 
   def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
-  def is_ret_taken = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
+  def is_only_ret_taken = !is_call && is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
@@ -796,8 +796,9 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
   def TAGEMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
   def SCMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
-  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
-  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
+  // ret-call instruction will jump in the same way as the call instruction
+  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && (!cfiUpdate.pd.isRet || cfiUpdate.pd.isCall)
+  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && (cfiUpdate.pd.isRet && !cfiUpdate.pd.isCall)
   def MemVioRedirectBubble = debugIsMemVio
   def OtherRedirectBubble = !debugIsCtrl && !debugIsMemVio
 

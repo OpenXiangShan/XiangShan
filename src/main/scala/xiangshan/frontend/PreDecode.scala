@@ -35,8 +35,8 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
     val brType::Nil = ListLookup(instr, List(BrType.notCFI), PreDecodeInst.brTable)
     val rd = Mux(isRVC(instr), instr(12), instr(11,7))
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
-    val isCall = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
-    val isRet = brType === BrType.jalr && isLink(rs) && !isCall
+    val isCall  = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
+    val isRet   = (brType === BrType.jalr && isLink(rs) && !isCall) || (brType === BrType.jalr && isLink(rs) && isLink(rd) && (rs =/= rd))
     List(brType, isCall, isRet)
   }
   def jal_offset(inst: UInt, rvc: Bool): UInt = {
@@ -79,6 +79,7 @@ class PreDecodeInfo extends Bundle {  // 8 bit
   def isJal   = brType === BrType.jal
   def isJalr  = brType === BrType.jalr
   def notCFI  = brType === BrType.notCFI
+  def onlyRet = isRet && !isCall
 }
 
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
@@ -343,7 +344,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   //Stage 1: detect remask fault
   /** first check: remask Fault */
   jalFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isJal && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
-  retFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
+  retFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.onlyRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
   val remaskFault      = VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || retFaultVec(i)))
   val remaskIdx        = ParallelPriorityEncoder(remaskFault.asUInt)
   val needRemask       = ParallelOR(remaskFault)
@@ -351,7 +352,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf((Vec(PredictWidth, Bool())))
 
-  io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
+  io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.onlyRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
 
   /** second check: faulse prediction fault and target fault */
   notCFITaken  := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken })

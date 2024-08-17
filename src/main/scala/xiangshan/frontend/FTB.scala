@@ -149,7 +149,8 @@ class FTBEntry_part(implicit p: Parameters) extends XSBundle with FTBParams with
   val isRet       = Bool()
   val isJalr      = Bool()
 
-  def isJal = !isJalr
+  def isJal   = !isJalr
+  def onlyRet = isRet && !isCall
 }
 
 class FTBEntry_FtqMem(implicit p: Parameters) extends FTBEntry_part with FTBParams with BPUUtils {
@@ -737,7 +738,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.s1_ftbCloseReq := s1_close_ftb_req
   io.out.s1_uftbHit := io.fauftb_entry_hit_in
   val s1_uftbHasIndirect = io.fauftb_entry_in.jmpValid &&
-    io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.isRet // uFTB determines that it's real JALR, RET and JAL are excluded
+    io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.onlyRet // uFTB determines that it's real JALR, only RET and JAL are excluded
   io.out.s1_uftbHasIndirect := s1_uftbHasIndirect
 
   // always taken logic
