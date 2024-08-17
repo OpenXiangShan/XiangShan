@@ -22,6 +22,7 @@ import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer}
 import utils.XSError
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
+import utility.ParallelPriorityMux
 
 class TracePredInfoBundle extends Bundle {
   val fixTarget = UInt(64.W)
@@ -32,6 +33,8 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
   // use for cfi fix
   // we need to know the bpu result to know if the branch should redirect or not
 //  val bpuPredInfo = new TracePredInfoBundle
+
+  def hasException = exception =/= 0.U
 }
 
 object TraceInstrBundle {
@@ -129,6 +132,33 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   }
 
   // debug check
+
+  // redirect check: instid should match with target
+  // when redirect, record the info and check it after 4 cycle(after read from dpic)
+  val debugRedirectValid = Reg(Bool())
+  val debugRedirectInstID = Reg(UInt(64.W))
+  val debugRedirectTarget = Reg(UInt(64.W))
+  val debugRedirectDelayCounter = RegInit(0.U(3.W))
+  val RedirectDelayNum = 3
+  when (debugRedirectValid && (debugRedirectDelayCounter > 1.U)) {
+    debugRedirectDelayCounter := debugRedirectDelayCounter - 1.U
+  }
+  when (debugRedirectDelayCounter === 0.U && debugRedirectValid) {
+    debugRedirectValid := false.B
+    val hitInstIDVec = traceBuffer.map(_.InstID === debugRedirectInstID)
+    val hitTargetVec = traceBuffer.map(_.pcVA === debugRedirectTarget)
+    hitInstIDVec.zip(hitTargetVec).zipWithIndex. foreach {
+      case ((id, t), idx) =>
+        XSError(id =/= t, s"Redirect Info(InstID/target) not match in traceBuffer($idx)")
+    }
+  }
+  when (redirect.valid) {
+    debugRedirectDelayCounter := RedirectDelayNum.U
+    debugRedirectInstID := traceRedirecter.InstID
+    debugRedirectTarget := redirect.bits.cfiUpdate.target
+  }
+
+
   if (!TraceEnableDuplicateFlush) {
     when (redirect.valid) {
       XSError(redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
