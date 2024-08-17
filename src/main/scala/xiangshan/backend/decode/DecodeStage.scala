@@ -27,6 +27,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.ExceptionNO.illegalInstr
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan.frontend.FtqPtr
@@ -186,6 +187,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       SrcType.isVp(s) && (l === 0.U)
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
+
+    if (env.TraceRTLMode) {
+      inst.bits.exceptionVec := 0.U.asTypeOf(inst.bits.exceptionVec)
+      when (inst.bits.traceInfo.hasException) {
+        inst.bits.exceptionVec(illegalInstr) := true.B
+      }
+    }
   }
 
   io.out.map(x =>
