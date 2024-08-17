@@ -385,9 +385,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // cancel mmio fetch if exception occurs
   val f2_mmio         = f2_exception(0) === ExceptionType.none && (
     fromICache(0).bits.pmp_mmio ||
-      // currently, we do not distinguish between PbmtType.nc and PbmtType.io
+      // currently, we do not distinguish between Pbmt.nc and Pbmt.io
       // anyway, they are both non-cacheable, and should be handled with mmio fsm and sent to Uncache module
-      fromICache(0).bits.itlb_pbmt === PbmtType.nc || fromICache(0).bits.itlb_pbmt === PbmtType.io
+      Pbmt.isUncache(fromICache(0).bits.itlb_pbmt)
   )
 
 

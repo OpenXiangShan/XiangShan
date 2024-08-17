@@ -296,7 +296,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
     toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
-    toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), PbmtType.pma)
+    toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
     toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
@@ -335,7 +335,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   // merge pmp mmio and itlb pbmt
   val s1_mmio = VecInit((s1_pmp_mmio zip s1_itlb_pbmt).map{ case (mmio, pbmt) =>
-    mmio || pbmt === PbmtType.nc || pbmt === PbmtType.io
+    mmio || Pbmt.isUncache(pbmt)
   })
 
   /**

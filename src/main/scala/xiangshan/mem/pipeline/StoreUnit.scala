@@ -29,7 +29,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
 class StoreUnit(implicit p: Parameters) extends XSModule
@@ -360,7 +360,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_pmp = WireInit(io.pmp)
 
   val s2_exception = (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && RegNext(s1_feedback.bits.hit)
-  val s2_mmio = (s2_in.mmio || s2_pmp.mmio || (s2_pbmt === 1.U) || (s2_pbmt === 2.U)) && RegNext(s1_feedback.bits.hit)
+  val s2_mmio = (s2_in.mmio || s2_pmp.mmio || Pbmt.isUncache(s2_pbmt)) && RegNext(s1_feedback.bits.hit)
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in

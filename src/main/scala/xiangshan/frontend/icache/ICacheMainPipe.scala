@@ -26,7 +26,7 @@ import xiangshan.cache.mmu._
 import utils._
 import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle, ExceptionType, PbmtType}
+import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle, ExceptionType}
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -42,7 +42,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
   val gpaddr    = UInt(GPAddrBits.W)
   val exception = UInt(ExceptionType.width.W)
   val pmp_mmio  = Bool()
-  val itlb_pbmt = UInt(PbmtType.width.W)
+  val itlb_pbmt = UInt(Pbmt.width.W)
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
@@ -398,7 +398,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   // merge pmp mmio and itlb pbmt
   val s2_mmio = VecInit((s2_pmp_mmio zip s2_itlb_pbmt).map{ case (mmio, pbmt) =>
-    mmio || pbmt === PbmtType.nc || pbmt === PbmtType.io
+    mmio || Pbmt.isUncache(pbmt)
   })
 
   /* s2_exception includes itlb pf/gpf/af, pmp af and meta corruption (af), neither of which should be fetched
@@ -461,7 +461,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       toIFU(i).valid          := s2_fire && s2_doubleline
       toIFU(i).bits.exception := Mux(s2_doubleline, s2_exception_out(i), ExceptionType.none)
       toIFU(i).bits.pmp_mmio  := s2_pmp_mmio(i) && s2_doubleline
-      toIFU(i).bits.itlb_pbmt := Mux(s2_doubleline, s2_itlb_pbmt(i), PbmtType.pma)
+      toIFU(i).bits.itlb_pbmt := Mux(s2_doubleline, s2_itlb_pbmt(i), Pbmt.pma)
       toIFU(i).bits.data      := DontCare
     }
     toIFU(i).bits.vaddr       := s2_req_vaddr(i)
@@ -545,7 +545,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
       val discard = toIFU(i).bits.exception =/= ExceptionType.none || toIFU(i).bits.pmp_mmio ||
-        toIFU(i).bits.itlb_pbmt === PbmtType.nc || toIFU(i).bits.itlb_pbmt === PbmtType.io
+        Pbmt.isUncache(toIFU(i).bits.itlb_pbmt)
       discard
     }
     val blkPaddrAll = s2_req_paddr.map(addr => addr(PAddrBits - 1, blockOffBits) << blockOffBits)

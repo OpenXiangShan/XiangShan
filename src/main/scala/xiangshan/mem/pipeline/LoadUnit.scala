@@ -1081,7 +1081,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // writeback access fault caused by ecc error / bus error
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
-  val s2_actually_mmio = s2_pmp.mmio || (s2_pbmt === 1.U) || (s2_pbmt === 2.U)
+  val s2_actually_mmio = s2_pmp.mmio || Pbmt.isUncache(s2_pbmt)
   val s2_mmio          = !s2_prf &&
                           s2_actually_mmio &&
                          !s2_exception &&

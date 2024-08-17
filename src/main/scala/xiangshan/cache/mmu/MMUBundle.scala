@@ -377,6 +377,18 @@ object TlbCmd {
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
+// Svpbmt extension
+object Pbmt {
+  def pma:  UInt = "b00".U  // None
+  def nc:   UInt = "b01".U  // Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory
+  def io:   UInt = "b10".U  // Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O
+  def rsvd: UInt = "b11".U  // Reserved for future standard use
+  def width: Int = 2
+  
+  def apply() = UInt(2.W)
+  def isUncache(a: UInt) = a===nc || a===io
+}
+
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {

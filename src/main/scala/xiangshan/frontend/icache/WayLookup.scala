@@ -20,7 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
-import xiangshan.frontend.{ExceptionType, PbmtType}
+import xiangshan.frontend.ExceptionType
+import xiangshan.cache.mmu.Pbmt
 
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
@@ -33,7 +34,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val waymask        : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
   val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val itlb_pbmt      : Vec[UInt] = Vec(PortNumber, UInt(PbmtType.width.W))
+  val itlb_pbmt      : Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
   val meta_corrupt   : Vec[Bool] = Vec(PortNumber, Bool())
 }
 
