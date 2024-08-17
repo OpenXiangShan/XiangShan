@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
-import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.{ExceptionType, PbmtType}
 
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
@@ -33,6 +33,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val waymask        : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
   val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val itlb_pbmt      : Vec[UInt] = Vec(PortNumber, UInt(PbmtType.width.W))
   val meta_corrupt   : Vec[Bool] = Vec(PortNumber, Bool())
 }
 
@@ -49,26 +50,10 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   def waymask        : Vec[UInt] = entry.waymask
   def ptag           : Vec[UInt] = entry.ptag
   def itlb_exception : Vec[UInt] = entry.itlb_exception
+  def itlb_pbmt      : Vec[UInt] = entry.itlb_pbmt
   def meta_corrupt   : Vec[Bool] = entry.meta_corrupt
   def gpaddr         : UInt      = gpf.gpaddr
 }
-
-
-// class WayLookupRead(implicit p: Parameters) extends ICacheBundle {
-//   val vSetIdx     = Vec(PortNumber, UInt(idxBits.W))
-//   val waymask     = Vec(PortNumber, UInt(nWays.W))
-//   val ptag        = Vec(PortNumber, UInt(tagBits.W))
-//   val excp_tlb_af = Vec(PortNumber, Bool())
-//   val excp_tlb_pf = Vec(PortNumber, Bool())
-// }
-
-// class WayLookupWrite(implicit p: Parameters) extends ICacheBundle {
-//   val vSetIdx       = Vec(PortNumber, UInt(idxBits.W))
-//   val ptag          = Vec(PortNumber, UInt(tagBits.W))
-//   val waymask       = Vec(PortNumber, UInt(nWays.W))
-//   val excp_tlb_af   = Vec(PortNumber, Bool())
-//   val excp_tlb_pf   = Vec(PortNumber, Bool())
-// }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
   val flush   = Input(Bool())

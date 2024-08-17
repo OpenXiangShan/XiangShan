@@ -223,6 +223,16 @@ object ExceptionType {
   }
 }
 
+// Svpbmt extension
+// FIXME: how to use MMUConst in frontend?
+object PbmtType {
+  def pma:  UInt = "b00".U  // None
+  def nc:   UInt = "b01".U  // Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory
+  def io:   UInt = "b10".U  // Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O
+  def rsvd: UInt = "b11".U  // Reserved for future standard use
+  def width: Int = 2
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs    = Vec(PredictWidth, UInt(32.W))
   val valid     = UInt(PredictWidth.W)
