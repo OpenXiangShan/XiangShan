@@ -149,7 +149,7 @@ jobs:
       # - name: V Extension Test - rvv-bench
       #   run: |
       #     python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-bench 2> /dev/zero
-  emu-chi:
+  emu-chi-basics:
     runs-on: bosc
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
@@ -165,19 +165,55 @@ jobs:
           export HEAD_SHA=${{ github.run_number }}
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build KunminghuV2Config Release emu
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config KunminghuV2Config --release
-      - name: run KunminghuV2Config - Linux
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build \
+            --threads 16 --config KunminghuV2Config --release \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
+      - name: CHI Basic Test - cputest
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
-          cat perf.log | sort
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci cputest 2> /dev/zero
+      - name: CHI Basic Test - riscv-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
+      - name: CHI Basic Test - misc-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
+      - name: CHI Simple Test - microbench
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/microbench.log
+      - name: CHI Simple Test - CoreMark
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci coremark 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/coremark.log
+      - name: CHI System Test - Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci linux-hello-opensbi 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/linux.log
+      - name: CHI + Floating-point Test - povray
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/povray.log
+      - name: CHI + Uncache Fetch Test - copy and run
+        run: |
+          $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
+      - name: CHI + Extension Test - hypervisor
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvh-tests 2> /dev/zero
+      - name: CHI + V Extension Test - rvv-test
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-test 2> /dev/zero
   emu-performance:
     runs-on: bosc
     needs: changes
@@ -280,6 +316,44 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/null
+  emu-chi-mc:
+    runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 900
+    name: EMU - CHI MC
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
+          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: build KunminghuV2Config MC EMU
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --num-cores 2 --emu-optimize "" \
+            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --with-dramsim3 --threads 16 \
+            --config KunminghuV2Config \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
+      - name: CHI MC Test
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
+      - name: CHI SMP Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/null
   simv-basics:
