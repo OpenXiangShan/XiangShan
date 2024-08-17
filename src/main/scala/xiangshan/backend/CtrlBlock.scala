@@ -312,7 +312,8 @@ class CtrlBlockImp(
     if (env.TraceRTLMode) {
       // tracertl need a right level for instID plus.
       val actualLevel = frontendFlushBits.level
-      when (actualLevel === RedirectLevel.flushAfter) {
+      when ((actualLevel === RedirectLevel.flushAfter) ||
+       (frontendFlushBits.traceInfo.hasException && (actualLevel === RedirectLevel.flush))) {
         io.frontend.toFtq.redirect.bits.traceInfo.InstID := frontendFlushBits.traceInfo.InstID + 1.U
       }
     }
