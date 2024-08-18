@@ -39,13 +39,22 @@ object TraceRTLChoose {
   }
 }
 
-object TraceRTLDontCare {
+object TraceRTLDontCareValue {
   def apply[T <: Data](origin: T)(implicit p: Parameters): T = {
     val env = p(DebugOptionsKey)
     if (env.TraceRTLMode) {
       0.U.asTypeOf(origin)
     } else {
       origin
+    }
+  }
+}
+
+object TraceRTLDontCare {
+  def apply[T <: Data](origin: T)(implicit p: Parameters) {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) {
+      origin := 0.U.asTypeOf(origin)
     }
   }
 }

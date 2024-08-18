@@ -35,7 +35,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
-import xiangshan.frontend.tracertl.{TraceRTLDontCare}
+import xiangshan.frontend.tracertl.{TraceRTLDontCareValue}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 
