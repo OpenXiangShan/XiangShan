@@ -66,7 +66,7 @@ def proc_input(wl_df: pd.DataFrame, js: dict, workload: str):
     # (N, 1) = (1, W) matmul (W, N)
     # To make sure the matrix_perf is in the same order as the vec_weight,
     # we sort the matrix_perf by point
-    assert isinstance(wl_df['point'][0], np.int64)
+    assert isinstance(wl_df.iloc[0]['point'], np.int64)
     wl_df = wl_df.sort_values(by=['point'])
     # We also sort the vec_weight by point
     wl_js = dict(js[workload])
