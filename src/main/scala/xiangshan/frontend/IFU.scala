@@ -610,6 +610,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     assert(f3_ftq_req_startAddr + (2*PredictWidth).U >= f3_ftq_req_nextStartAddr, s"More tha ${2*PredictWidth} Bytes fetch is not allowed!")
   }
 
+  val wb_enable = Wire(Bool())
   if (env.TraceRTLMode) {
     traceReader.io.specifyField(
       _.recv := traceDriver.io.out.recv,
@@ -620,7 +621,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.traceInsts := traceReader.io.traceInsts,
       _.fromIFU.specifyField(
         _.redirect := f3_flush,
-        _.fire := f3_fire,
+        _.ibuffer_fire := f3_fire,
+        _.wb_enable := wb_enable,
         _.valid := f3_valid,
       ),
       _.predInfo.specifyField(
@@ -1010,7 +1012,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * - redirect if has false hit last half (last PC is not start + 32 Bytes, but in the midle of an notCFI RVI instruction)
     ******************************************************************************
     */
-  val wb_enable         = RegNext(f2_fire && !f2_flush) && !f3_req_is_mmio && !f3_flush &&
+  wb_enable             := RegNext(f2_fire && !f2_flush) && !f3_req_is_mmio && !f3_flush &&
     TraceRTLChoose(true.B, !traceBlock)
   val wb_valid          = RegNext(wb_enable, init = false.B)
   val wb_ftq_req        = RegEnable(f3_ftq_req, wb_enable)

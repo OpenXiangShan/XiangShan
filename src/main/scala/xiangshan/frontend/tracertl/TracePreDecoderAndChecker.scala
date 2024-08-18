@@ -32,7 +32,8 @@ class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
 
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val redirect = Bool()
-  val fire = Bool()
+  val ibuffer_fire = Bool()
+  val wb_enable = Bool()
   val valid = Bool()
 }
 
@@ -77,7 +78,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     !io.fromTraceDriver.endWithCFI &&
     (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
     false.B,
-    io.fromIFU.fire || io.fromIFU.redirect
+    io.fromIFU.ibuffer_fire || io.fromIFU.redirect
   )
   // !lastFetchRedirect && lastFetchTakenMore2B && !lastEndWithCFI
   val traceInstIFUCut = traceAligner.io.cutInsts
@@ -96,7 +97,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.pdValid := traceAligner.io.pdValid,
   )
   predChecker.io.specifyField(
-    _.fire_in := io.fromIFU.fire,
+    _.wb_enable := io.fromIFU.wb_enable,
     _.traceInsts := traceInstIFUCut,
     // _.pdValid := traceAligner.pdValid,
     _.predictInfo := io.predInfo,
