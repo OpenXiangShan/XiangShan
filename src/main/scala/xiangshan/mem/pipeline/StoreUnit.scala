@@ -31,7 +31,7 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
-import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare, TraceRTLDontCareValue}
 
 class StoreUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -222,6 +222,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
   s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
 
+  TraceRTLDontCare(s0_out.uop.exceptionVec)
+
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
@@ -254,7 +256,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_pbmt      = io.tlb.resp.bits.pbmt(0)
-  val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
+  val s1_exception = TraceRTLDontCareValue(ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR)
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec && !s1_frm_mabuf)
@@ -325,6 +327,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.flushPipe                := false.B
   s1_out.uop.trigger                  := s1_trigger_action
   s1_out.uop.exceptionVec(breakPoint) := s1_trigger_breakpoint
+  TraceRTLDontCare(s1_out.uop.exceptionVec)
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf
@@ -371,8 +374,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_pmp = WireInit(io.pmp)
 
-  val s2_exception = RegNext(s1_feedback.bits.hit) &&
-                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR)
+  val s2_exception = TraceRTLDontCareValue(RegNext(s1_feedback.bits.hit) &&
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR))
   val s2_mmio = (s2_in.mmio || s2_pmp.mmio || Pbmt.isUncache(s2_pbmt)) && RegNext(s1_feedback.bits.hit)
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 

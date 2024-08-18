@@ -274,6 +274,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       mask_reg := io.dcache.req.bits.amo_mask
       fuop_reg := in.uop.fuOpType
     }
+
+    if (env.TraceRTLMode) {
+      // when TraceRTL, disable dcache access, pretend dcache has resp-ed
+      state := s_cache_resp_latch
+    }
   }
 
   val dcache_resp_data  = Reg(UInt())
@@ -377,6 +382,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     atom_override_xtval := false.B
   }
 
+  if (env.TraceRTLMode) {
+    // disable exception
+    exceptionVec := 0.U.asTypeOf(ExceptionVec())
+    atom_override_xtval := false.B
+    io.dcache.req.valid := false.B // disable dcache req
+  }
   // atomic trigger
   val csrCtrl = io.csrCtrl
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))

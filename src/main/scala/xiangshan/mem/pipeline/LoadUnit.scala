@@ -34,7 +34,7 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
-import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLChoose}
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLChoose, TraceRTLDontCareValue, TraceRTLDontCare}
 import xiangshan.mem.mdp._
 
 class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
@@ -733,7 +733,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.alignedType    := s0_sel_src.alignedType
   s0_out.mbIndex        := s0_sel_src.mbIndex
   // s0_out.flowPtr         := s0_sel_src.flowPtr
-  s0_out.uop.exceptionVec(loadAddrMisaligned) := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive
+  s0_out.uop.exceptionVec(loadAddrMisaligned) :=  TraceRTLDontCareValue((!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive)
   s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
   when(io.tlb.req.valid && s0_sel_src.isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -829,7 +829,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_gpaddr_dup_lsu   = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
-  val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
+  val s1_exception        = TraceRTLDontCareValue(ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR)   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
   val s1_tlb_fast_miss    = io.tlb.resp.bits.fastMiss && io.tlb.resp.valid && s1_valid
   val s1_pbmt             = Mux(io.tlb.resp.valid, io.tlb.resp.bits.pbmt(0), 0.U(2.W))
@@ -913,6 +913,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
   }
+  TraceRTLDontCare(s1_out.uop.exceptionVec)
 
   // pointer chasing
   val s1_try_ptr_chasing       = GatedValidRegNext(s0_do_try_ptr_chasing, false.B)
@@ -1055,10 +1056,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
-  val s2_exception = s2_vecActive &&
-                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
+  val s2_exception =  TraceRTLDontCareValue(s2_vecActive &&
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR))
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) && !s2_in.isvec &&
                      s2_exception_vec(loadAddrMisaligned) && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode
+  TraceRTLDontCare(s2_exception_vec)
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
@@ -1381,6 +1383,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
   }
 
+  TraceRTLDontCare(s3_in.uop.exceptionVec)
+
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && s3_safe_writeback
   s3_out.bits.uop             := s3_in.uop
@@ -1393,6 +1397,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.debug.isPerfCnt := false.B
   s3_out.bits.debug.paddr     := s3_in.paddr
   s3_out.bits.debug.vaddr     := s3_in.vaddr
+
+  TraceRTLDontCare(s3_out.bits.uop.exceptionVec)
 
   // Vector load, writeback to merge buffer
   // TODO: Add assertion in merge buffer, merge buffer must accept vec load writeback
@@ -1536,7 +1542,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
-  val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
+  val s3_outexception = TraceRTLDontCareValue(ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive)
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache)
   io.ldout.valid       := (s3_mmio.valid ||

@@ -27,7 +27,7 @@ import xiangshan.frontend.icache._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import xiangshan.frontend.tracertl.ChiselRecordForField._
 import xiangshan.frontend.tracertl.{TraceReader, TraceDriver, TracePreDecodeAndChecker, TraceFakeICache}
-import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare}
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 import utils._
 import utility._
 
@@ -525,13 +525,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_valid          = RegInit(false.B)
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
-  val f3_doubleLine     = TraceRTLDontCare(RegEnable(f2_doubleLine, f2_fire))
+  val f3_doubleLine     = TraceRTLDontCareValue(RegEnable(f2_doubleLine, f2_fire))
   val f3_fire           = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
 
   val f3_cut_data       = RegEnable(f2_cut_data,   f2_fire)
 
-  val f3_exception      = TraceRTLDontCare(RegEnable(f2_exception,  f2_fire))
-  val f3_mmio           = TraceRTLDontCare(RegEnable(f2_mmio,       f2_fire))
+  val f3_exception      = TraceRTLDontCareValue(RegEnable(f2_exception,  f2_fire))
+  val f3_mmio           = TraceRTLDontCareValue(RegEnable(f2_mmio,       f2_fire))
 
   val f3_instr          = TraceRTLChoose(RegEnable(f2_instr, f2_fire),
     VecInit(tracePDaC.io.traceAlignInsts.map(_.bits.inst)))
@@ -552,8 +552,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_jump_offset    = TraceRTLChoose(
     RegEnable(f2_jump_offset, f2_fire),
     tracePreDecoder.jumpOffset)
-  val f3_exception_vec   = TraceRTLDontCare(RegEnable(f2_exception_vec, f2_fire))
-  val f3_crossPage_exception_vec = TraceRTLDontCare(RegEnable(f2_crossPage_exception_vec, f2_fire))
+  val f3_exception_vec   = TraceRTLDontCareValue(RegEnable(f2_exception_vec, f2_fire))
+  val f3_crossPage_exception_vec = TraceRTLDontCareValue(RegEnable(f2_crossPage_exception_vec, f2_fire))
 
   val f3_pc_lower_result = RegEnable(f2_pc_lower_result, f2_fire)
   val f3_pc_high         = RegEnable(f2_pc_high, f2_fire)

@@ -41,7 +41,7 @@ import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.frontend.HasInstrMMIOConst
-import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare}
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 import xiangshan.backend.datapath.NewPipelineConnect
 import system.SoCParamsKey
@@ -849,7 +849,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
     // TraceRTL Mode: dont know how to get uop, just disable load2load
-    loadUnits(i).io.l2l_fwd_in.valid := TraceRTLDontCare(VecInit(fastValidVec).asUInt.orR)
+    loadUnits(i).io.l2l_fwd_in.valid := TraceRTLDontCareValue(VecInit(fastValidVec).asUInt.orR)
     loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
 //    loadUnits(i).io.l2l_fwd_in.uop := ???
@@ -989,7 +989,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(LduCnt + i)(j))
     // TraceRTL Mode: dont know how to get uop, just disable load2load
-    hybridUnits(i).io.ldu_io.l2l_fwd_in.valid := TraceRTLDontCare(VecInit(fastValidVec).asUInt.orR)
+    hybridUnits(i).io.ldu_io.l2l_fwd_in.valid := TraceRTLDontCareValue(VecInit(fastValidVec).asUInt.orR)
     hybridUnits(i).io.ldu_io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     hybridUnits(i).io.ldu_io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
 //    hybridUnits(i).io.ldu_io.l2l_fwd_in.uop := ???
@@ -1662,6 +1662,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       )
     )
   ))
+  if (env.TraceRTLMode) {
+    // when tracertl, disable execution's exception
+    atomicsException := false.B
+    vSegmentException := false.B
+  }
   // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
   XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
   io.mem_to_ooo.lsqio.vstart := RegNext(Mux(vSegmentException,
