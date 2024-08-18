@@ -60,6 +60,11 @@ class TrapInstMod(implicit p: Parameters) extends Module {
   }.elsewhen(newTrapInstInfo.valid && !valid) {
     valid := true.B
     trapInstInfo := newTrapInstInfo.bits
+    trapInstInfo.instr := Mux(
+      newTrapInstInfo.bits.instr(1, 0) === "b11".U,
+      newTrapInstInfo.bits.instr,
+      newTrapInstInfo.bits.instr(15, 0)
+    )
   }.elsewhen(newCSRInstValid && !valid) {
     valid := true.B
     trapInstInfo := newCSRInst
