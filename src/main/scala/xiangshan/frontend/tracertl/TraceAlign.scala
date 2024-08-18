@@ -40,6 +40,7 @@ class TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
   val traceRange = Output(UInt(PredictWidth.W))
   // use by predecode/predChecker/newFtq's false-hit update
   val pdValid = Output(UInt(PredictWidth.W))
+  val traceForceJump = Output(Bool())
 
   val traceRangeTaken2B = Output(Bool())
   val instRangeTaken2B = Output(Bool())
@@ -174,5 +175,14 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule
 
       XSError(io.debug_valid, "Should not reach here")
     }
+  }
+
+  // Force Execution of Interrupt(Interrupt is a force jump)
+  io.traceForceJump := false.B
+  when (io.traceInsts(0).isForceJump) {
+    io.cutInsts(0).valid := true.B
+    io.cutInsts(0).bits := io.traceInsts(0)
+    io.pdValid := 1.U
+    io.traceForceJump := true.B
   }
 }

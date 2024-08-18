@@ -35,6 +35,7 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
 //  val bpuPredInfo = new TracePredInfoBundle
 
   def hasException = exception =/= 0.U
+  def isForceJump = exception(7)
 }
 
 object TraceInstrBundle {

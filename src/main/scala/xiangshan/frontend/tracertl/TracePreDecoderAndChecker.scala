@@ -61,6 +61,7 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val traceChecker = Output(new TraceCheckerResp())
   // trace Inst: one-to-one with preDecoder but contains the traceInfo
   val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+  val traceForceJump = Output(Bool())
 }
 
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
@@ -111,11 +112,13 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.preDecode := preDecoder.io.out,
     _.predChecker := predChecker.io.out,
     _.traceRange := traceAligner.io.traceRange,
+    _.traceForceJump := traceAligner.io.traceForceJump,
   )
   io.specifyField(
     _.predecoder := preDecoder.io.out,
     _.checker := predChecker.io.out,
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
+    _.traceForceJump := traceAligner.io.traceForceJump
   )
 }
