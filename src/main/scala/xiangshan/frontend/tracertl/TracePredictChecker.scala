@@ -27,7 +27,7 @@ import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, FaultType}
 class TracePredictChecker(implicit p: Parameters) extends TraceModule
   with TraceParams {
   val io = IO(new Bundle {
-    val fire_in = Input(Bool())
+    val wb_enable = Input(Bool())
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val predictInfo = Input(new TracePredictInfo)
     val preDecode = Input(new PreDecodeResp)
@@ -110,10 +110,10 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     stage2Out.fixedTarget(i) := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i), seqTargets(i))
     stage2Out.jalTarget(i) := jumpTargets(i)
   })
-  io.out.stage2Out := RegEnable(stage2Out, io.fire_in)
+  io.out.stage2Out := RegEnable(stage2Out, io.wb_enable)
 
   // debug
-  when (io.fire_in) {
+  when (io.wb_enable) {
     instValid.zip(io.traceInsts).zipWithIndex.foreach { case ((valid, trace), i) =>
       when (io.traceRange(i)) {
         XSError(valid =/= trace.valid, "instValid should be the same with trace.valid")
