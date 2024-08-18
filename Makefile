@@ -34,7 +34,7 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
-CONFIG ?= DefaultConfig
+CONFIG ?= MinimalConfig
 NUM_CORES ?= 1
 ISSUE ?= B
 
