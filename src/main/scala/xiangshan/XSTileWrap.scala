@@ -24,7 +24,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
 import device.MsiInfoBundle
-import coupledL2.tl2chi.PortIO
+import coupledL2.tl2chi.{PortIO, AsyncPortIO, CHIAsyncBridgeSource}
 import utility.IntBuffer
 
 // This module is used for XSNoCTop for async time domain and divide different
@@ -46,6 +46,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   tile.debug_int_node := IntBuffer(2) := debugIntNode
   tile.plic_int_node :*= IntBuffer(2) :*= plicIntNode
   class XSTileWrapImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
+    val chiAsyncBridgeParams = soc.CHIAsyncBridge
+
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
@@ -55,7 +57,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
-      val chi = if (enableCHI) Some(new PortIO) else None
+      val chi = if (enableCHI) Some(new AsyncPortIO(chiAsyncBridgeParams)) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTimeAsync = Flipped(new AsyncBundle(UInt(64.W), AsyncQueueParams(1)))
     })
@@ -64,14 +66,21 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.reset_vector := io.reset_vector
     io.cpu_halt := tile.module.io.cpu_halt 
     io.debugTopDown <> tile.module.io.debugTopDown
-    io.chi.foreach(_ <> tile.module.io.chi.get)
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
 
+    // CLINT Async Queue Sink
     val clintTimeAsyncQueueSink = Module(new AsyncQueueSink(UInt(64.W), AsyncQueueParams(1)))
     clintTimeAsyncQueueSink.io.async <> io.clintTimeAsync
     clintTimeAsyncQueueSink.io.deq.ready := true.B
     tile.module.io.clintTime.valid := clintTimeAsyncQueueSink.io.deq.valid
     tile.module.io.clintTime.bits := clintTimeAsyncQueueSink.io.deq.bits
+
+    // CHI Async Queue Source
+    if (enableCHI) {
+      val chiAsyncBridgeSource = Module(new CHIAsyncBridgeSource(chiAsyncBridgeParams))
+      chiAsyncBridgeSource.io.enq <> tile.module.io.chi.get
+      io.chi.get <> chiAsyncBridgeSource.io.async
+    }
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)

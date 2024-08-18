@@ -28,7 +28,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import coupledL2.tl2chi.PortIO
+import coupledL2.tl2chi.{PortIO, CHIAsyncBridgeSink}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
 
@@ -131,7 +131,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
-    core_with_l2.module.io.chi.get <> io.chi
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
@@ -139,6 +138,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     clintTimeAsyncQueueSource.io.enq.valid := io.clintTime.valid
     clintTimeAsyncQueueSource.io.enq.bits := io.clintTime.bits
     core_with_l2.module.io.clintTimeAsync <> clintTimeAsyncQueueSource.io.async
+
+    val chiAsyncBridgeSink = withClockAndReset(noc_clock, noc_reset_sync) {
+      Module(new CHIAsyncBridgeSink(soc.CHIAsyncBridge))
+    }
+    chiAsyncBridgeSink.io.async <> core_with_l2.module.io.chi.get
+    io.chi <> chiAsyncBridgeSink.io.deq
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
     core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info

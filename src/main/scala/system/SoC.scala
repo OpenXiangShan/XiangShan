@@ -26,6 +26,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
@@ -58,6 +59,10 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  CHIAsyncBridge: AsyncQueueParams = AsyncQueueParams(
+    depth = 4,
+    sync = 3
+  )
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
