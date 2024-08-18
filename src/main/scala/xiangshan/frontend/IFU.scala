@@ -238,6 +238,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val tracePredChecker = tracePDaC.io.checker
   val traceChecker = tracePDaC.io.traceChecker
   val traceBlock = traceDriver.io.out.block
+  val traceForceJump = tracePDaC.io.traceForceJump
   dontTouch(traceReader.io)
   dontTouch(tracePDaC.io)
   dontTouch(traceDriver.io)
