@@ -3,7 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.XSError
+import utility.{HasCircularQueuePtrHelper, XSError}
 import xiangshan._
 import xiangshan.backend.Bundles.TrapInstInfo
 import xiangshan.backend.decode.Imm_Z
@@ -15,7 +15,7 @@ class FtqInfo(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
 
-class TrapInstMod(implicit p: Parameters) extends Module {
+class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val fromDecode = Input(new Bundle {
       val trapInstInfo = ValidIO(new TrapInstInfo)
@@ -57,6 +57,9 @@ class TrapInstMod(implicit p: Parameters) extends Module {
     valid := false.B
   }.elsewhen(io.readClear) {
     valid := false.B
+  }.elsewhen(newCSRInstValid) {
+    valid := true.B
+    trapInstInfo := newCSRInst
   }.elsewhen(newTrapInstInfo.valid && !valid) {
     valid := true.B
     trapInstInfo := newTrapInstInfo.bits
@@ -65,13 +68,8 @@ class TrapInstMod(implicit p: Parameters) extends Module {
       newTrapInstInfo.bits.instr,
       newTrapInstInfo.bits.instr(15, 0)
     )
-  }.elsewhen(newCSRInstValid && !valid) {
-    valid := true.B
-    trapInstInfo := newCSRInst
   }
 
   io.currentTrapInst.valid := valid
   io.currentTrapInst.bits := trapInstInfo.instr
-
-  XSError(newTrapInstInfo.valid && valid, "Already a trap instruction in TrapInstMod")
 }
