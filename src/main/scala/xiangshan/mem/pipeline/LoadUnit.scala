@@ -760,7 +760,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.wakeup.bits := s0_wakeup_uop
 
   // prefetch.i(Zicbop)
-  io.ifetchPrefetch.valid := s0_int_iss_valid && s0_sel_src.prf_i
+  io.ifetchPrefetch.valid := s0_int_iss_select && s0_sel_src.prf_i
   io.ifetchPrefetch.bits.vaddr := s0_out.vaddr
 
   XSDebug(io.dcache.req.fire,
