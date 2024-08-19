@@ -314,7 +314,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_last_hptw_resp := true.B
     mem_addr_update := true.B
     last_s2xlate := false.B
-    gpf_level := 1.U
   }
 
   when(sent_to_pmp && mem_addr_update === false.B){
@@ -358,6 +357,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := af_level - 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
+    gpf_level := pte_valid || l1Hit ? 1.U : 0.U
     pte_valid := true.B
   }
 
