@@ -852,3 +852,54 @@ object genVFirstUnmask extends VLSUConstants {
   }
 }
 
+class skidBufferConnect[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val in = Flipped(DecoupledIO(gen.cloneType))
+    val flush = Input(Bool())
+    val out = DecoupledIO(gen.cloneType)
+  })
+
+  skidBuffer.connect(io.in, io.out, io.flush)
+}
+
+object skidBuffer{
+  /*
+  * Skid Buffer used to break timing path of ready
+  * */
+  def connect[T <: Data](
+                          in: DecoupledIO[T],
+                          out: DecoupledIO[T],
+                          flush: Bool
+                        ): T = {
+    val empty :: skid :: Nil = Enum(2)
+    val state      = RegInit(empty)
+    val stateNext  = WireInit(empty)
+    val dataBuffer = RegEnable(in.bits, (!out.ready && in.fire))
+
+    when(state === empty){
+      stateNext := Mux(!out.ready && in.fire && !flush, skid, empty)
+    }.elsewhen(state === skid){
+      stateNext := Mux(out.ready || flush, empty, skid)
+    }
+    state     := stateNext
+
+    in.ready  := state === empty
+    out.bits  := Mux(state === skid, dataBuffer, in.bits)
+    out.valid := in.valid || (state === skid)
+
+    dataBuffer
+  }
+  def apply[T <: Data](
+                        in: DecoupledIO[T],
+                        out: DecoupledIO[T],
+                        flush: Bool,
+                        moduleName: String
+                      ) {
+    val buffer = Module(new skidBufferConnect(in.bits))
+    buffer.suggestName(moduleName)
+    buffer.io.in <> in
+    buffer.io.flush := flush
+    out <> buffer.io.out
+  }
+}
+
