@@ -194,7 +194,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
-  io.resp.bits.resp := Mux(stage1Hit, stage1, ptw_resp)
+  io.resp.bits.resp := Mux(stage1Hit || l1Hit && guestFault && !pte_valid, stage1, ptw_resp)
   io.resp.bits.h_resp := Mux(gvpn_gpf, fake_h_resp, hptw_resp)
   io.resp.bits.s2xlate := req_s2xlate
 
