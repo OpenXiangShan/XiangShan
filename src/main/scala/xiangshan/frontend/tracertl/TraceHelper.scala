@@ -22,11 +22,11 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util.Annotated.resetVector
 
 class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
-  val pcVA = UInt(TracePCWidth.W)
-  val pcPA = UInt(TracePCWidth.W)
-  val memoryAddrVA = UInt(64.W)
-  val memoryAddrPA = UInt(64.W)
-  val target = UInt(64.W)
+  val pcVA = UInt(VAddrBits.W)
+  val pcPA = UInt(PAddrBits.W)
+  val memoryAddrVA = UInt(VAddrBits.W)
+  val memoryAddrPA = UInt(PAddrBits.W)
+  val target = UInt(VAddrBits.W)
   val inst = UInt(TraceInstrWidth.W)
   val memoryType = UInt(8.W)
   val memorySize = UInt(8.W)

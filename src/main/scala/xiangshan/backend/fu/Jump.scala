@@ -57,7 +57,7 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
   val snpc = pc + Mux(isRVC, 2.U, 4.U)
   val target = TraceRTLChoose(Mux(JumpOpType.jumpOpisJalr(func), src1, pc) + offset, // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 //    Mux(JumpOpType.jumpOpisJalr(func), io.traceInfo.target, pc + offset) // use pc + offset for debug
-    io.traceInfo.target
+    SignExt(io.traceInfo.target, XLEN)
   )
 
   // RISC-V spec for JALR:
