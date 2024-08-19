@@ -25,7 +25,9 @@ import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
-import openLLC.DummyLLC
+import coupledL2.tl2chi.CHILogger
+import openLLC.{DummyLLC, DummyOpenNCB, OpenLLC, OpenLLCParamKey}
+import openLLC.TargetBinder._
 import utility._
 import system._
 import device._
@@ -38,6 +40,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import scala.collection.mutable.{Map}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -95,7 +98,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
-  val chi_dummyllc_opt = Option.when(enableCHI)(LazyModule(new DummyLLC(numRNs = NumCores)(p)))
+  val chiOpt = Option.when(enableCHI)(true.B)
+  val dummyllcOpt = Seq.fill(NumCores)(chiOpt.map(_ => LazyModule(new DummyLLC(numRNs = 1)(p))))
+  val ncbOpt = chiOpt.map(_ => LazyModule(new DummyOpenNCB(numRNs = 1)(p)))
+  val llcOpt = soc.OpenLLCParamsOpt.map(l3param =>
+    LazyModule(new OpenLLC()(new Config((_, _, _) => {
+      case OpenLLCParamKey => l3param
+    })))
+  )
 
   // receive all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
@@ -161,9 +171,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  chi_dummyllc_opt match {
-    case Some(llc) =>
-      misc.soc_xbar.get := llc.axi4node
+  dummyllcOpt.foreach { e =>
+    e match {
+      case Some(dummyllc) =>
+        misc.soc_xbar.get := dummyllc.axi4node
+      case None =>
+    }
+  }
+
+  ncbOpt match {
+    case Some(ncb) =>
+      misc.soc_xbar.get := ncb.axi4node
     case None =>
   }
 
@@ -244,9 +262,39 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
       core.module.io.reset_vector := io.riscv_rst_vec(i)
-      chi_dummyllc_opt.foreach { case llc =>
-        llc.module.io.rn(i) <> core.module.io.chi.get
-        core.module.io.nodeID.get := i.U // TODO
+    }
+
+    withClockAndReset(io.clock.asClock, io.reset) {
+      chiOpt.foreach { _ =>
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          val chilogger = CHILogger(s"L2[${i}]", true)
+          chilogger.io.up <> core.module.io.chi.get
+          dontTouch(core.module.io.chi.get)
+          bind(
+            route(
+              chilogger.io.down, Map((AddressSet(0x0L, 0xfff07fffffffL), NumCores + i)) ++ AddressSet(0x0L,
+              0xffffffffffffL).subtract(AddressSet(0x0L, 0xfff07fffffffL)).map(addr => (addr, NumCores * 2)).toMap
+            ),
+            Map((NumCores + i) -> dummyllcOpt(i).get.module.io.rn.head, (NumCores * 2) -> llcOpt.get.module.io.rn(i))
+          )
+        }
+        val chilogger = CHILogger(s"MEM_L3", true)
+        ncbOpt.get.module.io.rn.head <> chilogger.io.down
+        chilogger.io.up.tx.req <> llcOpt.get.module.io.sn.tx.req
+        chilogger.io.up.tx.dat <> llcOpt.get.module.io.sn.tx.dat
+        chilogger.io.up.tx.rsp := DontCare
+        chilogger.io.up.tx.linkactivereq := llcOpt.get.module.io.sn.tx.linkactivereq
+        chilogger.io.up.txsactive := llcOpt.get.module.io.sn.txsactive
+        chilogger.io.up.rx.snp := DontCare
+        chilogger.io.up.rx.linkactiveack := llcOpt.get.module.io.sn.rx.linkactiveack
+        chilogger.io.up.syscoreq := true.B
+
+        llcOpt.get.module.io.sn.tx.linkactiveack := chilogger.io.up.tx.linkactiveack
+        llcOpt.get.module.io.sn.rx.rsp <> chilogger.io.up.rx.rsp
+        llcOpt.get.module.io.sn.rx.dat <> chilogger.io.up.rx.dat
+        llcOpt.get.module.io.sn.rx.linkactivereq := chilogger.io.up.rx.linkactivereq
+        llcOpt.get.module.io.sn.rxsactive := chilogger.io.up.rxsactive
+        llcOpt.get.module.io.nodeID := (NumCores * 2).U
       }
     }
 
