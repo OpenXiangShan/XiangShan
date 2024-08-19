@@ -357,7 +357,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := af_level - 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
-    gpf_level := pte_valid || l1Hit ? 1.U : 0.U
+    gpf_level := Mux(pte_valid || l1Hit, 1.U, 0.U)
     pte_valid := true.B
   }
 
