@@ -23,7 +23,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import device.MsiInfoBundle
+import device.{IMSICAsync, MsiInfoBundle}
 import coupledL2.tl2chi.{PortIO, AsyncPortIO, CHIAsyncBridgeSource}
 import utility.IntBuffer
 
@@ -61,8 +61,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTimeAsync = Flipped(new AsyncBundle(UInt(64.W), AsyncQueueParams(1)))
     })
+
+    val imsicAsync = Module(new IMSICAsync())
+    imsicAsync.i.msiInfo := io.msiInfo
+
     tile.module.io.hartId := io.hartId
-    tile.module.io.msiInfo := io.msiInfo
+    tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
     io.cpu_halt := tile.module.io.cpu_halt 
     io.debugTopDown <> tile.module.io.debugTopDown

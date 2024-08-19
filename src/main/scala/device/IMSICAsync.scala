@@ -1,3 +1,5 @@
+package device
+
 import chisel3._
 import chisel3.util._
 
@@ -33,16 +35,4 @@ class IMSICAsync(
   // RegNext: DFF; RegEnable: DFF with enable func.
   o.msiInfo.valid := RegNext(validsyncneg, init=false.B)
   o.msiInfo.bits  := RegEnable(i.msiInfo.bits, 0.U.asTypeOf(i.msiInfo.bits), validsyncneg)
-}
-class MsiInfoBundle(
-  NumIRFiles: Int = 7,
-  NumHart: Int = 64,
-  NumIRSrc: Int = 256,
-) extends Bundle {
-  private val NR_SRC_WIDTH = log2Up(NumIRSrc)
-  private val NR_HARTS_WIDTH = log2Up(NumHart)
-  private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
-  private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
-
-  val info = UInt(MSI_INFO_WIDTH.W)
 }
