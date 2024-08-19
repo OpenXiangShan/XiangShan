@@ -106,6 +106,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s2xlate = enableS2xlate && !onlyS1xlate
   val level = RegInit(3.U(log2Up(Level + 1).W))
   val af_level = RegInit(3.U(log2Up(Level + 1).W)) // access fault return this level
+  val gpf_level = RegInit(3.U(log2Up(Level + 1).W))
   val ppn = Reg(UInt(ptePPNLen.W))
   val vpn = Reg(UInt(vpnLen.W)) // vpn or gvpn(onlyS2xlate)
   val levelNext = level - 1.U
@@ -188,7 +189,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(Mux(pte_valid, pageFault && !accessFault && !ppn_af, false.B), accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(pte_valid, pte, fake_pte), vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(Mux(pte_valid, pageFault && !accessFault && !ppn_af, false.B), accessFault || ppn_af, Mux(accessFault, af_level, Mux(guestFault, gpf_level, level)), Mux(pte_valid, pte, fake_pte), vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
   val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
@@ -250,6 +251,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (mode === Sv48) {
         level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
         af_level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
+        gpf_level := Mux(req.l2Hit, 2.U, Mux(req.l3Hit.get, 3.U, 3.U))
         ppn := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, satp.ppn)
         l3Hit := req.l3Hit.get
       } .otherwise {
@@ -261,6 +263,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     } else {
       level := Mux(req.l2Hit, 1.U, 2.U)
       af_level := Mux(req.l2Hit, 1.U, 2.U)
+      gpf_level := 2.U
       ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
       l3Hit := false.B
     }
@@ -311,6 +314,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_last_hptw_resp := true.B
     mem_addr_update := true.B
     last_s2xlate := false.B
+    gpf_level := 1.U
   }
 
   when(sent_to_pmp && mem_addr_update === false.B){
