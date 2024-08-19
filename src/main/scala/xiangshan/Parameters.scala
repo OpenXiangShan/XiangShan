@@ -863,7 +863,6 @@ trait HasXSParameter {
   def LFSTEnable = true
 
   // TraceRTLMode
-  def TracePCWidth = XLEN
   def TraceFetchWidth = 16
   require(TraceFetchWidth >= PredictWidth)
   def TraceBufferSize = TraceFetchWidth * 4 //
