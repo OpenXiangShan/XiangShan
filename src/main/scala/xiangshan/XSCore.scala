@@ -105,17 +105,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   frontend.io.hartId := memBlock.io.inner_hartId
   frontend.io.reset_vector := memBlock.io.inner_reset_vector
+  frontend.io.softPrefetch <> memBlock.io.IfetchPrefetch
   frontend.io.backend <> backend.io.frontend
   frontend.io.sfence <> backend.io.frontendSfence
   frontend.io.tlbCsr <> backend.io.frontendTlbCsr
   frontend.io.csrCtrl <> backend.io.frontendCsrCtrl
   frontend.io.fencei <> backend.io.fenceio.fencei
 
-  backend.io.fromTop.hartId := memBlock.io.inner_hartId
-  backend.io.fromTop.msiInfo := io.msiInfo
-  backend.io.fromTop.clintTime := io.clintTime
-
-  backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
+  backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
 
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
@@ -126,7 +123,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sink.bits.storeSetHit := source.bits.uop.storeSetHit
     // The other signals have not been used
   }
-  backend.io.mem.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
+  backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
   backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
   backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq
@@ -136,13 +133,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
-  backend.io.mem.ldaIqFeedback <> memBlock.io.mem_to_ooo.ldaIqFeedback
-  backend.io.mem.staIqFeedback <> memBlock.io.mem_to_ooo.staIqFeedback
-  backend.io.mem.hyuIqFeedback <> memBlock.io.mem_to_ooo.hyuIqFeedback
-  backend.io.mem.vstuIqFeedback <> memBlock.io.mem_to_ooo.vstuIqFeedback
-  backend.io.mem.vlduIqFeedback <> memBlock.io.mem_to_ooo.vlduIqFeedback
-  backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.wakeup <> memBlock.io.mem_to_ooo.wakeup
+  backend.io.mem.ldaIqFeedback := memBlock.io.mem_to_ooo.ldaIqFeedback
+  backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
+  backend.io.mem.hyuIqFeedback := memBlock.io.mem_to_ooo.hyuIqFeedback
+  backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
+  backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
+  backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
+  backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
   backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
   backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
   backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
@@ -153,7 +150,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  backend.io.mem.s3_delayed_load_error <> memBlock.io.mem_to_ooo.s3_delayed_load_error
+  backend.io.mem.s3_delayed_load_error := memBlock.io.mem_to_ooo.s3_delayed_load_error
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
@@ -173,17 +170,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.ctrlInfo := DontCare
 
   // top -> memBlock
+  memBlock.io.fromTopToBackend.clintTime := io.clintTime
+  memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
   memBlock.io.hartId := io.hartId
   memBlock.io.outer_reset_vector := io.reset_vector
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
   memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
-  memBlock.io.inner_cpu_halt := backend.io.toTop.cpuHalted
+  memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
   memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
   memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
-  backend.io.mem.issueHysta.map(_.ready := false.B) // this fake port should not be used
+  backend.io.mem.issueHysta.foreach(_.ready := false.B) // this fake port should not be used
   memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
 
   // By default, instructions do not have exceptions when they enter the function units.
@@ -198,9 +197,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.ooo_to_mem.sfence <> backend.io.mem.sfence
 
-  memBlock.io.redirect <> backend.io.mem.redirect
-  memBlock.io.ooo_to_mem.csrCtrl <> backend.io.mem.csrCtrl
-  memBlock.io.ooo_to_mem.tlbCsr <> backend.io.mem.tlbCsr
+  memBlock.io.redirect := backend.io.mem.redirect
+  memBlock.io.ooo_to_mem.csrCtrl := backend.io.mem.csrCtrl
+  memBlock.io.ooo_to_mem.tlbCsr := backend.io.mem.tlbCsr
   memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
   memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit
   memBlock.io.ooo_to_mem.lsqio.pendingUncacheld := backend.io.mem.robLsqIO.pendingUncacheld

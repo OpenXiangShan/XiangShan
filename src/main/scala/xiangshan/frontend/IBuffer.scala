@@ -87,9 +87,9 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.pc := pc
     cf.foldpc := foldpc
     cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.ipf
-    cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.igpf
-    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.acf
+    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.pf
+    cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.gpf
+    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.af
     cf.trigger := triggered
     cf.pd := pd
     cf.pred_taken := pred_taken

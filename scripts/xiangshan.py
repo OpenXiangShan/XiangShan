@@ -359,7 +359,7 @@ class XiangShan(object):
     def __get_ci_rvhtest(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
         workloads = [
-            # "riscv-hyp-tests/rvh_test.bin",
+            "riscv-hyp-tests/rvh_test.bin",
             "xvisor_wboxtest/checkpoint.gz",
         ]
         rvh_tests = map(lambda x: os.path.join(base_dir, x), workloads)

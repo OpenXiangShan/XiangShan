@@ -25,6 +25,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
 import coupledL2.PrefetchRecv
+import device.MsiInfoBundle
 import utils._
 import utility._
 import xiangshan._
@@ -72,6 +73,8 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 }
 
 class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
+  val backendToTopBypass = Flipped(new BackendToTopBundle)
+
   val loadFastMatch = Vec(LdExuCnt, Input(UInt(LdExuCnt.W)))
   val loadFastFuOpType = Vec(LdExuCnt, Input(FuOpType()))
   val loadFastImm = Vec(LdExuCnt, Input(UInt(12.W)))
@@ -109,6 +112,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
+  val topToBackendBypass = new TopToBackendBundle
+
   val otherFastWakeup = Vec(LdExuCnt, ValidIO(new DynInst))
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -261,6 +266,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
     val fetch_to_mem = new fetch_to_mem
 
+    val IfetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
+
     // misc
     val error = ValidIO(new L1CacheErrorInfo)
     val memInfo = new Bundle {
@@ -281,11 +288,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val debugRolling = Flipped(new RobDebugRollingIO)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
-    val externalInterrupt = Flipped(new ExternalInterruptIO)
+    val fromTopToBackend = Input(new Bundle {
+      val msiInfo   = ValidIO(new MsiInfoBundle)
+      val clintTime = ValidIO(UInt(64.W))
+    })
     val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
     val outer_reset_vector = Input(UInt(PAddrBits.W))
-    val inner_cpu_halt = Input(Bool())
     val outer_cpu_halt = Output(Bool())
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
@@ -298,11 +307,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // reset signals of frontend & backend are generated in memblock
   val reset_backend = IO(Output(Reset()))
 
-  dontTouch(io.externalInterrupt)
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
   dontTouch(io.outer_reset_vector)
-  dontTouch(io.inner_cpu_halt)
   dontTouch(io.outer_cpu_halt)
   dontTouch(io.inner_beu_errors_icache)
   dontTouch(io.outer_beu_errors_icache)
@@ -735,6 +742,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // fast replay
     loadUnits(i).io.fast_rep_in <> loadUnits(i).io.fast_rep_out
+
+    // SoftPrefetch to frontend (prefetch.i)
+    loadUnits(i).io.IfetchPrefetch <> io.IfetchPrefetch(i)
 
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
@@ -1671,18 +1681,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
   io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(atomicsException, atomicsExceptionGPAddress, lsq.io.exceptionAddr.gpaddr))
 
+  io.mem_to_ooo.topToBackendBypass match { case x =>
+    x.hartId            := io.hartId
+    x.externalInterrupt.msip  := outer.clint_int_sink.in.head._1(0)
+    x.externalInterrupt.mtip  := outer.clint_int_sink.in.head._1(1)
+    x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
+    x.externalInterrupt.seip  := outer.plic_int_sink.in.last._1(0)
+    x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+    x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
+    x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
+  }
+
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
-  io.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  io.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  io.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)
-  io.outer_cpu_halt := io.inner_cpu_halt
+  io.outer_cpu_halt := io.ooo_to_mem.backendToTopBypass.cpuHalted
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents

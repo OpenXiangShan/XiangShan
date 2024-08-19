@@ -732,9 +732,16 @@ class NewCSR(implicit val p: Parameters) extends Module
     vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
   )
 
+  // flush pipe when write frm and data > 4 or write fcsr and data[7:5] > 4 or write frm/fcsr and frm is reserved
+  val frmIsReserved = fcsr.frm(2) && fcsr.frm(1, 0).orR
+  val frmWdataReserved = fcsr.wAliasFfm.wdata(2) && fcsr.wAliasFfm.wdata(1, 0).orR
+  val fcsrWdataReserved = fcsr.w.wdata(7) && fcsr.w.wdata(6, 5).orR
+  val frmChange = fcsr.wAliasFfm.wen && (!frmIsReserved && frmWdataReserved || frmIsReserved && !frmWdataReserved) ||
+    fcsr.w.wen && (!frmIsReserved && fcsrWdataReserved || frmIsReserved && !fcsrWdataReserved)
+
   val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
-    vstartChange
+    vstartChange || frmChange
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
@@ -1082,6 +1089,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
+  io.toDecode.illegalInst.frm        := frmIsReserved
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

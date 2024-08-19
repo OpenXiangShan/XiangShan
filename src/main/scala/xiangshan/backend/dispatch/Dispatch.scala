@@ -198,7 +198,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val singleStepStatus = RegInit(false.B)
   val inst0actualOut = io.enqRob.req(0).valid
-  when(io.redirect.valid) {
+  when(!io.singleStep) {
     singleStepStatus := false.B
   }.elsewhen(io.singleStep && io.fromRename(0).fire && inst0actualOut) {
     singleStepStatus := true.B
