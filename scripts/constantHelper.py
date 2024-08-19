@@ -60,11 +60,16 @@ from datetime import datetime
 
 # parameters according to noop
 NOOP_HOME = os.getenv("NOOP_HOME")
+XS_PROJECT_ROOT = os.getenv("XS_PROJECT_ROOT")
 if NOOP_HOME is None:
     print("Please set NOOP_HOME first.")
     exit(1)
+if XS_PROJECT_ROOT is None:
+    print("Please set XS_PROJECT_ROOT first.")
+    exit(1)
 DIFF_PATH = os.path.join(NOOP_HOME, "ready-to-run", "riscv64-nemu-interpreter-so")
-BUILD_PATH = os.path.join(NOOP_HOME, "build")
+# BUILD_PATH = os.path.join(NOOP_HOME, "build")
+BUILD_PATH = os.path.join(os.path.join(XS_PROJECT_ROOT, "tutorial"), "p7-constantin")
 EMU_PATH = os.path.join(BUILD_PATH, "emu")
 
 CONFIG_FILE_PREFIX = ".constant_result_"
