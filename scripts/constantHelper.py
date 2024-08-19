@@ -150,11 +150,9 @@ class RunContext:
         return res
 
     def genRunCMD(self, population, id, numa = None, coreStart = None, coreEnd = None) -> str:
-        if None in [numa, coreStart, coreEnd]:
-            coreStart = (id % self.config.concurrent_emu) * self.config.emu_threads
-            coreEnd = ((id % self.config.concurrent_emu) + 1) * self.config.emu_threads - 1
-            numa = int(coreStart >= (128 // 2))
         stdinStr = self.getStdIn(population, id)
+        if None in [numa, coreStart, coreEnd]:
+            return "{} | {} -i {} --diff {} -I {} -s {}".format(stdinStr, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
         return "{} | numactl -m {} -C {}-{} {} -i {} --diff {} -I {} -s {}".format(stdinStr, numa, coreStart, coreEnd, EMU_PATH, self.config.work_load, DIFF_PATH, self.config.max_instr, self.config.seed)
     
     def getOutPath(self, iterid, i):
@@ -213,15 +211,18 @@ class Solution:
                     proc.wait()
                 procs.clear()
             print(population[i])
-            while True:
-                (succ, numa, coreStart, coreEnd) = self.context.get_free_cores()
-                if succ:
-                    with open(self.context.getOutPath(iterid, i), "w") as stdout, open(self.context.getPerfPath(iterid, i), "w") as stderr:
-                        # print(self.context.genRunCMD(population, i, numa, coreStart, coreEnd), flush=True)
-                        procs.append(Popen(args=self.context.genRunCMD(population, i, numa, coreStart, coreEnd), shell=True, encoding='utf-8', stdin=PIPE, stdout=stdout, stderr=stderr))
-                    break
-                print("no free {} core".format(self.config.concurrent_emu * self.config.emu_threads))
-                time.sleep(5)
+            # while True:
+            #     (succ, numa, coreStart, coreEnd) = self.context.get_free_cores()
+            #     if succ:
+            #         with open(self.context.getOutPath(iterid, i), "w") as stdout, open(self.context.getPerfPath(iterid, i), "w") as stderr:
+            #             # print(self.context.genRunCMD(population, i, numa, coreStart, coreEnd), flush=True)
+            #             procs.append(Popen(args=self.context.genRunCMD(population, i, numa, coreStart, coreEnd), shell=True, encoding='utf-8', stdin=PIPE, stdout=stdout, stderr=stderr))
+            #         break
+            #     print("no free {} core".format(self.config.concurrent_emu * self.config.emu_threads))
+            #     time.sleep(5)
+            ## only for tutorial
+            with open(self.context.getOutPath(iterid, i), "w") as stdout, open(self.context.getPerfPath(iterid, i), "w") as stderr:
+                procs.append(Popen(args=self.context.genRunCMD(population, i), shell=True, encoding='utf-8', stdin=PIPE, stdout=stdout, stderr=stderr))
             i += 1
         for proc in procs:
             proc.wait()
