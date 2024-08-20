@@ -43,6 +43,7 @@ import huancun._
 import huancun.debug._
 import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
+import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
@@ -553,7 +554,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   final val PageOffsetWidth = 12
-  def NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
+  def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)

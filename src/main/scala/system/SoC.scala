@@ -26,12 +26,14 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 import coupledL2.EnableCHI
+import coupledL2.tl2chi.CHIIssue
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -48,12 +50,19 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
-  NodeIDWidth: Int = 7,
+  NodeIDWidthList: Map[String, Int] = Map(
+    "B" -> 7,
+    "E.b" -> 11
+  ),
   NumHart: Int = 64,
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  CHIAsyncBridge: AsyncQueueParams = AsyncQueueParams(
+    depth = 4,
+    sync = 3
+  )
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -69,6 +78,7 @@ trait HasSoCParameter {
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
+  val issue = p(CHIIssue)
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
