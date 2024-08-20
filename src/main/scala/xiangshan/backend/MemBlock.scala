@@ -265,7 +265,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
     val fetch_to_mem = new fetch_to_mem
 
-    val IfetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
+    val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
 
     // misc
     val error = ValidIO(new L1CacheErrorInfo)
@@ -730,7 +730,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.fast_rep_in <> loadUnits(i).io.fast_rep_out
 
     // SoftPrefetch to frontend (prefetch.i)
-    loadUnits(i).io.IfetchPrefetch <> io.IfetchPrefetch(i)
+    loadUnits(i).io.ifetchPrefetch <> io.ifetchPrefetch(i)
 
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
