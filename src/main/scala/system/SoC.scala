@@ -38,7 +38,7 @@ case object SoCParamsKey extends Field[SoCParameters]
 case class SoCParameters
 (
   EnableILA: Boolean = false,
-  PAddrBits: Int = 36,
+  PAddrBits: Int = 48,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -143,8 +143,8 @@ trait HaveSlaveAXI4Port {
 trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
-  // 36-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  // 48-bit physical address
+  val memRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -249,7 +249,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   if (enableCHI) {
     val error = LazyModule(new TLError(
       params = DevNullParams(
-        address = Seq(AddressSet(0x1000000000L, 0xfffffffffL)),
+        address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
         maxAtomic = 8,
         maxTransfer = 64),
       beatBytes = 8
