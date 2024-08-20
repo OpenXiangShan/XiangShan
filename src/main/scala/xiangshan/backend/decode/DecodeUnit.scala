@@ -24,7 +24,7 @@ import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
-import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
+import xiangshan.ExceptionNO.{breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
@@ -808,6 +808,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.exceptionVec(illegalInstr) := exceptionII
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
+
+  //update exceptionVec: from frontend trigger's breakpoint exception. To reduce 1 bit of overhead in ibuffer entry.
+  decodedInst.exceptionVec(breakPoint) := TriggerAction.isExp(ctrl_flow.trigger)
 
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {

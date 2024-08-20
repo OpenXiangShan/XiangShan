@@ -111,7 +111,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val instr = UInt(32.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
-        val triggerCf = new TriggerCf
+        val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
         val isHls = Bool()
@@ -203,7 +203,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapPCGPA = io.fromRob.trap.bits.pcGPA
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
-  val triggerCf = io.fromRob.trap.bits.triggerCf
+  val trigger = io.fromRob.trap.bits.trigger
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
 
@@ -312,7 +312,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.vstvec := vstvec.regOut
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
-  val entryDebugMode = Wire(Bool())
+  val entryDebugMode = WireInit(false.B)
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -858,7 +858,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.intrVec     := intrVec
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
-  debugMod.io.in.trapInfo.bits.triggerCf   := triggerCf
+  debugMod.io.in.trapInfo.bits.trigger     := trigger
   debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -879,12 +879,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.debugMode                := debugMode
   trapEntryDEvent.in.hasTrap                  := hasTrap
   trapEntryDEvent.in.hasSingleStep            := debugMod.io.out.hasSingleStep
-  trapEntryDEvent.in.hasTriggerFire           := debugMod.io.out.hasTriggerFire
+  trapEntryDEvent.in.triggerEnterDebugMode    := debugMod.io.out.triggerEnterDebugMode
   trapEntryDEvent.in.hasDebugEbreakException  := debugMod.io.out.hasDebugEbreakException
   trapEntryDEvent.in.breakPoint               := debugMod.io.out.breakPoint
 
   trapHandleMod.io.in.trapInfo.bits.singleStep  := debugMod.io.out.hasSingleStep
-  trapHandleMod.io.in.trapInfo.bits.triggerFire := debugMod.io.out.triggerCanFire
 
   intrMod.io.in.debugMode := debugMode
   intrMod.io.in.debugIntr := debugIntr

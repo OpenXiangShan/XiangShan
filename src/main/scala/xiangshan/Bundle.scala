@@ -138,7 +138,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
-  val trigger = new TriggerCf
+  val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
@@ -634,26 +634,18 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class TriggerCf(implicit p: Parameters) extends XSBundle {
-  // frontend
-  val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
-  val frontendCanFire   = Vec(TriggerNum, Bool())
-  // backend
-  val backendHit        = Vec(TriggerNum, Bool())
-  val backendCanFire    = Vec(TriggerNum, Bool())
+object TriggerAction extends NamedUInt(4) {
+  // Put breakpoint Exception gererated by trigger in ExceptionVec[3].
+  def BreakpointExp = 0.U(width.W)  // raise breakpoint exception
+  def DebugMode     = 1.U(width.W)  // enter debug mode
+  def TraceOn       = 2.U(width.W)
+  def TraceOff      = 3.U(width.W)
+  def TraceNotify   = 4.U(width.W)
+  def None          = 15.U(width.W) // use triggerAction = 15.U to express that action is None;
 
-  // Two situations not allowed:
-  // 1. load data comparison
-  // 2. store chaining with store
-  def getFrontendCanFire = frontendCanFire.reduce(_ || _)
-  def getBackendCanFire = backendCanFire.reduce(_ || _)
-  def canFire = getFrontendCanFire || getBackendCanFire
-  def clear(): Unit = {
-    frontendHit.foreach(_ := false.B)
-    frontendCanFire.foreach(_ := false.B)
-    backendHit.foreach(_ := false.B)
-    backendCanFire.foreach(_ := false.B)
-  }
+  def isExp(action: UInt)   = action === BreakpointExp
+  def isDmode(action: UInt) = action === DebugMode
+  def isNone(action: UInt)  = action === None
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
@@ -664,6 +656,8 @@ class FrontendTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
+  val triggerCanRaiseBpExp = Output(Bool())
 }
 
 class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
@@ -672,16 +666,17 @@ class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
   val triggerCanRaiseBpExp  = Output(Bool())
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType = Output(UInt(2.W))
-  val select    = Output(Bool()) // todo: delete
+  val select    = Output(Bool())
   val timing    = Output(Bool())
-  val action    = Output(Bool()) // todo: delete
+  val action    = Output(TriggerAction())
   val chain     = Output(Bool())
-  val execute   = Output(Bool()) // todo: delete
+  val execute   = Output(Bool())
   val store     = Output(Bool())
   val load      = Output(Bool())
   val tdata2    = Output(UInt(64.W))

@@ -44,6 +44,8 @@ import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 import xiangshan.backend.datapath.NewPipelineConnect
 import system.SoCParamsKey
+import xiangshan.backend.fu.NewCSR.TriggerUtil
+import xiangshan.ExceptionNO._
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -699,6 +701,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
   val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
+  val debugMode = csrCtrl.mem_trigger.debugMode
 
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
@@ -899,15 +902,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadUnits(i).io.trigger(j).matchType := tdata(j).matchType
       loadUnits(i).io.trigger(j).tEnable := tEnable(j) && tdata(j).load
       // Just let load triggers that match data unavailable
-      loadTriggerHitVec(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(j).select
+      loadTriggerHitVec(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(j).select && !debugMode
     }
     TriggerCheckCanFire(TriggerNum, loadTriggerCanFireVec, loadTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
-    io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := loadTriggerHitVec
-    io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendCanFire := loadTriggerCanFireVec
-    XSDebug(io.mem_to_ooo.writebackLda(i).bits.uop.trigger.getBackendCanFire && io.mem_to_ooo.writebackLda(i).valid, p"Debug Mode: Load Inst No.${i}" +
-      p"has trigger fire vec ${io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendCanFire}\n")
+    val actionVec = VecInit(tdata.map(_.action))
+    val triggerAction = Wire(TriggerAction())
+    TriggerUtil.triggerActionGen(triggerAction, loadTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
+
+    io.mem_to_ooo.writebackLda(i).bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
+    io.mem_to_ooo.writebackLda(i).bits.uop.trigger                  := triggerAction
+    XSDebug(loadTriggerCanFireVec.asUInt.orR && io.mem_to_ooo.writebackLda(i).valid, p"Debug Mode: Load Inst No.${i}" +
+      p"has trigger fire vec ${loadTriggerCanFireVec.asUInt.orR}\n")
   }
 
   for (i <- 0 until HyuCnt) {
@@ -1035,10 +1042,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
     TriggerCheckCanFire(TriggerNum, loadTriggerCanFireVec, loadTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
 
-    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := loadTriggerHitVec
-    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendCanFire := loadTriggerCanFireVec
-    XSDebug(io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.getBackendCanFire && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
-      p"has trigger fire vec ${io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendCanFire}\n")
+    val actionVec =  VecInit(tdata.map(_.action))
+    val triggerAction = Wire(TriggerAction())
+    TriggerUtil.triggerActionGen(triggerAction, loadTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
+
+    io.mem_to_ooo.writebackHyuLda(i).bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
+    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger                  := triggerAction
+    XSDebug(loadTriggerCanFireVec.asUInt.orR && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
+      p"has trigger fire vec ${loadTriggerCanFireVec.asUInt.orR}\n")
 
     // ------------------------------------
     //  Store Port
@@ -1061,7 +1072,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.fromCsrTrigger.tdataVec := tdata
     hybridUnits(i).io.fromCsrTrigger.tEnableVec := tEnable
     hybridUnits(i).io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
-
+    hybridUnits(i).io.fromCsrTrigger.debugMode := debugMode
   }
 
   // misalignBuffer
@@ -1141,6 +1152,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.fromCsrTrigger.tdataVec := tdata
     stu.io.fromCsrTrigger.tEnableVec := tEnable
     stu.io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+    stu.io.fromCsrTrigger.debugMode := debugMode
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
@@ -1253,10 +1265,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   when (atomicsUnit.io.out.valid) {
     // when atom inst writeback, surpress normal load trigger
     (0 until LduCnt).map(i => {
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(TriggerNum)(false.B))
+      io.mem_to_ooo.writebackLda(i).bits.uop.trigger := TriggerAction.None
     })
     (0 until HyuCnt).map(i => {
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(TriggerNum)(false.B))
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger := TriggerAction.None
     })
   }
 
@@ -1672,11 +1684,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
                                             vSegmentExceptionVl,
                                             lsq.io.exceptionAddr.vl)
   )
-
-  io.mem_to_ooo.writeBack.map(wb => {
-    wb.bits.uop.trigger.frontendHit := 0.U(TriggerNum.W).asBools
-    wb.bits.uop.trigger.frontendCanFire := 0.U(TriggerNum.W).asBools
-  })
 
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
   io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(atomicsException, atomicsExceptionGPAddress, lsq.io.exceptionAddr.gpaddr))

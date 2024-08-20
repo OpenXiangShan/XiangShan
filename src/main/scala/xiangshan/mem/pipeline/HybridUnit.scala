@@ -699,6 +699,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
 
   when (s1_ld_flow) {
@@ -716,9 +717,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
     s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
     s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
-    s1_out.uop.trigger.backendHit                  := storeTrigger.io.toStore.triggerHitVec
-    s1_out.uop.trigger.backendCanFire              := storeTrigger.io.toStore.triggerCanFireVec
-    s1_out.uop.exceptionVec(breakPoint)            := storeTrigger.io.toStore.breakPointExp
+    s1_out.uop.trigger                             := storeTrigger.io.toStore.triggerAction
+    s1_out.uop.exceptionVec(breakPoint)            := TriggerAction.isExp(storeTrigger.io.toStore.triggerAction)
   }
 
   // pointer chasing

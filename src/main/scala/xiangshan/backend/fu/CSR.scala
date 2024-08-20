@@ -117,7 +117,7 @@ class VtypeStruct(implicit p: Parameters) extends XSBundle {
   val vsew = UInt(3.W)
   val vlmul = UInt(3.W)
 }
-
+/*
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
@@ -1633,7 +1633,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
-
+*/
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
