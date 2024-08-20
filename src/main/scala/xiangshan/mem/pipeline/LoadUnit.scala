@@ -205,6 +205,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_fire          = s0_valid && s0_can_go
   val s0_mmio_fire     = s0_mmio_select && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
+  val s0_tlb_valid     = Wire(Bool())
   val s0_tlb_hlv       = Wire(Bool())
   val s0_tlb_hlvx      = Wire(Bool())
   val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
@@ -364,6 +365,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s0_mmio_select := s0_ld_mmio_select && !s0_kill
 
+   // if is hardware prefetch or fast replay, don't send valid to tlb
+  s0_tlb_valid := (s0_super_ld_rep_valid ||
+                   s0_ld_rep_valid ||
+                   s0_vec_iss_valid ||
+                   s0_int_iss_valid ||
+                   s0_l2l_fwd_valid
+                  ) && io.dcache.req.ready
+
   // which is S0's out is ready and dcache is ready
   val s0_try_ptr_chasing      = s0_l2l_fwd_select
   val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.dcache.req.ready
@@ -376,7 +385,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready && io.dcache.req.ready
 
   // query DTLB
-  io.tlb.req.valid                   := s0_valid && !s0_tlb_no_query // if is hardware prefetch or fast replay, don't send valid to tlb, but need no_translate
+  io.tlb.req.valid                   := s0_tlb_valid
   io.tlb.req.bits.cmd                := Mux(s0_sel_src.prf,
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
@@ -385,7 +394,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hyperinst          := s0_tlb_hlv
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
-  io.tlb.req.bits.kill               := s0_kill
+  io.tlb.req.bits.kill               := s0_kill || s0_ld_mmio_select // if mmio, kill tlb req
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
   io.tlb.req.bits.memidx.idx         := s0_sel_src.uop.lqIdx.value
@@ -1280,7 +1289,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
 
-  // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || !io.dcache.req.ready
 
   // s3 load fast replay
