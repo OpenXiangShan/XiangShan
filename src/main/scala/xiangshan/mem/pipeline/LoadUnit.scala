@@ -212,6 +212,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_fire          = s0_valid && s0_can_go
   val s0_mmio_fire     = s0_mmio_select && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
+  val s0_tlb_hlv       = Wire(Bool())
+  val s0_tlb_hlvx      = Wire(Bool())
   val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
 
@@ -233,8 +235,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val prf_wr        = Bool()
     val prf_i         = Bool()
     val sched_idx     = UInt(log2Up(LoadQueueReplaySize+1).W)
-    val hlv           = Bool()
-    val hlvx          = Bool()
     // Record the issue port idx of load issue queue. This signal is used by load cancel.
     val deqPortIdx    = UInt(log2Ceil(LoadPipelineWidth).W)
     val frm_mabuf     = Bool()
@@ -406,8 +406,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := s0_tlb_vaddr
-  io.tlb.req.bits.hyperinst          := s0_sel_src.hlv
-  io.tlb.req.bits.hlvx               := s0_sel_src.hlvx
+  io.tlb.req.bits.hyperinst          := s0_tlb_hlv
+  io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
@@ -497,8 +497,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
-    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
-    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out
   }
 
@@ -521,8 +519,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := false.B
     out.prf_i         := false.B
     out.sched_idx     := 0.U
-    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
-    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B
     out
   }
@@ -556,8 +552,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
-    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
-    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out
   }
 
@@ -621,8 +615,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx             := src.elemIdx
     out.elemIdxInsideVd     := src.elemIdxInsideVd
     out.alignedType         := src.alignedType
-    out.hlv                 := false.B
-    out.hlvx                := false.B
     out
   }
 
@@ -645,8 +637,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.prf_i         := src.uop.fuOpType === LSUOpType.prefetch_i
     out.sched_idx     := 0.U
-    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
-    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -674,8 +664,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr             := false.B
     out.prf_i              := false.B
     out.sched_idx          := 0.U
-    out.hlv                := LSUOpType.isHlv(out.uop.fuOpType)
-    out.hlvx               := LSUOpType.isHlvx(out.uop.fuOpType)
     out
   }
 
@@ -725,6 +713,25 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s0_hw_prf_select,
       io.prefetch_req.bits.getVaddr(),
       s0_tlb_vaddr
+    )
+  )
+
+  s0_tlb_hlv := Mux(
+    s0_super_ld_rep_valid || s0_ld_rep_valid,
+    LSUOpType.isHlv(io.replay.bits.uop.fuOpType),
+    Mux(
+      s0_int_iss_valid,
+      LSUOpType.isHlv(io.ldin.bits.uop.fuOpType),
+      false.B
+    )
+  )
+  s0_tlb_hlvx := Mux(
+    s0_super_ld_rep_valid || s0_ld_rep_valid,
+    LSUOpType.isHlvx(io.replay.bits.uop.fuOpType),
+    Mux(
+      s0_int_iss_valid,
+      LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType),
+      false.B
     )
   )
 
