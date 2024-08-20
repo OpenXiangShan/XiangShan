@@ -16,7 +16,7 @@ object DataConfig {
   case class FpData() extends DataConfig("fp", 64)
   case class VecData() extends DataConfig("vec", 128)
   case class ImmData(len: Int) extends DataConfig("int", len)
-  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", VAddrBits)
+  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", 48 + 2) // Todo: associate it with the width of vaddr
   case class V0Data() extends DataConfig("v0", 128)
   case class VlData() extends DataConfig("vl", log2Up(VecData().dataWidth) + 1 ) // 8
   case class FakeIntData() extends DataConfig("fakeint", 64)

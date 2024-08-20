@@ -249,8 +249,8 @@ class CSRPermitModule extends Module {
   private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
     ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
     (privState.isModeVS && vsiselect > 0x1FF.U)) && addr === CSRs.sireg.U
-  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U ||
-    vsiselect >= 0x80.U && vsiselect <= 0xFF.U && vsiselect(0).asBool) || privState.isModeVU) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) || 
+    privState.isModeVU) && addr === CSRs.sireg.U
 
   private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
 
