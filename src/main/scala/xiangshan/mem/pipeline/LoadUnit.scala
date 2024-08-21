@@ -390,7 +390,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_mmio_select := s0_ld_mmio_select && !s0_kill
 
    // if is hardware prefetch or fast replay, don't send valid to tlb
-  s0_tlb_valid := (s0_super_ld_rep_valid ||
+  s0_tlb_valid := (s0_misalign_ld_valid ||
+                   s0_super_ld_rep_valid ||
                    s0_ld_rep_valid ||
                    s0_vec_iss_valid ||
                    s0_int_iss_valid ||
