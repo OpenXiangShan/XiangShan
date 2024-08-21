@@ -1266,7 +1266,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     (isAfter(robCommPtr, commPtr) ||
       validInstructions.reduce(_ || _) && lastInstructionStatus =/= c_toCommit)
 
-  when (io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
+  when (io.fromBackend.redirect.valid) {
+    robCommPtr_write := io.fromBackend.redirect.bits.ftqIdx
+  } .elsewhen (io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
     robCommPtr_write := ParallelPriorityMux(io.fromBackend.rob_commits.map(_.valid).reverse, io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse)
   } .elsewhen (isAfter(commPtr, robCommPtr)) {
     robCommPtr_write := commPtr
