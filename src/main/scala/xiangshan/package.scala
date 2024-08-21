@@ -862,7 +862,8 @@ package object xiangshan {
       illegalInstr,
       instrPageFault,
       instrGuestPageFault,
-      virtualInstr
+      virtualInstr,
+      breakPoint
     )
     def partialSelect(vec: Vec[Bool], select: Seq[Int]): Vec[Bool] = {
       val new_vec = Wire(ExceptionVec())

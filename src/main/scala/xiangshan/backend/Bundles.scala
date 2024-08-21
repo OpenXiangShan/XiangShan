@@ -43,7 +43,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -72,7 +72,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -148,7 +148,7 @@ object Bundles {
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val hasException    = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -690,7 +690,7 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(new TriggerCf)           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     // vldu used only
@@ -835,7 +835,7 @@ object Bundles {
     val isInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
-    val trigger  = new TriggerCf
+    val trigger = TriggerAction()
   }
 
   object UopIdx {

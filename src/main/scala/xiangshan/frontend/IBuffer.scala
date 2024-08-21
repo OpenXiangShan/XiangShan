@@ -65,7 +65,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
   val exceptionType = UInt(ExceptionType.width.W)
   val crossPageIPFFix = Bool()
-  val triggered = new TriggerCf
+  val triggered = TriggerAction()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)

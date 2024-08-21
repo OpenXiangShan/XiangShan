@@ -125,7 +125,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         current.flushPipe := s1_out_bits.flushPipe || current.flushPipe
         current.replayInst := s1_out_bits.replayInst || current.replayInst
         current.singleStep := s1_out_bits.singleStep || current.singleStep
-        current.trigger := (s1_out_bits.trigger.asUInt | current.trigger.asUInt).asTypeOf(new TriggerCf)
+        current.trigger := (s1_out_bits.trigger | current.trigger)
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {

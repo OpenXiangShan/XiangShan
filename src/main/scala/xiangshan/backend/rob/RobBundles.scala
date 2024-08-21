@@ -278,14 +278,14 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
-  val trigger = new TriggerCf
+  val trigger = TriggerAction()
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
 
-  def has_exception = hasException || flushPipe || singleStep || replayInst || trigger.canFire
-  def not_commit = hasException || singleStep || replayInst || trigger.canFire
+  def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
+  def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = hasException || singleStep || trigger.canFire
+  def can_writeback = hasException || singleStep || TriggerAction.isDmode(trigger)
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

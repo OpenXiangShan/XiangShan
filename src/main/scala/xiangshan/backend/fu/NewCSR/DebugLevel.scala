@@ -3,7 +3,6 @@ package xiangshan.backend.fu.NewCSR
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
-
 import chisel3._
 import chisel3.util._
 import utils.ConsecutiveOnes
@@ -18,6 +17,8 @@ import xiangshan.backend.fu.NewCSR.CSREvents._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import CSRConfig._
 import utility.SignExt
+import xiangshan.TriggerAction
+
 import scala.collection.immutable.SeqMap
 
 
@@ -358,5 +359,29 @@ object TriggerUtil {
    */
   def TriggerCheckChainLegal(chainVec: Seq[Bool], chainLen: Int): Bool = {
     !ConsecutiveOnes(chainVec, chainLen)
+  }
+
+  /**
+   * Generate Trigger action
+   * @return triggerAction return
+   * @param  triggerCanFireVec
+   * @param  actionVec tdata.action
+   * @param  triggerCanRaiseBpExp from csr
+   */
+  def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool): Unit = {
+    // More than one triggers can hit at the same time, but only fire one.
+    // We select the first hit trigger to fire.
+    val hasTriggerFire    = triggerCanFireVec.asUInt.orR
+    val triggerFireOH     = PriorityEncoderOH(triggerCanFireVec)
+    val triggerFireAction = PriorityMux(triggerFireOH, actionVec).asUInt
+    val actionIsBPExp     = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt)
+    val actionIsDmode     = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
+    val breakPointExp     = actionIsBPExp && triggerCanRaiseBpExp
+
+    // todo: add more for trace
+    triggerAction := MuxCase(TriggerAction.None, Seq(
+      breakPointExp -> TriggerAction.BreakpointExp,
+      actionIsDmode -> TriggerAction.DebugMode,
+    ))
   }
 }

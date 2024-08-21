@@ -234,7 +234,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
-  val triggered    = Vec(PredictWidth, new TriggerCf)
+  val triggered    = Vec(PredictWidth, TriggerAction())
   val topdown_info = new FrontendTopDownBundle
 }
 

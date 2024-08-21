@@ -28,6 +28,7 @@ import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule
@@ -373,7 +374,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     atom_override_xtval := false.B
   }
 
-  /*
   // atomic trigger
   val csrCtrl = io.csrCtrl
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
@@ -383,6 +383,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
 
+  val debugMode = csrCtrl.mem_trigger.debugMode
+  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
@@ -392,7 +394,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // store trigger
     val store_hit = Wire(Vec(TriggerNum, Bool()))
     for (j <- 0 until TriggerNum) {
-      store_hit(j) := !tdata(j).select && TriggerCmp(
+      store_hit(j) := !tdata(j).select && !debugMode && TriggerCmp(
         vaddr,
         tdata(j).tdata2,
         tdata(j).matchType,
@@ -402,7 +404,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // load trigger
     val load_hit = Wire(Vec(TriggerNum, Bool()))
     for (j <- 0 until TriggerNum) {
-      load_hit(j) := !tdata(j).select && TriggerCmp(
+      load_hit(j) := !tdata(j).select && !debugMode && TriggerCmp(
         vaddr,
         tdata(j).tdata2,
         tdata(j).matchType,
@@ -414,13 +416,16 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVec, backendTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
   }
 
+  val actionVec = VecInit(tdata.map(_.action))
+  val triggerAction = Wire(TriggerAction())
+  TriggerUtil.triggerActionGen(triggerAction, backendTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
+
   // addr trigger do cmp at s_cache_req
   // trigger result is used at s_finish
   // thus we can delay it safely
-  io.out.bits.uop.trigger.backendHit := backendTriggerHitVec
-  io.out.bits.uop.trigger.backendCanFire := backendTriggerCanFireVec
+  io.out.bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
+  io.out.bits.uop.trigger                  := triggerAction
 
-  */
   
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
