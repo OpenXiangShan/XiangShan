@@ -81,7 +81,7 @@ class XSArgs(object):
         self.config = args.config
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
-        self.with_chiseldb = 0 if args.no_db else None
+        self.with_chiseldb = 0 if args.no_db else 1
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
