@@ -85,6 +85,8 @@ class SlvpredctlBundle extends CSRBundle {
 }
 
 class SmblockctlBundle extends CSRBundle {
+  val HD_MISALIGN_LD_ENABLE            = RW(   9).withReset(true.B)  // Enable hardware load misalign.
+  val HD_MISALIGN_ST_ENABLE            = RW(   8).withReset(true.B)  // Enable hardware store misalign.
   val UNCACHE_WRITE_OUTSTANDING_ENABLE = RW(   7).withReset(false.B)  // Enable uncache write outstanding (0).
   val CACHE_ERROR_ENABLE               = RW(   6).withReset(true.B)   // Enable cache error after reset (CE).
   val SOFT_PREFETCH_ENABLE             = RW(   5).withReset(true.B)   // Enable soft-prefetch after reset (SP).

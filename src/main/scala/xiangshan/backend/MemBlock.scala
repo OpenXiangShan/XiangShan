@@ -83,6 +83,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val lsqio = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val pendingUncacheld = Input(Bool())
     val pendingld = Input(Bool())
     val pendingst = Input(Bool())
     val pendingVst = Input(Bool())
@@ -350,6 +351,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
   val vSegmentUnit  = Module(new VSegmentUnit)
 
+  // misalign Buffer
+  val loadMisalignBuffer = Module(new LoadMisalignBuffer)
+  val storeMisalignBuffer = Module(new StoreMisalignBuffer)
+
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
@@ -413,12 +418,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  val ldaWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
+  val ldaWritebackOverride  = Mux(
+    loadMisalignBuffer.io.writeBack.valid,
+    loadMisalignBuffer.io.writeBack.bits,
+    Mux(
+      atomicsUnit.io.out.valid,
+      atomicsUnit.io.out.bits,
+      loadUnits.head.io.ldout.bits
+    ))
   val ldaOut = Wire(Decoupled(new MemExuOutput))
-  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
+  // misalignBuffer will overwrite the source from ldu if it is about to writeback
+  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid || loadMisalignBuffer.io.writeBack.valid
   ldaOut.bits  := ldaWritebackOverride
   atomicsUnit.io.out.ready := ldaOut.ready
   loadUnits.head.io.ldout.ready := ldaOut.ready
+  loadMisalignBuffer.io.writeBack.ready := ldaOut.ready
 
   val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
@@ -857,6 +871,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
+    // connect misalignBuffer
+    loadMisalignBuffer.io.req(i) <> loadUnits(i).io.misalign_buf
+
+    if (i == 0) {
+      loadUnits(i).io.misalign_ldin  <> loadMisalignBuffer.io.splitLoadReq
+      loadUnits(i).io.misalign_ldout <> loadMisalignBuffer.io.splitLoadResp
+    } else {
+      loadUnits(i).io.misalign_ldin.valid := false.B
+      loadUnits(i).io.misalign_ldin.bits := DontCare
+    }
+
     // alter writeback exception info
     io.mem_to_ooo.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
@@ -1039,6 +1064,33 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   }
 
+  // misalignBuffer
+  loadMisalignBuffer.io.redirect                <> redirect  
+  loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
+  loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
+  loadMisalignBuffer.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
+  loadMisalignBuffer.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
+  loadMisalignBuffer.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
+  loadMisalignBuffer.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
+  loadMisalignBuffer.io.rob.commit              := io.ooo_to_mem.lsqio.commit
+  loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
+  loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+
+  lsq.io.flushFrmMaBuf                          := loadMisalignBuffer.io.flushLdExpBuff
+
+  storeMisalignBuffer.io.redirect               <> redirect
+  storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
+  storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
+  storeMisalignBuffer.io.rob.pendingUncacheld   := io.ooo_to_mem.lsqio.pendingUncacheld
+  storeMisalignBuffer.io.rob.pendingld          := io.ooo_to_mem.lsqio.pendingld
+  storeMisalignBuffer.io.rob.pendingst          := io.ooo_to_mem.lsqio.pendingst
+  storeMisalignBuffer.io.rob.pendingVst         := io.ooo_to_mem.lsqio.pendingVst
+  storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
+  storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
+  storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
+
+  lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
+
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
@@ -1073,6 +1125,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stu = storeUnits(i)
 
     stu.io.redirect      <> redirect
+    stu.io.csrCtrl       <> csrCtrl
     stu.io.dcache        <> dcache.io.lsu.sta(i)
     stu.io.feedback_slow <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
     stu.io.stin         <> io.ooo_to_mem.issueSta(i)
@@ -1097,6 +1150,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
+
+    // connect misalignBuffer
+    storeMisalignBuffer.io.req(i) <> stu.io.misalign_buf
+
+    if (i == 0) {
+      stu.io.misalign_stin  <> storeMisalignBuffer.io.splitStoreReq
+      stu.io.misalign_stout <> storeMisalignBuffer.io.splitStoreResp
+    } else {
+      stu.io.misalign_stin.valid := false.B
+      stu.io.misalign_stin.bits := DontCare
+    }
 
     // Lsq to std unit's rs
     if (i < VstuCnt){
@@ -1179,6 +1243,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).bits  := lsq.io.vecmmioStout.bits
     lsq.io.vecmmioStout.ready := true.B
   }
+  // miss align buffer will overwrite stOut(0)
+  storeMisalignBuffer.io.writeBack.ready := true.B
+  when (storeMisalignBuffer.io.writeBack.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
+  }
 
   when (atomicsUnit.io.out.valid) {
     // when atom inst writeback, surpress normal load trigger
@@ -1200,6 +1270,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
+  lsq.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
   lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
   lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
@@ -1563,6 +1634,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
 
+  val misalignBufExceptionOverwrite = loadMisalignBuffer.io.overwriteExpBuf.valid || storeMisalignBuffer.io.overwriteExpBuf.valid
+  val misalignBufExceptionVaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
+    loadMisalignBuffer.io.overwriteExpBuf.vaddr,
+    storeMisalignBuffer.io.overwriteExpBuf.vaddr
+  )
+
   val vSegmentException = RegInit(false.B)
   when (DelayN(redirect.valid, 10) && vSegmentException) {
     vSegmentException := false.B
@@ -1577,9 +1654,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
-    Mux(vSegmentException,
-      vSegmentExceptionAddress,
-      lsq.io.exceptionAddr.vaddr)
+    Mux(misalignBufExceptionOverwrite,
+      misalignBufExceptionVaddr,
+      Mux(vSegmentException,
+        vSegmentExceptionAddress,
+        lsq.io.exceptionAddr.vaddr
+      )
+    )
   ))
   // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
   XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
