@@ -212,7 +212,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
-      val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
+      val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
