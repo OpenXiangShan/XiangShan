@@ -353,7 +353,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   dontTouch(s0_int_iss_select)
   dontTouch(s0_l2l_fwd_select)
 
-  val s0_tlb_no_query        = s0_ld_fast_rep_select || s0_hw_prf_select || !s0_sel_src.prf_i
+  val s0_tlb_no_query        = s0_ld_fast_rep_select || s0_hw_prf_select || s0_ld_mmio_select || s0_sel_src.prf_i
   s0_valid := (s0_super_ld_rep_valid ||
                s0_ld_fast_rep_valid ||
                s0_ld_rep_valid ||
@@ -394,7 +394,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hyperinst          := s0_tlb_hlv
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
-  io.tlb.req.bits.kill               := s0_kill || s0_ld_mmio_select // if mmio, kill tlb req
+  io.tlb.req.bits.kill               := s0_kill || s0_tlb_no_query // if does not need to be translated, kill it
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
   io.tlb.req.bits.memidx.idx         := s0_sel_src.uop.lqIdx.value
