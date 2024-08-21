@@ -338,12 +338,11 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   val wait_last = readBeatCnt === (refillCycles - 1).U
   when(io.mem_grant.fire && edge.hasData(io.mem_grant.bits)) {
     respDataReg(readBeatCnt) := io.mem_grant.bits.data
-    readBeatCnt := Mux(wait_last || io.mem_grant.bits.corrupt, 0.U, readBeatCnt + 1.U)
+    readBeatCnt := Mux(wait_last, 0.U, readBeatCnt + 1.U)
   }
 
   // last transition finsh or corrupt
-  val last_fire = io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && 
-                  (wait_last || io.mem_grant.bits.corrupt)
+  val last_fire = io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && wait_last
 
   val (_, _, refill_done, _) = edge.addr_inc(io.mem_grant)
   assert(!(refill_done ^ last_fire), "refill not done!")
@@ -351,7 +350,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   val last_fire_r = RegNext(last_fire)
   val id_r        = RegNext(io.mem_grant.bits.source)
-  val corrupt_r   = RegNext(io.mem_grant.bits.corrupt)
+
+  // if any beat is corrupt, the whole response (to mainPipe/metaArray/dataArray) is corrupt
+  val corrupt_r   = RegInit(false.B)
+  when (io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && io.mem_grant.bits.corrupt) {
+    corrupt_r := true.B
+  }.elsewhen(io.fetch_resp.fire) {
+    corrupt_r := false.B
+  }
 
   /**
     ******************************************************************************
