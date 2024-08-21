@@ -786,6 +786,52 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l2_hint = Input(Valid(new L2ToL1Hint()))
 }
 
+private object ArbiterCtrl {
+  def apply(request: Seq[Bool]): Seq[Bool] = request.length match {
+    case 0 => Seq()
+    case 1 => Seq(true.B)
+    case _ => true.B +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
+  }
+}
+
+class TreeArbiter[T <: MissReqWoStoreData](val gen: T, val n: Int) extends Module{
+  val io = IO(new ArbiterIO(gen, n))
+
+  def selectTree(in: Vec[Valid[T]], sIdx: UInt): Tuple2[UInt, T] = {
+    if (in.length == 1) {
+      (sIdx, in(0).bits)
+    } else if (in.length == 2) {
+      (
+        Mux(in(0).valid, sIdx, sIdx + 1.U),
+        Mux(in(0).valid, in(0).bits, in(1).bits)
+      )
+    } else {
+      val half = in.length / 2
+      val leftValid = in.slice(0, half).map(_.valid).reduce(_ || _)
+      val (leftIdx, leftSel) = selectTree(VecInit(in.slice(0, half)), sIdx)
+      val (rightIdx, rightSel) = selectTree(VecInit(in.slice(half, in.length)), sIdx + half.U)
+      (
+        Mux(leftValid, leftIdx, rightIdx),
+        Mux(leftValid, leftSel, rightSel)
+      )
+    }
+  }
+  val ins = Wire(Vec(n, Valid(gen)))
+  for (i <- 0 until n) {
+    ins(i).valid := io.in(i).valid
+    ins(i).bits  := io.in(i).bits
+  }
+  val (idx, sel) = selectTree(ins, 0.U)
+  // NOTE: io.chosen is very slow, dont use it
+  io.chosen := idx
+  io.out.bits := sel
+
+  val grant = ArbiterCtrl(io.in.map(_.valid))
+  for ((in, g) <- io.in.zip(grant))
+    in.ready := g && io.out.ready
+  io.out.valid := !grant.last || io.in.last.valid
+}
+
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
@@ -1277,7 +1323,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
 
   // Request
-  val missReqArb = Module(new ArbiterFilterByCacheLineAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
+  val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
