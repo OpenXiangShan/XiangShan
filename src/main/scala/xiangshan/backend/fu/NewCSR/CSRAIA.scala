@@ -224,15 +224,15 @@ object SISelectField extends ISelectField(
 )
 
 class VSISelectBundle extends CSRBundle {
-  val ALL = VSISelectField(log2Up(0x1FF), 0, null)
+  val ALL = VSISelectField(log2Up(0x1FF), 0, null).withReset(0.U)
 }
 
 class MISelectBundle extends CSRBundle {
-  val ALL = MISelectField(log2Up(0xFF), 0, null)
+  val ALL = MISelectField(log2Up(0xFF), 0, null).withReset(0.U)
 }
 
 class SISelectBundle extends CSRBundle {
-  val ALL = SISelectField(log2Up(0xFF), 0, null)
+  val ALL = SISelectField(log2Up(0xFF), 0, null).withReset(0.U)
 }
 
 class TopIBundle extends CSRBundle {

@@ -49,46 +49,84 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     val read = Vec(numReadPorts, new BusyTableReadIO)
   })
 
+  val allExuParams = params.backendParam.allExuParams
+  val intBusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeIntRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readIntRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
+  val fpBusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeFpRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readFpRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
+  val vfBusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeVfRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVecRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
+  val v0BusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeV0Rf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVecRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
+  val vlBusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeVlRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVlRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
+  val needLoadCancel = pregWB match {
+    case IntWB(_, _) => intBusyTableNeedLoadCancel
+    case FpWB(_, _) => fpBusyTableNeedLoadCancel
+    case VfWB(_, _) => vfBusyTableNeedLoadCancel
+    case V0WB(_, _) => v0BusyTableNeedLoadCancel
+    case VlWB(_, _) => vlBusyTableNeedLoadCancel
+    case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
+  }
+  if (!needLoadCancel) println(s"[BusyTable]: WbConfig ${pregWB} busyTable don't need loadCancel")
+  val loadCancel = if (needLoadCancel) io.ldCancel else 0.U.asTypeOf(io.ldCancel)
+  val wakeUpIn = pregWB match {
+    case IntWB(_, _) => io.wakeUp.filter(_.bits.params.writeIntRf)
+    case FpWB(_, _) => io.wakeUp.filter(_.bits.params.writeFpRf)
+    case VfWB(_, _) => io.wakeUp.filter(_.bits.params.writeVfRf)
+    case V0WB(_, _) => io.wakeUp.filter(_.bits.params.writeV0Rf)
+    case VlWB(_, _) => io.wakeUp.filter(_.bits.params.writeVlRf)
+    case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
+  }
   val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  val shiftLoadDependency = Wire(Vec(io.wakeUp.size, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+  val shiftLoadDependency = Wire(Vec(wakeUpIn.size, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
-  val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(io.wakeUp.size.W)))
+  val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(wakeUpIn.size.W)))
 
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
     ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
   }
 
-  shiftLoadDependency.zip(io.wakeUp.map(_.bits.loadDependency)).zip(params.wakeUpInExuSources.map(_.name)).foreach {
-    case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
-      case ((dep, originalDep), deqPortIdx) =>
-        if (params.backendParam.getLdExuIdx(params.backendParam.allExuParams.find(_.name == name).get) == deqPortIdx)
-          dep := 1.U
-        else
-          dep := originalDep << 1
+  shiftLoadDependency.zip(wakeUpIn).map{ case (deps, wakeup) =>
+    if (wakeup.bits.params.hasLoadExu) {
+      deps.zipWithIndex.map{ case (dep, i) =>
+        if (backendParams.getLdExuIdx(wakeup.bits.params) == i) dep := 1.U
+        else dep := 0.U
+      }
+    }
+    else {
+      deps.zip(wakeup.bits.loadDependency).map{ case (sink, source) =>
+        sink := source << 1
+      }
     }
   }
 
   wakeupOHVec.zipWithIndex.foreach{ case (wakeupOH, idx) =>
     val tmp = pregWB match {
-      case IntWB(_, _) => io.wakeUp.map(x => x.valid && x.bits.rfWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
-      case FpWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.fpWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
-      case VfWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
-      case V0WB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.v0Wen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
-      case VlWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vlWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case IntWB(_, _) => wakeUpIn.map(x => x.valid && x.bits.rfWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case FpWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.fpWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case VfWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case V0WB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.v0Wen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
+      case VlWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.vlWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
     }
-    wakeupOH := (if (io.wakeUp.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
+    wakeupOH := (if (wakeUpIn.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
   }
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
   val wakeUpMask = VecInit(wakeupOHVec.map(_.orR).toSeq).asUInt
-  val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel))
+  val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), loadCancel))
 
   loadDependency.zipWithIndex.foreach{ case (ldDp, idx) =>
     when(allocMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
       ldDp := 0.U.asTypeOf(ldDp)
     }.elsewhen(wakeUpMask(idx)) {
-      ldDp := (if (io.wakeUp.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
+      ldDp := (if (wakeUpIn.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
     }.elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
       ldDp := VecInit(ldDp.map(x => x << 1))
     }

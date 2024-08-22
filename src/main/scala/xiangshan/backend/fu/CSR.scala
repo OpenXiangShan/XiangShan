@@ -117,7 +117,7 @@ class VtypeStruct(implicit p: Parameters) extends XSBundle {
   val vsew = UInt(3.W)
   val vlmul = UInt(3.W)
 }
-
+/*
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
@@ -525,17 +525,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.lvpred_timeout := slvpredctl(8, 4)
 
   //  smblockctl: memory block configurations
-  //  +------------------------------+---+----+----+-----+--------+
-  //  |XLEN-1                       8| 7 | 6  | 5  |  4  |3      0|
-  //  +------------------------------+---+----+----+-----+--------+
-  //  |           Reserved           | O | CE | SP | LVC |   Th   |
-  //  +------------------------------+---+----+----+-----+--------+
+  //  +------------------------+---+---+---+----+----+-----+--------+
+  //  |XLEN-1                10| 9 | 8 | 7 | 6  | 5  |  4  |3      0|
+  //  +------------------------+---+---+---+----+----+-----+--------+
+  //  |           Reserved     | L | S | O | CE | SP | LVC |   Th   |
+  //  +------------------------+---+---+---+----+----+-----+--------+
   //  Description:
   //  Bit 3-0   : Store buffer flush threshold (Th).
   //  Bit 4     : Enable load violation check after reset (LVC).
   //  Bit 5     : Enable soft-prefetch after reset (SP).
   //  Bit 6     : Enable cache error after reset (CE).
   //  Bit 7     : Enable uncache write outstanding (O).
+  //  Bit 8     : Enable unaligned store (S).
+  //  Bit 9     : Enable unaligned load (L).
   //  Others    : Reserved.
 
   val smblockctl_init_val =
@@ -543,7 +545,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     (EnableLdVioCheckAfterReset.toInt << 4) |
     (EnableSoftPrefetchAfterReset.toInt << 5) |
     (EnableCacheErrorAfterReset.toInt << 6) |
-    (EnableUncacheWriteOutstanding.toInt << 7)
+    (EnableUncacheWriteOutstanding.toInt << 7) |
+    (EnableHardwareStoreMisalign.toInt << 8) |
+    (EnableHardwareLoadMisalign.toInt << 9)
   val smblockctl = RegInit(UInt(XLEN.W), smblockctl_init_val.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
   // bits 4: enable load load violation check
@@ -551,6 +555,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.soft_prefetch_enable := smblockctl(5)
   csrio.customCtrl.cache_error_enable := smblockctl(6)
   csrio.customCtrl.uncache_write_outstanding_enable := smblockctl(7)
+  csrio.customCtrl.hd_misalign_st_enable := smblockctl(8)
+  csrio.customCtrl.hd_misalign_ld_enable := smblockctl(9)
 
   println("CSR smblockctl init value:")
   println("  Store buffer replace threshold: " + StoreBufferThreshold)
@@ -558,6 +564,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   println("  Enable soft prefetch after reset: " + EnableSoftPrefetchAfterReset)
   println("  Enable cache error after reset: " + EnableCacheErrorAfterReset)
   println("  Enable uncache write outstanding: " + EnableUncacheWriteOutstanding)
+  println("  Enable unaligned store: " + EnableHardwareStoreMisalign)
+  println("  Enable unaligned load: " + EnableHardwareLoadMisalign)
 
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
@@ -1625,7 +1633,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
-
+*/
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

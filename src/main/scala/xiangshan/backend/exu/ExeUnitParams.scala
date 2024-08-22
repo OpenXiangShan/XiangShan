@@ -28,6 +28,7 @@ case class ExeUnitParams(
   // calculated configs
   var iqWakeUpSourcePairs: Seq[WakeUpConfig] = Seq()
   var iqWakeUpSinkPairs: Seq[WakeUpConfig] = Seq()
+  var needLoadDependency: Boolean = false
   // used in bypass to select data of exu output
   var exuIdx: Int = -1
   var backendParam: BackendParams = null
@@ -46,6 +47,7 @@ case class ExeUnitParams(
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
   val readVfRf: Boolean = numVfSrc > 0
+  val readVlRf: Boolean = numVlSrc > 0
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
@@ -206,7 +208,7 @@ case class ExeUnitParams(
 
   def fpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (fpLatencyCertain)
-      writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if (needOg2) writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else
       Map()
   }
@@ -319,6 +321,11 @@ case class ExeUnitParams(
     if (this.isIQWakeUpSource) {
       require(!this.hasUncertainLatency || hasLoadFu || hasHyldaFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
     }
+    val loadWakeUpSourcePairs = cfgs.filter(x => x.source.getExuParam(backendParam.allExuParams).hasLoadFu || x.source.getExuParam(backendParam.allExuParams).hasHyldaFu)
+    val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
+    val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet
+    this.needLoadDependency = !(wakeUpByLoadNames & thisWakeUpByNames).isEmpty
+    println(s"${this.name}: needLoadDependency is ${this.needLoadDependency}")
   }
 
   def updateExuIdx(idx: Int): Unit = {

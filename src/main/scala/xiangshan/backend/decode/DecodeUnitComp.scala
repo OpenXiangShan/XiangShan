@@ -78,7 +78,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
 
 trait VectorConstants {
   val MAX_VLMUL = 8
-  val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
+  val VECTOR_TMP_REG_LMUL = 32 // 32~46  ->  15
   val VECTOR_COMPRESS = 1 // in v0 regfile
   val MAX_INDEXED_LS_UOPNUM = 64
 }
@@ -1918,8 +1918,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   inReady := state === s_idle || state === s_active && thisAllOut
 
 
-  XSError(io.in.valid && numOfUop === 0.U,
-    p"uop number $numOfUop is illegal, cannot be zero")
+  XSError(inValid && inUopInfo.numOfUop === 0.U,
+    p"uop number ${inUopInfo.numOfUop} is illegal, cannot be zero")
 //  val validSimple = Wire(Vec(DecodeWidth, Bool()))
 //  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
 //  val notInf = Wire(Vec(DecodeWidth, Bool()))

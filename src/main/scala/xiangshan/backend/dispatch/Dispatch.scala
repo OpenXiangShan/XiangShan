@@ -198,7 +198,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val singleStepStatus = RegInit(false.B)
   val inst0actualOut = io.enqRob.req(0).valid
-  when(io.redirect.valid) {
+  when(!io.singleStep) {
     singleStepStatus := false.B
   }.elsewhen(io.singleStep && io.fromRename(0).fire && inst0actualOut) {
     singleStepStatus := true.B
@@ -243,7 +243,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       updatedUop(i).singleStep := false.B
     }
     when (io.fromRename(i).fire) {
-      XSDebug(updatedUop(i).trigger.getFrontendCanFire, s"Debug Mode: inst ${i} has frontend trigger exception\n")
+      XSDebug(TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     }
     if (env.EnableDifftest) {
@@ -375,9 +375,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.toLsDq.req(i).bits   := updatedUop(i)
 
     //delete trigger message from frontend
-    io.toDq.map(dq => {
-      dq.req(i).bits.trigger.clear()
-    })
+    io.toDq.map(dq => { dq.req(i).bits.trigger := TriggerAction.None })
 
     XSDebug(io.toIntDq0.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq0.req(i).bits.pc)} int index $i\n")
     XSDebug(io.toIntDq1.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq1.req(i).bits.pc)} int index $i\n")

@@ -275,7 +275,7 @@ jobs:
             --num-cores 2 --emu-optimize "" \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
             --with-dramsim3 --threads 16 \
-            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
+            --pgo /nfs/home/share/ci-workloads/linux-hello-smp-newcsr/bbl.bin --llvm-profdata llvm-profdata
       - name: MC Test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
@@ -315,6 +315,9 @@ jobs:
       - name: Build SIMV on Remote
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --no-db --xprop"
+      - name: V Extension Test - rvv-test
+        run: |
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
       - name: Simple Test - MicroBench
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"

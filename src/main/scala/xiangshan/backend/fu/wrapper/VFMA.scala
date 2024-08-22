@@ -94,7 +94,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val outVuopidx = outVecCtrl.vuopIdx(2, 0)
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
-  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul - 1.U, outVecCtrl.vlmul)
+  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul + 1.U, outVecCtrl.vlmul)
   val lmulAbs = Mux(outVlmulFix(2), (~outVlmulFix(1, 0)).asUInt + 1.U, outVlmulFix(1, 0))
   val outVlFix = Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
   val vlMaxAllUop = Wire(outVl.cloneType)

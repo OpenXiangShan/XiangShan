@@ -140,7 +140,7 @@ class CtrlBlockImp(
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
     x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
-      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+      (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
@@ -487,6 +487,7 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
+  rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }

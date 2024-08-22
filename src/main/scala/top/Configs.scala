@@ -190,12 +190,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
         ),
         l2tlbParameters = L2TLBParameters(
-          l1Size = 4,
-          l2nSets = 4,
-          l2nWays = 4,
-          l3nSets = 4,
-          l3nWays = 8,
-          spSize = 2,
+          l3Size = 4,
+          l2Size = 4,
+          l1nSets = 4,
+          l1nWays = 4,
+          l0nSets = 4,
+          l0nWays = 8,
+          spSize = 4,
         ),
         L2CacheParamsOpt = Some(L2Param(
           name = "L2",
@@ -413,5 +414,22 @@ class KunminghuV2Config(n: Int = 1) extends Config(
 class XSNoCTopConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
+
+class FpgaDefaultConfig(n: Int = 1) extends Config(
+  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
   })
 )

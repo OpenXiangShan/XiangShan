@@ -37,7 +37,7 @@ object CSRConfig {
   // the width of VGEIN
   final val VGEINWidth = 6
 
-  final val VaddrMaxWidth = 41 // only Sv39 and Sv39x4
+  final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
 
   final val XLEN = 64 // Todo: use XSParams
 
@@ -48,11 +48,11 @@ object CSRConfig {
   // log2Up(128 + 1), hold 0~128
   final val VlWidth = 8
 
-  final val PAddrWidth = 36
+  final val PAddrWidth = 48
 
   final val AddrWidthInPage = 12
 
-  final val PMPAddrWidth = 36
+  final val PMPAddrWidth = 48
 
   final val PMPOffBits = 2
 
@@ -111,7 +111,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val instr = UInt(32.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
-        val triggerCf = new TriggerCf
+        val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
         val isHls = Bool()
@@ -203,7 +203,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapPCGPA = io.fromRob.trap.bits.pcGPA
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
-  val triggerCf = io.fromRob.trap.bits.triggerCf
+  val trigger = io.fromRob.trap.bits.trigger
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
 
@@ -305,12 +305,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.medeleg := medeleg.regOut
   trapHandleMod.io.in.hideleg := hideleg.regOut
   trapHandleMod.io.in.hedeleg := hedeleg.regOut
+  trapHandleMod.io.in.mvien := mvien.regOut
+  trapHandleMod.io.in.hvien := hvien.regOut
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
-  val entryDebugMode = Wire(Bool())
+  val entryDebugMode = WireInit(false.B)
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -730,9 +732,16 @@ class NewCSR(implicit val p: Parameters) extends Module
     vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
   )
 
+  // flush pipe when write frm and data > 4 or write fcsr and data[7:5] > 4 or write frm/fcsr and frm is reserved
+  val frmIsReserved = fcsr.frm(2) && fcsr.frm(1, 0).orR
+  val frmWdataReserved = fcsr.wAliasFfm.wdata(2) && fcsr.wAliasFfm.wdata(1, 0).orR
+  val fcsrWdataReserved = fcsr.w.wdata(7) && fcsr.w.wdata(6, 5).orR
+  val frmChange = fcsr.wAliasFfm.wen && (!frmIsReserved && frmWdataReserved || frmIsReserved && !frmWdataReserved) ||
+    fcsr.w.wen && (!frmIsReserved && fcsrWdataReserved || frmIsReserved && !fcsrWdataReserved)
+
   val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
-    vstartChange
+    vstartChange || frmChange
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
@@ -849,7 +858,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.intrVec     := intrVec
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
-  debugMod.io.in.trapInfo.bits.triggerCf   := triggerCf
+  debugMod.io.in.trapInfo.bits.trigger     := trigger
   debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -870,12 +879,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.debugMode                := debugMode
   trapEntryDEvent.in.hasTrap                  := hasTrap
   trapEntryDEvent.in.hasSingleStep            := debugMod.io.out.hasSingleStep
-  trapEntryDEvent.in.hasTriggerFire           := debugMod.io.out.hasTriggerFire
+  trapEntryDEvent.in.triggerEnterDebugMode    := debugMod.io.out.triggerEnterDebugMode
   trapEntryDEvent.in.hasDebugEbreakException  := debugMod.io.out.hasDebugEbreakException
   trapEntryDEvent.in.breakPoint               := debugMod.io.out.breakPoint
 
   trapHandleMod.io.in.trapInfo.bits.singleStep  := debugMod.io.out.hasSingleStep
-  trapHandleMod.io.in.trapInfo.bits.triggerFire := debugMod.io.out.triggerCanFire
 
   intrMod.io.in.debugMode := debugMode
   intrMod.io.in.debugIntr := debugIntr
@@ -999,6 +1007,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
   io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
   io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
+  io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
@@ -1078,6 +1088,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
+  io.toDecode.illegalInst.frm        := frmIsReserved
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
@@ -1087,10 +1098,22 @@ class NewCSR(implicit val p: Parameters) extends Module
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
-    val ivmHS = isModeHS &&  satp.regOut.MODE =/= SatpMode.Bare
-    val ivmVS = isModeVS && vsatp.regOut.MODE =/= SatpMode.Bare
+    val isSv39: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv39 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv39
+    val isSv48: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv48 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv48
+    val isBare = !isSv39 && !isSv48
+    val sv39PC = SignExt(trapPC.take(39), XLEN)
+    val sv48PC = SignExt(trapPC.take(48), XLEN)
+    val barePC = ZeroExt(trapPC.take(PAddrBits), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-    val exceptionPC = Mux(ivmHS || ivmVS, SignExt(trapPC, XLEN), ZeroExt(trapPC, XLEN))
+    val exceptionPC = Mux1H(Seq(
+      isSv39 -> sv39PC,
+      isSv48 -> sv48PC,
+      isBare -> barePC,
+    ))
 
     val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     diffArchEvent.coreid := hartId

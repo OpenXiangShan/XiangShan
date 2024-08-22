@@ -37,6 +37,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))
     val req           = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
+    val flushFrmMaBuf = Input(Bool())
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -106,6 +107,11 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
   io.exceptionAddr.gpaddr := req.gpaddr
+
+  when(req_valid && io.flushFrmMaBuf) {
+    req_valid := false.B
+  }
+
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
 
   // end

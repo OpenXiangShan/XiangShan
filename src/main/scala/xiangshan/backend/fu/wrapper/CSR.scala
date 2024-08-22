@@ -96,7 +96,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
-  csrMod.io.fromRob.trap.bits.triggerCf := csrIn.exception.bits.trigger
+  csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
 
   csrMod.io.fromRob.commit.fflags := setFflags
@@ -269,6 +269,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.soft_prefetch_enable             := csrMod.io.status.custom.soft_prefetch_enable
       custom.cache_error_enable               := csrMod.io.status.custom.cache_error_enable
       custom.uncache_write_outstanding_enable := csrMod.io.status.custom.uncache_write_outstanding_enable
+      custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
+      custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
@@ -345,6 +347,12 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_II when isModeHU || !isModeM && mstatus.TW=1
      */
     val wfi = Bool()
+
+    /**
+     * frm reserved
+     * raise EX_II when frm.data > 4
+     */
+    val frm = Bool()
   }
   val virtualInst = new Bundle {
     /**

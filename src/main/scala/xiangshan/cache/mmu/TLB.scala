@@ -100,11 +100,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_gpa_refill = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
 
+  val Sv39Enable = satp.mode === 8.U
+  val Sv48Enable = satp.mode === 9.U
+  val Sv39x4Enable = vsatp.mode === 8.U || hgatp.mode === 8.U
+  val Sv48x4Enable = vsatp.mode === 9.U || hgatp.mode === 9.U
   val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
-    if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U) && (mode(i) < ModeM))
+    if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
+    else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
   )
-  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
+  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
 
@@ -120,7 +124,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
   }
-  
+
   // read TLB, get hit/miss, paddr, perm bits
   val readResult = (0 until Width).map(TLBRead(_))
   val hitVec = readResult.map(_._1)
@@ -158,7 +162,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
-    val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(i).vaddr) 
+    val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(i).vaddr)
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
 
     when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i)){
@@ -178,9 +182,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     when (req_out_v(i) && hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit ){
       need_gpa := false.B
     }
-    
+
     TimeOutAssert(need_gpa && !resp_gpa_refill, timeOutThreshold, s"port{i} need gpa long time not refill.")
-  
+
     val hit = e_hit || p_hit
     val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
     hit.suggestName(s"hit_read_${i}")
@@ -227,6 +231,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val hasS2xlate = s2xlate =/= noS2xlate
+    val onlyS1 = s2xlate === onlyStage1
     val onlyS2 = s2xlate === onlyStage2
     val af = perm.af || (hasS2xlate && g_perm.af)
 
@@ -255,7 +260,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stGpf = (g_stPermFail || gpf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrGpf = (g_instrPermFail || gpf) && TlbCmd.isExec(cmd)
-    val s2_valid = hasS2xlate && portTranslateEnable(idx)
+    val s2_valid = hasS2xlate && !onlyS1 && portTranslateEnable(idx)
 
     val fault_valid = s1_valid || s2_valid
 
@@ -292,7 +297,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.vsatp.mode === 0.U) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-   
+
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
@@ -363,7 +368,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     assert(RegNext(req_out_v(idx) || !(miss_v || miss_req_v), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
 
     val ptw_req = io.ptw.req(idx)
-    ptw_req.valid := miss_req_v 
+    ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
     ptw_req.bits.s2xlate := miss_req_s2xlate
     ptw_req.bits.getGpa := req_need_gpa && hitVec(idx)

@@ -38,8 +38,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
+    val csrCtrl         = Flipped(new CustomCSRCtrlIO)
     val stin            = Flipped(Decoupled(new MemExuInput))
     val issue           = Valid(new MemExuInput)
+    // misalignBuffer issue path
+    val misalign_stin   = Flipped(Decoupled(new LsPipelineBundle))
+    val misalign_stout  = Valid(new SqWriteBundle)
     val tlb             = new TlbRequestIO()
     val dcache          = new DCacheStoreIO
     val pmp             = Flipped(new PMPRespBundle())
@@ -61,6 +65,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // vector
     val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
+    // writeback to misalign buffer
+    val misalign_buf = Valid(new LsPipelineBundle)
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
@@ -72,28 +78,43 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // stage 0
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
-  val s0_iss_valid    = io.stin.valid
-  val s0_prf_valid    = io.prefetch_req.valid && io.dcache.req.ready
-  val s0_vec_valid    = io.vecstin.valid
-  val s0_valid        = s0_iss_valid || s0_prf_valid || s0_vec_valid
-  val s0_use_flow_vec = s0_vec_valid
-  val s0_use_flow_rs  = s0_iss_valid && !s0_vec_valid
-  val s0_use_flow_prf = !s0_iss_valid && !s0_vec_valid && s0_prf_valid
-  val s0_stin         = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
-  val s0_vecstin      = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
-  val s0_uop          = Mux(s0_use_flow_rs, s0_stin.uop, s0_vecstin.uop)
-  val s0_isFirstIssue = s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
-  val s0_size         = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
-  val s0_mem_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.sqIdx.value, 0.U)
-  val s0_rob_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
-  val s0_pc           = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.pc, 0.U)
-  val s0_instr_type   = Mux(s0_use_flow_rs || s0_use_flow_vec, STORE_SOURCE.U, DCACHE_PREFETCH_SOURCE.U)
+  val s0_iss_valid        = io.stin.valid
+  val s0_prf_valid        = io.prefetch_req.valid && io.dcache.req.ready
+  val s0_vec_valid        = io.vecstin.valid
+  val s0_ma_st_valid      = io.misalign_stin.valid
+  val s0_valid            = s0_iss_valid || s0_prf_valid || s0_vec_valid || s0_ma_st_valid
+  val s0_use_flow_ma      = s0_ma_st_valid
+  val s0_use_flow_vec     = s0_vec_valid && !s0_ma_st_valid
+  val s0_use_flow_rs      = s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
+  val s0_use_flow_prf     = s0_prf_valid && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
+  val s0_use_non_prf_flow = s0_use_flow_rs || s0_use_flow_vec || s0_use_flow_ma
+  val s0_stin             = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
+  val s0_vecstin          = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
+  val s0_uop              = Mux(
+    s0_use_flow_ma,
+    io.misalign_stin.bits.uop,
+    Mux(
+      s0_use_flow_rs,
+      s0_stin.uop,
+      s0_vecstin.uop
+    )
+  )
+  val s0_isFirstIssue = Mux(
+    s0_use_flow_ma,
+    false.B,
+    s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
+  )
+  val s0_size         = Mux(s0_use_non_prf_flow, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
+  val s0_mem_idx      = Mux(s0_use_non_prf_flow, s0_uop.sqIdx.value, 0.U)
+  val s0_rob_idx      = Mux(s0_use_non_prf_flow, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
+  val s0_pc           = Mux(s0_use_non_prf_flow, s0_uop.pc, 0.U)
+  val s0_instr_type   = Mux(s0_use_non_prf_flow, STORE_SOURCE.U, DCACHE_PREFETCH_SOURCE.U)
   val s0_wlineflag    = Mux(s0_use_flow_rs, s0_uop.fuOpType === LSUOpType.cbo_zero, false.B)
   val s0_out          = Wire(new LsPipelineBundle)
   val s0_kill         = s0_uop.robIdx.needFlush(io.redirect)
   val s0_can_go       = s1_ready
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
-  val s0_is128bit     = is128Bit(s0_vecstin.alignedType)
+  val s0_is128bit     = Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType))
   // vector
   val s0_vecActive    = !s0_use_flow_vec || s0_vecstin.vecActive
   // val s0_flowPtr      = s0_vecstin.flowPtr
@@ -106,22 +127,30 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // generate addr
   val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
   val s0_vaddr = Mux(
-    s0_use_flow_rs,
-    s0_saddr,
+    s0_use_flow_ma,
+    io.misalign_stin.bits.vaddr,
     Mux(
-      s0_use_flow_vec,
-      s0_vecstin.vaddr,
-      io.prefetch_req.bits.vaddr
+      s0_use_flow_rs,
+      s0_saddr,
+      Mux(
+        s0_use_flow_vec,
+        s0_vecstin.vaddr,
+        io.prefetch_req.bits.vaddr
+      )
     )
   )
-  val s0_mask  = Mux(
-    s0_use_flow_rs,
-    genVWmask128(s0_saddr, s0_uop.fuOpType(2,0)),
+  val s0_mask = Mux(
+    s0_use_flow_ma,
+    io.misalign_stin.bits.mask,
     Mux(
-      s0_use_flow_vec,
-      s0_vecstin.mask,
-      // -1.asSInt.asUInt
-      Fill(VLEN/8, 1.U(1.W))
+      s0_use_flow_rs,
+      genVWmask128(s0_saddr, s0_uop.fuOpType(2,0)),
+      Mux(
+        s0_use_flow_vec,
+        s0_vecstin.mask,
+        // -1.asSInt.asUInt
+        Fill(VLEN/8, 1.U(1.W))
+      )
     )
   )
 
@@ -174,6 +203,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
+  s0_out.isFrmMisAlignBuf := s0_use_flow_ma
 
   // exception check
   val s0_addr_aligned = LookupTree(Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0)), List(
@@ -184,15 +214,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   ))
   // if vector store sends 128-bit requests, its address must be 128-aligned
   XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
-  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_flow_rs || s0_use_flow_vec, !s0_addr_aligned, false.B)
+  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, !s0_addr_aligned, false.B)
 
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
-
+  
   io.stin.ready := s1_ready && s0_use_flow_rs
   io.vecstin.ready := s1_ready && s0_use_flow_vec
-  io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid
+  io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
+  io.misalign_stin.ready := s1_ready && s0_use_flow_ma
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -206,6 +237,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
   val s1_vecActive    = RegEnable(s0_out.vecActive, true.B, s0_fire)
+  val s1_frm_mabuf    = s1_in.isFrmMisAlignBuf
 
   // mmio cbo decoder
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
@@ -218,7 +250,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec)
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec && !s1_frm_mabuf)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -227,14 +259,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   .elsewhen (s1_kill) { s1_valid := false.B }
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
+  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_frm_mabuf
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
   io.stld_nuke_query.bits.matchLine := s1_in.isvec && s1_in.is128bit
 
   // issue
-  io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec
+  io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
   io.issue.bits  := RegEnable(s0_stin, s0_valid)
 
 
@@ -276,17 +308,21 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
 
   s1_out.uop.flushPipe                := false.B
-  s1_out.uop.trigger.backendHit       := storeTrigger.io.toStore.triggerHitVec
-  s1_out.uop.trigger.backendCanFire   := storeTrigger.io.toStore.triggerCanFireVec
-  s1_out.uop.exceptionVec(breakPoint) := storeTrigger.io.toStore.breakPointExp
+  s1_out.uop.trigger                  := storeTrigger.io.toStore.triggerAction
+  s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(storeTrigger.io.toStore.triggerAction)
 
   // scalar store and scalar load nuke check, and also other purposes
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
+  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
+
+  // goto misalignBuffer
+  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && io.csrCtrl.hd_misalign_st_enable
+  io.misalign_buf.bits  := io.lsq.bits
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))
@@ -311,6 +347,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
+  val s2_mis_align    = s2_in.uop.exceptionVec(storeAddrMisaligned) && io.csrCtrl.hd_misalign_st_enable
+  val s2_frm_mabuf    = s2_in.isFrmMisAlignBuf
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -340,11 +378,20 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
-  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec
+  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec && !s1_frm_mabuf
   io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
   io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
   val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
+
+  val s2_misalign_stout = WireInit(0.U.asTypeOf(io.misalign_stout))
+  s2_misalign_stout.valid := s2_valid && s2_can_go && s2_frm_mabuf
+  s2_misalign_stout.bits.mmio := s2_out.mmio
+  s2_misalign_stout.bits.vaddr := s2_out.vaddr
+  s2_misalign_stout.bits.paddr := s2_out.paddr
+  s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
+  s2_misalign_stout.bits.uop.exceptionVec := s2_out.uop.exceptionVec
+  io.misalign_stout := s2_misalign_stout
 
   // mmio and exception
   io.lsq_replenish := s2_out
@@ -387,7 +434,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
   val s3_vecFeedback = RegEnable(s2_vecFeedback, s2_fire)
 
-  when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch  }
+  // store misalign will not writeback to rob now
+  when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch && !s2_mis_align && !s2_frm_mabuf }
   .elsewhen (s3_fire) { s3_valid := false.B }
   .elsewhen (s3_kill) { s3_valid := false.B }
 

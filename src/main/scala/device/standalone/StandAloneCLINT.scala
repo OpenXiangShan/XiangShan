@@ -22,6 +22,7 @@ import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
+import utility.IntBuffer
 
 class StandAloneCLINT (
   useTL: Boolean = false,
@@ -41,7 +42,7 @@ class StandAloneCLINT (
 
   // interrupts
   val clintIntNode = IntSinkNode(IntSinkPortSimple(hartNum, 2))
-  clintIntNode :*= clint.intnode
+  clintIntNode :*= IntBuffer() :*= clint.intnode
   val int = InModuleBody(clintIntNode.makeIOs())
 
   class StandAloneCLINTImp(outer: StandAloneCLINT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {

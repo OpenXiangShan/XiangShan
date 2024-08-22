@@ -188,6 +188,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
+    val flushFrmMaBuf = Input(Bool())
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -271,6 +272,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   // mmio non-data error exception
   exceptionBuffer.io.req.last := uncacheBuffer.io.exception
+  exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 

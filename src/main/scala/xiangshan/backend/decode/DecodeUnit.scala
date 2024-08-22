@@ -24,7 +24,7 @@ import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
-import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
+import xiangshan.ExceptionNO.{breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
@@ -794,7 +794,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
                                            FuType.FuTypeOrR(decodedInst.fuType, FuType.stu) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
                                            isVecOPF) ||
     io.fromCSR.illegalInst.vsIsOff    && FuType.FuTypeOrR(decodedInst.fuType, FuType.vecAll) ||
-    io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
+    io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType) ||
+    (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
+    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm
 
   private val exceptionVI =
     io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
@@ -806,6 +808,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.exceptionVec(illegalInstr) := exceptionII
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
+
+  //update exceptionVec: from frontend trigger's breakpoint exception. To reduce 1 bit of overhead in ibuffer entry.
+  decodedInst.exceptionVec(breakPoint) := TriggerAction.isExp(ctrl_flow.trigger)
 
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {
@@ -887,7 +892,20 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W,
     VFNCVT_ROD_F_F_W, VFRSQRT7_V, VFREC7_V,
   )
+
+  private val scalaNeedFrmInsts = Seq(
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+  )
+
+  private val vectorNeedFrmInsts = Seq (
+    VFSLIDE1UP_VF, VFSLIDE1DOWN_VF,
+  )
+
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   val fpToVecDecoder = Module(new FPToVecDecoder())
   fpToVecDecoder.io.instr := inst.asUInt
   val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
@@ -957,6 +975,12 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isCsrrVlenb = isCSRR && inst.CSRIDX === CSRs.vlenb.U
   val isCsrrVl    = isCSRR && inst.CSRIDX === CSRs.vl.U
 
+  // decode for SoftPrefetch instructions (prefetch.w / prefetch.r / prefetch.i)
+  val isSoftPrefetch = inst.OPCODE === BitPat("b0010011") && inst.FUNCT3 === BitPat("b110") && inst.RD === 0.U
+  val isPreW = isSoftPrefetch && inst.RS2 === 3.U(5.W)
+  val isPreR = isSoftPrefetch && inst.RS2 === 1.U(5.W)
+  val isPreI = isSoftPrefetch && inst.RS2 === 0.U(5.W)
+
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -980,6 +1004,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.blockBackward := false.B
     decodedInst.canRobCompress := true.B
     decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
+  }.elsewhen(isPreW || isPreR || isPreI){
+    decodedInst.selImm := SelImm.IMM_S
+    decodedInst.fuType := FuType.ldu.U
+    decodedInst.canRobCompress := false.B
+    decodedInst.fuOpType := Mux1H(Seq(
+      isPreW -> LSUOpType.prefetch_w,
+      isPreR -> LSUOpType.prefetch_r,
+      isPreI -> LSUOpType.prefetch_i,
+    ))
+
   }
 
   io.deq.decodedInst := decodedInst

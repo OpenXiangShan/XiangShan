@@ -185,20 +185,20 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   }
   def genMaskForRedFFlag(sew:UInt): UInt = {
     val default = "b11111111".U
-    val f64FoldMask = Mux(vecCtrl.fpu.isFoldTo1_2, "b00000001".U, default)
-    val f32Fold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4
+    val f64FoldMask = Mux(outVecCtrl.fpu.isFoldTo1_2, "b00000001".U, default)
+    val f32Fold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4
     val f32FoldMask = Mux1H(
       Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> "b00000011".U,
-        vecCtrl.fpu.isFoldTo1_4 -> "b00000001".U,
+        outVecCtrl.fpu.isFoldTo1_2 -> "b00000011".U,
+        outVecCtrl.fpu.isFoldTo1_4 -> "b00000001".U,
       )
     )
-    val f16Fold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8
+    val f16Fold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
     val f16FoldMask = Mux1H(
       Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> "b00001111".U,
-        vecCtrl.fpu.isFoldTo1_4 -> "b00000011".U,
-        vecCtrl.fpu.isFoldTo1_8 -> "b00000001".U,
+        outVecCtrl.fpu.isFoldTo1_2 -> "b00001111".U,
+        outVecCtrl.fpu.isFoldTo1_4 -> "b00000011".U,
+        outVecCtrl.fpu.isFoldTo1_8 -> "b00000001".U,
       )
     )
     Mux1H(
@@ -308,7 +308,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val vlMax_s0 = ((VLEN/8).U >> outEew_s0).asUInt
   val vlMax = ((VLEN/8).U >> outEew).asUInt
-  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul - 1.U, outVecCtrl.vlmul)
+  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul + 1.U, outVecCtrl.vlmul)
   val lmulAbs = Mux(outVlmulFix(2), (~outVlmulFix(1,0)).asUInt + 1.U, outVlmulFix(1,0))
   //  vfmv_f_s need vl=1, reduction last uop need vl=1, other uop need vl=vlmax
   numOfUopVFRED := {

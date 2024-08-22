@@ -81,6 +81,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val entries             = Wire(Vec(params.numEntries, ValidIO(new EntryBundle)))
   val robIdxVec           = Wire(Vec(params.numEntries, new RobPtr))
   val validVec            = Wire(Vec(params.numEntries, Bool()))
+  val issuedVec           = Wire(Vec(params.numEntries, Bool()))
+  val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec         = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
@@ -181,11 +183,11 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     // note that dispatch does not guarantee the validity of enq entries with low index.
     // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
     // in this case, enq entry [1] should use result [0] of TransPolicy.
-    othersTransSelVec.get(0).valid := othersTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
+    othersTransSelVec.get(0).valid := othersTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
     othersTransSelVec.get(0).bits  := othersTransPolicy.get.io.enqSelOHVec(0).bits
     if (params.numEnq == 2) {
-      othersTransSelVec.get(1).valid := Mux(!validVec(0), othersTransPolicy.get.io.enqSelOHVec(0).valid, othersTransPolicy.get.io.enqSelOHVec(1).valid)
-      othersTransSelVec.get(1).bits  := Mux(!validVec(0), othersTransPolicy.get.io.enqSelOHVec(0).bits,  othersTransPolicy.get.io.enqSelOHVec(1).bits)
+      othersTransSelVec.get(1).valid := Mux(!validForTrans(0), othersTransPolicy.get.io.enqSelOHVec(0).valid, othersTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
+      othersTransSelVec.get(1).bits  := Mux(!validForTrans(0), othersTransPolicy.get.io.enqSelOHVec(0).bits,  othersTransPolicy.get.io.enqSelOHVec(1).bits)
     }
 
     finalOthersTransSelVec.get.zip(othersTransSelVec.get).zipWithIndex.foreach { case ((finalOH, selOH), enqIdx) =>
@@ -219,15 +221,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     // note that dispatch does not guarantee the validity of enq entries with low index.
     // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
     // in this case, enq entry [1] should use result [0] of TransPolicy.
-    simpTransSelVec.get(0).valid := simpTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
+    simpTransSelVec.get(0).valid := simpTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
     simpTransSelVec.get(0).bits  := simpTransPolicy.get.io.enqSelOHVec(0).bits
-    compTransSelVec.get(0).valid := compTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
+    compTransSelVec.get(0).valid := compTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
     compTransSelVec.get(0).bits  := compTransPolicy.get.io.enqSelOHVec(0).bits
     if (params.numEnq == 2) {
-      simpTransSelVec.get(1).valid := Mux(!validVec(0), simpTransPolicy.get.io.enqSelOHVec(0).valid, simpTransPolicy.get.io.enqSelOHVec(1).valid)
-      simpTransSelVec.get(1).bits  := Mux(!validVec(0), simpTransPolicy.get.io.enqSelOHVec(0).bits,  simpTransPolicy.get.io.enqSelOHVec(1).bits)
-      compTransSelVec.get(1).valid := Mux(!validVec(0), compTransPolicy.get.io.enqSelOHVec(0).valid, compTransPolicy.get.io.enqSelOHVec(1).valid)
-      compTransSelVec.get(1).bits  := Mux(!validVec(0), compTransPolicy.get.io.enqSelOHVec(0).bits,  compTransPolicy.get.io.enqSelOHVec(1).bits)
+      simpTransSelVec.get(1).valid := Mux(!validForTrans(0), simpTransPolicy.get.io.enqSelOHVec(0).valid, simpTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
+      simpTransSelVec.get(1).bits  := Mux(!validForTrans(0), simpTransPolicy.get.io.enqSelOHVec(0).bits,  simpTransPolicy.get.io.enqSelOHVec(1).bits)
+      compTransSelVec.get(1).valid := Mux(!validForTrans(0), compTransPolicy.get.io.enqSelOHVec(0).valid, compTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
+      compTransSelVec.get(1).bits  := Mux(!validForTrans(0), compTransPolicy.get.io.enqSelOHVec(0).bits,  compTransPolicy.get.io.enqSelOHVec(1).bits)
     }
 
     finalSimpTransSelVec.get.zip(simpTransSelVec.get).zipWithIndex.foreach { case ((finalOH, selOH), enqIdx) =>
@@ -385,6 +387,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   }
 
   io.valid                          := validVec.asUInt
+  io.issued                         := issuedVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
@@ -416,6 +419,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       in.fromLsq.get.lqDeqPtr   := io.vecMemIn.get.lqDeqPtr
     }
     validVec(entryIdx)          := out.valid
+    issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
@@ -538,6 +542,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val ldCancel            = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
   //entries status
   val valid               = Output(UInt(params.numEntries.W))
+  val issued              = Output(UInt(params.numEntries.W))
   val canIssue            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))

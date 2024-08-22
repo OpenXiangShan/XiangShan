@@ -55,10 +55,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   ResourceBinding {
     val width = ResourceInt(2)
-    val model = "freechips,rocketchip-unknown"
+    val model = "xiangshan," + os.read(os.resource / "publishVersion")
+    val compatible = "freechips,rocketchip-unknown"
     Resource(ResourceAnchors.root, "model").bind(ResourceString(model))
-    Resource(ResourceAnchors.root, "compat").bind(ResourceString(model + "-dev"))
-    Resource(ResourceAnchors.soc, "compat").bind(ResourceString(model + "-soc"))
+    Resource(ResourceAnchors.root, "compat").bind(ResourceString(compatible + "-dev"))
+    Resource(ResourceAnchors.soc, "compat").bind(ResourceString(compatible + "-soc"))
     Resource(ResourceAnchors.root, "width").bind(width)
     Resource(ResourceAnchors.soc, "width").bind(width)
     Resource(ResourceAnchors.cpus, "width").bind(ResourceInt(1))
@@ -211,7 +212,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
-      val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
+      val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }

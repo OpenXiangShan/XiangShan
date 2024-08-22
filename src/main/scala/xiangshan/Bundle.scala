@@ -138,7 +138,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
-  val trigger = new TriggerCf
+  val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
@@ -349,6 +349,10 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
+class SoftIfetchPrefetchBundle(implicit p: Parameters) extends XSBundle {
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
@@ -472,7 +476,7 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
     val sa = satp_value.asTypeOf(new SatpStruct)
     mode := sa.mode
     asid := sa.asid
-    ppn := Cat(0.U((44-PAddrBits).W), sa.ppn(PAddrBits-1, 0)).asUInt
+    ppn := Cat(0.U((44-PAddrBits+12).W), sa.ppn(PAddrBits-12-1, 0)).asUInt
     changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
   }
 }
@@ -557,6 +561,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
   val uncache_write_outstanding_enable = Output(Bool())
+  val hd_misalign_st_enable = Output(Bool())
+  val hd_misalign_ld_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())
@@ -628,26 +634,18 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class TriggerCf(implicit p: Parameters) extends XSBundle {
-  // frontend
-  val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
-  val frontendCanFire   = Vec(TriggerNum, Bool())
-  // backend
-  val backendHit        = Vec(TriggerNum, Bool())
-  val backendCanFire    = Vec(TriggerNum, Bool())
+object TriggerAction extends NamedUInt(4) {
+  // Put breakpoint Exception gererated by trigger in ExceptionVec[3].
+  def BreakpointExp = 0.U(width.W)  // raise breakpoint exception
+  def DebugMode     = 1.U(width.W)  // enter debug mode
+  def TraceOn       = 2.U(width.W)
+  def TraceOff      = 3.U(width.W)
+  def TraceNotify   = 4.U(width.W)
+  def None          = 15.U(width.W) // use triggerAction = 15.U to express that action is None;
 
-  // Two situations not allowed:
-  // 1. load data comparison
-  // 2. store chaining with store
-  def getFrontendCanFire = frontendCanFire.reduce(_ || _)
-  def getBackendCanFire = backendCanFire.reduce(_ || _)
-  def canFire = getFrontendCanFire || getBackendCanFire
-  def clear(): Unit = {
-    frontendHit.foreach(_ := false.B)
-    frontendCanFire.foreach(_ := false.B)
-    backendHit.foreach(_ := false.B)
-    backendCanFire.foreach(_ := false.B)
-  }
+  def isExp(action: UInt)   = action === BreakpointExp
+  def isDmode(action: UInt) = action === DebugMode
+  def isNone(action: UInt)  = action === None
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
@@ -658,6 +656,8 @@ class FrontendTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
+  val triggerCanRaiseBpExp = Output(Bool())
 }
 
 class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
@@ -666,16 +666,17 @@ class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
   val triggerCanRaiseBpExp  = Output(Bool())
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType = Output(UInt(2.W))
-  val select    = Output(Bool()) // todo: delete
+  val select    = Output(Bool())
   val timing    = Output(Bool())
-  val action    = Output(Bool()) // todo: delete
+  val action    = Output(TriggerAction())
   val chain     = Output(Bool())
-  val execute   = Output(Bool()) // todo: delete
+  val execute   = Output(Bool())
   val store     = Output(Bool())
   val load      = Output(Bool())
   val tdata2    = Output(UInt(64.W))

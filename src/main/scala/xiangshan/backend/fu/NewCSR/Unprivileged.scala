@@ -21,7 +21,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val OF = WARL(2, wNoFilter)
     val DZ = WARL(3, wNoFilter)
     val NV = WARL(4, wNoFilter)
-    val FRM = WARL(7, 5, wNoFilter)
+    val FRM = WARL(7, 5, wNoFilter).withReset(0.U)
   }) with HasRobCommitBundle {
     val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRFFlagsBundle)))
     val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
@@ -51,7 +51,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   // vec
   val vstart = Module(new CSRModule("Vstart", new CSRBundle {
-    val vstart = RW(VlWidth - 2, 0) // hold [0, 128)
+    // vstart is not a WARL CSR.
+    // Since we need to judge whether flush pipe by vstart being not 0 in DecodeStage, vstart must be initialized to some value at reset.
+    val vstart = RW(VlWidth - 2, 0).withReset(0.U) // hold [0, 128)
   }) with HasRobCommitBundle {
     // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
     // Not trap

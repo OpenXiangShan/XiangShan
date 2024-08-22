@@ -17,6 +17,8 @@ class TrapHandleModule extends Module {
   private val hideleg = io.in.hideleg.asUInt
   private val medeleg = io.in.medeleg.asUInt
   private val hedeleg = io.in.hedeleg.asUInt
+  private val mvien = io.in.mvien.asUInt
+  private val hvien = io.in.hvien.asUInt
 
   private val hasTrap = trapInfo.valid
   private val hasIR = hasTrap && trapInfo.bits.isInterrupt
@@ -70,9 +72,9 @@ class TrapHandleModule extends Module {
   private val highestPrioIR = highestPrioIRVec.asUInt
   private val highestPrioEX = highestPrioEXVec.asUInt
 
-  private val mIRVec  = highestPrioIR
-  private val hsIRVec = highestPrioIR & mideleg
-  private val vsIRVec = highestPrioIR & mideleg & hideleg
+  private val mIRVec  = dontTouch(WireInit(highestPrioIR))
+  private val hsIRVec = (mIRVec  & mideleg) | (mIRVec  & mvien & ~mideleg)
+  private val vsIRVec = (hsIRVec & hideleg) | (hsIRVec & hvien & ~hideleg)
 
   private val mEXVec  = highestPrioEX
   private val hsEXVec = highestPrioEX & medeleg
@@ -96,7 +98,7 @@ class TrapHandleModule extends Module {
   // Todo: support more interrupt and exception
   private val exceptionRegular = OHToUInt(highestPrioEX)
   private val interruptNO = OHToUInt(highestPrioIR)
-  private val exceptionNO = Mux(trapInfo.bits.singleStep || trapInfo.bits.triggerFire, ExceptionNO.breakPoint.U, exceptionRegular)
+  private val exceptionNO = Mux(trapInfo.bits.singleStep, ExceptionNO.breakPoint.U, exceptionRegular)
 
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
@@ -152,13 +154,14 @@ class TrapHandleIO extends Bundle {
       val intrVec = UInt(64.W)
       val isInterrupt = Bool()
       val singleStep = Bool()
-      val triggerFire = Bool()
     })
     val privState = new PrivState
     val mideleg = new MidelegBundle
     val medeleg = new MedelegBundle
     val hideleg = new HidelegBundle
     val hedeleg = new HedelegBundle
+    val mvien = new MvienBundle
+    val hvien = new HvienBundle
     // trap vector
     val mtvec = Input(new XtvecBundle)
     val stvec = Input(new XtvecBundle)

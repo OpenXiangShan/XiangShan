@@ -45,6 +45,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val rabCommits = Input(new RabCommitIO)
+    // from csr
+    val singleStep = Input(Bool())
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
@@ -156,7 +158,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
   compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
-    sink.valid := source.valid
+    sink.valid := source.valid && !io.singleStep
     sink.bits := source.bits
   }
   val needRobFlags = compressUnit.io.out.needRobFlags
@@ -237,7 +239,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
   val needV0Dest     = Wire(Vec(RenameWidth, Bool()))
   val needVlDest     = Wire(Vec(RenameWidth, Bool()))
-  val hasValid = Cat(io.in.map(_.valid)).orR
   private val inHeadValid = io.in.head.valid
 
   val isMove = Wire(Vec(RenameWidth, Bool()))
@@ -301,11 +302,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
-    io.in(i).ready := canOut
+    io.in(i).ready := !io.in(0).valid || canOut
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)
-    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || uops(i).trigger.getFrontendCanFire
+    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numUops := 0.U
       uops(i).numWB := 0.U
@@ -494,7 +495,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   io.out.map{ x =>
-    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || x.bits.trigger.getFrontendCanFire
+    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(x.bits.trigger)
   }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)

@@ -24,7 +24,6 @@ case class IssueBlockParams(
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,
   VLEN                 : Int = 128,
-  vaddrBits            : Int = 39,
   // calculate in scheduler
   var idxInSchBlk      : Int = 0,
 )(
@@ -64,6 +63,8 @@ case class IssueBlockParams(
   def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
 
   def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
+
+  def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 

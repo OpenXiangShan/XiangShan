@@ -43,7 +43,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -72,7 +72,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -109,6 +109,7 @@ object Bundles {
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
+    val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
@@ -147,7 +148,7 @@ object Bundles {
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val hasException    = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -233,10 +234,6 @@ object Bundles {
 
     def isHls: Bool = {
       fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
-    }
-
-    def isVecOPF: Bool = {
-      FuType.isVecOPF(fuType)
     }
 
     def srcIsReady: Vec[Bool] = {
@@ -457,6 +454,11 @@ object Bundles {
     }
   }
 
+  class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
+    val scalaNeedFrm = Bool()
+    val vectorNeedFrm = Bool()
+  }
+
   // DynInst --[IssueQueue]--> DataPath
   class IssueQueueIssueBundle(
     iqParams: IssueBlockParams,
@@ -605,7 +607,7 @@ object Bundles {
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
-    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -688,7 +690,7 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(new TriggerCf)           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     // vldu used only
@@ -833,7 +835,7 @@ object Bundles {
     val isInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
-    val trigger  = new TriggerCf
+    val trigger = TriggerAction()
   }
 
   object UopIdx {
