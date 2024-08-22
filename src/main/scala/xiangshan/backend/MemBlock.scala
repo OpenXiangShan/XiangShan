@@ -23,7 +23,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink._import coupledL2.{PrefetchRecv, RVA23CMOReq, RVA23CMOResp}
+import freechips.rocketchip.tilelink._
+import coupledL2.{PrefetchRecv, RVA23CMOReq, RVA23CMOResp}
 import device.MsiInfoBundle
 import utils._
 import utility._
