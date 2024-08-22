@@ -725,21 +725,29 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
 
   s0_tlb_hlv := Mux(
-    s0_super_ld_rep_valid || s0_ld_rep_valid,
-    LSUOpType.isHlv(io.replay.bits.uop.fuOpType),
+    s0_misalign_ld_valid,
+    LSUOpType.isHlv(io.misalign_ldin.bits.uop.fuOpType),
     Mux(
-      s0_int_iss_valid,
-      LSUOpType.isHlv(io.ldin.bits.uop.fuOpType),
-      false.B
+      s0_super_ld_rep_valid || s0_ld_rep_valid,
+      LSUOpType.isHlv(io.replay.bits.uop.fuOpType),
+      Mux(
+        s0_int_iss_valid,
+        LSUOpType.isHlv(io.ldin.bits.uop.fuOpType),
+        false.B
+      )
     )
   )
   s0_tlb_hlvx := Mux(
-    s0_super_ld_rep_valid || s0_ld_rep_valid,
-    LSUOpType.isHlvx(io.replay.bits.uop.fuOpType),
+    s0_misalign_ld_valid,
+    LSUOpType.isHlvx(io.misalign_ldin.bits.uop.fuOpType),
     Mux(
-      s0_int_iss_valid,
-      LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType),
-      false.B
+      s0_super_ld_rep_valid || s0_ld_rep_valid,
+      LSUOpType.isHlvx(io.replay.bits.uop.fuOpType),
+      Mux(
+        s0_int_iss_valid,
+        LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType),
+        false.B
+      )
     )
   )
 
@@ -1091,7 +1099,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
   val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR && s2_vecActive
-  val s2_mis_align = s2_valid && s2_in.uop.exceptionVec(loadAddrMisaligned) && io.csrCtrl.hd_misalign_ld_enable
+  val s2_mis_align = s2_valid && s2_in.uop.exceptionVec(loadAddrMisaligned) && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable)
 
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
@@ -1385,7 +1393,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.miss := s3_in.miss
 
   // connect to misalignBuffer
-  io.misalign_buf.valid := io.lsq.ldin.valid && io.csrCtrl.hd_misalign_ld_enable
+  io.misalign_buf.valid := io.lsq.ldin.valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable)
   io.misalign_buf.bits  := s3_in
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
