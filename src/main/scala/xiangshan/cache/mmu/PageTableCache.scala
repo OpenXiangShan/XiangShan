@@ -695,7 +695,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2(refillIdx).refill(
       refill.req_info_dup(2).vpn,
       Mux(refill.req_info_dup(2).s2xlate =/= noS2xlate, io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid),
-      io.csr_dup(2).hgatp.asid,
+      io.csr_dup(2).hgatp.vmid,
       memSelData(2),
       2.U,
       refill_prefetch_dup(2)
@@ -986,11 +986,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   if (EnableSv48) {
     val l3asidhit = VecInit(l3asids.get.map(_ === sfence_dup(2).bits.id)).asUInt
-    val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.asid)).asUInt
+    val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.vmid)).asUInt
     val l3hhit = VecInit(l3h.get.map{a => io.csr_dup(2).priv.virt && a === onlyStage1 || !io.csr_dup(2).priv.virt && a === noS2xlate}).asUInt
 
     when (sfence_valid) {
-      val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.asid)).asUInt
+      val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.vmid)).asUInt
       val l3hhit = VecInit(l3h.get.map{a => io.csr_dup(2).priv.virt && a === onlyStage1 || !io.csr_dup(2).priv.virt && a === noS2xlate}).asUInt
       val sfence_vpn = sfence_dup(2).bits.addr(sfence_dup(2).bits.addr.getWidth-1, offLen)
 
@@ -1006,7 +1006,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
 
     when (hfencev_valid) {
-      val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.asid)).asUInt
+      val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === io.csr_dup(2).hgatp.vmid)).asUInt
       val l3hhit = VecInit(l3h.get.map(_ === onlyStage1)).asUInt
       val hfencev_vpn = sfence_dup(2).bits.addr(sfence_dup(2).bits.addr.getWidth-1, offLen)
       when(sfence_dup(2).bits.rs1) {
