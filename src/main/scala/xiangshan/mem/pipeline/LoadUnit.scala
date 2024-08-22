@@ -462,8 +462,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.isvec         := false.B
     out.is128bit      := src.is128bit
     out.vecActive     := true.B
-    out.hlv           := false.B
-    out.hlvx          := false.B
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out
   }
 
