@@ -71,6 +71,24 @@ package object xiangshan {
     def FMVXF = BitPat("b1_1000_0000") //for fmv_x_d & fmv_x_w
   }
 
+  object I2fType {
+    // move/cvt ## i64/i32(input) ## f64/f32/f16(output) ## hassign
+    def fcvt_h_wu = BitPat("b0_0_00_0")
+    def fcvt_h_w  = BitPat("b0_0_00_1")
+    def fcvt_h_lu = BitPat("b0_1_00_0")
+    def fcvt_h_l  = BitPat("b0_1_00_1")
+
+    def fcvt_s_wu = BitPat("b0_0_01_0")
+    def fcvt_s_w  = BitPat("b0_0_01_1")
+    def fcvt_s_lu = BitPat("b0_1_01_0")
+    def fcvt_s_l  = BitPat("b0_1_01_1")
+
+    def fcvt_d_wu = BitPat("b0_0_10_0")
+    def fcvt_d_w  = BitPat("b0_0_10_1")
+    def fcvt_d_lu = BitPat("b0_1_10_0")
+    def fcvt_d_l  = BitPat("b0_1_10_1")
+
+  }
   object VlduType {
     // bit encoding: | vector or scala (2bit) || mop (2bit) | lumop(5bit) |
     // only unit-stride use lumop
@@ -139,6 +157,7 @@ package object xiangshan {
     def isFmv(bits: UInt): Bool = bits(0) & !bits(2)
     def FMX_D_X    = "b0_01_11".U
     def FMX_W_X    = "b0_01_10".U
+    def FMX_H_X   =  "b0_01_01".U
   }
 
   object CommitType {

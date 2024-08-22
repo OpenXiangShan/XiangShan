@@ -46,7 +46,8 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     // scalar cvt inst
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
-    FMV_X_W, FMV_X_D,
+    FCVT_S_H, FCVT_H_S, FCVT_H_D, FCVT_D_H,
+    FMV_X_W, FMV_X_D, FMV_X_H,
   )
   val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
   val isFP32Instrs = Seq(
@@ -69,7 +70,18 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
     FMV_X_W,
   )
-  val isSew2Cvt = isSew2Cvts.map(io.instr === _).reduce(_ || _)
+  /*
+  The optype for FCVT_D_H and FCVT_H_D is the same,
+  so the two instructions are distinguished by sew.
+  FCVT_H_D:VSew.e64
+  FCVT_D_H:VSew.e16
+   */
+  val isSew2Cvth = Seq(
+    FCVT_S_H, FCVT_H_S, FCVT_D_H,
+    FMV_X_H,
+  )
+  val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
+  val isSew2Cvt16 = isSew2Cvth.map(io.instr === _).reduce(_ || _)
   val isLmulMf4Cvts = Seq(
     FCVT_W_S, FCVT_WU_S,
     FMV_X_W,
@@ -92,7 +104,7 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vill  := false.B
   io.vpuCtrl.vma   := true.B
   io.vpuCtrl.vta   := true.B
-  io.vpuCtrl.vsew  := Mux(isFP32Instr || isSew2Cvt, VSew.e32, VSew.e64)
+  io.vpuCtrl.vsew  := Mux(isFP32Instr || isSew2Cvt32, VSew.e32, Mux(isSew2Cvt16, VSew.e16, VSew.e64))
   io.vpuCtrl.vlmul := Mux(isFP32Instr || isLmulMf4Cvt, VLmul.mf4, VLmul.mf2)
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
@@ -118,9 +130,9 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   def X = BitPat("b?")
   def N = BitPat("b0")
   def Y = BitPat("b1")
-  val s = BitPat(FPU.S)
-  val d = BitPat(FPU.D)
-  val i = BitPat(FPU.D)
+  val s = BitPat(FPU.S(0))
+  val d = BitPat(FPU.D(0))
+  val i = BitPat(FPU.D(0))
 
   val default = List(X,X,X,N,N,N,X,X,X)
 
