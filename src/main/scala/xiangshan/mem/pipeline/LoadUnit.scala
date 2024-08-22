@@ -473,8 +473,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.isvec         := false.B
     out.is128bit      := src.is128bit
     out.vecActive     := true.B
-    out.hlv           := false.B
-    out.hlvx          := false.B
     out
   }
 
@@ -1519,7 +1517,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergeLsqFwdData(s3_merged_data_frm_tlD)
 
   // duplicate reg for ldout and vecldout
-  private val LdDataDup = 2
+  private val LdDataDup = 3
   require(LdDataDup >= 2)
   // truncate forward data and cache data to XLEN width to writeback
   val s3_fwd_mask_clip = VecInit(List.fill(LdDataDup)(
@@ -1595,7 +1593,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.vecFeedback := vecFeedback
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache(1))
-  // only 128 bits load uses s3_merged_data_frm_cache
   io.vecldout.bits.vecdata.get := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
   io.vecldout.bits.isvec := s3_vecout.isvec
   io.vecldout.bits.elemIdx := s3_vecout.elemIdx
@@ -1618,7 +1615,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf
   io.misalign_ldout.bits      := io.lsq.ldin.bits
-  io.misalign_ldout.bits.data := Mux(s3_in.is128bit, s3_merged_data_frm_cache, s3_picked_data_frm_cache)
+  io.misalign_ldout.bits.data := Mux(s3_in.is128bit, s3_merged_data_frm_cache, s3_picked_data_frm_cache(2))
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
