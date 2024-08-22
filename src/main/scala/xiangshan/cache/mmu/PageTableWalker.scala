@@ -257,6 +257,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       } .otherwise {
         level := Mux(req.l2Hit, 1.U, 2.U)
         af_level := Mux(req.l2Hit, 1.U, 2.U)
+        gpf_level := 2.U
         ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
         l3Hit := false.B
       }
