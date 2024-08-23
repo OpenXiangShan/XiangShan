@@ -35,6 +35,7 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
+import xiangshan.backend.trace._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -106,6 +107,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
+  val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
+  val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
@@ -951,6 +954,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     robEntries(i).vxsat := Mux(!robEntries(i).valid && instCanEnqFlag, 0.U, robEntries(i).vxsat | vxsatRes)
+
+    // trace
+    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
+    val xret = csrWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && io.csr.isXRet).reduce(_ || _)
+
+    when(xret){
+      robEntries(i).traceBlockInPipe.itype := Itype.ExpIntReturn
+    }.elsewhen(Itype.isBranchType(robEntries(i).traceBlockInPipe.itype)){
+      // BranchType code(itype = 5) must be correctly replaced!
+      robEntries(i).traceBlockInPipe.itype := Mux(taken, Itype.Taken, Itype.NonTaken)
+    }
   }
 
   // begin update robBanksRdata

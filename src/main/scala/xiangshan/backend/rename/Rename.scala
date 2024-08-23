@@ -32,6 +32,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenUSWholeEmul}
 import xiangshan.mem.GenRealFlowNum
+import xiangshan.backend.trace._
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -192,6 +193,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.hasException  :=  DontCare
     uop.useRegCache   := DontCare
     uop.regCacheIdx   := DontCare
+    uop.traceBlockInPipe := DontCare
   })
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
@@ -401,6 +403,46 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       walkPdest(i) := io.out(i).bits.pdest
     }
   }
+
+  /**
+   * trace begin
+   */
+  val inVec = io.in.map(_.bits)
+  val canRobCompressVec = inVec.map(_.canRobCompress)
+  val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
+  val halfWordNumVec = (0 until RenameWidth).map{
+    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
+      case (mask, isRVC) => Mux(mask, Mux(isRVC, 1.U, 2.U), 0.U)
+    }
+  }
+
+  for (i <- 0 until RenameWidth) {
+    // iretire
+    uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
+      halfWordNumVec(i).reduce(_ +& _),
+      Mux(isRVCVec(i), 1.U, 2.U)
+    )
+
+    // ilastsize
+    val j = i
+    val lastIsRVC = WireInit(false.B)
+    (j until RenameWidth).map { j =>
+      when(compressMasksVec(i)(j)) {
+        lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
+      }
+    }
+
+    uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
+      Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
+      Mux(isRVCVec(i), Ilastsize.HalfWord, Ilastsize.Word)
+    )
+
+    // itype
+    uops(i).traceBlockInPipe.itype := Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+  }
+  /**
+   * trace end
+   */
 
   /**
     * How to set psrc:
