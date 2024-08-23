@@ -200,6 +200,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
   val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
+  val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
@@ -208,6 +209,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i))
     }
   }
+  
+  // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed, 
+  // that is Necessary when exceptions happen.
+  // Update the ftqIdx and ftqOffset to correctly notify the frontend which instructions have been committed.
+  for (i <- 0 until CommitWidth) {
+    val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt)) +& rawInfo(i).ftqOffset
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + lastOffset.head(1)
+    commitInfo(i).ftqOffset := lastOffset.tail(1)
+  }
+
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
   val debug_microOp = DebugMem(RobSize, new DynInst)
