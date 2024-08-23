@@ -803,7 +803,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val vsegmentDtlbReqValid = vSegmentUnit.io.dtlb.req.valid // segment tlb resquest need to delay 1 cycle
       dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || RegNext(vsegmentDtlbReqValid)
       vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
-      dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
+      dtlb_reqs.take(LduCnt)(i).req.bits  := ParallelPriorityMux(Seq(
         RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
         loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
@@ -1454,7 +1454,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
-      false.B,
+      vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VsSplitConnectStu")
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
@@ -1468,7 +1468,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
-      false.B,
+      vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VlSplitConnectLdu")
     )
 
