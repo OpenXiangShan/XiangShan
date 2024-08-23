@@ -96,7 +96,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val need_gpa = RegInit(false.B)
   val need_gpa_robidx = Reg(new RobPtr)
   val need_gpa_vpn = Reg(UInt(vpnLen.W))
-  val need_gpa_gvpn = Reg(UInt(vpnLen.W))
+  val need_gpa_gvpn = Reg(UInt(ptePPNLen.W))
   val resp_gpa_refill = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
 
@@ -175,7 +175,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := false.B
       need_gpa_robidx := req_out(i).debug.robIdx
     }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
-      need_gpa_gvpn := ptw.resp.bits.s2.entry.tag
+      need_gpa_gvpn := ptw.resp.bits.s1.genPPN(need_gpa_vpn)
       resp_gpa_refill := true.B
     }
 
@@ -297,11 +297,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.vsatp.mode === 0.U) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-
-    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
+   
+    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, true, false)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
-    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, allType = true)
+    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
     io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
     io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back)
     when (io.requestor(idx).req_kill && GatedValidRegNext(io.requestor(idx).req.fire)) {
@@ -333,8 +333,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
     val hasS2xlate = miss_req_s2xlate_reg =/= noS2xlate
     val onlyS2 = miss_req_s2xlate_reg === onlyStage2
-    val hit_s1 = io.ptw.resp.bits.s1.hit(miss_req_vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, allType = true, false, hasS2xlate)
-    val hit_s2 = io.ptw.resp.bits.s2.hit(miss_req_vpn, io.csr.hgatp.asid)
+    val hit_s1 = io.ptw.resp.bits.s1.hit(miss_req_vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, allType = true, false, hasS2xlate)
+    val hit_s2 = io.ptw.resp.bits.s2.hit(miss_req_vpn, io.csr.hgatp.vmid)
     val hit = Mux(onlyS2, hit_s2, hit_s1) && io.ptw.resp.valid && miss_req_s2xlate_reg === io.ptw.resp.bits.s2xlate
 
     val new_coming_valid = WireInit(false.B)
@@ -399,7 +399,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val onlyS2 = s2xlate === onlyStage2
     val onlyS1 = s2xlate === onlyStage1
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
-    val resp_hit = ptw.resp.bits.hit(vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
+    val resp_hit = ptw.resp.bits.hit(vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, true, false)
     val p_hit = GatedValidRegNext(resp_hit && io.ptw.resp.fire && s2xlate_hit)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)
     val gvpn = Mux(onlyS2, vpn, ppn_s1)
@@ -472,7 +472,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
       difftest.satp := Cat(io.csr.satp.mode, io.csr.satp.asid, io.csr.satp.ppn)
       difftest.vsatp := Cat(io.csr.vsatp.mode, io.csr.vsatp.asid, io.csr.vsatp.ppn)
-      difftest.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.asid, io.csr.hgatp.ppn)
+      difftest.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.vmid, io.csr.hgatp.ppn)
       val req_need_gpa = gpf
       val req_s2xlate = Wire(UInt(2.W))
       req_s2xlate := MuxCase(noS2xlate, Seq(

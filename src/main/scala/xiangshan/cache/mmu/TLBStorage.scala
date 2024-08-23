@@ -115,7 +115,7 @@ class TLBFA(
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
@@ -179,19 +179,19 @@ class TLBFA(
   val sfence = io.sfence
   val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
         v.zipWithIndex.map{ case(a, i) => a := a && !((io.csr.priv.virt === false.B && entries(i).s2xlate === noS2xlate) ||
-          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.asid))}
+          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid))}
       }.otherwise {
         // all addr but specific asid
         v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && ((!io.csr.priv.virt && entries(i).s2xlate === noS2xlate && entries(i).asid === sfence.bits.id) ||
-          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid)))}
+          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid)))}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
@@ -208,14 +208,14 @@ class TLBFA(
   val hfenceg_valid = sfence.valid && sfence.bits.hg
   val hfencev = io.sfence
   val hfencev_vpn = sfence_vpn
-  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
-  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
+  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = true.B))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = true.B))
   when (hfencev_valid) {
     when (hfencev.bits.rs1) {
       when (hfencev.bits.rs2) {
-        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.asid)}
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid)}
       }.otherwise {
-        v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid))
+        v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid))
         }
       }
     }.otherwise {
