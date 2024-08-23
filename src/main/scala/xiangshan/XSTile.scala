@@ -80,10 +80,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.l2cache match {
     case Some(l2) =>
       l2.cmo_sink_node.foreach(recv => {
-        recv := core.memBlock.cmo_sender
+        recv := core.memBlock.cmo_sender.get
       })
       l2.cmo_source_node.foreach(resp => {
-        core.memBlock.cmo_reciver := resp
+        core.memBlock.cmo_reciver.get := resp
       })
     case None =>
   }

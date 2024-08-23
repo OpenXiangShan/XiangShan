@@ -237,8 +237,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
-  val cmo_sender  = if (coreParams.HasRVA23CMO) BundleBridgeSource(() => DecoupledIO(new RVA23CMOReq)) else null
-  val cmo_reciver = if (coreParams.HasRVA23CMO) BundleBridgeSink(Some(() => DecoupledIO(new RVA23CMOResp))) else null
+  val cmo_sender  = if (coreParams.HasRVA23CMO) Some(BundleBridgeSource(() => DecoupledIO(new RVA23CMOReq))) else None
+  val cmo_reciver = if (coreParams.HasRVA23CMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new RVA23CMOResp)))) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -1105,14 +1105,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
 
   // lsq to l2 CMO
-  if (HasRVA23CMO) {
-    outer.cmo_sender.out.head._1  <> lsq.io.cmoOpReq
-    outer.cmo_reciver.in.head._1  <> lsq.io.cmoOpResp
-  } else {
-    lsq.io.cmoOpReq.ready  := false.B
-    lsq.io.cmoOpResp.valid := false.B
-    lsq.io.cmoOpResp.bits  := DontCare
+  outer.cmo_sender match {
+    case Some(x) =>
+      x.out.head._1 <> lsq.io.cmoOpReq
+    case None =>
+      lsq.io.cmoOpReq.ready  := false.B
   }
+  outer.cmo_reciver match {
+    case Some(x) =>
+      x.in.head._1  <> lsq.io.cmoOpResp
+    case None =>
+      lsq.io.cmoOpResp.valid := false.B
+      lsq.io.cmoOpResp.bits  := 0.U.asTypeOf(new RVA23CMOResp)
+  }
+
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
