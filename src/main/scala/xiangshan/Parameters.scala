@@ -533,6 +533,10 @@ case class XSCoreParameters
     ),
     iqWakeUpParams,
   )
+
+  // Parameters for trace extension.
+  // Trace parameters is useful for XSTOP.
+  val TraceGroupNum          = 3 // Width to Encoder
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -854,4 +858,7 @@ trait HasXSParameter {
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
   protected def TriggerChainMaxLength = 2
+
+  // Parameters for Trace extension
+  def TraceGroupNum          = coreParams.TraceGroupNum
 }
