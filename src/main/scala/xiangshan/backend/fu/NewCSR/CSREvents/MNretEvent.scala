@@ -15,7 +15,8 @@ import xiangshan.AddrTransType
 
 class MNretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val mnstatus  = ValidIO((new MnstatusBundle).addInEvent(_.MNPP, _.MNPV, _.NMIE))
-  val mstatus   = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
+  val mstatus   = ValidIO((new MstatusBundle).addInEvent(_.MPRV, _.MDT, _.SDT))
+  val vsstatus  = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val targetPc  = ValidIO(new TargetPCBundle)
 }
 
@@ -26,6 +27,7 @@ class MNretEventInput extends Bundle {
   val satp     = Input(new SatpBundle)
   val vsatp    = Input(new SatpBundle)
   val hgatp    = Input(new HgatpBundle)
+  val vsstatus = Input(new SstatusBundle)
 }
 
 class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase {
@@ -49,18 +51,28 @@ class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase 
     sv48x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
   )
 
+  val outPrivState   = Wire(new PrivState)
+  outPrivState.PRVM := in.mnstatus.MNPP
+  outPrivState.V    := Mux(in.mnstatus.MNPP === PrivMode.M, VirtMode.Off.asUInt, in.mnstatus.MNPV.asUInt)
+
+  val mnretToM  = outPrivState.isModeM
+  val mnretToVU = outPrivState.isModeVU
+
   out := DontCare
 
   out.privState.valid := valid
   out.mnstatus .valid := valid
   out.targetPc .valid := valid
 
-  out.privState.bits.PRVM     := in.mnstatus.MNPP
-  out.privState.bits.V        := Mux(in.mnstatus.MNPP === PrivMode.M, VirtMode.Off.asUInt, in.mnstatus.MNPV.asUInt)
+  out.privState.bits          := outPrivState
   out.mnstatus.bits.MNPP      := PrivMode.U
   out.mnstatus.bits.MNPV      := VirtMode.Off.asUInt
   out.mnstatus.bits.NMIE      := 1.U
   out.mstatus.bits.MPRV       := Mux(in.mnstatus.MNPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
+  // clear MDT when mnret to below M
+  out.mstatus.bits.MDT        := Mux(mnretToM, in.mstatus.MDT.asBool, 0.U)
+  out.mstatus.bits.SDT        := Mux(mnretToM, in.mstatus.SDT.asBool, 0.U) // ?? return to S clear SDT?
+  out.vsstatus.bits.SDT       := Mux(mnretToVU, 0.U, in.vsstatus.SDT.asBool)
   out.targetPc.bits.pc        := in.mnepc.asUInt
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(in.mnepc.asUInt)
   out.targetPc.bits.raiseIAF  := instrAddrTransType.checkAccessFault(in.mnepc.asUInt)

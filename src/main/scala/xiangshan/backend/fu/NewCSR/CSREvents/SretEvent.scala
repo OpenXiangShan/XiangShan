@@ -23,7 +23,7 @@ class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
 
 class SretEventInput extends Bundle {
   val privState = Input(new PrivState)
-  val sstatus   = Input(new SstatusBundle)
+  val mstatus   = Input(new MstatusBundle)
   val hstatus   = Input(new HstatusBundle)
   val vsstatus  = Input(new SstatusBundle)
   val sepc      = Input(new Epc())
@@ -61,20 +61,29 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
     sretInVS    -> in.vsepc,
   )).asUInt
 
+  val sretInM     = in.privState.isModeM
+  val sretInHSorM = in.privState.isModeM || in.privState.isModeHS
+  val sretInVS    = in.privState.isModeVS
+
+  val outPrivState   = Wire(new PrivState)
+  outPrivState.PRVM := Mux1H(Seq(
+    // SPP is not PrivMode enum type, so asUInt
+    sretInHSorM -> in.mstatus.SPP.asUInt,
+    sretInVS    -> in.vsstatus.SPP.asUInt,
+  ))
+  outPrivState.V := Mux1H(Seq(
+    sretInHSorM -> in.hstatus.SPV,
+    sretInVS    -> in.privState.V, // keep
+  ))
+
+  val sretToVU    = outPrivState.isModeVU
+
   out := DontCare
 
   out.privState.valid := valid
   out.targetPc .valid := valid
 
-  out.privState.bits.PRVM     := Mux1H(Seq(
-    // SPP is not PrivMode enum type, so asUInt
-    sretInHSorM -> in.sstatus.SPP.asUInt,
-    sretInVS    -> in.vsstatus.SPP.asUInt,
-  ))
-  out.privState.bits.V        := Mux1H(Seq(
-    sretInHSorM -> in.hstatus.SPV,
-    sretInVS    -> in.privState.V, // keep
-  ))
+  out.privState.bits      := outPrivState
 
   // hstatus
   out.hstatus.valid           := valid && sretInHSorM
@@ -83,15 +92,22 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   // sstatus
   out.mstatus.valid           := valid && sretInHSorM
   out.mstatus.bits.SPP        := PrivMode.U.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
-  out.mstatus.bits.SIE        := in.sstatus.SPIE
+  out.mstatus.bits.SIE        := in.mstatus.SPIE
   out.mstatus.bits.SPIE       := 1.U
   out.mstatus.bits.MPRV       := 0.U // sret will always leave M mode
+  out.mstatus.bits.MDT        := Mux(sretInM, 0.U, in.mstatus.MDT.asBool) // when execute return in M mode, set MDT 0
+  out.mstatus.bits.SDT        := Mux1H(Seq(
+    sretInHSorM -> 0.U, // sret will alway leave M mode
+    sretInVS    -> in.mstatus.SDT.asBool  // when sret in VS SDT not set to 0
+  ))
+
 
   // vsstatus
   out.vsstatus.valid          := valid && sretInVS
   out.vsstatus.bits.SPP       := PrivMode.U.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.vsstatus.bits.SIE       := in.vsstatus.SPIE
   out.vsstatus.bits.SPIE      := 1.U
+  out.vsstatus.bits.SDT       := Mux(sretToVU, 0.U, in.vsstatus.SDT.asBool) // clear SDT when return to VU
 
   out.targetPc.bits.pc        := xepc
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(xepc)

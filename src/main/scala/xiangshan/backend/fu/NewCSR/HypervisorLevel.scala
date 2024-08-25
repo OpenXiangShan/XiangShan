@@ -62,14 +62,16 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when (!menvcfg.STCE.asBool) {
+    when(!menvcfg.STCE.asBool) {
       regOut.STCE := 0.U
     }
-    when (!menvcfg.PBMTE) {
+    when(!menvcfg.PBMTE) {
       regOut.PBMTE := 0.U
     }
-  })
-    .setAddr(CSRs.henvcfg)
+    when(!menvcfg.DTE.asBool) {
+      regOut.DTE := 0.U
+    }
+  }).setAddr(CSRs.henvcfg)
 
   val htval = Module(new CSRModule("Htval", new XtvalBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.htval)
@@ -340,6 +342,9 @@ class HEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
+  if (CSRConfig.EXT_SSTC) {
+    this.DTE.setRW().withReset(1.U)
+  }
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

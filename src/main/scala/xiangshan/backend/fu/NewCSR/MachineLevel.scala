@@ -452,12 +452,14 @@ class MstatusBundle extends CSRBundle {
   val TVM  = CSRRWField     (20).withReset(0.U)
   val TW   = CSRRWField     (21).withReset(0.U)
   val TSR  = CSRRWField     (22).withReset(0.U)
+  val SDT  = CSRRWField     (24).withReset(1.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
   val SBE  = CSRROField     (36).withReset(0.U)
   val MBE  = CSRROField     (37).withReset(0.U)
   val GVA  = CSRRWField     (38).withReset(0.U)
   val MPV  = VirtMode       (39).withReset(0.U)
+  val MDT  = CSRRWField     (42).withReset(1.U)
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
@@ -471,6 +473,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   with MNretEventSinkBundle
   with SretEventSinkBundle
   with HasRobCommitBundle
+  with HasMachineEnvBundle
 {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
@@ -496,7 +499,22 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
+  // when MDT is explicitly written by 1, clear MIE
+  // only when reg.MDT is zero or wdata.MDT is zero , MIE can be explicitly written by 1
+  when (w.wdataFields.MDT.asBool) {
+    reg.MIE := false.B
+  }.elsewhen(!reg.MDT.asBool || !w.wdataFields.MDT.asBool) {
+    reg.MIE := w.wdataFields.MIE.asBool
+  }
+  // when DTE is zero, SDT field is read-only zero
+  reg.SDT := Mux(this.menvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
 
+  // SDT and SIE is the same as MDT and MIE
+  when (w.wdataFields.SDT.asBool) {
+    reg.SIE := false.B
+  }.elsewhen(!reg.SDT.asBool || !w.wdataFields.SDT.asBool) {
+    reg.SIE := w.wdataFields.SIE.asBool
+  }
   // read connection
   mstatus :|= reg
   sstatus := mstatus
@@ -628,6 +646,9 @@ class MEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
+  if (CSRConfig.EXT_DBLTRP) {
+    this.DTE.setRW().withReset(1.U)
+  }
 }
 
 object MarchidField extends CSREnum with ROApply {

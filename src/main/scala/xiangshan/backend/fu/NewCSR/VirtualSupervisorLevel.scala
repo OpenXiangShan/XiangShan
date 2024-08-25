@@ -7,7 +7,7 @@ import freechips.rocketchip.rocket.CSRs
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{VirtMode, CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
-import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, MretEventSinkBundle, MNretEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRConfig.PPNLength
@@ -20,8 +20,11 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsstatus = Module(
     new CSRModule("VSstatus", new SstatusBundle)
       with SretEventSinkBundle
+      with MretEventSinkBundle
+      with MNretEventSinkBundle
       with TrapEntryVSEventSinkBundle
       with HasRobCommitBundle
+      with HasVirtualSupervisorEnvBundle
     {
       when ((robCommit.fsDirty || writeFCSR) && isVirtMode) {
         assert(reg.FS =/= ContextStatus.Off, "The vsstatus.FS should not be Off when set dirty, please check decode")
@@ -32,6 +35,15 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         assert(reg.VS =/= ContextStatus.Off, "The vsstatus.VS should not be Off when set dirty, please check decode")
         reg.VS := ContextStatus.Dirty
       }
+      // when menvcfg or henvcfg.DTE close,  vsstatus.SDT is read-only
+      reg.SDT := Mux(this.menvcfg.DTE.asBool && this.henvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
+      // SDT and SIE is the same as mstatus
+      when (w.wdataFields.SDT.asBool) {
+        reg.SIE := false.B
+      }.elsewhen(!reg.SDT.asBool || !w.wdataFields.SDT.asBool) {
+        reg.SIE := w.wdataFields.SIE.asBool
+      }
+
     }
   )
     .setAddr(CSRs.vsstatus)
@@ -295,4 +307,9 @@ class VSipToHip extends Bundle {
 trait VirtualSupervisorBundle { self: CSRModule[_] =>
   val v = IO(Input(Bool()))
   val hgatp = IO(Input(new HgatpBundle))
+}
+
+trait HasVirtualSupervisorEnvBundle { self: CSRModule[_] =>
+  val menvcfg = IO(Input(new MEnvCfg))
+  val henvcfg = IO(Input(new HEnvCfg))
 }

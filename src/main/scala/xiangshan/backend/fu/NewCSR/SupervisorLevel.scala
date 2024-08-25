@@ -210,6 +210,7 @@ class SstatusBundle extends CSRBundle {
   val XS   = ContextStatusRO(16, 15).withReset(0.U)
   val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U)
   val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U)
+  val SDT  = CSRWARLField   (24, wNoFilter).withReset(1.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty)
 }
