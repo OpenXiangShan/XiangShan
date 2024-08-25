@@ -67,6 +67,8 @@ object CSRConfig {
 
   final val EXT_SSTC = true
 
+  final val EXT_DBLTRP = true
+
   final val PPNLength = 44
 }
 
@@ -347,6 +349,14 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
+  // smdbltrp/ssdbltrp
+  private val m_EX_DT  = entryPrivState.isModeM  && mstatus.regOut.MDT.asBool  && hasTrap
+  private val s_EX_DT  = entryPrivState.isModeHS && mstatus.regOut.SDT.asBool  && hasTrap
+  private val vs_EX_DT = entryPrivState.isModeVS && vsstatus.regOut.SDT.asBool && hasTrap
+
+  val dbltrpToMN     = m_EX_DT && mnstatus.regOut.NMIE // NMI not allow double trap
+  val dbltrpToM      = s_EX_DT || vs_EX_DT
+  val hasDTExcp      = m_EX_DT || s_EX_DT || vs_EX_DT
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -593,6 +603,12 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
+      case m: HasVirtualSupervisorEnvBundle =>
+        m.henvcfg := henvcfg.regOut
+        m.menvcfg := menvcfg.regOut
+      case _ =>
+    }
+    mod match {
       case m: HasIpIeBundle =>
         m.mideleg := mideleg.regOut
         m.mip := mip.rdata
@@ -634,11 +650,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
-  
-  trapEntryMEvent.valid  := hasTrap && entryPrivState.isModeM && !entryDebugMode  && !debugMode && !nmi
-  trapEntryMNEvent.valid := hasTrap && nmi && !debugMode
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
+
+  trapEntryMEvent.valid   := ((hasTrap && entryPrivState.isModeM) || dbltrpToM) && !entryDebugMode && !debugMode && !nmi && !m_EX_DT
+  trapEntryMNEvent.valid  := (hasTrap && nmi)  || dbltrpToMN && !debugMode
+  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && !s_EX_DT
+  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && !vs_EX_DT
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -651,6 +667,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
+        in.hasDTExcp := hasDTExcp
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
@@ -665,6 +682,9 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.vsstatus := vsstatus.regOut
         in.pcFromXtvec := trapHandleMod.io.out.pcFromXtvec
         in.tcontrol := tcontrol.regOut
+
+        in.menvcfg := menvcfg.regOut
+        in.henvcfg := henvcfg.regOut
 
         in.satp  := satp.regOut
         in.vsatp := vsatp.regOut
@@ -682,6 +702,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   mnretEvent.in match {
     case in =>
       in.mstatus := mstatus.regOut
+      in.vsstatus := vsstatus.regOut
       in.mnepc   := mnepc.regOut
       in.mnstatus:= mnstatus.regOut
       in.satp := satp.regOut
@@ -693,6 +714,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   mretEvent.in match {
     case in =>
       in.mstatus := mstatus.regOut
+      in.vsstatus := vsstatus.regOut
       in.mepc := mepc.regOut
       in.tcontrol := tcontrol.regOut
       in.satp := satp.regOut
@@ -704,7 +726,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   sretEvent.in match {
     case in =>
       in.privState := privState
-      in.sstatus := mstatus.sstatus
+      in.mstatus := mstatus.regOut
       in.hstatus := hstatus.regOut
       in.vsstatus := vsstatus.regOut
       in.sepc := sepc.regOut
@@ -951,7 +973,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata2Update              := tdata2Update
   debugMod.io.in.tdata1Wdata               := wdata
 
-  entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
+  entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode && !nmi
 
   trapEntryDEvent.valid                       := entryDebugMode
   trapEntryDEvent.in.hasDebugIntr             := debugMod.io.out.hasDebugIntr

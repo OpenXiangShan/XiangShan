@@ -114,6 +114,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
   val isFetchMalAddr = Input(Bool())
+  val hasDTExcp = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -125,6 +126,9 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val hstatus = Input(new HstatusBundle)
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
+  // envcfg
+  val menvcfg = Input(new MEnvCfg)
+  val henvcfg = Input(new HEnvCfg)
 
   val tcontrol = Input(new TcontrolBundle)
 

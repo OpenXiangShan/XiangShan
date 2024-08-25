@@ -326,6 +326,7 @@ class InterruptFilter extends Module {
   dontTouch(mIRVec)
   dontTouch(hsIRVec)
   dontTouch(vsIRVec)
+  dontTouch(nmiReg)
 }
 
 class InterruptFilterIO extends Bundle {

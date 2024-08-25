@@ -62,14 +62,16 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when (!menvcfg.STCE.asBool) {
+    when(!menvcfg.STCE.asBool) {
       regOut.STCE := 0.U
     }
-    when (!menvcfg.PBMTE) {
+    when(!menvcfg.PBMTE) {
       regOut.PBMTE := 0.U
     }
-  })
-    .setAddr(CSRs.henvcfg)
+    when(!menvcfg.DTE.asBool) {
+      regOut.DTE := 0.U
+    }
+  }).setAddr(CSRs.henvcfg)
 
   val htval = Module(new CSRModule("Htval", new XtvalBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.htval)
@@ -262,6 +264,7 @@ class HedelegBundle extends ExceptionBundle {
   this.EX_LGPF  .setRO().withReset(0.U)
   this.EX_VI    .setRO().withReset(0.U)
   this.EX_SGPF  .setRO().withReset(0.U)
+  this.EX_DT    .setRO().withReset(0.U) // double trap is not delegatable
 }
 
 class HidelegBundle extends InterruptBundle {
@@ -340,6 +343,9 @@ class HEnvCfg extends EnvCfg {
   }
   // Always enable PBMT
   this.PBMTE.setRO().withReset(1.U)
+  if (CSRConfig.EXT_SSTC) {
+    this.DTE.setRW().withReset(1.U)
+  }
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

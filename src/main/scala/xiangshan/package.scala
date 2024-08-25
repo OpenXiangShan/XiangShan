@@ -812,6 +812,7 @@ package object xiangshan {
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def doubleTrap          = 16
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
     def virtualInstr        = 22
@@ -833,6 +834,7 @@ package object xiangshan {
     def EX_IPF    = instrPageFault
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
+    def EX_DT     = doubleTrap
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
     def EX_VI     = virtualInstr
@@ -855,6 +857,7 @@ package object xiangshan {
     def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
 
     def priorities = Seq(
+      doubleTrap,
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
       instrGuestPageFault,

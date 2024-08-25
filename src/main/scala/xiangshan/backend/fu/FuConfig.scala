@@ -299,7 +299,7 @@ object FuConfig {
     piped = false,
     writeIntRf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(illegalInstr, virtualInstr, breakPoint, ecallU, ecallS, ecallVS, ecallM),
+    exceptionOut = Seq(illegalInstr, virtualInstr, doubleTrap, breakPoint, ecallU, ecallS, ecallVS, ecallM),
     flushPipe = true,
   )
 

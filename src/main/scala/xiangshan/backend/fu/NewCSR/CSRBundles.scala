@@ -47,6 +47,7 @@ object CSRBundles {
     val STCE  = RO(    63).withReset(0.U) // Sstc Enable
     val PBMTE = RO(    62).withReset(0.U) // Svpbmt Enable
     val ADUE  = RO(    61).withReset(0.U) // Svadu extension Enable
+    val DTE   = RO(    59).withReset(0.U)
     val PMM   = RO(33, 32).withReset(0.U) // Smnpm extension
     val CBZE  = RO(     7).withReset(0.U) // Zicboz extension
     val CBCFE = RO(     6).withReset(0.U) // Zicbom extension
