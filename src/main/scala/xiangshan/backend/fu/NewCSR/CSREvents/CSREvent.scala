@@ -125,6 +125,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isFetchMalAddr = Input(Bool())
   val isFetchBkpt = Input(Bool())
   val trapIsForVSnonLeafPTE = Input(Bool())
+  val hasDTExcp = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -136,6 +137,9 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val hstatus = Input(new HstatusBundle)
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
+  // envcfg
+  val menvcfg = Input(new MEnvCfg)
+  val henvcfg = Input(new HEnvCfg)
 
   val pcFromXtvec = Input(UInt(XLEN.W))
 

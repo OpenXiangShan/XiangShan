@@ -124,6 +124,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.mstatus.bits.SPP          := current.privState.PRVM.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.mstatus.bits.SPIE         := current.sstatus.SIE
   out.mstatus.bits.SIE          := 0.U
+  out.mstatus.bits.SDT          := in.menvcfg.DTE.asBool // when DTE open set SDT to 1, else SDT is readonly 0
   // hstatus
   out.hstatus.bits.SPV          := current.privState.V
     // SPVP is not PrivMode enum type, so asUInt and shrink the width
