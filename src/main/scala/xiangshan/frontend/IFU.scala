@@ -863,6 +863,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
+  val mmioRVCExpander = Module(new RVCExpander)
+  mmioRVCExpander.io.in := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio){
     val inst  = Cat(f3_mmio_data(1), f3_mmio_data(0))
@@ -872,8 +875,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs(0) := new RVCDecoder(inst, XLEN, fLen, useAddiForMv = true).decode.bits
-
+    io.toIbuffer.bits.instrs(0) := Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
 
     io.toIbuffer.bits.pd(0).valid   := true.B
     io.toIbuffer.bits.pd(0).isRVC   := currentIsRVC
@@ -883,6 +885,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
     io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception =/= ExceptionType.none
+    io.toIbuffer.bits.illegalInstr(0)  := mmioRVCExpander.io.ill
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
 
