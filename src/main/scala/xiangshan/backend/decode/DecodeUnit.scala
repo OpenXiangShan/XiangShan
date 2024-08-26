@@ -24,7 +24,7 @@ import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
-import xiangshan.ExceptionNO.{breakPoint, illegalInstr, virtualInstr}
+import xiangshan.ExceptionNO.{EX_II, breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
@@ -829,7 +829,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType) ||
     io.fromCSR.virtualInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
 
-  decodedInst.exceptionVec(illegalInstr) := exceptionII
+  decodedInst.exceptionVec(illegalInstr) := exceptionII || io.enq.ctrlFlow.exceptionVec(EX_II)
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
 
   //update exceptionVec: from frontend trigger's breakpoint exception. To reduce 1 bit of overhead in ibuffer entry.
