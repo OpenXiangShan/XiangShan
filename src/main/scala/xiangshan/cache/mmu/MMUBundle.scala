@@ -384,7 +384,7 @@ object Pbmt {
   def io:   UInt = "b10".U  // Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O
   def rsvd: UInt = "b11".U  // Reserved for future standard use
   def width: Int = 2
-  
+
   def apply() = UInt(2.W)
   def isUncache(a: UInt) = a===nc || a===io
 }
@@ -687,7 +687,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   def isLeaf() = {
     (perm.r || perm.x || perm.w) && perm.v
   }
-  
+
   def isNext() = {
     !(perm.r || perm.x || perm.w) && perm.v
   }
@@ -718,20 +718,10 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     gpf
   }
 
-  // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits
+  // ppn of Xiangshan is 48 - 12 bits but ppn of sv48 is 44 bits
   // access fault will be raised when ppn >> ppnLen is not zero
-  def isAf(mode: UInt = Sv39): Bool = {
-    val af = WireInit(false.B)
-    if (EnableSv48) {
-      when (mode === Sv39) {
-        af := !(ppn_high === 0.U && ppn(ppnLen - 1, vpnnLen * 3) === 0.U)
-      } .otherwise {
-        af := !(ppn_high === 0.U)
-      }
-    } else {
-      af := !(ppn_high === 0.U)
-    }
-    af
+  def isAf(): Bool = {
+    !(ppn_high === 0.U)
   }
 
   def isStage1Gpf() = {
