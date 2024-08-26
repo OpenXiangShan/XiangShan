@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import coupledL2.PrefetchRecv
+import coupledL2.{PrefetchRecv, RVA23CMOReq, RVA23CMOResp}
 import device.MsiInfoBundle
 import utils._
 import utility._
@@ -237,6 +237,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
+  val cmo_sender  = if (coreParams.HasRVA23CMO) Some(BundleBridgeSource(() => DecoupledIO(new RVA23CMOReq))) else None
+  val cmo_reciver = if (coreParams.HasRVA23CMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new RVA23CMOResp)))) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -1102,6 +1104,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
 
+  // lsq to l2 CMO
+  outer.cmo_sender match {
+    case Some(x) =>
+      x.out.head._1 <> lsq.io.cmoOpReq
+    case None =>
+      lsq.io.cmoOpReq.ready  := false.B
+  }
+  outer.cmo_reciver match {
+    case Some(x) =>
+      x.in.head._1  <> lsq.io.cmoOpResp
+    case None =>
+      lsq.io.cmoOpResp.valid := false.B
+      lsq.io.cmoOpResp.bits  := 0.U.asTypeOf(new RVA23CMOResp)
+  }
+
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
@@ -1542,6 +1559,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer
+  val cmoFlush = lsq.io.flushSbuffer.valid
   val fenceFlush = io.ooo_to_mem.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid || vSegmentUnit.io.flush_sbuffer.valid
   val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
@@ -1549,8 +1567,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
-  assert(!(fenceFlush && atomicsFlush))
-  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
+  assert(!(fenceFlush && atomicsFlush && cmoFlush))
+  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush || cmoFlush)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
@@ -1622,6 +1640,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)
   }
+
+  lsq.io.flushSbuffer.empty := sbuffer.io.sbempty
 
   for (i <- 0 until StaCnt) {
     when (state === s_atomics(i)) {

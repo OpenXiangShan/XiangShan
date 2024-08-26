@@ -252,6 +252,7 @@ case class XSCoreParameters
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
+  HasRVA23CMO: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
@@ -796,6 +797,7 @@ trait HasXSParameter {
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def HasRVA23CMO = coreParams.HasRVA23CMO
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
