@@ -274,6 +274,7 @@ object FuConfig {
       Seq(FpData()),
     ),
     piped = true,
+    writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
     latency = CertainLatency(0),

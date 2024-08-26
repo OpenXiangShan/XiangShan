@@ -33,6 +33,7 @@ import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFi
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.Zimop._
+import yunsuan.{VfaluType, VfcvtType}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -507,6 +508,33 @@ object ZimopDecode extends DecodeConstants {
   )
 }
 
+object ZfaDecode extends DecodeConstants {
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    FLI_H       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
+    FLI_S       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
+    FLI_D       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
+    FMINM_H     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
+    FMINM_S     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
+    FMINM_D     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
+    FMAXM_H     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
+    FMAXM_S     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
+    FMAXM_D     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
+    FROUND_H    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
+    FROUND_S    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
+    FROUND_D    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
+    FROUNDNX_H  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
+    FROUNDNX_S  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
+    FROUNDNX_D  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
+    FCVTMOD_W_D -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fcvtmod_w_d, xWen = T, canRobCompress = T),
+    FLEQ_H      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fleq, xWen = T, canRobCompress = T),
+    FLEQ_S      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fleq, xWen = T, canRobCompress = T),
+    FLEQ_D      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fleq, xWen = T, canRobCompress = T),
+    FLTQ_H      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fltq, xWen = T, canRobCompress = T),
+    FLTQ_S      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fltq, xWen = T, canRobCompress = T),
+    FLTQ_D      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fltq, xWen = T, canRobCompress = T),
+  )
+}
+
 /**
  * XiangShan Trap Decode constants
  */
@@ -759,7 +787,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     HypervisorDecode.table ++
     VecDecoder.table ++
     ZicondDecode.table ++
-    ZimopDecode.table
+    ZimopDecode.table ++
+    ZfaDecode.table
 
   require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
@@ -932,12 +961,18 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFWCVT_XU_F_V, VFWCVT_X_F_V, VFWCVT_RTZ_XU_F_V, VFWCVT_RTZ_X_F_V, VFWCVT_F_XU_V, VFWCVT_F_X_V, VFWCVT_F_F_V,
     VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W,
     VFNCVT_ROD_F_F_W, VFRSQRT7_V, VFREC7_V,
+    // zfa
+    FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D,
+    FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
+    FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D,
+    FCVTMOD_W_D,
   )
 
   private val scalaNeedFrmInsts = Seq(
     FADD_S, FSUB_S, FADD_D, FSUB_D,
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+    FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D,
   )
 
   private val vectorNeedFrmInsts = Seq (
@@ -1022,6 +1057,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isPreR = isSoftPrefetch && inst.RS2 === 1.U(5.W)
   val isPreI = isSoftPrefetch && inst.RS2 === 0.U(5.W)
 
+  // for fli.s|fli.d instruction
+  val isFLI = inst.FUNCT7 === BitPat("b11110??") && inst.RS2 === 1.U && inst.RM === 0.U && inst.OPCODE5Bit === OPCODE5Bit.OP_FP
+
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -1087,6 +1125,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInst.fuOpType := MuxCase(decodedInst.fuOpType, Seq(
     isCsrrVl    -> VSETOpType.csrrvl,
     isCsrrVlenb -> ALUOpType.add,
+    isFLI       -> Cat(1.U, inst.FMT, inst.RS1),
   ))
 
   io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
