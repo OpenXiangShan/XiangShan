@@ -124,9 +124,10 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
         s"The width(${fetchExcp.getWidth}) of fetchExcp should be equal to " +
         s"the width(${ExceptionType.width}) of frontend.ExceptionType."
       )
-      MuxCase(fetchExcp, Seq(
-        rvcIll    -> this.rvcII,
-        crossPage -> Cat(1.U(1.W), fetchExcp),
+      MuxCase(0.U, Seq(
+        crossPage     -> Cat(1.U(1.W), fetchExcp),
+        fetchExcp.orR -> fetchExcp,
+        rvcIll        -> this.rvcII,
       ))
     }
 
