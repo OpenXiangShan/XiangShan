@@ -734,8 +734,10 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     af
   }
 
-  def isStage1Gpf() = {
-    !((Cat(ppn_high, ppn) >> gvpnLen) === 0.U)
+  def isStage1Gpf(mode: UInt) = {
+    val sv39_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv39x4 - offLen)
+    val sv48_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv48x4 - offLen)
+    !(Mux(mode === Sv39, sv39_high, Mux(mode === Sv48, sv48_high, 0.U)) === 0.U)
   }
 
   def getPerm() = {

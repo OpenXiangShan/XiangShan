@@ -584,6 +584,8 @@ trait HasXSParameter {
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
+  def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
   def GPAddrBits = {
     if (EnableSv48)
       coreParams.GPAddrBitsSv48x4
