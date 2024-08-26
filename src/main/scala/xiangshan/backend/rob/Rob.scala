@@ -1343,7 +1343,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // TODO: do expandInst check. traceinfo.inst and uop.inst
 
       when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
-        XSError(traceCollector.io.in(i).bits.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
+        XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
       }
     }
     (0 until CommitWidth).foreach{ case i =>
