@@ -590,9 +590,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode
+  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode && !debugMode
+  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
   Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
