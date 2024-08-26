@@ -658,7 +658,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // TODO: handle sfenceLatch outsize
   if (EnableSv48) {
     when (!flush_dup(2) && refill.levelOH.l3.get && !memPte(2).isLeaf() && !memPte(2).isPf(refill.level_dup(2)) 
-    && Mux(refill.req_info_dup(2).s2xlate === allStage, !memPte(2).isStage1Gpf(), Mux(refill.req_info_dup(2).s2xlate === onlyStage1, !(memPte(2).isAf() || memPte(2).isStage1Gpf()), !memPte(2).isAf()))) {
+    && Mux(refill.req_info_dup(2).s2xlate === allStage, !memPte(2).isStage1Gpf(), Mux(refill.req_info_dup(2).s2xlate === onlyStage1, !(memPte(2).isAf() || memPte(2).isStage1Gpf()), Mux(refill.req_info_dup(2).s2xlate === onlyStage2, !memPte(2).isGpf(refill.level_dup(2)), !memPte(2).isAf())))) {
       val refillIdx = replaceWrapper(l3v.get, ptwl3replace.get.way)
       refillIdx.suggestName(s"Ptwl3RefillIdx")
       val rfOH = UIntToOH(refillIdx)
@@ -688,7 +688,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   when (!flush_dup(2) && refill.levelOH.l2 && !memPte(2).isLeaf() && !memPte(2).isPf(refill.level_dup(2)) 
-  && Mux(refill.req_info_dup(2).s2xlate === allStage || refill.req_info_dup(2).s2xlate === onlyStage1, !memPte(2).isStage1Gpf(), true.B)) {
+    && Mux(refill.req_info_dup(2).s2xlate === allStage, !memPte(2).isStage1Gpf(), Mux(refill.req_info_dup(2).s2xlate === onlyStage1, !(memPte(2).isAf() || memPte(2).isStage1Gpf()), Mux(refill.req_info_dup(2).s2xlate === onlyStage2, !memPte(2).isGpf(refill.level_dup(2)), !memPte(2).isAf())))) {
     val refillIdx = replaceWrapper(l2v, ptwl2replace.way)
     refillIdx.suggestName(s"Ptwl2RefillIdx")
     val rfOH = UIntToOH(refillIdx)
@@ -717,7 +717,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   when (!flush_dup(1) && refill.levelOH.l1 && !memPte(1).isLeaf() && !memPte(1).isPf(refill.level_dup(1)) 
-  && Mux(refill.req_info_dup(1).s2xlate === allStage, !memPte(1).isStage1Gpf(), Mux(refill.req_info_dup(1).s2xlate === onlyStage1, !(memPte(1).isAf() || memPte(1).isStage1Gpf()), !memPte(1).isAf()))) {
+  && Mux(refill.req_info_dup(1).s2xlate === allStage, !memPte(1).isStage1Gpf(), Mux(refill.req_info_dup(1).s2xlate === onlyStage1, !(memPte(1).isAf() || memPte(1).isStage1Gpf()), Mux(refill.req_info_dup(1).s2xlate === onlyStage2, !memPte(1).isGpf(refill.level_dup(1)), !memPte(1).isAf())))) {
     val refillIdx = genPtwL1SetIdx(refill.req_info_dup(1).vpn)
     val victimWay = replaceWrapper(getl1vSet(refill.req_info_dup(1).vpn), ptwl1replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -759,7 +759,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   when (!flush_dup(0) && refill.levelOH.l0
-  && Mux(refill.req_info_dup(0).s2xlate === allStage || refill.req_info_dup(0).s2xlate === onlyStage1, !memPte(0).isStage1Gpf(), true.B)) {
+  && Mux(refill.req_info_dup(0).s2xlate === allStage, !memPte(0).isStage1Gpf(), Mux(refill.req_info_dup(0).s2xlate === onlyStage1, !(memPte(0).isAf() || memPte(0).isStage1Gpf()), Mux(refill.req_info_dup(0).s2xlate === onlyStage2, !memPte(0).isGpf(refill.level_dup(0)), !memPte(0).isAf())))) {
     val refillIdx = genPtwL0SetIdx(refill.req_info_dup(0).vpn)
     val victimWay = replaceWrapper(getl0vSet(refill.req_info_dup(0).vpn), ptwl0replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -802,7 +802,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
 
   // misc entries: super & invalid
-  when (!flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0))) && Mux(refill.req_info_dup(0).s2xlate === noS2xlate, true.B, !memPte(0).isStage1Gpf())) {
+  when (!flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0))) 
+  && Mux(refill.req_info_dup(0).s2xlate === allStage, !memPte(0).isStage1Gpf(), Mux(refill.req_info_dup(0).s2xlate === onlyStage1, !(memPte(0).isAf() || memPte(0).isStage1Gpf()), Mux(refill.req_info_dup(0).s2xlate === onlyStage2, !memPte(0).isGpf(refill.level_dup(0)), !memPte(0).isAf())))) {
     val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
     val rfOH = UIntToOH(refillIdx)
     sp(refillIdx).refill(

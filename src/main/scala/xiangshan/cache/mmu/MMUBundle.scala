@@ -665,8 +665,34 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     (perm.r || perm.x || perm.w) && perm.v
   }
   
+  def isNext() = {
+    !(perm.r || perm.x || perm.w) && perm.v
+  }
+
   def isPf(level: UInt) = {
-    !perm.v || (!perm.r && perm.w) || unaligned(level) || (!isLeaf() && (perm.u || perm.a || perm.d ))
+    val pf = WireInit(false.B)
+    when (isNext()) {
+      pf := (perm.u || perm.a || perm.d )
+    }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+      pf := true.B
+    }.otherwise{
+      unaligned(level)
+    }
+    pf
+  }
+
+  def isGpf(level: UInt) = {
+    val gpf = WireInit(false.B)
+    when (isNext()) {
+      gpf := (perm.u || perm.a || perm.d )
+    }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+      gpf := true.B
+    }.elsewhen (!perm.u) {
+      gpf := true.B
+    }.otherwise{
+      unaligned(level)
+    }
+    gpf
   }
 
   // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits

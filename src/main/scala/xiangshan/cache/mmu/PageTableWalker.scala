@@ -869,7 +869,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val finish = WireInit(false.B)
 
   val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish
-  val pageFault = pte.isPf(level) || (!pte.isLeaf() && level === 0.U)
+  val pageFault = pte.isGpf(level) || (!pte.isLeaf() && level === 0.U)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
   val ppn_af = pte.isAf()
