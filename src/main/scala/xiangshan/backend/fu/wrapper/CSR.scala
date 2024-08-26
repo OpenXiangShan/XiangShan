@@ -153,9 +153,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapInstMod.io.fromRob.flush.valid := io.flush.valid
   trapInstMod.io.fromRob.flush.bits.ftqPtr := io.flush.bits.ftqIdx
   trapInstMod.io.fromRob.flush.bits.ftqOffset := io.flush.bits.ftqOffset
-  trapInstMod.io.faultCsrUop.valid := csrMod.io.out.valid && (csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI)
+  trapInstMod.io.faultCsrUop.valid         := csrMod.io.out.valid && (csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI)
   trapInstMod.io.faultCsrUop.bits.fuOpType := DataHoldBypass(io.in.bits.ctrl.fuOpType, io.in.fire)
-  trapInstMod.io.faultCsrUop.bits.imm := DataHoldBypass(io.in.bits.data.imm, io.in.fire)
+  trapInstMod.io.faultCsrUop.bits.imm      := DataHoldBypass(io.in.bits.data.imm, io.in.fire)
+  trapInstMod.io.faultCsrUop.bits.ftqInfo.ftqPtr    := DataHoldBypass(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
+  trapInstMod.io.faultCsrUop.bits.ftqInfo.ftqOffset := DataHoldBypass(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
   // Clear trap instruction when any trap occurs.
   trapInstMod.io.readClear := csrMod.io.fromRob.trap.valid
 

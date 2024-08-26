@@ -28,6 +28,7 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
     val faultCsrUop = Input(ValidIO(new Bundle {
       val fuOpType = FuOpType()
       val imm      = UInt(Imm_Z().len.W)
+      val ftqInfo  = new FtqInfo
     }))
 
     val readClear = Input(Bool())
@@ -52,6 +53,8 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
   val newCSRInstValid = io.faultCsrUop.valid
   val newCSRInst = WireInit(0.U.asTypeOf(new TrapInstInfo))
   newCSRInst.instr := csrInst
+  newCSRInst.ftqPtr := io.faultCsrUop.bits.ftqInfo.ftqPtr
+  newCSRInst.ftqOffset := io.faultCsrUop.bits.ftqInfo.ftqOffset
 
   when (flush.valid && valid && trapInstInfo.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
     valid := false.B
