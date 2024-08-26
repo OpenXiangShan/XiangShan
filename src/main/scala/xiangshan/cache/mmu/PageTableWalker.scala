@@ -189,7 +189,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   fake_pte.perm.a := true.B
   fake_pte.perm.d := true.B
   fake_pte.ppn := ppn(ppnLen - 1, 0)
-  fake_pte.ppn_high := ppn(pteResLen - ppnLen -1, ppnLen)
+  fake_pte.ppn_high := ppn(pteResLen - 1, ppnLen)
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
