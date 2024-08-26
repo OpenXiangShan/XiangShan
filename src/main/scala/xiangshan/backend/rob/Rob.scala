@@ -35,6 +35,7 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
+import xiangshan.backend.trace._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -106,6 +107,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
+  val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
+  val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
@@ -197,6 +200,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     robBanksRaddrNextLine := robBanksRaddrThisLine
   )
   val robDeqGroup = Reg(Vec(bankNum, new RobCommitEntryBundle))
+  val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
@@ -205,6 +209,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i))
     }
   }
+  
+  // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed, 
+  // that is Necessary when exceptions happen.
+  // Update the ftqIdx and ftqOffset to correctly notify the frontend which instructions have been committed.
+  for (i <- 0 until CommitWidth) {
+    val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt)) +& rawInfo(i).ftqOffset
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + lastOffset.head(1)
+    commitInfo(i).ftqOffset := lastOffset.tail(1)
+  }
+
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
   val debug_microOp = DebugMem(RobSize, new DynInst)
@@ -951,6 +965,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     robEntries(i).vxsat := Mux(!robEntries(i).valid && instCanEnqFlag, 0.U, robEntries(i).vxsat | vxsatRes)
+
+    // trace
+    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
+    val xret = csrWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && io.csr.isXRet).reduce(_ || _)
+
+    when(xret){
+      robEntries(i).traceBlockInPipe.itype := Itype.ExpIntReturn
+    }.elsewhen(Itype.isBranchType(robEntries(i).traceBlockInPipe.itype)){
+      // BranchType code(itype = 5) must be correctly replaced!
+      robEntries(i).traceBlockInPipe.itype := Mux(taken, Itype.Taken, Itype.NonTaken)
+    }
   }
 
   // begin update robBanksRdata

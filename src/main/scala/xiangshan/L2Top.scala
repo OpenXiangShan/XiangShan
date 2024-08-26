@@ -193,6 +193,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
       l2.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
       l2.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+      l2.io.l2_tlb_req.resp.bits.pbmt := l2_tlb_req.resp.bits.pbmt.head
       l2.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
       l2.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
       l2.io.l2_tlb_req.pmp_resp.ld := l2_pmp_resp.ld

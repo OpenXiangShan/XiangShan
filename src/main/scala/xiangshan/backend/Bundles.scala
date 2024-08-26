@@ -22,6 +22,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
+import xiangshan.backend.trace._
 
 object Bundles {
   /**
@@ -195,6 +196,7 @@ object Bundles {
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
     val dirtyVs         = Bool()
+    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst

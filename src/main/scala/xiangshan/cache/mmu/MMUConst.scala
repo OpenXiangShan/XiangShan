@@ -93,9 +93,21 @@ trait HasTlbConst extends HasXSParameter {
   val vpnnLen = 9
   val extendVpnnBits = if (HasHExtension) 2 else 0
   val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
-  val flagLen = 8
-  val pteResLen = XLEN - 44 - 2 - flagLen
-  val ppnHignLen = 44 - ppnLen
+  /*
+    Sv39 page table entry
+    +--+------+--------+----------------------+-----+--------+
+    |63|62  61|60    54|53                  10|9   8|7      0|
+    +--+------+--------+----------------------+-----+--------+
+    |N | PBMT |Reserved|        PPNs          | RSW |  FALG  |
+    +--+------+--------+----------------------+-----+--------+
+  */
+  val pteFlagLen = 8
+  val pteRswLen = 2
+  val ptePPNLen = 44
+  val pteResLen = 7
+  val ptePbmtLen = 2
+  val pteNLen = 1
+  val ppnHignLen = ptePPNLen - ppnLen
   val gvpnLen = GPAddrBits - offLen
 
   val tlbcontiguous = 8
@@ -103,6 +115,7 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
+  val sectorptePPNLen = ptePPNLen - sectortlbwidth
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
   val storefiltersize = if (StorePipelineWidth >= 3) 16 else 8
@@ -268,7 +281,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def MakeAddr(ppn: UInt, off: UInt) = {
     require(off.getWidth == 9)
-    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
+    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))
   }
 
   def MakeGPAddr(ppn: UInt, off: UInt) = {

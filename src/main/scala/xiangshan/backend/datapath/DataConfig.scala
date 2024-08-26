@@ -34,11 +34,16 @@ object DataConfig {
 
   def VAddrBits(implicit p: Parameters): Int = {
     def coreParams = p(XSCoreParamsKey)
-    def HasHExtension = coreParams.HasHExtension
-    if(HasHExtension){
-      coreParams.GPAddrBits
-    }else{
-      coreParams.VAddrBits
+    if (coreParams.HasHExtension) {
+      if (coreParams.EnableSv48)
+        coreParams.GPAddrBitsSv48x4
+      else
+        coreParams.GPAddrBitsSv39x4
+    } else {
+      if (coreParams.EnableSv48)
+        coreParams.VAddrBitsSv48
+      else
+        coreParams.VAddrBitsSv39
     }
     // VAddrBits is Virtual Memory addr bits
   }

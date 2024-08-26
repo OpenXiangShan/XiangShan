@@ -68,8 +68,10 @@ case class XSCoreParameters
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
-  VAddrBits: Int = 48,
-  GPAddrBits: Int = 50,
+  VAddrBitsSv39: Int = 39,
+  GPAddrBitsSv39x4: Int = 41,
+  VAddrBitsSv48: Int = 48,
+  GPAddrBitsSv48x4: Int = 50,
   HasFPU: Boolean = true,
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
@@ -532,6 +534,10 @@ case class XSCoreParameters
     ),
     iqWakeUpParams,
   )
+
+  // Parameters for trace extension.
+  // Trace parameters is useful for XSTOP.
+  val TraceGroupNum          = 3 // Width to Encoder
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -579,17 +585,34 @@ trait HasXSParameter {
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  def GPAddrBits = coreParams.GPAddrBits
+  def GPAddrBits = {
+    if (EnableSv48)
+      coreParams.GPAddrBitsSv48x4
+    else 
+      coreParams.GPAddrBitsSv39x4
+  }
   def VAddrBits = {
     if (HasHExtension) {
-      coreParams.GPAddrBits
+      if (EnableSv48)
+        coreParams.GPAddrBitsSv48x4
+      else
+        coreParams.GPAddrBitsSv39x4
     } else {
-      coreParams.VAddrBits
+      if (EnableSv48)
+        coreParams.VAddrBitsSv48
+      else
+        coreParams.VAddrBitsSv39
     }
   } // VAddrBits is Virtual Memory addr bits
   require(PAddrBits == 48 || !EnableSv48) // Paddr bits should be 48 when Sv48 enable
 
-  def VAddrMaxBits = coreParams.VAddrBits max coreParams.GPAddrBits
+  def VAddrMaxBits = {
+    if(EnableSv48) {
+      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
+    } else {
+      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
+    }
+  }
 
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
@@ -837,4 +860,7 @@ trait HasXSParameter {
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
   protected def TriggerChainMaxLength = 2
+
+  // Parameters for Trace extension
+  def TraceGroupNum          = coreParams.TraceGroupNum
 }

@@ -380,8 +380,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
+
+  // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
-  val f2_mmio         = fromICache(0).bits.mmio && f2_exception(0) === ExceptionType.none
+  val f2_mmio         = f2_exception(0) === ExceptionType.none && (
+    fromICache(0).bits.pmp_mmio ||
+      // currently, we do not distinguish between Pbmt.nc and Pbmt.io
+      // anyway, they are both non-cacheable, and should be handled with mmio fsm and sent to Uncache module
+      Pbmt.isUncache(fromICache(0).bits.itlb_pbmt)
+  )
+
 
   /**
     * reduce the number of registers, origin code
