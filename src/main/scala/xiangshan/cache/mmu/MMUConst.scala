@@ -93,9 +93,20 @@ trait HasTlbConst extends HasXSParameter {
   val vpnnLen = 9
   val extendVpnnBits = if (HasHExtension) 2 else 0
   val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
-  val flagLen = 8
+  /*
+    Sv39 page table entry
+    +--+------+--------+----------------------+-----+--------+
+    |63|62  61|60    54|53                  10|9   8|7      0|
+    +--+------+--------+----------------------+-----+--------+
+    |N | PBMT |Reserved|        PPNs          | RSW |  FALG  |
+    +--+------+--------+----------------------+-----+--------+
+  */
+  val pteFlagLen = 8
+  val pteRswLen = 2
   val ptePPNLen = 44
-  val pteResLen = XLEN - ptePPNLen - 2 - flagLen
+  val pteResLen = 7
+  val ptePbmtLen = 2
+  val pteNLen = 1
   val ppnHignLen = ptePPNLen - ppnLen
   val gvpnLen = GPAddrBits - offLen
 

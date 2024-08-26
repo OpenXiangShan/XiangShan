@@ -1272,7 +1272,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     })
   }
 
-  // Uncahce
+  // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable

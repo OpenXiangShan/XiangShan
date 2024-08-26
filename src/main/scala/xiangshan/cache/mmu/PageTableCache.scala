@@ -37,16 +37,19 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   val hit = Bool()
   val pre = Bool()
   val ppn = UInt(gvpnLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
   val perm = new PtePermBundle()
   val ecc = Bool()
   val level = UInt(2.W)
   val v = Bool()
 
-  def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
+  def apply(hit: Bool, pre: Bool, ppn: UInt, pbmt: UInt = 0.U,
+            perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
             ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
+    this.pbmt := pbmt
     this.perm := perm
     this.ecc := ecc && hit
     this.level := level
@@ -59,17 +62,21 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   val hit = Bool()
   val pre = Bool()
   val ppn = Vec(tlbcontiguous, UInt(gvpnLen.W))
+  val pbmt = Vec(tlbcontiguous, UInt(ptePbmtLen.W))
   val perm = Vec(tlbcontiguous, new PtePermBundle())
   val ecc = Bool()
   val level = UInt(2.W)
   val v = Vec(tlbcontiguous, Bool())
   val af = Vec(tlbcontiguous, Bool())
 
-  def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B), accessFault: Vec[Bool] = Vec(tlbcontiguous, true.B)): Unit = {
+  def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], pbmt: Vec[UInt] = Vec(tlbcontiguous, 0.U),
+            perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B),
+            accessFault: Vec[Bool] = Vec(tlbcontiguous, true.B)): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
+    this.pbmt := pbmt
     this.perm := perm
     this.ecc := ecc && hit
     this.level := level
@@ -300,6 +307,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // l3
   val l3Hit = if(EnableSv48) Some(Wire(Bool())) else None
   val l3HitPPN = if(EnableSv48) Some(Wire(UInt(ppnLen.W))) else None
+  val l3HitPbmt = if(EnableSv48) Some(Wire(UInt(ptePbmtLen.W))) else None
   val l3Pre = if(EnableSv48) Some(Wire(Bool())) else None
   val ptwl3replace = if(EnableSv48) Some(ReplacementPolicy.fromString(l2tlbParams.l3Replacer, l2tlbParams.l3Size)) else None
   if (EnableSv48) {
@@ -311,6 +319,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // stageDelay, but check for l3
     val hitPPN = DataHoldBypass(ParallelPriorityMux(hitVec zip l3.get.map(_.ppn)), stageDelay_valid_1cycle)
+    val hitPbmt = DataHoldBypass(ParallelPriorityMux(hitVec zip l3.get.map(_.pbmt)), stageDelay_valid_1cycle)
     val hitPre = DataHoldBypass(ParallelPriorityMux(hitVec zip l3.get.map(_.prefetch)), stageDelay_valid_1cycle)
     val hit = DataHoldBypass(ParallelOR(hitVec), stageDelay_valid_1cycle)
 
@@ -329,12 +338,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // synchronize with other entries with RegEnable
     l3Hit.map(_ := RegEnable(hit, stageDelay(1).fire))
     l3HitPPN.map(_ := RegEnable(hitPPN, stageDelay(1).fire))
+    l3HitPbmt.map(_ := RegEnable(hitPbmt, stageDelay(1).fire))
     l3Pre.map(_ := RegEnable(hitPre, stageDelay(1).fire))
   }
 
   // l2
   val ptwl2replace = ReplacementPolicy.fromString(l2tlbParams.l2Replacer, l2tlbParams.l2Size)
-  val (l2Hit, l2HitPPN, l2Pre) = {
+  val (l2Hit, l2HitPPN, l2HitPbmt, l2Pre) = {
     val hitVecT = l2.zipWithIndex.map {
       case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search =/= noS2xlate)
         && l2v(i) && h_search === l2h(i))
@@ -343,6 +353,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // stageDelay, but check for l2
     val hitPPN = DataHoldBypass(ParallelPriorityMux(hitVec zip l2.map(_.ppn)), stageDelay_valid_1cycle)
+    val hitPbmt = DataHoldBypass(ParallelPriorityMux(hitVec zip l2.map(_.pbmt)), stageDelay_valid_1cycle)
     val hitPre = DataHoldBypass(ParallelPriorityMux(hitVec zip l2.map(_.prefetch)), stageDelay_valid_1cycle)
     val hit = DataHoldBypass(ParallelOR(hitVec), stageDelay_valid_1cycle)
 
@@ -361,12 +372,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // synchronize with other entries with RegEnable
     (RegEnable(hit, stageDelay(1).fire),
      RegEnable(hitPPN, stageDelay(1).fire),
+     RegEnable(hitPbmt, stageDelay(1).fire),
      RegEnable(hitPre, stageDelay(1).fire))
   }
 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer,l2tlbParams.l1nWays,l2tlbParams.l1nSets)
-  val (l1Hit, l1HitPPN, l1Pre, l1eccError) = {
+  val (l1Hit, l1HitPPN, l1HitPbmt, l1Pre, l1eccError) = {
     val ridx = genPtwL1SetIdx(vpn_search)
     l1.io.r.req.valid := stageReq.fire
     l1.io.r.req.bits.apply(setIdx = ridx)
@@ -418,7 +430,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
     XSDebug(stageCheck_valid_1cycle, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL1SectorIdx(check_vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${vVec}\n")
 
-    (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError)
+    (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.pbmts(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError)
   }
 
   // l0
@@ -478,6 +490,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     (hit, hitWayData, hitWayData.prefetch, eccError)
   }
   val l0HitPPN = l0HitData.ppns
+  val l0HitPbmt = l0HitData.pbmts
   val l0HitPerm = l0HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL0SectorSize, new PtePermBundle)))
   val l0HitValid = l0HitData.vs
   val l0HitAf = l0HitData.af
@@ -511,10 +524,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   val check_res = Wire(new PageCacheRespBundle)
   check_res.l3.map(_.apply(l3Hit.get, l3Pre.get, l3HitPPN.get))
-  check_res.l2.apply(l2Hit, l2Pre, l2HitPPN)
-  check_res.l1.apply(l1Hit, l1Pre, l1HitPPN, ecc = l1eccError)
-  check_res.l0.apply(l0Hit, l0Pre, l0HitPPN, l0HitPerm, l0eccError, valid = l0HitValid, accessFault = l0HitAf)
-  check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel, spValid)
+  check_res.l2.apply(l2Hit, l2Pre, l2HitPPN, l2HitPbmt)
+  check_res.l1.apply(l1Hit, l1Pre, l1HitPPN, l1HitPbmt, ecc = l1eccError)
+  check_res.l0.apply(l0Hit, l0Pre, l0HitPPN, l0HitPbmt, l0HitPerm, l0eccError, valid = l0HitValid, accessFault = l0HitAf)
+  check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitData.pbmt, spHitPerm, false.B, spHitLevel, spValid)
 
   val resp_res = Reg(new PageCacheRespBundle)
   when (stageCheck(1).fire) { resp_res := check_res }
@@ -572,6 +585,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.entry.level.map(_ := Mux(resp_res.l0.hit, 0.U, resp_res.sp.level))
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
   io.resp.bits.toHptw.resp.entry.ppn := Mux(resp_res.l0.hit, resp_res.l0.ppn(idx), resp_res.sp.ppn)(ppnLen - 1, 0)
+  io.resp.bits.toHptw.resp.entry.pbmt := Mux(resp_res.l0.hit, resp_res.l0.pbmt(idx), resp_res.sp.pbmt)
   io.resp.bits.toHptw.resp.entry.perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(idx), resp_res.sp.perm))
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
@@ -622,6 +636,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
           Mux(resp_res.l1.hit, resp_res.l1.v,
             resp_res.l2.v)))
     }
+    io.resp.bits.stage1.entry(i).pbmt := Mux(resp_res.l0.hit, resp_res.l0.pbmt(i),
+      Mux(resp_res.sp.hit, resp_res.sp.pbmt,
+        Mux(resp_res.l1.hit, resp_res.l1.pbmt,
+          resp_res.l2.pbmt)))
     io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l0.hit, resp_res.l0.perm(i),  Mux(resp_res.sp.hit, resp_res.sp.perm, 0.U.asTypeOf(new PtePermBundle))))
     io.resp.bits.stage1.entry(i).pf := !io.resp.bits.stage1.entry(i).v
     io.resp.bits.stage1.entry(i).af := Mux(resp_res.l0.hit, resp_res.l0.af(i), false.B)
