@@ -824,8 +824,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.wakeup.bits := s0_wakeup_uop
 
   // prefetch.i(Zicbop)
-  io.ifetchPrefetch.valid := s0_int_iss_select && s0_sel_src.prf_i
-  io.ifetchPrefetch.bits.vaddr := s0_out.vaddr
+  io.ifetchPrefetch.valid := RegNext(s0_int_iss_select && s0_sel_src.prf_i)
+  io.ifetchPrefetch.bits.vaddr := RegEnable(s0_out.vaddr, 0.U, s0_int_iss_select && s0_sel_src.prf_i)
 
   XSDebug(io.dcache.req.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.pc)}, vaddr ${Hexadecimal(s0_dcache_vaddr)}\n"
