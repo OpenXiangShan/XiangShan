@@ -676,7 +676,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     }.elsewhen (!perm.v || (!perm.r && perm.w)) {
       pf := true.B
     }.otherwise{
-      unaligned(level)
+      pf := unaligned(level)
     }
     pf
   }
@@ -690,7 +690,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     }.elsewhen (!perm.u) {
       gpf := true.B
     }.otherwise{
-      unaligned(level)
+      pf := unaligned(level)
     }
     gpf
   }
