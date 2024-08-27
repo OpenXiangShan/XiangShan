@@ -947,29 +947,7 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
 
-      } .elsewhen (isWline) {
-        val storeCommit = io.in(i).fire && io.in(i).bits.vecValid
-        val blockAddr = get_block_addr(io.in(i).bits.addr)
-
-        difftestCommon.coreid := io.hartId
-        difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
-        difftestCommon.valid  := storeCommit
-        difftestCommon.addr   := blockAddr
-        difftestCommon.data   := io.in(i).bits.data
-        difftestCommon.mask   := ((1 << wordBytes) - 1).U
-
-        for (index <- 1 until WlineMaxNumber) {
-          val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
-
-          difftest.coreid := io.hartId
-          difftest.index  := (i*VecMemFLOWMaxNumber + index).U
-          difftest.valid  := storeCommit && isWline
-          difftest.addr   := blockAddr + (index.U << wordOffBits)
-          difftest.data   := io.in(i).bits.data
-          difftest.mask   := ((1 << wordBytes) - 1).U
-        }
-        assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
-      } .otherwise{
+      } .elsewhen (!isWline) {
         val storeCommit       = io.in(i).fire
         val waddr             = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
         val sbufferMask       = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
@@ -984,6 +962,38 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
 
+      } .otherwise {
+        difftestCommon.coreid := 0.U
+        difftestCommon.index  := 0.U
+        difftestCommon.valid  := 0.U
+        difftestCommon.addr   := 0.U
+        difftestCommon.data   := 0.U
+        difftestCommon.mask   := 0.U
+      }
+
+      for (index <- 0 until WlineMaxNumber) {
+        val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
+
+        val storeCommit = io.in(i).fire && io.in(i).bits.vecValid
+        val blockAddr = get_block_addr(io.in(i).bits.addr)
+
+        when (isWline) {
+          difftest.coreid := io.hartId
+          difftest.index  := (i*VecMemFLOWMaxNumber + index).U
+          difftest.valid  := storeCommit
+          difftest.addr   := blockAddr + (index.U << wordOffBits)
+          difftest.data   := io.in(i).bits.data
+          difftest.mask   := ((1 << wordBytes) - 1).U
+          
+          assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
+        } .otherwise {
+          difftest.coreid := 0.U
+          difftest.index  := 0.U
+          difftest.valid  := 0.U
+          difftest.addr   := 0.U
+          difftest.data   := 0.U
+          difftest.mask   := 0.U
+        }
       }
 
       // Only the interface used by the 'unit-store' and 'whole' vector store instr
