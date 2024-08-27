@@ -397,7 +397,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // mmio and exception
   io.lsq_replenish := s2_out
-  io.lsq_replenish.af := s2_out.af && !s2_kill
+  io.lsq_replenish.af := s2_out.af && s2_valid && !s2_kill
 
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
