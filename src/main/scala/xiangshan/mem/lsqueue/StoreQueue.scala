@@ -34,7 +34,7 @@ import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.ExceptionNO._
-import coupledL2.{RVA23CMOReq, RVA23CMOResp}
+import coupledL2.{CMOReq, CMOResp}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -167,8 +167,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
     val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is, write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
-    val cmoOpReq  = DecoupledIO(new RVA23CMOReq)
-    val cmoOpResp = Flipped(DecoupledIO(new RVA23CMOResp))
+    val cmoOpReq  = DecoupledIO(new CMOReq)
+    val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))

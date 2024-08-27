@@ -29,7 +29,7 @@ import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
-import coupledL2.{RVA23CMOReq, RVA23CMOResp}
+import coupledL2.{CMOReq, CMOResp}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -115,8 +115,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
-    val cmoOpReq  = DecoupledIO(new RVA23CMOReq)
-    val cmoOpResp = Flipped(DecoupledIO(new RVA23CMOResp))
+    val cmoOpReq  = DecoupledIO(new CMOReq)
+    val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
     val flushSbuffer = new SbufferFlushBundle
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())

@@ -836,7 +836,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  WPUEnable: " + dwpuParam.enWPU)
   println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
   println("  WPUAlgorithm: " + dwpuParam.algoName)
-  println("  HasRVA23CMO: " + HasRVA23CMO)
+  println("  HasCMO: " + HasCMO)
 
   // Enable L1 Store prefetch
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
