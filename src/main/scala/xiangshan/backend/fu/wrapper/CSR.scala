@@ -10,6 +10,7 @@ import xiangshan.backend.fu.util._
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import device._
 import system.HasSoCParameter
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.TrapInstInfo
 import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
@@ -158,8 +159,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapInstMod.io.faultCsrUop.bits.imm      := DataHoldBypass(io.in.bits.data.imm, io.in.fire)
   trapInstMod.io.faultCsrUop.bits.ftqInfo.ftqPtr    := DataHoldBypass(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
   trapInstMod.io.faultCsrUop.bits.ftqInfo.ftqOffset := DataHoldBypass(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
-  // Clear trap instruction when any trap occurs.
-  trapInstMod.io.readClear := csrMod.io.fromRob.trap.valid
+  // Clear trap instruction when instruction fault trap(EX_II, EX_VI) occurs.
+  trapInstMod.io.readClear := (csrMod.io.fromRob.trap match {
+    case t =>
+      t.valid && !t.bits.isInterrupt && (t.bits.trapVec(EX_II) || t.bits.trapVec(EX_VI))
+  })
 
   private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
   imsic.i.hartId := io.csrin.get.hartId
@@ -187,7 +191,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.fromAIA.vstopei := imsic.o.vstopei
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
-  import ExceptionNO._
+
   exceptionVec(EX_BP    ) := isEbreak
   exceptionVec(EX_MCALL ) := isEcall && privState.isModeM
   exceptionVec(EX_HSCALL) := isEcall && privState.isModeHS
