@@ -62,7 +62,7 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when (!menvcfg.STCE.asBool && !privState.isModeM && accessStimecmp) {
+    when (!menvcfg.STCE.asBool) {
       regOut.STCE := 0.U
     }
   })
