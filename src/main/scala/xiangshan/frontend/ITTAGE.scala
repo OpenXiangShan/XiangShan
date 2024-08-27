@@ -435,7 +435,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   //updating read
   val u_req_buff_valid = RegInit(false.B)
-  val u_req_stall_ftq  = RegInit(false.B)
   val delay_full_target = RegInit(0.U.asTypeOf(update.full_target)) //if update target need buffer
   val delay_u_pc     = RegInit(0.U.asTypeOf(update.pc))
   val delay_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
@@ -472,13 +471,11 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   //For reading during updates, even if there are no conflicts, it is necessary to block FTQ and store the update information.
   //Release when it can be written
   when(updateValid){
-    u_req_stall_ftq := true.B
     delay_full_target := update.full_target
     delay_u_pc := update.pc
     delay_updateMisPred := update.mispred_mask(numBr)
     delay_ufolded_hist := ufolded_hist
   }.elsewhen(u_req_valid_reg){
-    u_req_stall_ftq := false.B
     delay_full_target := 0.U.asTypeOf(update.full_target)
     delay_ufolded_hist := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
     delay_updateMisPred := update.mispred_mask(numBr)
@@ -627,7 +624,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
   //if ittage table has conflict need block ftq update req
-  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_stall_ftq
+  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_buff_valid
   XSPerfAccumulate("ittage_update_not_ready", io.update.ready)
   val ittage_updateMask_and_read_conflict = RegNext(updateMask.reduce(_||_)) && io.s1_fire(3) && s1_isIndirect
   XSPerfAccumulate("ittage_updateMask_and_read_conflict", ittage_updateMask_and_read_conflict)
