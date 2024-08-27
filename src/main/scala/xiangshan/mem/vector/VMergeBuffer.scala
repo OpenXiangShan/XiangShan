@@ -187,8 +187,11 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
       io.fromPipeline(j).valid)).orR
   }
-  dontTouch(mergePortMatrix)
-  dontTouch(mergedByPrevPortVec)
+
+  if (backendParams.debugEn){
+    dontTouch(mergePortMatrix)
+    dontTouch(mergedByPrevPortVec)
+  }
 
   // for exception, select exception, when multi port writeback exception, we need select oldest one
   def selectOldest[T <: VecPipelineFeedbackIO](valid: Seq[Bool], bits: Seq[T], sel: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
