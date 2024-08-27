@@ -9,7 +9,7 @@ src/main/scala/xiangshan/frontend/FrontendBundle.scala @eastonman
 src/main/scala/xiangshan/frontend/FTB.scala @eastonman
 src/main/scala/xiangshan/frontend/IBuffer.scala @eastonman
 src/main/scala/xiangshan/frontend/ITTAGE.scala @eastonman
-src/main/scala/xiangshan/frontend/newRAS.scala @eastonman
+src/main/scala/xiangshan/frontend/RAS.scala @eastonman @my-mayfly
 src/main/scala/xiangshan/frontend/SC.scala @eastonman
 src/main/scala/xiangshan/frontend/Tage.scala @eastonman
 src/main/scala/xiangshan/frontend/WrBypass.scala @eastonman
