@@ -174,9 +174,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       ats.io.valid := req(idx).valid && portTranslateEnable(idx)
       ats.io.vaddr := req(idx).bits.vaddr
       // next cycle
-      val paddr = ats.io.paddr
-      val hit = ats.io.hit // always should be hit, this hit is not use for ptw
-
+      // always should be hit, this hit is not use for ptw
+      val (paddr, hit) = if (Block(idx)) {
+        (DataHoldBypass(ats.io.paddr, RegNext(req_in(idx).fire)),
+         DataHoldBypass(ats.io.hit, RegNext(req_in(idx).fire)))
+      } else {
+        (ats.io.paddr, ats.io.hit)
+      }
       hitVec(idx) := true.B
       missVec(idx) := false.B
       pmp_addr(idx) := paddr
@@ -190,8 +194,22 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         excep.af := 0.U.asTypeOf(new TlbExceptionBundle)
       }
 
+      when (vmEnable(idx) && resp(idx).valid && !TlbCmd.isExec(req_out(idx).cmd)) {
+        XSError(!ats.io.hit, s"Memory TLB(?)(port ${idx}) should always hit")
+      }
       XSError(resp(idx).bits.miss, s"TLB $idx should not miss")
       XSError(resp(idx).bits.ptwBack, s"TLB $idx should not ptwBack")
+
+      val result_ok = req_in.map(a => GatedValidRegNext(a.fire))
+      if (Block(idx)) {
+        XSPerfAccumulate(s"tracetlb_access${idx}",result_ok(idx) && portTranslateEnable(idx))
+        XSPerfAccumulate(s"tracetlb_miss${idx}", result_ok(idx) && !hit)
+      } else {
+        XSPerfAccumulate("tracetlb_first_access" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && RegEnable(req(idx).bits.debug.isFirstIssue, req(idx).valid))
+        XSPerfAccumulate("tracetlb_access" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx))
+        XSPerfAccumulate("tracetlb_first_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !hit && RegEnable(req(idx).bits.debug.isFirstIssue, req(idx).valid))
+        XSPerfAccumulate("tracetlb_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !hit)
+      }
     }
     io.ptw.req.map(_.valid := false.B)
 
