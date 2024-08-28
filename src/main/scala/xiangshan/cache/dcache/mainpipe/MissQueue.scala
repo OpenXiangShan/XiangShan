@@ -595,11 +595,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
-    acquire_not_sent && (req.isFromLoad || req.isFromPrefetch) && (new_req.isFromLoad || new_req.isFromStore)
+    acquire_not_sent && (new_req.isFromLoad || new_req.isFromStore)
   }
 
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
-    data_not_refilled && (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
+    data_not_refilled && new_req.isFromLoad
   }
   
   // Note that late prefetch will be ignored
