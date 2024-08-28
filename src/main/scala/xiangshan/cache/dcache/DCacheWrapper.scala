@@ -832,6 +832,46 @@ class TreeArbiter[T <: MissReqWoStoreData](val gen: T, val n: Int) extends Modul
   io.out.valid := !grant.last || io.in.last.valid
 }
 
+class DCacheMEQueryIOBundle(implicit p: Parameters) extends DCacheBundle
+{
+  val req              = ValidIO(new MissReqWoStoreData)
+  val primary_ready    = Input(Bool())
+  val secondary_ready  = Input(Bool())
+  val secondary_reject = Input(Bool())
+}
+
+class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
+{
+  val req    = ValidIO(new MissReq)
+  val ready  = Input(Bool())
+}
+
+class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val in = Vec(n, Flipped(DecoupledIO(new MissReq)))
+    val queryMQ = Vec(n, new DCacheMQQueryIOBundle)
+  })
+
+  val mqReadyVec = io.queryMQ.map(_.ready)
+
+  io.queryMQ.zipWithIndex.foreach{
+    case (q, idx) => {
+      q.req.valid := io.in(idx).valid
+      q.req.bits  := io.in(idx).bits
+    }
+  }
+  io.in.zipWithIndex.map {
+    case (r, idx) => {
+      if (idx == 0) {
+        r.ready := mqReadyVec(idx)
+      } else {
+        r.ready := mqReadyVec(idx) && !Cat(io.in.slice(0, idx).map(_.valid)).orR
+      }
+    }
+  }
+
+}
+
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
@@ -917,12 +957,22 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.dump()
 
   //----------------------------------------
+  // miss queue
+  // missReqArb port:
+  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
+  // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
+  // higher priority is given to lower indices
+  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
+  val MainPipeMissReqPort = 0
+  val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
+
+  //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
   // val refillPipe   = Module(new RefillPipe)
-  val missQueue    = Module(new MissQueue(edge))
+  val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
 
@@ -1312,27 +1362,26 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
-  //----------------------------------------
-  // miss queue
-  // missReqArb port:
-  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
-  // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
-  // higher priority is given to lower indices
-  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
-  val MainPipeMissReqPort = 0
-  val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
-
   // Request
   val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))
+  // seperately generating miss queue enq ready for better timeing
+  val missReadyGen = Module(new MissReadyGen(MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
-  for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  missReadyGen.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
+  for (w <- 0 until backendParams.LduCnt) {
+    missReqArb.io.in(w + 1) <> ldu(w).io.miss_req
+    missReadyGen.io.in(w + 1) <> ldu(w).io.miss_req
+  }
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp
 
   if(StorePrefetchL1Enabled) {
-    for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req }
+    for (w <- 0 until backendParams.StaCnt) {
+      missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req
+      missReadyGen.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req
+    }
   }else {
     for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
   }
@@ -1348,11 +1397,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     if (StorePrefetchL1Enabled) {
       when (ldu(HybridLoadReqPort).io.miss_req.valid) {
         missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+        missReadyGen.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
       } .otherwise {
         missReqArb.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
+        missReadyGen.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
       }
     } else {
       missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+      missReadyGen.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
     }
   }
 
@@ -1369,6 +1421,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
 
   missReqArb.io.out <> missQueue.io.req
+  missReadyGen.io.queryMQ <> missQueue.io.queryMQ
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
