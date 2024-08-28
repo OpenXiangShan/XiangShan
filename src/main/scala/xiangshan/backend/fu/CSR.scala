@@ -26,7 +26,7 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.frontend.tracertl.{TraceRTLChoose}
+import xiangshan.frontend.tracertl.{TraceRTLDontCare, TraceRTLChoose}
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
@@ -1273,7 +1273,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(13, Bool()))
-  val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie)
+  val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie) || TraceRTLChoose(false.B, true.B)
   intrVecEnable.zip(idelegS.asBools).zip(idelegVS.asBools).map{case((x,y),z) => x := privilegedEnableDetect(y, z) && !disableInterrupt}
   val intrVec = Cat(debugIntr && !debugMode, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
   val intrBitSet = intrVec.orR
@@ -1287,6 +1287,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
   mipWire.e.s := csrio.externalInterrupt.seip
+
+  // When TraceRTL, disable external interrupt
+  TraceRTLDontCare(mipWire)
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
