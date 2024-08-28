@@ -104,11 +104,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
 
-  val isIllegalInstVec = VecInit(inValids.zip(decoders.map(_.io.deq.decodedInst.exceptionVec)).map{
-    case (valid, exceptionVec) => valid && (exceptionVec(ExceptionNO.EX_II) || exceptionVec(ExceptionNO.EX_VI))
+  val isIllegalInstVec = VecInit(outValids.zip(io.out.map(_.bits)).map {
+    case (valid, decodedInst) =>
+      valid && (decodedInst.exceptionVec(ExceptionNO.EX_II) || decodedInst.exceptionVec(ExceptionNO.EX_VI))
   })
-  val hasIllegalInst =  Cat(isIllegalInstVec).orR
-  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(decoders.map(_.io.deq.decodedInst)),0.U.asTypeOf(new DecodedInst))
+  val hasIllegalInst = Cat(isIllegalInstVec).orR
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(io.out.map(_.bits)), 0.U.asTypeOf(new DecodedInst))
 
   val complexNum = Wire(UInt(3.W))
   // (0, 1, 2, 3, 4, 5) + complexNum
