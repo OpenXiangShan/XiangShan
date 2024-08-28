@@ -233,7 +233,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
                in)
   }
 
-  io.toCSR.trapInstInfo.valid := hasIllegalInst
+  io.toCSR.trapInstInfo.valid := hasIllegalInst && !io.redirect
   io.toCSR.trapInstInfo.bits.fromDecodedInst(illegalInst)
 
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))

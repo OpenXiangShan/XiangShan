@@ -150,7 +150,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
 
-  trapInstMod.io.fromDecode.trapInstInfo := io.csrin.get.trapInstInfo
+  trapInstMod.io.fromDecode.trapInstInfo := RegNextWithEnable(io.csrin.get.trapInstInfo, hasInit = true)
   trapInstMod.io.fromRob.flush.valid := io.flush.valid
   trapInstMod.io.fromRob.flush.bits.ftqPtr := io.flush.bits.ftqIdx
   trapInstMod.io.fromRob.flush.bits.ftqOffset := io.flush.bits.ftqOffset
