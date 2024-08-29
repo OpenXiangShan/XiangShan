@@ -402,7 +402,15 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
     val dcache_data = respDcacheData
     val use_D = forward_D && forward_result_valid
     val use_mshr = forward_mshr && forward_result_valid
-    Mux(use_D, forwardData_D.asUInt, Mux(use_mshr, forwardData_mshr.asUInt, dcache_data))
+    Mux(
+      use_D || use_mshr,
+      Mux(
+        use_D,
+        forwardData_D.asUInt,
+        forwardData_mshr.asUInt
+      ),
+      dcache_data
+    )
   }
 
   def mergeLsqFwdData(dcacheData: UInt): UInt = {
