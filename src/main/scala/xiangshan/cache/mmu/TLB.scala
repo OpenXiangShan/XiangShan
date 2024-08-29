@@ -171,16 +171,18 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   if (env.TraceRTLMode) {
     (0 until Width).foreach { case idx: Int =>
       val ats = Module(new TraceFakeMMU())
-      ats.io.valid := req(idx).valid && portTranslateEnable(idx)
+      ats.io.valid := req(idx).valid
       ats.io.vaddr := req(idx).bits.vaddr
       // next cycle
       // always should be hit, this hit is not use for ptw
-      val (paddr, hit) = if (Block(idx)) {
+      val (ats_paddr, ats_hit) = if (Block(idx)) {
         (DataHoldBypass(ats.io.paddr, RegNext(req_in(idx).fire)),
          DataHoldBypass(ats.io.hit, RegNext(req_in(idx).fire)))
       } else {
         (ats.io.paddr, ats.io.hit)
       }
+      val paddr = Mux(portTranslateEnable(idx), ats_paddr, SignExt(req_out(idx).vaddr, PAddrBits))
+      val hit   = Mux(portTranslateEnable(idx), ats_hit, true.B)
       hitVec(idx) := true.B
       missVec(idx) := false.B
       pmp_addr(idx) := paddr
