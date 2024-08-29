@@ -1091,6 +1091,14 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     )
   }
 
+  def isLeaf() = {
+    (entry.perm.get.r || entry.perm.get.x || entry.perm.get.w) && entry.v
+  }
+
+  def isFakePte() = {
+    !pf && !entry.v
+  }
+
   def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
     require(vpn.getWidth == vpnLen)
     //    require(this.asid.getWidth <= asid.getWidth)
@@ -1148,7 +1156,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
     ptw_resp.pf := pf
     ptw_resp.af := af
-    ptw_resp.v := !pf
+    ptw_resp.v := resp_pte.perm.v
     ptw_resp.prefetch := DontCare
     ptw_resp.asid := asid
     ptw_resp.vmid.map(_ := vmid)

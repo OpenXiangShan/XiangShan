@@ -182,7 +182,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
   val fake_pte = 0.U.asTypeOf(new PteBundle())
-  fake_pte.perm.v := true.B
+  fake_pte.perm.v := false.B // tell L1TLB this is fake pte
   fake_pte.perm.r := true.B
   fake_pte.perm.w := true.B
   fake_pte.perm.x := true.B
@@ -255,20 +255,20 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (mode === Sv48) {
         level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
         af_level := Mux(req.l2Hit, 1.U, Mux(req.l3Hit.get, 2.U, 3.U))
-        gpf_level := Mux(req.l2Hit, 2.U, Mux(req.l3Hit.get, 3.U, 3.U))
+        gpf_level := Mux(req.l2Hit, 2.U, Mux(req.l3Hit.get, 3.U, 0.U))
         ppn := Mux(req.l2Hit || req.l3Hit.get, io.req.bits.ppn, satp.ppn)
         l3Hit := req.l3Hit.get
       } .otherwise {
         level := Mux(req.l2Hit, 1.U, 2.U)
         af_level := Mux(req.l2Hit, 1.U, 2.U)
-        gpf_level := 2.U
+        gpf_level := 0.U
         ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
         l3Hit := false.B
       }
     } else {
       level := Mux(req.l2Hit, 1.U, 2.U)
       af_level := Mux(req.l2Hit, 1.U, 2.U)
-      gpf_level := 2.U
+      gpf_level := 0.U
       ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
       l3Hit := false.B
     }
@@ -362,7 +362,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := af_level - 1.U
     s_llptw_req := false.B
     mem_addr_update := true.B
-    gpf_level := Mux(!pte_valid && !(l3Hit || l2Hit), gpf_level, gpf_level - 1.U)
+    gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
   }
 
