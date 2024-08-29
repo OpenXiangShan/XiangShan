@@ -470,6 +470,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s3_out.debug.vaddr     := s3_in.vaddr
   s3_out.debug.isPerfCnt := false.B
 
+  if (env.TraceRTLMode) {
+    when (s3_valid) {
+      XSError(s3_in.mmio && s3_in.paddr >= 0x80000000L.U, "LoadUnit, paddr should not be mmio")
+      XSError(!s3_in.mmio && s3_in.paddr < 0x80000000L.U, "LoadUnit, paddr should be mmio")
+    }
+  }
+
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage x

@@ -1399,6 +1399,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.debug.vaddr     := s3_in.vaddr
 
   TraceRTLDontCare(s3_out.bits.uop.exceptionVec)
+  if (env.TraceRTLMode) {
+    when (s3_valid) {
+      XSError(s3_in.mmio && s3_in.paddr >= 0x80000000L.U, "LoadUnit, paddr should not be mmio")
+      XSError(!s3_in.mmio && s3_in.paddr < 0x80000000L.U, "LoadUnit, paddr should be mmio")
+    }
+  }
 
   // Vector load, writeback to merge buffer
   // TODO: Add assertion in merge buffer, merge buffer must accept vec load writeback
