@@ -50,7 +50,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
 
   when(valid && isInterrupt) {
     assert(
-      (InterruptNO.getVS ++ InterruptNO.getHS).map(_.U === trapCode).reduce(_ || _),
+      (InterruptNO.getVS ++ InterruptNO.getLocal).map(_.U === trapCode).reduce(_ || _),
       "The VS mode can only handle VSEI, VSTI, VSSI and local interrupts"
     )
   }
