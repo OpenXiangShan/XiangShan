@@ -266,9 +266,17 @@ class ITTageTable
     bitmask = update_bitmask
   )
 
-  io.req.ready := true.B // !io.update.valid
-  // io.req.ready := !bank_conflict
-
+  // Power-on reset
+  val powerOnResetState = RegInit(true.B)
+  when(table.io.r.req.ready) {
+    // When all the SRAM first reach ready state, we consider power-on reset is done
+    powerOnResetState := false.B
+  }
+  // Do not use table banks io.r.req.ready directly
+  // All table_banks are single port SRAM, ready := !wen
+  // We do not want write request block the whole BPU pipeline
+  // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
+  io.req.ready := !powerOnResetState
 
   val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
 
@@ -586,7 +594,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
-  XSPerfAccumulate("ittage_write_blocks_read", !io.s1_ready)
   XSPerfAccumulate("ittage_used", io.s1_fire(0) && s1_isIndirect)
   XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
 
