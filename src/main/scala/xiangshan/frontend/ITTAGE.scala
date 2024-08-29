@@ -108,6 +108,7 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
 class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   val provider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
   val altProvider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
+  val altDiffers = Bool()
   val providerU = Bool()
   val providerCtr = UInt(ITTageCtrBits.W)
   val altProviderCtr = UInt(ITTageCtrBits.W)
@@ -117,8 +118,6 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
-
-  def altDiffers = Mux(altProvider.valid, altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
 
   override def toPrintable = {
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
@@ -499,6 +498,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   resp_meta.provider.bits     := s3_provider
   resp_meta.altProvider.valid := s3_altProvided
   resp_meta.altProvider.bits  := s3_altProvider
+  resp_meta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
   resp_meta.providerU         := s3_providerU
   resp_meta.providerCtr       := s3_providerCtr
   resp_meta.altProviderCtr    := s3_altProviderCtr
