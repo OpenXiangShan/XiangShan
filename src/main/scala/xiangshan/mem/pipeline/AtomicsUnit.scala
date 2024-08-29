@@ -199,7 +199,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st || pmp.ld
+    val exception_pa = pmp.st || pmp.ld || pmp.mmio
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -209,8 +209,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
     // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || (pmp.ld || pmp.mmio) && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || (pmp.ld || pmp.mmio) && !isLr
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
