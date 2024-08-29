@@ -849,9 +849,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * debug_begin
    */
-
-  val tdata1Update  = tdata1.w.wen
-  val tdata2Update  = tdata2.w.wen
+  val tdata1Selected = Wire(new Tdata1Bundle)
+  tdata1Selected := tdata1.rdata
+  val dmodeInSelectedTrigger = tdata1Selected.DMODE.asBool
+  val triggerCanWrite = dmodeInSelectedTrigger && debugMode || !dmodeInSelectedTrigger
+  val tdata1Update  = tdata1.w.wen && triggerCanWrite
+  val tdata2Update  = tdata2.w.wen && triggerCanWrite
   val tdata1Vec = tdata1RegVec.map{ mod => {
     val tdata1Wire = Wire(new Tdata1Bundle)
     tdata1Wire := mod.rdata
