@@ -285,7 +285,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val scommit = GatedRegNext(io.rob.scommit)
 
   // RegNext misalign control for better timing
-  val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr))
+  val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr) && !isVec(deqPtr))
   val finishMisalignSt = GatedValidRegNext(doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException)
   val misalignBlock = doMisalignSt && !finishMisalignSt
   

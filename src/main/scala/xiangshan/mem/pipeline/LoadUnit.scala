@@ -1355,7 +1355,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
   // connect to misalignBuffer
-  io.misalign_buf.valid := io.lsq.ldin.valid && io.csrCtrl.hd_misalign_ld_enable
+  io.misalign_buf.valid := io.lsq.ldin.valid && io.csrCtrl.hd_misalign_ld_enable && !io.lsq.ldin.bits.isvec
   io.misalign_buf.bits  := s3_in
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
@@ -1386,7 +1386,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
 
   val s3_exception = ExceptionNO.selectByFu(s3_in.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
-  val s3_mis_align = s3_valid && s3_in.uop.exceptionVec(loadAddrMisaligned) && io.csrCtrl.hd_misalign_ld_enable
+  val s3_mis_align = s3_valid && s3_in.uop.exceptionVec(loadAddrMisaligned) && io.csrCtrl.hd_misalign_ld_enable && !s3_in.isvec
   when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
     io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
   } .otherwise {
