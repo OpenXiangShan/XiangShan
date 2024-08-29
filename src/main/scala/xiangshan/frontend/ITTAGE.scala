@@ -476,7 +476,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerInfo.target),
     (altProvided && providerNull, altProviderInfo.target),
-    (!provided || providerNull && !altProvided, baseTarget)
+    (!provided, baseTarget)
   ))
   s2_provided       := provided
   s2_provider       := providerInfo.tableIdx
