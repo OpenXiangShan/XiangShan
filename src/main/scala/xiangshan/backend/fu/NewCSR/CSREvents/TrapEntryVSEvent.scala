@@ -7,8 +7,9 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
+import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 
 class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -17,7 +18,7 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc = ValidIO(new TargetPCBundle)
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -103,6 +104,12 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
   ))
 
+  private val instrAddrTransType = AddrTransType(
+    bare = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Bare,
+    sv39 = vsatp.MODE === SatpMode.Sv39,
+    sv39x4 = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4
+  )
+
   out := DontCare
 
   out.privState.valid := valid
@@ -123,7 +130,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := highPrioTrapNO
   out.vstval.bits.ALL            := Mux(isFetchMalAddr, 1.U << (XLEN - 1), tval)
-  out.targetPc.bits              := in.pcFromXtvec
+  out.targetPc.bits.pc           := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF    := instrAddrTransType.checkGuestPageFault(in.pcFromXtvec)
 
   dontTouch(tvalFillGVA)
 }

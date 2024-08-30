@@ -8,6 +8,7 @@ import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 
 class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -19,7 +20,7 @@ class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val mtval2    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtinst    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val tcontrol  = ValidIO((new TcontrolBundle).addInEvent(_.MPTE, _.MTE))
-  val targetPc  = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc  = ValidIO(new TargetPCBundle)
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -132,7 +133,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mtinst.bits.ALL           := 0.U
   out.tcontrol.bits.MPTE        := in.tcontrol.MTE
   out.tcontrol.bits.MTE         := 0.U
-  out.targetPc.bits             := in.pcFromXtvec
+  out.targetPc.bits.pc          := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF    := false.B
+  out.targetPc.bits.raiseIAF    := AddrTransType(bare = true).checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF   := false.B
 
   dontTouch(isLSGuestExcp)
   dontTouch(tvalFillGVA)

@@ -9,6 +9,7 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, Priv
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 
 class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -21,7 +22,7 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val stval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc  = ValidIO(new TargetPCBundle)
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -108,6 +109,12 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     (isLSGuestExcp                     ) -> trapMemGPA,
   ))
 
+  private val instrAddrTransType = AddrTransType(
+    bare = satp.MODE === SatpMode.Bare,
+    sv39 = satp.MODE === SatpMode.Sv39,
+    sv39x4 = false.B
+  )
+
   out := DontCare
 
   out.privState.valid := valid
@@ -136,7 +143,10 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.stval.bits.ALL            := Mux(isFetchMalAddr, 1.U << (XLEN - 1), tval)
   out.htval.bits.ALL            := tval2 >> 2
   out.htinst.bits.ALL           := 0.U
-  out.targetPc.bits             := in.pcFromXtvec
+  out.targetPc.bits.pc          := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF   := false.B
 
   dontTouch(isLSGuestExcp)
   dontTouch(tvalFillGVA)

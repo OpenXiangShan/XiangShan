@@ -220,7 +220,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
-  redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc
+  redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc.pc
+  redirect.cfiUpdate.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
+  redirect.cfiUpdate.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
+  redirect.cfiUpdate.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 

@@ -11,7 +11,7 @@ import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, HgatpMode, PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
@@ -127,7 +127,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val EX_VI = Bool()
       val flushPipe = Bool()
       val rData = UInt(64.W)
-      val targetPc = UInt(VaddrMaxWidth.W)
+      val targetPc = new TargetPCBundle
       val regOut = UInt(64.W)
       // perf
       val isPerfCnt = Bool()
@@ -636,6 +636,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
       in.tcontrol := tcontrol.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   sretEvent.valid := legalSret
@@ -647,6 +650,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.vsstatus := vsstatus.regOut
       in.sepc := sepc.regOut
       in.vsepc := vsepc.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   dretEvent.valid := legalDret
@@ -655,6 +661,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.dcsr := dcsr.regOut
       in.dpc  := dpc.regOut
       in.mstatus := mstatus.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   PRVM := MuxCase(

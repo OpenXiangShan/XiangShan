@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import chisel3.experimental.BundleLiterals._
 import utility._
 import utils._
 import xiangshan.backend.decode.{ImmUnion, XDecode}
@@ -614,6 +615,18 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
   def checkAccessFault(target: UInt): Bool = bare && target(XLEN - 1, PAddrBits).orR
   def checkPageFault(target: UInt): Bool = sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt
   def checkGuestPageFault(target: UInt): Bool = sv39x4 && target(XLEN - 1, 41).orR
+}
+
+object AddrTransType {
+  def apply(bare: Boolean = false, sv39: Boolean = false, sv39x4: Boolean = false)(implicit p: Parameters): AddrTransType =
+    (new AddrTransType).Lit(_.bare -> bare.B, _.sv39 -> sv39.B, _.sv39x4 -> sv39x4.B)
+  def apply(bare: Bool, sv39: Bool, sv39x4: Bool)(implicit p: Parameters): AddrTransType = {
+    val addrTransType = Wire(new AddrTransType)
+    addrTransType.bare := bare
+    addrTransType.sv39 := sv39
+    addrTransType.sv39x4 := sv39x4
+    addrTransType
+  }
 }
 
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {

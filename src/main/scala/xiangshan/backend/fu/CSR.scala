@@ -29,6 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.ExceptionInfo
+import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
@@ -92,7 +93,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val exception = Flipped(ValidIO(new ExceptionInfo))
   // to ROB
   val isXRet = Output(Bool())
-  val trapTarget = Output(UInt(VAddrBits.W))
+  val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
   // from LSQ
@@ -1433,7 +1434,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret || illegalVSModeSret, isXRet)
 
   private val xtvec = Mux(delegS, Mux(delegVS, vstvec, stvec), mtvec)
-  private val xtvecBase = xtvec(VAddrBits - 1, 2)
+  private val xtvecBase = xtvec(XLEN - 1, 2)
   // When MODE=Vectored, all synchronous exceptions into M/S mode
   // cause the pc to be set to the address in the BASE field, whereas
   // interrupts cause the pc to be set to the address in the BASE field

@@ -118,7 +118,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
 
   val tcontrol = Input(new TcontrolBundle)
 
-  val pcFromXtvec = Input(UInt(VaddrMaxWidth.W))
+  val pcFromXtvec = Input(UInt(XLEN.W))
 
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
@@ -126,4 +126,11 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   // from mem
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+}
+
+class TargetPCBundle extends Bundle {
+  val pc = UInt(VaddrMaxWidth.W)
+  val raiseIPF = Bool()
+  val raiseIAF = Bool()
+  val raiseIGPF = Bool()
 }

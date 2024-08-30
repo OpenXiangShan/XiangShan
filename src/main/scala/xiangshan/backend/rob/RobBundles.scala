@@ -32,6 +32,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
+import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
@@ -211,7 +212,7 @@ object RobPtr {
 
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
-  val trapTarget = Input(UInt(VAddrBits.W))
+  val trapTarget = Input(new TargetPCBundle)
   val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
 
