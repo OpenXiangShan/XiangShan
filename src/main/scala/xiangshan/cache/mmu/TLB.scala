@@ -192,6 +192,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
+    resp(i).bits.fastMiss := !hit && enable
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))

@@ -516,6 +516,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(GPAddrBits.W)))
   val miss = Output(Bool())
+  val fastMiss = Output(Bool())
   val excp = Vec(nDups, new Bundle {
     val gpf = new TlbExceptionBundle()
     val pf = new TlbExceptionBundle()
