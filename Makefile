@@ -116,9 +116,6 @@ endif
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
-ifeq ($(GOALS),verilog)
-RELEASE_ARGS += --disable-always-basic-diff
-endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)

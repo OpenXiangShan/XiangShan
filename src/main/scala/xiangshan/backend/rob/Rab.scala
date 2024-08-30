@@ -46,7 +46,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
-    val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
+    val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
 
     val status = Output(new Bundle {
       val walkEnd = Bool()

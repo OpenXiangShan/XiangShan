@@ -344,11 +344,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
   dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
   dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
-  dataPath.io.debugIntRat    .foreach(_ := ctrlBlock.io.debug_int_rat.get)
-  dataPath.io.debugFpRat     .foreach(_ := ctrlBlock.io.debug_fp_rat.get)
-  dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
-  dataPath.io.debugV0Rat     .foreach(_ := ctrlBlock.io.debug_v0_rat.get)
-  dataPath.io.debugVlRat     .foreach(_ := ctrlBlock.io.debug_vl_rat.get)
+  dataPath.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
+  dataPath.io.diffFpRat .foreach(_ := ctrlBlock.io.diff_fp_rat.get)
+  dataPath.io.diffVecRat.foreach(_ := ctrlBlock.io.diff_vec_rat.get)
+  dataPath.io.diffV0Rat .foreach(_ := ctrlBlock.io.diff_v0_rat.get)
+  dataPath.io.diffVlRat .foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
@@ -443,7 +443,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   // csr not store the value of vl, so when using difftest we assign the value of vl to debugVl
   val debugVl_s0 = WireInit(UInt(VlData().dataWidth.W), 0.U)
   val debugVl_s1 = WireInit(UInt(VlData().dataWidth.W), 0.U)
-  debugVl_s0 := dataPath.io.debugVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
+  debugVl_s0 := dataPath.io.diffVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
   debugVl_s1 := RegNext(debugVl_s0)
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid

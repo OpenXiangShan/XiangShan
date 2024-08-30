@@ -607,11 +607,11 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat    .foreach(_ := rat.io.diff_int_rat.get)
-  io.debug_fp_rat     .foreach(_ := rat.io.diff_fp_rat.get)
-  io.debug_vec_rat    .foreach(_ := rat.io.diff_vec_rat.get)
-  io.debug_v0_rat.foreach(_ := rat.io.diff_v0_rat.get)
-  io.debug_vl_rat.foreach(_ := rat.io.diff_vl_rat.get)
+  io.diff_int_rat.foreach(_ := rat.io.diff_int_rat.get)
+  io.diff_fp_rat .foreach(_ := rat.io.diff_fp_rat.get)
+  io.diff_vec_rat.foreach(_ := rat.io.diff_vec_rat.get)
+  io.diff_v0_rat .foreach(_ := rat.io.diff_v0_rat.get)
+  io.diff_vl_rat .foreach(_ := rat.io.diff_vl_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
@@ -715,11 +715,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vec_rat     = if (params.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_v0_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vl_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_int_rat = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_fp_rat  = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vec_rat = if (params.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_v0_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
