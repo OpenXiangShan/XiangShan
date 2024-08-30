@@ -181,8 +181,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       } else {
         (ats.io.paddr, ats.io.hit)
       }
-      val paddr = Mux(portTranslateEnable(idx), ats_paddr, SignExt(req_out(idx).vaddr, PAddrBits))
-      val hit   = Mux(portTranslateEnable(idx), ats_hit, true.B)
+      val paddr = ats_paddr
+      val hit = ats_hit
       hitVec(idx) := true.B
       missVec(idx) := false.B
       pmp_addr(idx) := paddr
