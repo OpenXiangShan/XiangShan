@@ -313,8 +313,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
 
   s1_out.uop.flushPipe                := false.B
-  s1_out.uop.trigger                  := storeTrigger.io.toStore.triggerAction
-  s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(storeTrigger.io.toStore.triggerAction)
+  s1_out.uop.trigger                  := storeTrigger.io.toLoadStore.triggerAction
+  s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(storeTrigger.io.toLoadStore.triggerAction)
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf

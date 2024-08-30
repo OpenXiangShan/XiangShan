@@ -111,7 +111,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqDeqPtr = Output(new SqPtr)
     val exceptionAddr = new ExceptionAddrIO
     val flushFrmMaBuf = Input(Bool())
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -201,7 +200,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
  // loadQueue.io.refill              <> io.refill
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
-  loadQueue.io.trigger             <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.flushFrmMaBuf       := io.flushFrmMaBuf
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt

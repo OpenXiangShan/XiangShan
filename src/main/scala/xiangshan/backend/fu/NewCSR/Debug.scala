@@ -194,7 +194,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
       val vaddr = UInt(VAddrBits.W)
     })
 
-    val toStore = Output(new Bundle{
+    val toLoadStore = Output(new Bundle{
       val triggerAction = TriggerAction()
     })
   })
@@ -225,5 +225,5 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
   val triggerAction = Wire(TriggerAction())
   TriggerUtil.triggerActionGen(triggerAction, triggerCanFireVec, actionVec, triggerCanRaiseBpExp)
 
-  io.toStore.triggerAction := triggerAction
+  io.toLoadStore.triggerAction := triggerAction
 }

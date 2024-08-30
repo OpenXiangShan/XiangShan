@@ -1001,7 +1001,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.ldin
-    lsq.io.trigger(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.trigger
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(StaCnt + i) <> hybridUnits(i).io.stu_io.st_mask_out
 

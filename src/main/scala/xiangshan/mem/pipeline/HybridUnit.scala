@@ -640,13 +640,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.lateKill          := s1_late_kill
 
-  // trigger
+  // store trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))
   storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+  storeTrigger.io.fromStore.vaddr                     := s1_vaddr
 
   when (s1_ld_flow) {
     when (!s1_late_kill) {
@@ -663,8 +663,21 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
     s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
     s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
-    s1_out.uop.trigger                             := storeTrigger.io.toStore.triggerAction
-    s1_out.uop.exceptionVec(breakPoint)            := TriggerAction.isExp(storeTrigger.io.toStore.triggerAction)
+    s1_out.uop.trigger                             := storeTrigger.io.toLoadStore.triggerAction
+    s1_out.uop.exceptionVec(breakPoint)            := TriggerAction.isExp(storeTrigger.io.toLoadStore.triggerAction)
+  }
+
+  // load trigger
+  val loadTrigger = Module(new MemTrigger(MemType.LOAD))
+  loadTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
+  loadTrigger.io.fromStore.vaddr                     := s1_vaddr
+
+  when (s1_ld_flow) {
+    s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(loadTrigger.io.toLoadStore.triggerAction)
+    s1_out.uop.trigger := loadTrigger.io.toLoadStore.triggerAction
   }
 
   // pointer chasing
@@ -1315,21 +1328,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   sx_last_ready  := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.stout.ready
   io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect) && FuType.isStore(sx_last_in.uop.fuType)
   io.stout.bits  := sx_last_in
-
-   // trigger
-  val ld_trigger = FuType.isLoad(io.ldout.bits.uop.fuType)
-  val last_valid_data = RegEnable(io.ldout.bits.data, io.stout.fire)
-  val hit_ld_addr_trig_hit_vec = Wire(Vec(TriggerNum, Bool()))
-  val lq_ld_addr_trig_hit_vec = RegNext(io.ldu_io.lsq.trigger.lqLoadAddrTriggerHitVec)
-  (0 until TriggerNum).map{i => {
-    val tdata2    = RegNext(RegNext(io.ldu_io.trigger(i).tdata2))
-    val matchType = RegNext(RegNext(io.ldu_io.trigger(i).matchType))
-    val tEnable   = RegNext(RegNext(io.ldu_io.trigger(i).tEnable))
-
-    hit_ld_addr_trig_hit_vec(i)        := TriggerCmp(RegNext(s3_in.vaddr), tdata2, matchType, tEnable)
-    io.ldu_io.trigger(i).addrHit       := Mux(io.ldout.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-  }}
-  io.ldu_io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
   // FIXME: please move this part to LoadQueueReplay
   io.ldu_io.debug_ls := DontCare

@@ -29,7 +29,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
-import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
@@ -82,7 +82,6 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val forward         = new PipeLoadForwardQueryIO
   val stld_nuke_query = new LoadNukeQueryIO
   val ldld_nuke_query = new LoadNukeQueryIO
-  val trigger         = Flipped(new LqTriggerIO)
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -970,6 +969,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.mshrid := s1_out.mshrid
   io.forward_mshr.paddr  := s1_out.paddr
 
+  val loadTrigger = Module(new MemTrigger(MemType.LOAD))
+  loadTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
+  loadTrigger.io.fromStore.vaddr                     := s1_vaddr
+
+  s1_out.uop.trigger                  := loadTrigger.io.toLoadStore.triggerAction
+  s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(loadTrigger.io.toLoadStore.triggerAction)
+
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(s1_out.paddr)}, mmio ${s1_out.mmio}\n")
@@ -1561,20 +1570,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.l2l_fwd_out.data := DontCare
     io.l2l_fwd_out.dly_ld_err := DontCare
   }
-
-   // trigger
-  val last_valid_data = RegNext(RegEnable(io.ldout.bits.data, io.ldout.fire))
-  val hit_ld_addr_trig_hit_vec = Wire(Vec(TriggerNum, Bool()))
-  val lq_ld_addr_trig_hit_vec = io.lsq.trigger.lqLoadAddrTriggerHitVec
-  (0 until TriggerNum).map{i => {
-    val tdata2    = GatedRegNext(io.trigger(i).tdata2)
-    val matchType = RegNext(io.trigger(i).matchType)
-    val tEnable   = RegNext(io.trigger(i).tEnable)
-
-    hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegEnable(s2_out.vaddr, 0.U, s2_valid), tdata2, matchType, tEnable)
-    io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-  }}
-  io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
   // s1
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
