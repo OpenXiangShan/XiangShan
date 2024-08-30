@@ -696,6 +696,8 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     val pf = WireInit(false.B)
     when (reserved =/= 0.U){
       pf := true.B
+    }.elsewhen(pbmt === 3.U){
+      pf := true.B
     }.elsewhen (isNext()) {
       pf := (perm.u || perm.a || perm.d || n =/= 0.U || pbmt =/= 0.U)
     }.elsewhen (!perm.v || (!perm.r && perm.w)) {
