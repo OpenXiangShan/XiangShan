@@ -778,6 +778,7 @@ package object xiangshan {
     def VEC_US_LDST      = "b110001".U // vector unit-strided load/store
     def VEC_S_LDST       = "b110010".U // vector strided load/store
     def VEC_I_LDST       = "b110011".U // vector indexed load/store
+    def VEC_US_FF_LD     = "b110100".U // vector unit-stride fault-only-first load
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW
