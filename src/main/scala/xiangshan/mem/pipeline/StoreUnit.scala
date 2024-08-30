@@ -348,7 +348,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
-  val s2_mis_align    = s2_in.uop.exceptionVec(storeAddrMisaligned) && io.csrCtrl.hd_misalign_st_enable && !s2_in.isvec
+  val s2_mis_align    = io.csrCtrl.hd_misalign_st_enable && !s2_in.isvec &&
+                        s2_in.uop.exceptionVec(storeAddrMisaligned) && !s2_in.uop.exceptionVec(breakPoint)
   val s2_frm_mabuf    = s2_in.isFrmMisAlignBuf
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
 

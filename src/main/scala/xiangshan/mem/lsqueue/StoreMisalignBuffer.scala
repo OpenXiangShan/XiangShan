@@ -116,7 +116,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
-  val s2_miss_aligned = s2_req.map(x => x.uop.exceptionVec(storeAddrMisaligned))
+  val s2_miss_aligned = s2_req.map(x => x.uop.exceptionVec(storeAddrMisaligned) && !x.uop.exceptionVec(breakPoint))
 
   val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
   for (w <- 0 until enqPortNum) {
