@@ -222,16 +222,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr        = RegEnable(s0_req_vaddr,        0.U.asTypeOf(s0_req_vaddr),      s0_fire)
-  val s1_req_ptags        = RegEnable(s0_req_ptags,        0.U.asTypeOf(s0_req_ptags),      s0_fire)
-  val s1_req_gpaddr       = RegEnable(s0_req_gpaddr,       0.U.asTypeOf(s0_req_gpaddr),     s0_fire)
-  val s1_doubleline       = RegEnable(s0_doubleline,       0.U.asTypeOf(s0_doubleline),     s0_fire)
-  val s1_SRAMhits         = RegEnable(s0_hits,             0.U.asTypeOf(s0_hits),           s0_fire)
-  val s1_itlb_exception   = RegEnable(s0_itlb_exception,   0.U.asTypeOf(s0_itlb_exception), s0_fire)
-  val s1_excp_fromBackend = RegEnable(s0_excp_fromBackend, false.B,                         s0_fire)
-  val s1_itlb_pbmt        = RegEnable(s0_itlb_pbmt,        0.U.asTypeOf(s0_itlb_pbmt),      s0_fire)
-  val s1_waymasks         = RegEnable(s0_waymasks,         0.U.asTypeOf(s0_waymasks),       s0_fire)
-  val s1_meta_corrupt     = RegEnable(s0_meta_corrupt,     0.U.asTypeOf(s0_meta_corrupt),   s0_fire)
+  val s1_req_vaddr        = RegEnable(s0_req_vaddr,        0.U.asTypeOf(s0_req_vaddr),     s0_fire)
+  val s1_req_ptags        = RegEnable(s0_req_ptags,        0.U.asTypeOf(s0_req_ptags),     s0_fire)
+  val s1_req_gpaddr       = RegEnable(s0_req_gpaddr,       0.U.asTypeOf(s0_req_gpaddr),    s0_fire)
+  val s1_doubleline       = RegEnable(s0_doubleline,       0.U.asTypeOf(s0_doubleline),    s0_fire)
+  val s1_SRAMhits         = RegEnable(s0_hits,             0.U.asTypeOf(s0_hits),          s0_fire)
+  val s1_itlb_exception   = RegEnable(s0_exception_out,    0.U.asTypeOf(s0_exception_out), s0_fire)
+  val s1_excp_fromBackend = RegEnable(s0_excp_fromBackend, false.B,                        s0_fire)
+  val s1_itlb_pbmt        = RegEnable(s0_itlb_pbmt,        0.U.asTypeOf(s0_itlb_pbmt),     s0_fire)
+  val s1_waymasks         = RegEnable(s0_waymasks,         0.U.asTypeOf(s0_waymasks),      s0_fire)
+  val s1_meta_corrupt     = RegEnable(s0_meta_corrupt,     0.U.asTypeOf(s0_meta_corrupt),  s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx)
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
