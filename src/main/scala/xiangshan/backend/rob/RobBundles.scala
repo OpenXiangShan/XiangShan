@@ -83,8 +83,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
+    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
+    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
 
@@ -119,8 +119,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
+    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
+    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
     val dirtyFs = Bool()
