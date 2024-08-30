@@ -763,10 +763,10 @@ object VecDecoder extends DecodeConstants {
     VSOXEI32_V    -> VST(SrcType.vp,  VstuType.vsoxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     VSOXEI64_V    -> VST(SrcType.vp,  VstuType.vsoxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     // 7.7. Unit-stride Fault-Only-First Loads
-    VLE8FF_V      -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE16FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE32FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE64FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
+    VLE8FF_V      -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE16FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE32FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE64FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
     // 7.8. Vector Load/Store Segment Instructions
     // 7.8.1. Vector Unit-Stride Segment Loads and Stores
     // TODO
