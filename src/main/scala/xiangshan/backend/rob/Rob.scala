@@ -305,7 +305,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitSizeSum = PriorityMuxDefault(commitSizeSumCond.reverse.zip(commitSizeSumSeq.reverse), 0.U)
   val walkSizeSum   = PriorityMuxDefault(walkSizeSumCond.reverse.zip(walkSizeSumSeq.reverse), 0.U)
 
-  rab.io.fromRob.commitSize := commitSizeSum
+  val deqVlsExceptionNeedCommit = RegInit(false.B)
+  val deqVlsExceptionCommitSize = RegInit(0.U(log2Up(MaxUopSize + 1).W))
+  val deqVlsCanCommit= RegInit(false.B)
+  rab.io.fromRob.commitSize := Mux(deqVlsExceptionNeedCommit, deqVlsExceptionCommitSize, commitSizeSum)
   rab.io.fromRob.walkSize := walkSizeSum
   rab.io.snpt := io.snpt
   rab.io.snpt.snptEnq := snptEnq
@@ -530,6 +533,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException
   val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
+  val deqIsVlsException = deqHasException && deqPtrEntry.isVls
+  // delay 2 cycle wait exceptionGen out
+  deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w))
+  when(deqIsVlsException && deqVlsCanCommit){
+    deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
+    deqVlsExceptionNeedCommit := true.B
+  }.elsewhen(state === s_idle) {
+    deqVlsExceptionNeedCommit := false.B
+  }
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
   XSDebug(deqHasException && TriggerAction.isDmode(exceptionDataRead.bits.trigger), "Debug Mode: Deq has trigger entry debug Mode\n")
@@ -544,7 +556,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
-  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException || isFlushPipe) && !lastCycleFlush
+  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   io.flushOut.bits.isRVC := deqDispatchData.isRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
@@ -1123,7 +1135,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
     exc_wb.bits.vstartEn := false.B //wb.bits.vstartEn.getOrElse(false.B) // todo need add vstart in ExuOutput
-    exc_wb.bits.vstart := 0.U //wb.bits.vstart.getOrElse(0.U)
+    exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
     //    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
     //      s"flushPipe ${configs.exists(_.flushPipe)}, " +
     //      s"replayInst ${configs.exists(_.replayInst)}")
