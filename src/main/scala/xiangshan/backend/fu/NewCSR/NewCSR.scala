@@ -287,6 +287,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     pmpCSROutMap
 
   // interrupt
+  val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
+  when(nonMaskableIRP.NMI) {
+    nmip.NMI := true.B
+  }
+
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
   intrMod.io.in.mstatusMIE := mstatus.regOut.MIE.asBool
@@ -312,12 +317,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
   intrMod.io.in.mnstatusNMIE := mnstatus.regOut.NMIE.asBool
-
-  val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
-  when(nonMaskableIRP.NMI) {
-    nmip.NMI := true.B
-  }
-  
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
 
@@ -336,10 +335,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.trapInfo.bits.intrVec := intrVec
   trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   trapHandleMod.io.in.privState := privState
-  trapHandleMod.io.in.mideleg := mideleg.regOut
-  trapHandleMod.io.in.medeleg := medeleg.regOut
-  trapHandleMod.io.in.hideleg := hideleg.regOut
-  trapHandleMod.io.in.hedeleg := hedeleg.regOut
+  trapHandleMod.io.in.mstatus  := mstatus.regOut
+  trapHandleMod.io.in.vsstatus := vsstatus.regOut
+  trapHandleMod.io.in.mnstatus := mnstatus.regOut
+  trapHandleMod.io.in.mideleg  := mideleg.regOut
+  trapHandleMod.io.in.medeleg  := medeleg.regOut
+  trapHandleMod.io.in.hideleg  := hideleg.regOut
+  trapHandleMod.io.in.hedeleg  := hedeleg.regOut
   trapHandleMod.io.in.mvien := mvien.regOut
   trapHandleMod.io.in.hvien := hvien.regOut
   trapHandleMod.io.in.mtvec := mtvec.regOut
@@ -349,14 +351,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
-  // smdbltrp/ssdbltrp
-  private val m_EX_DT  = entryPrivState.isModeM  && mstatus.regOut.MDT.asBool  && hasTrap
-  private val s_EX_DT  = entryPrivState.isModeHS && mstatus.regOut.SDT.asBool  && hasTrap
-  private val vs_EX_DT = entryPrivState.isModeVS && vsstatus.regOut.SDT.asBool && hasTrap
-
-  val dbltrpToMN     = m_EX_DT && mnstatus.regOut.NMIE // NMI not allow double trap
-  val dbltrpToM      = s_EX_DT || vs_EX_DT
-  val hasDTExcp      = m_EX_DT || s_EX_DT || vs_EX_DT
+  val dbltrpToMN     = trapHandleMod.io.out.dbltrpToMN
+  val hasDTExcp      = trapHandleMod.io.out.hasDTExcp
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -651,10 +647,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent.valid   := ((hasTrap && entryPrivState.isModeM) || dbltrpToM) && !entryDebugMode && !debugMode && !nmi && !m_EX_DT
-  trapEntryMNEvent.valid  := (hasTrap && nmi)  || dbltrpToMN && !debugMode
-  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && !s_EX_DT
-  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && !vs_EX_DT
+  trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !nmi
+  trapEntryMNEvent.valid  := ((hasTrap && nmi)  || dbltrpToMN) && !debugMode
+  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -789,8 +785,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr === CSRs.mip.U) || (addr === CSRs.sip.U) || (addr === CSRs.vsip.U) ||
     (addr === CSRs.hip.U) || (addr === CSRs.mvip.U) || (addr === CSRs.hvip.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR ||
-    (addr === CSRs.menvcfg.U) ||
-    (addr === CSRs.henvcfg.U) ||
+//    (addr === CSRs.menvcfg.U) ||
+//    (addr === CSRs.henvcfg.U) ||
     (addr === CSRs.stimecmp.U)
   )
 

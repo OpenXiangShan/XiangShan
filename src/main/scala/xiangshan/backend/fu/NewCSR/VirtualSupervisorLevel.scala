@@ -36,12 +36,17 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         reg.VS := ContextStatus.Dirty
       }
       // when menvcfg or henvcfg.DTE close,  vsstatus.SDT is read-only
-      reg.SDT := Mux(this.menvcfg.DTE.asBool && this.henvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
+      val writeSDT = Wire(Bool())
+      writeSDT := Mux(this.menvcfg.DTE.asBool && this.henvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
+      when (!(this.menvcfg.DTE.asBool && this.henvcfg.DTE.asBool)) {
+        regOut.SDT := false.B
+      }
       // SDT and SIE is the same as mstatus
-      when (w.wdataFields.SDT.asBool) {
+      when (writeSDT && w.wen ) {
         reg.SIE := false.B
-      }.elsewhen(!reg.SDT.asBool || !w.wdataFields.SDT.asBool) {
-        reg.SIE := w.wdataFields.SIE.asBool
+      }
+      when (reg.SDT.asBool && writeSDT && w.wdataFields.SIE.asBool && w.wen) {
+        reg.SIE := reg.SIE
       }
 
     }
