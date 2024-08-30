@@ -56,6 +56,7 @@ class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase 
   outPrivState.V    := Mux(in.mnstatus.MNPP === PrivMode.M, VirtMode.Off.asUInt, in.mnstatus.MNPV.asUInt)
 
   val mnretToM  = outPrivState.isModeM
+  val mnretToS  = outPrivState.isModeHS
   val mnretToVU = outPrivState.isModeVU
 
   out := DontCare
@@ -71,7 +72,7 @@ class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase 
   out.mstatus.bits.MPRV       := Mux(in.mnstatus.MNPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
   // clear MDT when mnret to below M
   out.mstatus.bits.MDT        := Mux(mnretToM, in.mstatus.MDT.asBool, 0.U)
-  out.mstatus.bits.SDT        := Mux(mnretToM, in.mstatus.SDT.asBool, 0.U) // ?? return to S clear SDT?
+  out.mstatus.bits.SDT        := Mux(mnretToM || mnretToS, in.mstatus.SDT.asBool, 0.U)
   out.vsstatus.bits.SDT       := Mux(mnretToVU, 0.U, in.vsstatus.SDT.asBool)
   out.targetPc.bits.pc        := in.mnepc.asUInt
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(in.mnepc.asUInt)

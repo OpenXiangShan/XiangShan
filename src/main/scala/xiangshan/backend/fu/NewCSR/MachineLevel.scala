@@ -452,7 +452,7 @@ class MstatusBundle extends CSRBundle {
   val TVM  = CSRRWField     (20).withReset(0.U)
   val TW   = CSRRWField     (21).withReset(0.U)
   val TSR  = CSRRWField     (22).withReset(0.U)
-  val SDT  = CSRRWField     (24).withReset(1.U)
+  val SDT  = CSRRWField     (24).withReset(0.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
   val SBE  = CSRROField     (36).withReset(0.U)
@@ -501,22 +501,28 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   }
   // when MDT is explicitly written by 1, clear MIE
   // only when reg.MDT is zero or wdata.MDT is zero , MIE can be explicitly written by 1
-  when (w.wdataFields.MDT.asBool) {
+  // when reg.MDT is 1 and wdata.MDT is 1 and wdatat.MIE is 1, hold reg.MIE
+  when (w.wdataFields.MDT.asBool && w.wen) {
     reg.MIE := false.B
-  }.elsewhen(!reg.MDT.asBool || !w.wdataFields.MDT.asBool) {
-    reg.MIE := w.wdataFields.MIE.asBool
   }
-  // when DTE is zero, SDT field is read-only zero
-  reg.SDT := Mux(this.menvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
-
+  when (reg.MDT.asBool && w.wdataFields.MDT.asBool && w.wdataFields.MIE.asBool && w.wen) {
+    reg.MIE := reg.MIE
+  }
+  // when DTE is zero, SDT field is read-only zero(write any, read zero, side effect of write 1 is block)
+  val writeSDT = Wire(Bool())
+  writeSDT := Mux(this.menvcfg.DTE.asBool, w.wdataFields.SDT.asBool, 0.U)
+  when (!this.menvcfg.DTE.asBool) {
+    regOut.SDT := false.B
+  }
   // SDT and SIE is the same as MDT and MIE
-  when (w.wdataFields.SDT.asBool) {
+  when (writeSDT && wAliasSstatus.wen) {
     reg.SIE := false.B
-  }.elsewhen(!reg.SDT.asBool || !w.wdataFields.SDT.asBool) {
-    reg.SIE := w.wdataFields.SIE.asBool
+  }
+  when (reg.SDT.asBool && writeSDT && w.wdataFields.SIE.asBool && wAliasSstatus.wen) {
+    reg.SIE := reg.SIE
   }
   // read connection
-  mstatus :|= reg
+  mstatus :|= regOut
   sstatus := mstatus
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt

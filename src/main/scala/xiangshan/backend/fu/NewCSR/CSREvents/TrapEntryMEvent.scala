@@ -13,7 +13,7 @@ import xiangshan.AddrTransType
 
 class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
-  val mstatus   = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
+  val mstatus   = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE, _.MDT))
   val mepc      = ValidIO((new Epc           ).addInEvent(_.epc))
   val mcause    = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val mtval     = ValidIO((new OneFieldBundle).addInEvent(_.ALL))

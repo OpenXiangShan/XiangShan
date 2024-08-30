@@ -13,6 +13,9 @@ class TrapHandleModule extends Module {
 
   private val trapInfo = io.in.trapInfo
   private val privState = io.in.privState
+  private val mstatus  = io.in.mstatus
+  private val vsstatus = io.in.vsstatus
+  private val mnstatus = io.in.mnstatus
   private val mideleg = io.in.mideleg.asUInt
   private val hideleg = io.in.hideleg.asUInt
   private val medeleg = io.in.medeleg.asUInt
@@ -110,6 +113,7 @@ class TrapHandleModule extends Module {
 
   private val handleTrapUnderHS = !privState.isModeM && hsHasTrap
   private val handleTrapUnderVS = privState.isVirtual && vsHasTrap
+  private val handleTrapUnderM = !handleTrapUnderVS && !handleTrapUnderHS
 
   // Todo: support more interrupt and exception
   private val exceptionRegular = OHToUInt(highestPrioEX)
@@ -118,20 +122,33 @@ class TrapHandleModule extends Module {
 
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
+  // sm/ssdbltrp
+  private val m_EX_DT  = handleTrapUnderM  && mstatus.MDT.asBool  && hasTrap
+  private val s_EX_DT  = handleTrapUnderHS && mstatus.SDT.asBool  && hasTrap
+  private val vs_EX_DT = handleTrapUnderVS && vsstatus.SDT.asBool && hasTrap
+
+  private val dbltrpToMN = m_EX_DT && mnstatus.NMIE.asBool // NMI not allow double trap
+  private val hasDTExcp  = m_EX_DT || s_EX_DT || vs_EX_DT
+
+  private val trapToHS = handleTrapUnderHS && !s_EX_DT && !vs_EX_DT
+  private val traptoVS = handleTrapUnderVS && !vs_EX_DT
+
   private val xtvec = MuxCase(io.in.mtvec, Seq(
-    handleTrapUnderVS -> io.in.vstvec,
-    handleTrapUnderHS -> io.in.stvec
+    traptoVS -> io.in.vstvec,
+    trapToHS -> io.in.stvec
   ))
   private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, interruptNO(5, 0), 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
-    handleTrapUnderVS -> PrivState.ModeVS,
-    handleTrapUnderHS -> PrivState.ModeHS,
+    traptoVS -> PrivState.ModeVS,
+    trapToHS -> PrivState.ModeHS,
   ))
 
   io.out.causeNO.Interrupt := hasIR
   io.out.causeNO.ExceptionCode := causeNO
   io.out.pcFromXtvec := pcFromXtvec
+  io.out.hasDTExcp := hasDTExcp
+  io.out.dbltrpToMN := dbltrpToMN
 
   def filterIRQs(group: Seq[Int], originIRQ: UInt): Seq[Bool] = {
     group.map(irqNum => originIRQ(irqNum))
@@ -173,6 +190,9 @@ class TrapHandleIO extends Bundle {
       val singleStep = Bool()
     })
     val privState = new PrivState
+    val mstatus = new MstatusBundle
+    val vsstatus = new SstatusBundle
+    val mnstatus = new MnstatusBundle
     val mideleg = new MidelegBundle
     val medeleg = new MedelegBundle
     val hideleg = new HidelegBundle
@@ -190,6 +210,8 @@ class TrapHandleIO extends Bundle {
   val out = new Bundle {
     val entryPrivState = new PrivState
     val causeNO = new CauseBundle
+    val dbltrpToMN = Bool()
+    val hasDTExcp = Bool()
     val pcFromXtvec = UInt()
   }
 }

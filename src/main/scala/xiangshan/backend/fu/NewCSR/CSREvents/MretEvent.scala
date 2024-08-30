@@ -14,7 +14,7 @@ import xiangshan.AddrTransType
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
+  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV, _.MDT, _.SDT))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val targetPc = ValidIO(new TargetPCBundle)
 }
@@ -53,6 +53,7 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   outPrivState.V    := Mux(in.mstatus.MPP === PrivMode.M, VirtMode.Off.asUInt, in.mstatus.MPV.asUInt)
 
   val mretToM  = outPrivState.isModeM
+  val mretToS  = outPrivState.isModeHS
   val mretToVu = outPrivState.isModeVU
 
   out := DontCare
@@ -69,8 +70,8 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.mstatus.bits.MPRV       := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
   // clear MDT when return mret always execute in M mode
   out.mstatus.bits.MDT    := 0.U
-  // clear sstatus.SDT when return mode below M
-  out.mstatus.bits.SDT    := Mux(mretToM, in.mstatus.SDT.asBool, 0.U)
+  // clear sstatus.SDT when return mode below M and HS
+  out.mstatus.bits.SDT    := Mux(mretToM || mretToS, in.mstatus.SDT.asBool, 0.U)
   // clear vsstatus.SDT when return to VU
   out.vsstatus.bits.SDT   := Mux(mretToVu, 0.U, in.vsstatus.SDT.asBool)
 

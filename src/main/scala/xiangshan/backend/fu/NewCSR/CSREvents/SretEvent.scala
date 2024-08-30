@@ -15,9 +15,9 @@ import xiangshan.AddrTransType
 
 class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   // Todo: write sstatus instead of mstatus
-  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.MPRV))
+  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.MPRV, _.MDT, _.SDT))
   val hstatus = ValidIO((new HstatusBundle).addInEvent(_.SPV))
-  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP))
+  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.SDT))
   val targetPc = ValidIO(new TargetPCBundle)
 }
 
@@ -53,7 +53,9 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
     sv48x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
   )
 
-  private val sretInHSorM = in.privState.isModeM || in.privState.isModeHS
+  private val sretInM     = in.privState.isModeM
+  private val sretInHS    = in.privState.isModeHS
+  private val sretInHSorM = sretInM || sretInHS
   private val sretInVS    = in.privState.isModeVS
 
   private val xepc = Mux1H(Seq(
@@ -61,11 +63,8 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
     sretInVS    -> in.vsepc,
   )).asUInt
 
-  val sretInM     = in.privState.isModeM
-  val sretInHSorM = in.privState.isModeM || in.privState.isModeHS
-  val sretInVS    = in.privState.isModeVS
 
-  val outPrivState   = Wire(new PrivState)
+  private val outPrivState   = Wire(new PrivState)
   outPrivState.PRVM := Mux1H(Seq(
     // SPP is not PrivMode enum type, so asUInt
     sretInHSorM -> in.mstatus.SPP.asUInt,
@@ -76,7 +75,9 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
     sretInVS    -> in.privState.V, // keep
   ))
 
-  val sretToVU    = outPrivState.isModeVU
+  private val sretToVU    = outPrivState.isModeVU
+  private val sretToVS    = outPrivState.isModeVS
+  private val sretToU     = outPrivState.isModeHU
 
   out := DontCare
 
@@ -96,9 +97,9 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.mstatus.bits.SPIE       := 1.U
   out.mstatus.bits.MPRV       := 0.U // sret will always leave M mode
   out.mstatus.bits.MDT        := Mux(sretInM, 0.U, in.mstatus.MDT.asBool) // when execute return in M mode, set MDT 0
-  out.mstatus.bits.SDT        := Mux1H(Seq(
-    sretInHSorM -> 0.U, // sret will alway leave M mode
-    sretInVS    -> in.mstatus.SDT.asBool  // when sret in VS SDT not set to 0
+  out.mstatus.bits.SDT        := MuxCase(in.mstatus.SDT.asBool, Seq(
+    sretInHS   -> 0.U, // sret will alway leave M mode
+    (sretInM && (sretToU || sretToVS || sretToVU))    -> 0.U
   ))
 
 
@@ -107,7 +108,7 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.vsstatus.bits.SPP       := PrivMode.U.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.vsstatus.bits.SIE       := in.vsstatus.SPIE
   out.vsstatus.bits.SPIE      := 1.U
-  out.vsstatus.bits.SDT       := Mux(sretToVU, 0.U, in.vsstatus.SDT.asBool) // clear SDT when return to VU
+  out.vsstatus.bits.SDT       := Mux(sretToVU || sretInVS, 0.U, in.vsstatus.SDT.asBool) // clear SDT when return to VU or sret in vs
 
   out.targetPc.bits.pc        := xepc
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(xepc)

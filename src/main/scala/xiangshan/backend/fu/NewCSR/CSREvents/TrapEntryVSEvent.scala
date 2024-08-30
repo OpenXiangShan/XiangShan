@@ -14,7 +14,7 @@ import xiangshan.AddrTransType
 
 class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
-  val vsstatus = ValidIO((new SstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE))
+  val vsstatus = ValidIO((new SstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE, _.SDT))
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
