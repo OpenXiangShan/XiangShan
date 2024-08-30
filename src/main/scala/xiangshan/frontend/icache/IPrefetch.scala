@@ -35,6 +35,7 @@ abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
   val csr_pf_enable     = Input(Bool())
+  val csr_parity_enable = Input(Bool())
   val flush             = Input(Bool())
 
   val ftqReq            = Flipped(new FtqToPrefetchIO)
@@ -56,10 +57,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val (toMeta,  fromMeta) = (io.metaRead.toIMeta,  io.metaRead.fromIMeta)
   val (toMSHR, fromMSHR)  = (io.MSHRReq, io.MSHRResp)
   val toWayLookup = io.wayLookupWrite
-
-  // FIXME: csr_pf_enable/enableBit is not used now
-  val enableBit = RegInit(false.B)
-  enableBit := io.csr_pf_enable
 
   val s0_fire, s1_fire, s2_fire             = WireInit(false.B)
   val s0_discard, s2_discard                = WireInit(false.B)
@@ -294,8 +291,15 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
-  // merge s1 itlb/pmp exceptions, itlb has higher priority
-  val s1_exception_out = ExceptionType.merge(s1_itlb_exception, s1_pmp_exception)
+  // also raise af when meta array corrupt is detected, to cancel prefetch
+  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+
+  // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
+  val s1_exception_out = ExceptionType.merge(
+    s1_itlb_exception,
+    s1_pmp_exception,
+    s1_meta_exception
+  )
 
   /**
     ******************************************************************************
@@ -348,7 +352,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   s1_flush := io.flush || from_bpu_s1_flush
 
   s1_ready      := next_state === m_idle
-  s1_fire       := (next_state === m_idle) && s1_valid && !s1_flush
+  s1_fire       := (next_state === m_idle) && s1_valid && !s1_flush  // used to clear s1_valid & itlb_valid_latch
+  val s1_real_fire = s1_fire && io.csr_pf_enable                     // real "s1 fire" that s1 enters s2
 
   /**
     ******************************************************************************
@@ -357,14 +362,14 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * - 2. send req to missUnit
     ******************************************************************************
     */
-  val s2_valid  = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
+  val s2_valid  = generatePipeControl(lastFire = s1_real_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
 
-  val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_fire)
-  val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_fire)
-  val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_fire)
-  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exceptions
-  val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_fire)
-  val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_fire)
+  val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_real_fire)
+  val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_real_fire)
+  val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_real_fire)
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_real_fire)  // includes itlb/pmp/meta exception
+  val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_real_fire)
+  val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_real_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx)
   val s2_req_ptags    = s2_req_paddr.map(get_phy_tag)
@@ -389,12 +394,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_SRAM_hits = s2_waymasks.map(_.orR)
   val s2_hits = VecInit((0 until PortNumber).map(i => s2_MSHR_hits(i) || s2_SRAM_hits(i)))
 
-  /* s2_exception includes itlb pf/gpf/af and pmp af, neither of which should be prefetched
+  /* s2_exception includes itlb pf/gpf/af, pmp af and meta corruption (af), neither of which should be prefetched
    * mmio should not be prefetched
-   * also, if port0 has exception, port1 should not be prefetched
-   * miss = this port not hit && need this port && no exception found before and in this port
+   * also, if previous has exception, latter port should also not be prefetched
    */
-  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
       s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&
@@ -407,11 +410,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     ******************************************************************************
     */
   val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
-  
+
   // To avoid sending duplicate requests.
   val has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   (0 until PortNumber).foreach{ i =>
-    when(s1_fire) {
+    when(s1_real_fire) {
       has_send(i) := false.B
     }.elsewhen(toMSHRArbiter.io.in(i).fire) {
       has_send(i) := true.B

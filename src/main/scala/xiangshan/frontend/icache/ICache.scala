@@ -516,6 +516,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   prefetcher.io.flush             := io.flush
   prefetcher.io.csr_pf_enable     := io.csr_pf_enable
+  prefetcher.io.csr_parity_enable := io.csr_parity_enable
   prefetcher.io.ftqReq            <> io.prefetch
   prefetcher.io.MSHRResp          := missUnit.io.fetch_resp
 

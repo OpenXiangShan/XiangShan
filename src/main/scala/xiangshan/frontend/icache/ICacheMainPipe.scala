@@ -261,8 +261,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
   val s1_mmio          = VecInit(fromPMP.map(_.mmio))
 
-  // merge s1 itlb/pmp exceptions, itlb has higher priority
-  val s1_exception_out = ExceptionType.merge(s1_itlb_exception, s1_pmp_exception)
+  // also raise af when meta array corrupt is detected, to cancel fetch
+  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+
+  // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
+  val s1_exception_out = ExceptionType.merge(
+    s1_itlb_exception,
+    s1_pmp_exception,
+    s1_meta_exception
+  )
 
   /**
     ******************************************************************************
@@ -304,7 +311,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_req_ptags        = RegEnable(s1_req_ptags,        0.U.asTypeOf(s1_req_ptags),     s1_fire)
   val s2_req_gpaddr       = RegEnable(s1_req_gpaddr,       0.U.asTypeOf(s1_req_gpaddr),    s1_fire)
   val s2_doubleline       = RegEnable(s1_doubleline,       0.U.asTypeOf(s1_doubleline),    s1_fire)
-  val s2_exception        = RegEnable(s1_exception_out,    0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp exception
+  val s2_exception        = RegEnable(s1_exception_out,    0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp/meta exception
   val s2_excp_fromBackend = RegEnable(s1_excp_fromBackend, false.B,                        s1_fire)
   val s2_mmio             = RegEnable(s1_mmio,             0.U.asTypeOf(s1_mmio),          s1_fire)
 
@@ -393,12 +400,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * send request to MSHR if ICache miss
     ******************************************************************************
     */
-  /* s2_exception includes itlb pf/gpf/af and pmp af, neither of which should be prefetched
-   * mmio should not be prefetched
-   * also, if port0 has exception, port1 should not be prefetched
-   * miss = this port not hit && need this port && no exception found before and in this port
+  /* s2_exception includes itlb pf/gpf/af, pmp af and meta corruption (af), neither of which should be fetched
+   * mmio should not be fetched, it will be fetched by IFU mmio fsm
+   * also, if previous has exception, latter port should also not be fetched
    */
-  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
       s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&
@@ -427,11 +432,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall",  toMSHR.valid && !toMSHR.ready)
 
   val s2_fetch_finish = !s2_miss.reduce(_||_)
+
+  // also raise af if data/l2 corrupt is detected
+  val s2_data_exception = VecInit(s2_data_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+  val s2_l2_exception   = VecInit(s2_l2_corrupt.map(ExceptionType.fromECC(true.B, _)))
+
+  // merge s2 exceptions, itlb has the highest priority, meta next, meta/data/l2 lowest (and we dont care about prioritizing between this three)
   val s2_exception_out = ExceptionType.merge(
-    s2_exception,
-    VecInit(s2_l2_corrupt.map(ExceptionType.fromECC))
-    // FIXME: maybe we should also raise af if meta/data error is detected
-//     VecInit((s2_meta_corrupt zip s2_data_corrupt zip s2_l2_corrupt).map{ case ((m, d), l2) => ExceptionType.fromECC(m || d || l2)}
+    s2_exception,  // includes itlb/pmp/meta exception
+    s2_data_exception,
+    s2_l2_exception
   )
 
   /**

@@ -354,6 +354,10 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
+class SoftIfetchPrefetchBundle(implicit p: Parameters) extends XSBundle {
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())

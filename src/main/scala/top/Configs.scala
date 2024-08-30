@@ -414,3 +414,20 @@ class XSNoCTopConfig(n: Int = 1) extends Config(
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
+
+class FpgaDefaultConfig(n: Int = 1) extends Config(
+  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)

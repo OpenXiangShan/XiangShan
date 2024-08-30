@@ -348,6 +348,12 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_II when isModeHU || !isModeM && mstatus.TW=1
      */
     val wfi = Bool()
+
+    /**
+     * frm reserved
+     * raise EX_II when frm.data > 4
+     */
+    val frm = Bool()
   }
   val virtualInst = new Bundle {
     /**

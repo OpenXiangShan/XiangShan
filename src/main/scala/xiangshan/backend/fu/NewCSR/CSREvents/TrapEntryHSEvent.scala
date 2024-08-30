@@ -103,7 +103,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   ))
 
   private val tval2 = Mux1H(Seq(
-    (isFetchGuestExcp                  ) -> trapPC,
+    (isFetchGuestExcp                  ) -> trapPCGPA,
     (isFetchGuestExcp && fetchCrossPage) -> (trapPCGPA + 2.U),
     (isLSGuestExcp                     ) -> trapMemGPA,
   ))

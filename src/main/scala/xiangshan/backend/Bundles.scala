@@ -112,6 +112,7 @@ object Bundles {
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
+    val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
@@ -457,6 +458,11 @@ object Bundles {
     }
   }
 
+  class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
+    val scalaNeedFrm = Bool()
+    val vectorNeedFrm = Bool()
+  }
+
   // DynInst --[IssueQueue]--> DataPath
   class IssueQueueIssueBundle(
     iqParams: IssueBlockParams,
@@ -605,7 +611,7 @@ object Bundles {
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
-    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 

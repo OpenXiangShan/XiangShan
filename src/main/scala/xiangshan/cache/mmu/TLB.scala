@@ -227,6 +227,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val hasS2xlate = s2xlate =/= noS2xlate
+    val onlyS1 = s2xlate === onlyStage1
     val onlyS2 = s2xlate === onlyStage2
     val af = perm.af || (hasS2xlate && g_perm.af)
 
@@ -255,7 +256,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stGpf = (g_stPermFail || gpf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrGpf = (g_instrPermFail || gpf) && TlbCmd.isExec(cmd)
-    val s2_valid = hasS2xlate && portTranslateEnable(idx)
+    val s2_valid = hasS2xlate && !onlyS1 && portTranslateEnable(idx)
 
     val fault_valid = s1_valid || s2_valid
 
