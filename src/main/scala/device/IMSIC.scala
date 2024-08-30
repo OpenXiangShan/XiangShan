@@ -138,7 +138,6 @@ class imsic_csr_top(
   addResource("/aia/src/rtl/imsic/imsic_csr_top.sv")
   addResource("/aia/src/rtl/imsic/imsic_csr_gate.sv")
   addResource("/aia/src/rtl/imsic/imsic_csr_reg.sv")
-  addResource("/aia/src/rtl/imsic/common/cmip_dff_sync.sv")
 }
 
 class MsiInfoBundle(

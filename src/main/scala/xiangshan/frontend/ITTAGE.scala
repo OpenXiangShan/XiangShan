@@ -108,6 +108,7 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
 class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   val provider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
   val altProvider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
+  val altDiffers = Bool()
   val providerU = Bool()
   val providerCtr = UInt(ITTageCtrBits.W)
   val altProviderCtr = UInt(ITTageCtrBits.W)
@@ -117,8 +118,6 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
-
-  def altDiffers = Mux(altProvider.valid, altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
 
   override def toPrintable = {
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
@@ -266,9 +265,17 @@ class ITTageTable
     bitmask = update_bitmask
   )
 
-  io.req.ready := true.B // !io.update.valid
-  // io.req.ready := !bank_conflict
-
+  // Power-on reset
+  val powerOnResetState = RegInit(true.B)
+  when(table.io.r.req.ready) {
+    // When all the SRAM first reach ready state, we consider power-on reset is done
+    powerOnResetState := false.B
+  }
+  // Do not use table banks io.r.req.ready directly
+  // All table_banks are single port SRAM, ready := !wen
+  // We do not want write request block the whole BPU pipeline
+  // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
+  io.req.ready := !powerOnResetState
 
   val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
 
@@ -468,7 +475,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerInfo.target),
     (altProvided && providerNull, altProviderInfo.target),
-    (!provided || providerNull && !altProvided, baseTarget)
+    (!provided, baseTarget)
   ))
   s2_provided       := provided
   s2_provider       := providerInfo.tableIdx
@@ -491,6 +498,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   resp_meta.provider.bits     := s3_provider
   resp_meta.altProvider.valid := s3_altProvided
   resp_meta.altProvider.bits  := s3_altProvider
+  resp_meta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
   resp_meta.providerU         := s3_providerU
   resp_meta.providerCtr       := s3_providerCtr
   resp_meta.altProviderCtr    := s3_altProviderCtr
@@ -586,7 +594,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
-  XSPerfAccumulate("ittage_write_blocks_read", !io.s1_ready)
   XSPerfAccumulate("ittage_used", io.s1_fire(0) && s1_isIndirect)
   XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
 

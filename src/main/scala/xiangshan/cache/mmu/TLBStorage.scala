@@ -115,7 +115,7 @@ class TLBFA(
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
@@ -129,12 +129,16 @@ class TLBFA(
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     val ppnReg   = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val pbmtReg  = RegEnable(VecInit(entries.map(_.pbmt)), req.fire)
+    val gpbmtReg  = RegEnable(VecInit(entries.map(_.g_pbmt)), req.fire)
     val permReg  = RegEnable(VecInit(entries.map(_.perm)), req.fire)
     val gPermReg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
     val s2xLate  = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := ppnReg(0)
+        resp.bits.pbmt(d) := pbmtReg(0)
+        resp.bits.g_pbmt(d) := gpbmtReg(0)
         resp.bits.perm(d) := permReg(0)
         resp.bits.g_perm(d) := gPermReg(0)
         resp.bits.s2xlate(d) := s2xLate(0)
@@ -142,6 +146,8 @@ class TLBFA(
     } else {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := Mux1H(hitVecReg zip ppnReg)
+        resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmtReg)
+        resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmtReg)
         resp.bits.perm(d) := Mux1H(hitVecReg zip permReg)
         resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPermReg)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
@@ -154,6 +160,8 @@ class TLBFA(
 
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
+    resp.bits.pbmt.suggestName("pbmt")
+    resp.bits.g_pbmt.suggestName("g_pbmt")
     resp.bits.perm.suggestName("perm")
     resp.bits.g_perm.suggestName("g_perm")
   }
@@ -179,19 +187,19 @@ class TLBFA(
   val sfence = io.sfence
   val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
         v.zipWithIndex.map{ case(a, i) => a := a && !((io.csr.priv.virt === false.B && entries(i).s2xlate === noS2xlate) ||
-          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.asid))}
+          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid))}
       }.otherwise {
         // all addr but specific asid
         v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && ((!io.csr.priv.virt && entries(i).s2xlate === noS2xlate && entries(i).asid === sfence.bits.id) ||
-          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid)))}
+          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid)))}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
@@ -208,14 +216,14 @@ class TLBFA(
   val hfenceg_valid = sfence.valid && sfence.bits.hg
   val hfencev = io.sfence
   val hfencev_vpn = sfence_vpn
-  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
-  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
+  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = true.B))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = true.B))
   when (hfencev_valid) {
     when (hfencev.bits.rs1) {
       when (hfencev.bits.rs2) {
-        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.asid)}
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid)}
       }.otherwise {
-        v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid))
+        v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid))
         }
       }
     }.otherwise {
@@ -300,7 +308,7 @@ class TLBFakeFA(
       resp.bits.perm(d).x := pte.perm.x
       resp.bits.perm(d).w := pte.perm.w
       resp.bits.perm(d).r := pte.perm.r
-
+      resp.bits.pbmt(d) := pte.pbmt
       resp.bits.ppn(d) := MuxLookup(level, 0.U)(Seq(
         0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
         1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
@@ -385,6 +393,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.perm(d).r := p.bits.perm(d).r
       rp.bits.s2xlate(d) := p.bits.s2xlate(d)
       rp.bits.g_perm(d) := p.bits.g_perm(d)
+      rp.bits.pbmt(d) := p.bits.pbmt(d)
+      rp.bits.g_pbmt(d) := p.bits.g_pbmt(d)
     }
   }
 

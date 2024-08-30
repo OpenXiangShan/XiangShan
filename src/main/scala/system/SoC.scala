@@ -26,19 +26,21 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
 import coupledL2.EnableCHI
+import coupledL2.tl2chi.CHIIssue
 
 case object SoCParamsKey extends Field[SoCParameters]
 
 case class SoCParameters
 (
   EnableILA: Boolean = false,
-  PAddrBits: Int = 36,
+  PAddrBits: Int = 48,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -48,12 +50,19 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
-  NodeIDWidth: Int = 7,
+  NodeIDWidthList: Map[String, Int] = Map(
+    "B" -> 7,
+    "E.b" -> 11
+  ),
   NumHart: Int = 64,
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  CHIAsyncBridge: AsyncQueueParams = AsyncQueueParams(
+    depth = 4,
+    sync = 3
+  )
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -69,6 +78,7 @@ trait HasSoCParameter {
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
+  val issue = p(CHIIssue)
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
@@ -143,8 +153,8 @@ trait HaveSlaveAXI4Port {
 trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
-  // 36-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  // 48-bit physical address
+  val memRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -249,7 +259,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   if (enableCHI) {
     val error = LazyModule(new TLError(
       params = DevNullParams(
-        address = Seq(AddressSet(0x1000000000L, 0xfffffffffL)),
+        address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
         maxAtomic = 8,
         maxTransfer = 64),
       beatBytes = 8

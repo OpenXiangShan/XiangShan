@@ -117,7 +117,7 @@ trait PMAMethod extends PMAConst {
       MemMap('h00_3A00_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
       MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
-      MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
+      MemMap("h00_8000_0000", " MAX_ADDRESS ",   "h0", "DDR",         "RWXIDSA"),
     )
    */
 
@@ -153,7 +153,7 @@ trait PMAMethod extends PMAConst {
       mask_list.append(genMask(addr, a))
     }
 
-    addPMA(0x0L, range = 0x1000000000L, c = true, atomic = true, a = 3, x = true, w = true, r = true)
+    addPMA(0x0L, range = 0x1000000000000L, c = true, atomic = true, a = 3, x = true, w = true, r = true)
     addPMA(0x0L, range = 0x80000000L, a = 3, w = true, r = true)
     addPMA(0x3C000000L, a = 1)
     addPMA(0x3A001000L, a = 1, w = true, r = true)

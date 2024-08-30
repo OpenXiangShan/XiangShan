@@ -103,6 +103,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val isHWPrefetch = Bool()
   def isSWPrefetch = isPrefetch && !isHWPrefetch
 
+  // misalignBuffer
+  val isFrmMisAlignBuf = Bool()
+
   // vector
   val isvec = Bool()
   val isLastElem = Bool()
@@ -170,6 +173,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
     if (latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
+    if (latch) isFrmMisAlignBuf := RegEnable(input.isFrmMisAlignBuf, enable) else isFrmMisAlignBuf := input.isFrmMisAlignBuf
     if (latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
     if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
     if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
@@ -245,6 +249,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if(latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
     if(latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
+    if(latch) isFrmMisAlignBuf := RegEnable(input.isFrmMisAlignBuf, enable) else isFrmMisAlignBuf := input.isFrmMisAlignBuf
     if(latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
     if(latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
     if(latch) isLoadReplay := RegEnable(input.isLoadReplay, enable) else isLoadReplay := input.isLoadReplay
@@ -272,6 +277,10 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     rep_info := DontCare
     data_wen_dup := DontCare
   }
+}
+
+class SqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  val need_rep = Bool()
 }
 
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
@@ -362,6 +371,30 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
   val matchLine = Bool()
+}
+
+class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
+  // from storeMisalignBuffer to storeQueue, control it's sbuffer write
+  val control = Output(new XSBundle {
+    // control sq to write-into sb
+    val writeSb = Bool()
+    val wdata = UInt(VLEN.W)
+    val wmask = UInt((VLEN / 8).W)
+    val paddr = UInt(PAddrBits.W)
+    val vaddr = UInt(VAddrBits.W)
+    val last  = Bool()
+    val hasException = Bool()
+    // remove this entry in sq
+    val removeSq = Bool()
+  })
+  // from storeQueue to storeMisalignBuffer, provide detail info of this store
+  val storeInfo = Input(new XSBundle {
+    val data = UInt(VLEN.W)
+    // is the data of the unaligned store ready at sq?
+    val dataReady = Bool()
+    // complete a data transfer from sq to sb
+    val completeSbTrans = Bool()
+  })
 }
 
 // Store byte valid mask write bundle

@@ -1,10 +1,10 @@
 package xiangshan.backend.fu.NewCSR.CSREvents
 
 import chisel3._
-import chisel3.util.{MuxCase, _}
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
-import xiangshan.{ExceptionNO, HasXSParameter, TriggerCf}
+import xiangshan.{ExceptionNO, HasXSParameter, TriggerAction}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
@@ -32,7 +32,7 @@ class TrapEntryDEventInput(implicit override val p: Parameters) extends TrapEntr
   val hasTrap                 = Input(Bool())
   val debugMode               = Input(Bool())
   val hasDebugIntr            = Input(Bool())
-  val hasTriggerFire          = Input(Bool())
+  val triggerEnterDebugMode   = Input(Bool())
   val hasDebugEbreakException = Input(Bool())
   val hasSingleStep           = Input(Bool())
   val breakPoint              = Input(Bool())
@@ -52,14 +52,14 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   private val debugMode               = in.debugMode
   private val hasDebugIntr            = in.hasDebugIntr
   private val breakPoint              = in.breakPoint
-  private val hasTriggerFire          = in.hasTriggerFire
+  private val triggerEnterDebugMode   = in.triggerEnterDebugMode
   private val hasDebugEbreakException = in.hasDebugEbreakException
   private val hasSingleStep           = in.hasSingleStep
 
   private val hasExceptionInDmode = debugMode && hasTrap
   val causeIntr = DcsrCause.Haltreq.asUInt
   val causeExp = MuxCase(0.U, Seq(
-    hasTriggerFire          -> DcsrCause.Trigger.asUInt,
+    triggerEnterDebugMode   -> DcsrCause.Trigger.asUInt,
     hasDebugEbreakException -> DcsrCause.Ebreak.asUInt,
     hasSingleStep           -> DcsrCause.Step.asUInt
   ))

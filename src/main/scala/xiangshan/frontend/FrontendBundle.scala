@@ -256,7 +256,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val exceptionFromBackend = Vec(PredictWidth, Bool())
   val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
-  val triggered    = Vec(PredictWidth, new TriggerCf)
+  val illegalInstr = Vec(PredictWidth, Bool())
+  val triggered    = Vec(PredictWidth, TriggerAction())
   val topdown_info = new FrontendTopDownBundle
 }
 

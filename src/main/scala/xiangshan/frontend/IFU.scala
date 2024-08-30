@@ -129,6 +129,7 @@ class IfuWbToFtqDB extends Bundle {
 
 class NewIFU(implicit p: Parameters) extends XSModule
   with HasICacheParameters
+  with HasXSParameter
   with HasIFUConst
   with HasPdConst
   with HasCircularQueuePtrHelper
@@ -380,8 +381,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
+
+  // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
-  val f2_mmio         = fromICache(0).bits.mmio && f2_exception(0) === ExceptionType.none
+  val f2_mmio         = f2_exception(0) === ExceptionType.none && (
+    fromICache(0).bits.pmp_mmio ||
+      // currently, we do not distinguish between Pbmt.nc and Pbmt.io
+      // anyway, they are both non-cacheable, and should be handled with mmio fsm and sent to Uncache module
+      Pbmt.isUncache(fromICache(0).bits.itlb_pbmt)
+  )
+
 
   /**
     * reduce the number of registers, origin code
@@ -480,6 +489,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ******************************************************************************
     */
 
+  val expanders = Seq.fill(PredictWidth)(Module(new RVCExpander))
+
   val f3_valid          = RegInit(false.B)
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
@@ -492,13 +503,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio           = RegEnable(f2_mmio,       f2_fire)
   val f3_except_fromBackend = RegEnable(f2_except_fromBackend, f2_fire)
 
-  //val f3_expd_instr     = RegEnable(f2_expd_instr,  f2_fire)
   val f3_instr          = RegEnable(f2_instr, f2_fire)
-  val f3_expd_instr     = VecInit((0 until PredictWidth).map{ i =>
-    val expander       = Module(new RVCExpander)
+
+  expanders.zipWithIndex.foreach { case (expander, i) =>
     expander.io.in := f3_instr(i)
-    expander.io.out.bits
+  }
+  // Use expanded instruction only when input is legal.
+  // Otherwise use origin illegal RVC instruction.
+  val f3_expd_instr     = VecInit(expanders.map { expander: RVCExpander =>
+    Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
+  val f3_ill            = VecInit(expanders.map(_.io.ill))
 
   val f3_pd_wire         = RegEnable(f2_pd,            f2_fire)
   val f3_pd              = WireInit(f3_pd_wire)
@@ -813,6 +828,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     case _ => false.B
   }
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
+  io.toIbuffer.bits.illegalInstr:= f3_ill
   io.toIbuffer.bits.triggered   := f3_triggered
 
   when(f3_lastHalf.valid){
@@ -855,6 +871,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
+  val mmioRVCExpander = Module(new RVCExpander)
+  mmioRVCExpander.io.in := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio){
     val inst  = Cat(f3_mmio_data(1), f3_mmio_data(0))
@@ -864,8 +883,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs(0) := new RVCDecoder(inst, XLEN, fLen, useAddiForMv = true).decode.bits
-
+    io.toIbuffer.bits.instrs(0) := Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
 
     io.toIbuffer.bits.pd(0).valid   := true.B
     io.toIbuffer.bits.pd(0).isRVC   := currentIsRVC
@@ -875,6 +893,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
     io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception =/= ExceptionType.none
+    io.toIbuffer.bits.illegalInstr(0)  := mmioRVCExpander.io.ill
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
 

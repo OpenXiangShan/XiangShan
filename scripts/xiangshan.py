@@ -81,7 +81,7 @@ class XSArgs(object):
         self.config = args.config
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
-        self.with_chiseldb = 0 if args.no_db else None
+        self.with_chiseldb = 0 if args.no_db else 1
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -329,7 +329,7 @@ class XiangShan(object):
         base_dir = os.path.join(self.args.rvtest_home, "isa/build")
         riscv_tests = os.listdir(base_dir)
         riscv_tests = filter(lambda x: x.endswith(".bin"), riscv_tests)
-        all_rv_tests = ["rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud"]
+        all_rv_tests = ["rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud", "rv64mi"]
         riscv_tests = filter(lambda x: x[:6] in all_rv_tests, riscv_tests)
         riscv_tests = map(lambda x: os.path.join(base_dir, x), riscv_tests)
         return riscv_tests

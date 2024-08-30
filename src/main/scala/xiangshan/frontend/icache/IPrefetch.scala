@@ -27,10 +27,35 @@ import xiangshan.frontend._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import huancun.PreferCacheKey
 import xiangshan.XSCoreParamsKey
+import xiangshan.SoftIfetchPrefetchBundle
 import utility._
 
 abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
+
+class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
+  val startAddr     : UInt   = UInt(VAddrBits.W)
+  val nextlineStart : UInt   = UInt(VAddrBits.W)
+  val ftqIdx        : FtqPtr = new FtqPtr
+  val isSoftPrefetch: Bool   = Bool()
+  def crossCacheline: Bool   = startAddr(blockOffBits - 1) === 1.U
+
+  def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
+    this.startAddr := info.startAddr
+    this.nextlineStart := info.nextlineStart
+    this.ftqIdx := info.ftqIdx
+    this.isSoftPrefetch := false.B
+    this
+  }
+
+  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
+    this.startAddr := req.vaddr
+    this.nextlineStart := req.vaddr + (1 << blockOffBits).U
+    this.ftqIdx := DontCare
+    this.isSoftPrefetch := true.B
+    this
+  }
+}
 
 class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
@@ -38,7 +63,8 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val csr_parity_enable = Input(Bool())
   val flush             = Input(Bool())
 
-  val ftqReq            = Flipped(new FtqToPrefetchIO)
+  val req               = Flipped(Decoupled(new IPrefetchReq))
+  val flushFromBpu      = Flipped(new BpuFlushInfo)
   val itlb              = Vec(PortNumber, new TlbRequestIO)
   val pmp               = Vec(PortNumber, new ICachePMPBundle)
   val metaRead          = new ICacheMetaReqBundle
@@ -51,7 +77,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 {
   val io: IPrefetchIO = IO(new IPrefetchIO)
 
-  val fromFtq = io.ftqReq
   val (toITLB,  fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
   val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   val (toMeta,  fromMeta) = (io.metaRead.toIMeta,  io.metaRead.fromIMeta)
@@ -72,24 +97,25 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * - 3. send req to Meta SRAM
     ******************************************************************************
     */
-  val s0_valid  = fromFtq.req.valid
+  val s0_valid  = io.req.valid
 
   /**
     ******************************************************************************
     * receive ftq req
     ******************************************************************************
     */
-  val s0_req_vaddr    = VecInit(Seq(fromFtq.req.bits.startAddr, fromFtq.req.bits.nextlineStart))
-  val s0_req_ftqIdx   = fromFtq.req.bits.ftqIdx
-  val s0_doubleline   = fromFtq.req.bits.crossCacheline
+  val s0_req_vaddr    = VecInit(Seq(io.req.bits.startAddr, io.req.bits.nextlineStart))
+  val s0_req_ftqIdx   = io.req.bits.ftqIdx
+  val s0_isSoftPrefetch = io.req.bits.isSoftPrefetch
+  val s0_doubleline   = io.req.bits.crossCacheline
   val s0_req_vSetIdx  = s0_req_vaddr.map(get_idx)
 
-  from_bpu_s0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
-                       fromFtq.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx)
+  from_bpu_s0_flush := !s0_isSoftPrefetch && (io.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
+                                              io.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx))
   s0_flush := io.flush || from_bpu_s0_flush || s1_flush
 
   val s0_can_go = s1_ready && toITLB(0).ready && toITLB(1).ready && toMeta.ready
-  fromFtq.req.ready := s0_can_go
+  io.req.ready := s0_can_go
 
   s0_fire := s0_valid && s0_can_go && !s0_flush
 
@@ -105,6 +131,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
   val s1_req_vaddr    = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
+  val s1_isSoftPrefetch = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
   val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
   val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
   val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx))
@@ -168,6 +195,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   ))
   val s1_itlb_exception     = VecInit((0 until PortNumber).map( i =>
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits))
+  ))
+  val s1_itlb_pbmt          = VecInit((0 until PortNumber).map( i =>
+    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.pbmt(0)), data = fromITLB(i).bits.pbmt(0))
   ))
   val s1_itlb_exception_gpf = VecInit(s1_itlb_exception.map(_ === ExceptionType.gpf))
 
@@ -256,7 +286,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     ******** **********************************************************************
     */
   // Disallow enqueuing wayLookup when SRAM write occurs.
-  toWayLookup.valid             := ((state === m_enqWay) || ((state === m_idle) && itlb_finish)) && !s1_flush && !fromMSHR.valid
+  toWayLookup.valid             := ((state === m_enqWay) || ((state === m_idle) && itlb_finish)) &&
+    !s1_flush && !fromMSHR.valid && !s1_isSoftPrefetch  // do not enqueue soft prefetch
   toWayLookup.bits.vSetIdx      := s1_req_vSetIdx
   toWayLookup.bits.waymask      := s1_waymasks
   toWayLookup.bits.ptag         := s1_req_ptags
@@ -265,6 +296,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
     toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
     toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
@@ -289,7 +321,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     p.bits.cmd  := TlbCmd.exec
   }
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
-  val s1_mmio          = VecInit(fromPMP.map(_.mmio))
+  val s1_pmp_mmio      = VecInit(fromPMP.map(_.mmio))
 
   // also raise af when meta array corrupt is detected, to cancel prefetch
   val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
@@ -301,6 +333,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     s1_meta_exception
   )
 
+  // merge pmp mmio and itlb pbmt
+  val s1_mmio = VecInit((s1_pmp_mmio zip s1_itlb_pbmt).map{ case (mmio, pbmt) =>
+    mmio || Pbmt.isUncache(pbmt)
+  })
+
   /**
     ******************************************************************************
     * state machine
@@ -309,27 +346,43 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   switch(state) {
     is(m_idle) {
-      when(s1_valid && !itlb_finish) {
-        next_state := m_itlbResend
-      }.elsewhen(s1_valid && itlb_finish && !toWayLookup.fire) {
-        next_state := m_enqWay
-      }.elsewhen(s1_valid && itlb_finish && toWayLookup.fire && !s2_ready) {
-        next_state := m_enterS2
-      }
+      when(s1_valid) {
+        when(!itlb_finish) {
+          next_state := m_itlbResend
+        }.elsewhen(!toWayLookup.fire && !s1_isSoftPrefetch) {  // itlb_finish
+          next_state := m_enqWay
+        }.elsewhen(!s2_ready) { // itlb_finish && (toWayLookup.fire || s1_isSoftPrefetch)
+          next_state := m_enterS2
+        } // .otherwise { next_state := m_idle }
+      } // .otherwise { next_state := m_idle }  // !s1_valid
     }
     is(m_itlbResend) {
-      when(itlb_finish && !toMeta.ready) {
-        next_state := m_metaResend
-      }.elsewhen(itlb_finish && toMeta.ready) {
-        next_state := m_enqWay
-      }
+      when(itlb_finish) {
+        when(!toMeta.ready) {
+          next_state := m_metaResend
+        }.elsewhen(!s1_isSoftPrefetch) { // toMeta.ready
+          next_state := m_enqWay
+        }.elsewhen(!s2_ready) { // toMeta.ready && s1_isSoftPrefetch
+          next_state := m_enterS2
+        }.otherwise { // toMeta.ready && s1_isSoftPrefetch && s2_ready
+          next_state := m_idle
+        }
+      } // .otherwise { next_state := m_itlbResend }  // !itlb_finish
     }
     is(m_metaResend) {
       when(toMeta.ready) {
-        next_state := m_enqWay
-      }
+        when (!s1_isSoftPrefetch) {
+          next_state := m_enqWay
+        }.elsewhen(!s2_ready) { // s1_isSoftPrefetch
+          next_state := m_enterS2
+        }.otherwise { // s1_isSoftPrefetch && s2_ready
+          next_state := m_idle
+        }
+      } // .otherwise { next_state := m_metaResend }  // !toMeta.ready
     }
     is(m_enqWay) {
+      // sanity check
+      assert(!s1_isSoftPrefetch, "Soft prefetch enters m_enqWay")
       when(toWayLookup.fire && !s2_ready) {
         next_state := m_enterS2
       }.elsewhen(toWayLookup.fire && s2_ready) {
@@ -348,7 +401,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   }
 
   /** Stage 1 control */
-  from_bpu_s1_flush := s1_valid && fromFtq.flushFromBpu.shouldFlushByStage3(s1_req_ftqIdx)
+  from_bpu_s1_flush := s1_valid && !s1_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s1_req_ftqIdx)
   s1_flush := io.flush || from_bpu_s1_flush
 
   s1_ready      := next_state === m_idle
@@ -365,6 +418,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_valid  = generatePipeControl(lastFire = s1_real_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
 
   val s2_req_vaddr    = RegEnable(s1_req_vaddr,     0.U.asTypeOf(s1_req_vaddr),     s1_real_fire)
+  val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_real_fire)
   val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_real_fire)
   val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_real_fire)
   val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_real_fire)  // includes itlb/pmp/meta exception
@@ -436,10 +490,17 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   s2_fire       := s2_valid && s2_finish && !s2_flush
 
   /** PerfAccumulate */
-  // the number of prefetch request received from ftq
-  XSPerfAccumulate("prefetch_req_receive", fromFtq.req.fire)
+  // the number of bpu flush
+  XSPerfAccumulate("bpu_s0_flush", from_bpu_s0_flush)
+  XSPerfAccumulate("bpu_s1_flush", from_bpu_s1_flush)
+  // the number of prefetch request received from ftq or backend (software prefetch)
+//  XSPerfAccumulate("prefetch_req_receive", io.req.fire)
+  XSPerfAccumulate("prefetch_req_receive_hw", io.req.fire && !io.req.bits.isSoftPrefetch)
+  XSPerfAccumulate("prefetch_req_receive_sw", io.req.fire && io.req.bits.isSoftPrefetch)
   // the number of prefetch request sent to missUnit
-  XSPerfAccumulate("prefetch_req_send", toMSHR.fire)
+//  XSPerfAccumulate("prefetch_req_send", toMSHR.fire)
+  XSPerfAccumulate("prefetch_req_send_hw", toMSHR.fire && !s2_isSoftPrefetch)
+  XSPerfAccumulate("prefetch_req_send_sw", toMSHR.fire && s2_isSoftPrefetch)
   XSPerfAccumulate("to_missUnit_stall", toMSHR.valid && !toMSHR.ready)
   /**
     * Count the number of requests that are filtered for various reasons.

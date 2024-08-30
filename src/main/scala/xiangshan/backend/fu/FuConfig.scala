@@ -433,6 +433,7 @@ object FuConfig {
     piped = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint),
+    flushPipe = true,
     trigger = true,
     immType = Set(SelImm.IMM_S),
   )

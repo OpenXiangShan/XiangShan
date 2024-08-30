@@ -22,6 +22,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
+import xiangshan.backend.trace._
 
 object Bundles {
   /**
@@ -44,7 +45,7 @@ object Bundles {
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -75,7 +76,7 @@ object Bundles {
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -142,6 +143,24 @@ object Bundles {
     }
   }
 
+  class TrapInstInfo(implicit p: Parameters) extends XSBundle {
+    val instr = UInt(32.W)
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+
+    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool ={
+      val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
+      sameFlush || isAfter(this.ftqPtr, ftqPtr)
+    }
+
+    def fromDecodedInst(decodedInst: DecodedInst): this.type = {
+      this.instr     := decodedInst.instr
+      this.ftqPtr    := decodedInst.ftqPtr
+      this.ftqOffset := decodedInst.ftqOffset
+      this
+    }
+  }
+
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
@@ -152,7 +171,7 @@ object Bundles {
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -199,6 +218,7 @@ object Bundles {
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
     val dirtyVs         = Bool()
+    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
@@ -694,7 +714,7 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(new TriggerCf)           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     // vldu used only
@@ -840,7 +860,7 @@ object Bundles {
     val isInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
-    val trigger  = new TriggerCf
+    val trigger = TriggerAction()
   }
 
   object UopIdx {

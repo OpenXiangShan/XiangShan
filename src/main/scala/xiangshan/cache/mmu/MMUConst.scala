@@ -48,18 +48,22 @@ case class TLBParameters
 case class L2TLBParameters
 (
   name: String = "l2tlb",
-  // l1
-  l1Size: Int = 16,
-  l1Associative: String = "fa",
-  l1Replacer: Option[String] = Some("plru"),
-  // l2
-  l2nSets: Int = 8,
-  l2nWays: Int = 4,
-  l2Replacer: Option[String] = Some("setplru"),
   // l3
-  l3nSets: Int = 32,
-  l3nWays: Int = 8,
-  l3Replacer: Option[String] = Some("setplru"),
+  l3Size: Int = 16,
+  l3Associative: String = "fa",
+  l3Replacer: Option[String] = Some("plru"),
+  // l2
+  l2Size: Int = 16,
+  l2Associative: String = "fa",
+  l2Replacer: Option[String] = Some("plru"),
+  // l1
+  l1nSets: Int = 8,
+  l1nWays: Int = 4,
+  l1Replacer: Option[String] = Some("setplru"),
+  // l0
+  l0nSets: Int = 32,
+  l0nWays: Int = 8,
+  l0Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
@@ -82,16 +86,28 @@ case class L2TLBParameters
 )
 
 trait HasTlbConst extends HasXSParameter {
-  val Level = 3
+  val Level = if (EnableSv48) 3 else 2
 
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
   val extendVpnnBits = if (HasHExtension) 2 else 0
   val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
-  val flagLen = 8
-  val pteResLen = XLEN - 44 - 2 - flagLen
-  val ppnHignLen = 44 - ppnLen
+  /*
+    Sv39 page table entry
+    +--+------+--------+----------------------+-----+--------+
+    |63|62  61|60    54|53                  10|9   8|7      0|
+    +--+------+--------+----------------------+-----+--------+
+    |N | PBMT |Reserved|        PPNs          | RSW |  FALG  |
+    +--+------+--------+----------------------+-----+--------+
+  */
+  val pteFlagLen = 8
+  val pteRswLen = 2
+  val ptePPNLen = 44
+  val pteResLen = 7
+  val ptePbmtLen = 2
+  val pteNLen = 1
+  val ppnHignLen = ptePPNLen - ppnLen
   val gvpnLen = GPAddrBits - offLen
 
   val tlbcontiguous = 8
@@ -99,6 +115,7 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
+  val sectorptePPNLen = ptePPNLen - sectortlbwidth
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
   val storefiltersize = if (StorePipelineWidth >= 3) 16 else 8
@@ -112,6 +129,9 @@ trait HasTlbConst extends HasXSParameter {
   def allStage = "b11".U
   def onlyStage1 = "b01".U
   def onlyStage2 = "b10".U
+
+  def Sv39 = "h8".U
+  def Sv48 = "h9".U
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -196,31 +216,33 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   val bPtwWidth = log2Up(PtwWidth)
   val bSourceWidth = log2Up(sourceWidth)
-  // ptwl1: fully-associated
-  val PtwL1TagLen = vpnnLen + extendVpnnBits
+  // ptwl3: fully-associated
+  val PtwL3TagLen = if (EnableSv48) vpnnLen + extendVpnnBits else 0
+  // ptwl2: fully-associated
+  val PtwL2TagLen = if (EnableSv48) vpnnLen * 2 + extendVpnnBits else vpnnLen + extendVpnnBits
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
    * +-------+----------+-------------+
    */
-  // ptwl2: 8-way group-associated
-  val PtwL2SetNum = l2tlbParams.l2nSets
-  val PtwL2SectorSize = blockBits / XLEN
-  val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
-  val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
-  val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
-  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen + extendVpnnBits
+  // ptwl1: 8-way group-associated
+  val PtwL1SetNum = l2tlbParams.l1nSets
+  val PtwL1SectorSize = blockBits / XLEN
+  val PtwL1IdxLen = log2Up(PtwL1SetNum * PtwL1SectorSize)
+  val PtwL1SectorIdxLen = log2Up(PtwL1SectorSize)
+  val PtwL1SetIdxLen = log2Up(PtwL1SetNum)
+  val PtwL1TagLen = if (EnableSv48) vpnnLen * 3 - PtwL1IdxLen + extendVpnnBits else vpnnLen * 2 - PtwL1IdxLen + extendVpnnBits
 
-  // ptwl3: 16-way group-associated
-  val PtwL3SetNum = l2tlbParams.l3nSets
-  val PtwL3SectorSize =  blockBits / XLEN
-  val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
-  val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
-  val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
-  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen + extendVpnnBits
+  // ptwl0: 16-way group-associated
+  val PtwL0SetNum = l2tlbParams.l0nSets
+  val PtwL0SectorSize =  blockBits / XLEN
+  val PtwL0IdxLen = log2Up(PtwL0SetNum * PtwL0SectorSize)
+  val PtwL0SectorIdxLen = log2Up(PtwL0SectorSize)
+  val PtwL0SetIdxLen = log2Up(PtwL0SetNum)
+  val PtwL0TagLen = if (EnableSv48) vpnnLen * 4 - PtwL0IdxLen + extendVpnnBits else vpnnLen * 3 - PtwL0IdxLen + extendVpnnBits
 
   // super page, including 1GB and 2MB page
-  val SPTagLen = vpnnLen * 2 + extendVpnnBits
+  val SPTagLen = if (EnableSv48) vpnnLen * 3 + extendVpnnBits else vpnnLen * 2 + extendVpnnBits
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
@@ -229,37 +251,37 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 
-  def genPtwL2Idx(vpn: UInt) = {
-    (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
+  def genPtwL1Idx(vpn: UInt) = {
+    (vpn(vpnLen - 1, vpnnLen))(PtwL1IdxLen - 1, 0)
   }
 
-  def genPtwL2SectorIdx(vpn: UInt) = {
-    genPtwL2Idx(vpn)(PtwL2SectorIdxLen - 1, 0)
+  def genPtwL1SectorIdx(vpn: UInt) = {
+    genPtwL1Idx(vpn)(PtwL1SectorIdxLen - 1, 0)
   }
 
-  def genPtwL2SetIdx(vpn: UInt) = {
-    genPtwL2Idx(vpn)(PtwL2SetIdxLen + PtwL2SectorIdxLen - 1, PtwL2SectorIdxLen)
+  def genPtwL1SetIdx(vpn: UInt) = {
+    genPtwL1Idx(vpn)(PtwL1SetIdxLen + PtwL1SectorIdxLen - 1, PtwL1SectorIdxLen)
   }
 
-  def genPtwL3Idx(vpn: UInt) = {
-    vpn(PtwL3IdxLen - 1, 0)
+  def genPtwL0Idx(vpn: UInt) = {
+    vpn(PtwL0IdxLen - 1, 0)
   }
 
-  def genPtwL3SectorIdx(vpn: UInt) = {
-    genPtwL3Idx(vpn)(PtwL3SectorIdxLen - 1, 0)
+  def genPtwL0SectorIdx(vpn: UInt) = {
+    genPtwL0Idx(vpn)(PtwL0SectorIdxLen - 1, 0)
   }
 
-  def dropL3SectorBits(vpn: UInt) = {
-    vpn(vpn.getWidth-1, PtwL3SectorIdxLen)
+  def dropL0SectorBits(vpn: UInt) = {
+    vpn(vpn.getWidth-1, PtwL0SectorIdxLen)
   }
 
-  def genPtwL3SetIdx(vpn: UInt) = {
-    genPtwL3Idx(vpn)(PtwL3SetIdxLen + PtwL3SectorIdxLen - 1, PtwL3SectorIdxLen)
+  def genPtwL0SetIdx(vpn: UInt) = {
+    genPtwL0Idx(vpn)(PtwL0SetIdxLen + PtwL0SectorIdxLen - 1, PtwL0SectorIdxLen)
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
     require(off.getWidth == 9)
-    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
+    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))
   }
 
   def MakeGPAddr(ppn: UInt, off: UInt) = {
@@ -272,25 +294,35 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   }
 
   def getVpnn(vpn: UInt, idx: UInt): UInt = {
-    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 - 1, vpnnLen * 2)))
+    MuxLookup(idx, 0.U)(Seq(
+      0.U -> vpn(vpnnLen - 1, 0),
+      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
+      2.U -> vpn(vpnnLen * 3 - 1, vpnnLen * 2),
+      3.U -> vpn(vpnnLen * 4 - 1, vpnnLen * 3))
+    )
   }
 
-  def getGVpnn(vpn: UInt, idx: UInt): UInt = {
-    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 + 1, vpnnLen * 2)))
+  def getGVpnn(vpn: UInt, idx: UInt, mode: UInt): UInt = {
+    MuxLookup(idx, 0.U)(Seq(
+      0.U -> vpn(vpnnLen - 1, 0),
+      1.U -> vpn(vpnnLen * 2 - 1, vpnnLen),
+      2.U -> Mux(mode === Sv48, vpn(vpnnLen * 3 - 1, vpnnLen * 2), vpn(vpnnLen * 3 + 1, vpnnLen * 2)),
+      3.U -> vpn(vpnnLen * 4 + 1, vpnnLen * 3))
+    )
   }
 
   def getVpnClip(vpn: UInt, level: Int) = {
-    // level 0  /* vpnn2 */
+    // level 2  /* vpnn2 */
     // level 1  /* vpnn2 * vpnn1 */
-    // level 2  /* vpnn2 * vpnn1 * vpnn0*/
-    vpn(vpnLen - 1, (2 - level) * vpnnLen)
+    // level 0  /* vpnn2 * vpnn1 * vpnn0*/
+    vpn(vpnLen - 1, level * vpnnLen)
   }
 
   def get_next_line(vpn: UInt) = {
-    Cat(dropL3SectorBits(vpn) + 1.U, 0.U(PtwL3SectorIdxLen.W))
+    Cat(dropL0SectorBits(vpn) + 1.U, 0.U(PtwL0SectorIdxLen.W))
   }
 
-  def same_l2entry(vpn1: UInt, vpn2: UInt) = {
+  def same_l1entry(vpn1: UInt, vpn2: UInt) = {
     vpn1(vpnLen-1, vpnnLen) === vpn2(vpnLen-1, vpnnLen)
   }
 
@@ -305,7 +337,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // vpn1 and vpn2 is at same cacheline
   def dup(vpn1: UInt, vpn2: UInt): Bool = {
-    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
+    dropL0SectorBits(vpn1) === dropL0SectorBits(vpn2)
   }
 
 

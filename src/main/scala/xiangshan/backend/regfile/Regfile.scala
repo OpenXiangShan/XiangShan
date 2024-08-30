@@ -159,7 +159,7 @@ object Regfile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val instanceName = name(0).toLower + name.drop(1)
+    val instanceName = name(0).toLower.toString() + name.drop(1)
     require(instanceName != name, "Regfile Instance Name can't be same as Module name")
     val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits, bankNum, isVlRegfile)).suggestName(instanceName)
     rdata := regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>

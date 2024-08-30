@@ -18,6 +18,7 @@ import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
+import xiangshan.ExceptionNO._
 
 import scala.collection.immutable.SeqMap
 
@@ -37,7 +38,9 @@ object CSRConfig {
   // the width of VGEIN
   final val VGEINWidth = 6
 
-  final val VaddrMaxWidth = 41 // only Sv39 and Sv39x4
+  final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
+
+  final val InstWidth = 32
 
   final val XLEN = 64 // Todo: use XSParams
 
@@ -48,11 +51,11 @@ object CSRConfig {
   // log2Up(128 + 1), hold 0~128
   final val VlWidth = 8
 
-  final val PAddrWidth = 36
+  final val PAddrWidth = 48
 
   final val AddrWidthInPage = 12
 
-  final val PMPAddrWidth = 36
+  final val PMPAddrWidth = 48
 
   final val PMPOffBits = 2
 
@@ -100,6 +103,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val sret = Input(Bool())
       val dret = Input(Bool())
     }))
+    val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
       val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
@@ -108,10 +112,10 @@ class NewCSR(implicit val p: Parameters) extends Module
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
         val pcGPA = UInt(VaddrMaxWidth.W)
-        val instr = UInt(32.W)
+        val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
-        val triggerCf = new TriggerCf
+        val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
         val isHls = Bool()
@@ -206,7 +210,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapPCGPA = io.fromRob.trap.bits.pcGPA
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
-  val triggerCf = io.fromRob.trap.bits.triggerCf
+  val trigger = io.fromRob.trap.bits.trigger
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
@@ -316,7 +320,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.vstvec := vstvec.regOut
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
-  val entryDebugMode = Wire(Bool())
+  val entryDebugMode = WireInit(false.B)
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -594,9 +598,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode
+  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode && !debugMode
+  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
   Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -604,6 +608,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
+        in.trapInst := io.trapInst
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
@@ -708,10 +713,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr === CSRs.mip.U) || (addr === CSRs.sip.U) || (addr === CSRs.vsip.U) ||
     (addr === CSRs.hip.U) || (addr === CSRs.mvip.U) || (addr === CSRs.hvip.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR ||
-    (addr === CSRs.stimecmp.U) ||
-    (addr === CSRs.mcounteren.U) ||
-    (addr === CSRs.scounteren.U) ||
-    (addr === CSRs.menvcfg.U)
+    (addr === CSRs.menvcfg.U) ||
+    (addr === CSRs.henvcfg.U) ||
+    (addr === CSRs.stimecmp.U)
   )
 
   // flush
@@ -817,6 +821,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     state === s_waitIMSIC && stateNext === s_idle
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
+
   io.out.bits.flushPipe := flushPipe
 
   io.out.bits.rData := MuxCase(0.U, Seq(
@@ -858,9 +863,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * debug_begin
    */
-
-  val tdata1Update  = tdata1.w.wen
-  val tdata2Update  = tdata2.w.wen
+  val tdata1Selected = Wire(new Tdata1Bundle)
+  tdata1Selected := tdata1.rdata
+  val dmodeInSelectedTrigger = tdata1Selected.DMODE.asBool
+  val triggerCanWrite = dmodeInSelectedTrigger && debugMode || !dmodeInSelectedTrigger
+  val tdata1Update  = tdata1.w.wen && triggerCanWrite
+  val tdata2Update  = tdata2.w.wen && triggerCanWrite
   val tdata1Vec = tdata1RegVec.map{ mod => {
     val tdata1Wire = Wire(new Tdata1Bundle)
     tdata1Wire := mod.rdata
@@ -872,7 +880,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
   debugMod.io.in.trapInfo.bits.intrVec     := intrVec
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
-  debugMod.io.in.trapInfo.bits.triggerCf   := triggerCf
+  debugMod.io.in.trapInfo.bits.trigger     := trigger
   debugMod.io.in.trapInfo.bits.singleStep  := singleStep
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
@@ -893,12 +901,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.debugMode                := debugMode
   trapEntryDEvent.in.hasTrap                  := hasTrap
   trapEntryDEvent.in.hasSingleStep            := debugMod.io.out.hasSingleStep
-  trapEntryDEvent.in.hasTriggerFire           := debugMod.io.out.hasTriggerFire
+  trapEntryDEvent.in.triggerEnterDebugMode    := debugMod.io.out.triggerEnterDebugMode
   trapEntryDEvent.in.hasDebugEbreakException  := debugMod.io.out.hasDebugEbreakException
   trapEntryDEvent.in.breakPoint               := debugMod.io.out.breakPoint
 
   trapHandleMod.io.in.trapInfo.bits.singleStep  := debugMod.io.out.hasSingleStep
-  trapHandleMod.io.in.trapInfo.bits.triggerFire := debugMod.io.out.triggerCanFire
 
   intrMod.io.in.debugMode := debugMode
   intrMod.io.in.debugIntr := debugIntr
@@ -1022,6 +1029,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
   io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
   io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
+  io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
@@ -1119,10 +1128,22 @@ class NewCSR(implicit val p: Parameters) extends Module
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
-    val ivmHS = isModeHS &&  satp.regOut.MODE =/= SatpMode.Bare
-    val ivmVS = isModeVS && vsatp.regOut.MODE =/= SatpMode.Bare
+    val isSv39: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv39 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv39
+    val isSv48: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv48 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv48
+    val isBare = !isSv39 && !isSv48
+    val sv39PC = SignExt(trapPC.take(39), XLEN)
+    val sv48PC = SignExt(trapPC.take(48), XLEN)
+    val barePC = ZeroExt(trapPC.take(PAddrBits), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-    val exceptionPC = Mux(ivmHS || ivmVS, SignExt(trapPC, XLEN), ZeroExt(trapPC, XLEN))
+    val exceptionPC = Mux1H(Seq(
+      isSv39 -> sv39PC,
+      isSv48 -> sv48PC,
+      isBare -> barePC,
+    ))
 
     val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     diffArchEvent.coreid := hartId

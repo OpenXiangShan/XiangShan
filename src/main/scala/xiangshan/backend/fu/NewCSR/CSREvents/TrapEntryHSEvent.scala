@@ -72,6 +72,8 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
 
+  private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
+
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
 
@@ -81,12 +83,13 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
+  private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp 
+  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp
   private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp
   private val tvalFillGVA      =
@@ -94,6 +97,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     isLSGuestExcp|| isFetchGuestExcp ||
     (isFetchExcp || isBpExcp) && fetchIsVirt ||
     isMemExcp && memIsVirt
+  private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
     (tvalFillPc                     ) -> trapPC,
@@ -101,12 +105,13 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
     (isLSGuestExcp                  ) -> trapMemVA,
+    (tvalFillInst                   ) -> trapInst,
   ))
 
   private val tval2 = Mux1H(Seq(
-    (isFetchGuestExcp                  ) -> trapPCGPA,
-    (isFetchGuestExcp && fetchCrossPage) -> (trapPCGPA + 2.U),
-    (isLSGuestExcp                     ) -> trapMemGPA,
+    (isFetchGuestExcp && !fetchCrossPage) -> trapPCGPA,
+    (isFetchGuestExcp && fetchCrossPage ) -> (trapPCGPA + 2.U),
+    (isLSGuestExcp                      ) -> trapMemGPA,
   ))
 
   private val instrAddrTransType = AddrTransType(

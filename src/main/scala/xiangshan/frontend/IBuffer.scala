@@ -63,10 +63,9 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType = UInt(ExceptionType.width.W)
+  val exceptionType = IBufferExceptionType()
   val exceptionFromBackend = Bool()
-  val crossPageIPFFix = Bool()
-  val triggered = new TriggerCf
+  val triggered = TriggerAction()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
@@ -76,9 +75,12 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
     ftqOffset := fetch.ftqOffset(i).bits
-    exceptionType := fetch.exceptionType(i)
+    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
+      fetch.exceptionType(i),
+      fetch.crossPageIPFFix(i),
+      fetch.illegalInstr(i),
+    )
     exceptionFromBackend := fetch.exceptionFromBackend(i)
-    crossPageIPFFix := fetch.crossPageIPFFix(i)
     triggered := fetch.triggered(i)
     this
   }
@@ -89,14 +91,15 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.pc := pc
     cf.foldpc := foldpc
     cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.pf
-    cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.gpf
-    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.af
+    cf.exceptionVec(instrPageFault)      := IBufferExceptionType.isPF (this.exceptionType)
+    cf.exceptionVec(instrGuestPageFault) := IBufferExceptionType.isGPF(this.exceptionType)
+    cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF (this.exceptionType)
+    cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
     cf.exceptionFromBackend := exceptionFromBackend
     cf.trigger := triggered
     cf.pd := pd
     cf.pred_taken := pred_taken
-    cf.crossPageIPFFix := crossPageIPFFix
+    cf.crossPageIPFFix := IBufferExceptionType.isCrossPage(this.exceptionType)
     cf.storeSetHit := DontCare
     cf.waitForRobIdx := DontCare
     cf.loadWaitBit := DontCare
@@ -105,6 +108,45 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
     cf
+  }
+
+  object IBufferExceptionType extends NamedUInt(3) {
+    def None         = "b000".U
+    def NonCrossPF   = "b001".U
+    def NonCrossGPF  = "b010".U
+    def NonCrossAF   = "b011".U
+    // illegal instruction
+    def rvcII        = "b100".U
+    def CrossPF      = "b101".U
+    def CrossGPF     = "b110".U
+    def CrossAF      = "b111".U
+
+    def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: UInt, crossPage: Bool, rvcIll: Bool): UInt = {
+      require(
+        fetchExcp.getWidth == ExceptionType.width,
+        s"The width(${fetchExcp.getWidth}) of fetchExcp should be equal to " +
+        s"the width(${ExceptionType.width}) of frontend.ExceptionType."
+      )
+      MuxCase(0.U, Seq(
+        crossPage     -> Cat(1.U(1.W), fetchExcp),
+        fetchExcp.orR -> fetchExcp,
+        rvcIll        -> this.rvcII,
+      ))
+    }
+
+    def isRVCII(uint: UInt): Bool = {
+      this.checkInputWidth(uint)
+      uint(2) && uint(1, 0) === 0.U
+    }
+
+    def isCrossPage(uint: UInt): Bool = {
+      this.checkInputWidth(uint)
+      uint(2) && uint(1, 0) =/= 0.U
+    }
+
+    def isPF (uint: UInt): Bool = uint(1, 0) === this.NonCrossPF (1, 0)
+    def isGPF(uint: UInt): Bool = uint(1, 0) === this.NonCrossGPF(1, 0)
+    def isAF (uint: UInt): Bool = uint(1, 0) === this.NonCrossAF (1, 0)
   }
 }
 
@@ -362,11 +404,9 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   }
 
 
-  val dequeueInsufficient = Wire(Bool())
   val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
   val deqValidCount = PopCount(validVec.asBools)
   val deqWasteCount = DecodeWidth.U - deqValidCount
-  dequeueInsufficient := deqValidCount < DecodeWidth.U
   matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
 
   io.stallReason.reason.map(_ := 0.U)
@@ -434,33 +474,18 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val ibuffer_IDWidth_hvButNotFull = afterInit && (numValid =/= 0.U) && (numValid < DecodeWidth.U) && !headBubble
   XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", ibuffer_IDWidth_hvButNotFull)
-  /*
-  XSPerfAccumulate("ICacheMissBubble", Mux(matchBubbleVec(TopDownCounters.ICacheMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("ITLBMissBubble", Mux(matchBubbleVec(TopDownCounters.ITLBMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("ControlRedirectBubble", Mux(matchBubbleVec(TopDownCounters.ControlRedirectBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("MemVioRedirectBubble", Mux(matchBubbleVec(TopDownCounters.MemVioRedirectBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("OtherRedirectBubble", Mux(matchBubbleVec(TopDownCounters.OtherRedirectBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("BTBMissBubble", Mux(matchBubbleVec(TopDownCounters.BTBMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("OverrideBubble", Mux(matchBubbleVec(TopDownCounters.OverrideBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("FtqUpdateBubble", Mux(matchBubbleVec(TopDownCounters.FtqUpdateBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("FtqFullStall", Mux(matchBubbleVec(TopDownCounters.FtqFullStall.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("FetchFragmentBubble",
-  Mux(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR, 0.U, deqWasteCount))
-  XSPerfAccumulate("TAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.TAGEMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("SCMissBubble", Mux(matchBubbleVec(TopDownCounters.SCMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("ITTAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.ITTAGEMissBubble.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("RASMissBubble", Mux(matchBubbleVec(TopDownCounters.RASMissBubble.id), deqWasteCount, 0.U))
-  */
+
+  val FrontBubble = Mux(decodeCanAccept, DecodeWidth.U - numOut, 0.U)
 
   val perfEvents = Seq(
-    ("IBuffer_Flushed  ", io.flush                                                                     ),
-    ("IBuffer_hungry   ", instrHungry                                                                  ),
-    ("IBuffer_1_4_valid", (numValid >  (0*(IBufSize/4)).U) & (numValid < (1*(IBufSize/4)).U)   ),
-    ("IBuffer_2_4_valid", (numValid >= (1*(IBufSize/4)).U) & (numValid < (2*(IBufSize/4)).U)   ),
-    ("IBuffer_3_4_valid", (numValid >= (2*(IBufSize/4)).U) & (numValid < (3*(IBufSize/4)).U)   ),
-    ("IBuffer_4_4_valid", (numValid >= (3*(IBufSize/4)).U) & (numValid < (4*(IBufSize/4)).U)   ),
-    ("IBuffer_full     ",  numValid.andR                                                           ),
-    ("Front_Bubble     ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid)))
+    ("IBuffer_Flushed  ", io.flush),
+    ("IBuffer_hungry   ", instrHungry),
+    ("IBuffer_1_4_valid", (numValid > (0 * (IBufSize / 4)).U) & (numValid < (1 * (IBufSize / 4)).U)),
+    ("IBuffer_2_4_valid", (numValid >= (1 * (IBufSize / 4)).U) & (numValid < (2 * (IBufSize / 4)).U)),
+    ("IBuffer_3_4_valid", (numValid >= (2 * (IBufSize / 4)).U) & (numValid < (3 * (IBufSize / 4)).U)),
+    ("IBuffer_4_4_valid", (numValid >= (3 * (IBufSize / 4)).U) & (numValid < (4 * (IBufSize / 4)).U)),
+    ("IBuffer_full     ", numValid.andR),
+    ("Front_Bubble     ", FrontBubble)
   )
   generatePerfEvent()
 }

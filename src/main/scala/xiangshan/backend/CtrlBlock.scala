@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst, TrapInstInfo}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -140,7 +140,7 @@ class CtrlBlockImp(
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
     x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
-      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+      (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
@@ -493,6 +493,7 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
+  rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
@@ -628,6 +629,8 @@ class CtrlBlockImp(
   // backend to rob
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
 
+  io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
+
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
@@ -666,6 +669,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
+  }
+  val toCSR = new Bundle {
+    val trapInstInfo = Output(ValidIO(new TrapInstInfo))
   }
   val intIQValidNumVec = Input(MixedVec(params.genIntIQValidNumBundle))
   val fpIQValidNumVec = Input(MixedVec(params.genFpIQValidNumBundle))

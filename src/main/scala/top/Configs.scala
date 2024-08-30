@@ -190,12 +190,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
         ),
         l2tlbParameters = L2TLBParameters(
-          l1Size = 4,
-          l2nSets = 4,
-          l2nWays = 4,
-          l3nSets = 4,
-          l3nWays = 8,
-          spSize = 2,
+          l3Size = 4,
+          l2Size = 4,
+          l1nSets = 4,
+          l1nWays = 4,
+          l0nSets = 4,
+          l0nWays = 8,
+          spSize = 4,
         ),
         L2CacheParamsOpt = Some(L2Param(
           name = "L2",
@@ -286,7 +287,7 @@ class WithNKBL2
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes)),
+          vaddrBitsOpt = Some((if(p.EnableSv48) p.VAddrBitsSv48 else p.VAddrBitsSv39) - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),
@@ -294,6 +295,7 @@ class WithNKBL2
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        hasRVA23CMO = p.HasRVA23CMO,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,

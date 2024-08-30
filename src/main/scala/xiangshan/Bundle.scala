@@ -144,7 +144,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val exceptionFromBackend = Bool()
-  val trigger = new TriggerCf
+  val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
@@ -482,15 +482,35 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
     val sa = satp_value.asTypeOf(new SatpStruct)
     mode := sa.mode
     asid := sa.asid
-    ppn := Cat(0.U((44-PAddrBits).W), sa.ppn(PAddrBits-1, 0)).asUInt
+    ppn := sa.ppn
     changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+  }
+}
+
+class HgatpStruct(implicit p: Parameters) extends XSBundle {
+  val mode = UInt(4.W)
+  val vmid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
+class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
+  val changed = Bool()
+
+  // Todo: remove it
+  def apply(hgatp_value: UInt): Unit = {
+    require(hgatp_value.getWidth == XLEN)
+    val sa = hgatp_value.asTypeOf(new HgatpStruct)
+    mode := sa.mode
+    vmid := sa.vmid
+    ppn := sa.ppn
+    changed := DataChanged(sa.vmid) // when ppn is changed, software need do the flush
   }
 }
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
   val vsatp = new TlbSatpBundle()
-  val hgatp = new TlbSatpBundle()
+  val hgatp = new TlbHgatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
@@ -567,6 +587,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val soft_prefetch_enable = Output(Bool())
   val cache_error_enable = Output(Bool())
   val uncache_write_outstanding_enable = Output(Bool())
+  val hd_misalign_st_enable = Output(Bool())
+  val hd_misalign_ld_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())
   val wfi_enable = Output(Bool())
@@ -658,26 +680,18 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class TriggerCf(implicit p: Parameters) extends XSBundle {
-  // frontend
-  val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
-  val frontendCanFire   = Vec(TriggerNum, Bool())
-  // backend
-  val backendHit        = Vec(TriggerNum, Bool())
-  val backendCanFire    = Vec(TriggerNum, Bool())
+object TriggerAction extends NamedUInt(4) {
+  // Put breakpoint Exception gererated by trigger in ExceptionVec[3].
+  def BreakpointExp = 0.U(width.W)  // raise breakpoint exception
+  def DebugMode     = 1.U(width.W)  // enter debug mode
+  def TraceOn       = 2.U(width.W)
+  def TraceOff      = 3.U(width.W)
+  def TraceNotify   = 4.U(width.W)
+  def None          = 15.U(width.W) // use triggerAction = 15.U to express that action is None;
 
-  // Two situations not allowed:
-  // 1. load data comparison
-  // 2. store chaining with store
-  def getFrontendCanFire = frontendCanFire.reduce(_ || _)
-  def getBackendCanFire = backendCanFire.reduce(_ || _)
-  def canFire = getFrontendCanFire || getBackendCanFire
-  def clear(): Unit = {
-    frontendHit.foreach(_ := false.B)
-    frontendCanFire.foreach(_ := false.B)
-    backendHit.foreach(_ := false.B)
-    backendCanFire.foreach(_ := false.B)
-  }
+  def isExp(action: UInt)   = action === BreakpointExp
+  def isDmode(action: UInt) = action === DebugMode
+  def isNone(action: UInt)  = action === None
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
@@ -688,6 +702,8 @@ class FrontendTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
+  val triggerCanRaiseBpExp = Output(Bool())
 }
 
 class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
@@ -696,16 +712,17 @@ class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val debugMode = Output(Bool())
   val triggerCanRaiseBpExp  = Output(Bool())
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType = Output(UInt(2.W))
-  val select    = Output(Bool()) // todo: delete
+  val select    = Output(Bool())
   val timing    = Output(Bool())
-  val action    = Output(Bool()) // todo: delete
+  val action    = Output(TriggerAction())
   val chain     = Output(Bool())
-  val execute   = Output(Bool()) // todo: delete
+  val execute   = Output(Bool())
   val store     = Output(Bool())
   val load      = Output(Bool())
   val tdata2    = Output(UInt(64.W))

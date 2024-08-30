@@ -79,6 +79,8 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   )
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
 
+  private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
+
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
 
@@ -87,6 +89,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
+  private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
@@ -96,12 +99,14 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val tvalFillGVA      =
     (isFetchExcp || isBpExcp) && fetchIsVirt ||
     isMemExcp && memIsVirt
+  private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
     (tvalFillPc                     ) -> trapPC,
     (tvalFillPcPlus2                ) -> (trapPC + 2.U),
     (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
+    (tvalFillInst                   ) -> trapInst,
   ))
 
   private val instrAddrTransType = AddrTransType(

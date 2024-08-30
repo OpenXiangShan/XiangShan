@@ -29,6 +29,7 @@ import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
+import coupledL2.{RVA23CMOReq, RVA23CMOResp}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -90,6 +91,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
+    val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
@@ -108,10 +110,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
     val exceptionAddr = new ExceptionAddrIO
+    val flushFrmMaBuf = Input(Bool())
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
+    val cmoOpReq  = DecoupledIO(new RVA23CMOReq)
+    val cmoOpResp = Flipped(DecoupledIO(new RVA23CMOResp))
+    val flushSbuffer = new SbufferFlushBundle
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
 
@@ -169,12 +175,16 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.vecmmioStout <> io.vecmmioStout
   storeQueue.io.rob         <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
-  storeQueue.io.sqCancelCnt <> io.sqCancelCnt
-  storeQueue.io.sqDeq       <> io.sqDeq
-  storeQueue.io.sqEmpty     <> io.sqEmpty
-  storeQueue.io.sqFull      <> io.sqFull
-  storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
-  storeQueue.io.force_write <> io.force_write
+  storeQueue.io.sqCancelCnt  <> io.sqCancelCnt
+  storeQueue.io.sqDeq        <> io.sqDeq
+  storeQueue.io.sqEmpty      <> io.sqEmpty
+  storeQueue.io.sqFull       <> io.sqFull
+  storeQueue.io.forward      <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+  storeQueue.io.force_write  <> io.force_write
+  storeQueue.io.cmoOpReq     <> io.cmoOpReq
+  storeQueue.io.cmoOpResp    <> io.cmoOpResp
+  storeQueue.io.flushSbuffer <> io.flushSbuffer
+  storeQueue.io.maControl    <> io.maControl
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -193,6 +203,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.release             <> io.release
   loadQueue.io.trigger             <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
+  loadQueue.io.flushFrmMaBuf       := io.flushFrmMaBuf
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec

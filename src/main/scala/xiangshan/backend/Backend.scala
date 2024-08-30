@@ -405,6 +405,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrin.msiInfo.bits := RegEnable(io.fromTop.msiInfo.bits, io.fromTop.msiInfo.valid)
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
+  csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -751,7 +752,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val hyuIqFeedback = Vec(params.HyuCnt, Flipped(new MemRSFeedbackIO))
   val vstuIqFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
   val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
-  val ldCancel = Vec(params.LdExuCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(params.LdExuCnt, Input(new LoadCancelIO))
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
@@ -825,17 +826,21 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   }
 }
 
-class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {
-  val fromTop = new Bundle {
-    val hartId = Input(UInt(hartIdLen.W))
-    val externalInterrupt = Input(new ExternalInterruptIO)
-    val msiInfo = Input(ValidIO(new MsiInfoBundle))
-    val clintTime = Input(ValidIO(UInt(64.W)))
-  }
+class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
+  val hartId            = Output(UInt(hartIdLen.W))
+  val externalInterrupt = Output(new ExternalInterruptIO)
+  val msiInfo           = Output(ValidIO(new MsiInfoBundle))
+  val clintTime         = Output(ValidIO(UInt(64.W)))
+}
 
-  val toTop = new Bundle {
-    val cpuHalted = Output(Bool())
-  }
+class BackendToTopBundle extends Bundle {
+  val cpuHalted = Output(Bool())
+}
+
+class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {
+  val fromTop = Flipped(new TopToBackendBundle)
+
+  val toTop = new BackendToTopBundle
 
   val fenceio = new FenceIO
   // Todo: merge these bundles into BackendFrontendIO

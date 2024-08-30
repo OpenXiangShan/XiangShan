@@ -197,6 +197,8 @@ object CSRBundles {
     val soft_prefetch_enable = Output(Bool())
     val cache_error_enable = Output(Bool())
     val uncache_write_outstanding_enable = Output(Bool())
+    val hd_misalign_st_enable = Output(Bool())
+    val hd_misalign_ld_enable = Output(Bool())
     // Rename
     val fusion_enable = Output(Bool())
     val wfi_enable = Output(Bool())

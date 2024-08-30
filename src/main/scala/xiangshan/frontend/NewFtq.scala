@@ -184,40 +184,34 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val redirctFromIFU = Output(Bool())
 }
 
-class FtqToIfuIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
+class BpuFlushInfo(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
+  // when ifu pipeline is not stalled,
+  // a packet from bpu s3 can reach f1 at most
+  val s2 = Valid(new FtqPtr)
+  val s3 = Valid(new FtqPtr)
+  def shouldFlushBy(src: Valid[FtqPtr], idx_to_flush: FtqPtr) = {
+    src.valid && !isAfter(src.bits, idx_to_flush)
+  }
+  def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
+  def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
+}
+
+class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new FetchRequestBundle)
   val redirect = Valid(new BranchPredictionRedirect)
   val topdown_redirect = Valid(new BranchPredictionRedirect)
-  val flushFromBpu = new Bundle {
-    // when ifu pipeline is not stalled,
-    // a packet from bpu s3 can reach f1 at most
-    val s2 = Valid(new FtqPtr)
-    val s3 = Valid(new FtqPtr)
-    def shouldFlushBy(src: Valid[FtqPtr], idx_to_flush: FtqPtr) = {
-      src.valid && !isAfter(src.bits, idx_to_flush)
-    }
-    def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
-    def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
-  }
+  val flushFromBpu = new BpuFlushInfo
 }
 
-class FtqToICacheIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
+class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
   //NOTE: req.bits must be prepare in T cycle
   // while req.valid is set true in T + 1 cycle
   val req = Decoupled(new FtqToICacheRequestBundle)
 }
 
-class FtqToPrefetchIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
+class FtqToPrefetchIO(implicit p: Parameters) extends XSBundle {
   val req = Decoupled(new FtqICacheInfo)
-  val flushFromBpu = new Bundle {
-    val s2 = Valid(new FtqPtr)
-    val s3 = Valid(new FtqPtr)
-    def shouldFlushBy(src: Valid[FtqPtr], idx_to_flush: FtqPtr) = {
-      src.valid && !isAfter(src.bits, idx_to_flush)
-    }
-    def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
-    def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
-  }
+  val flushFromBpu = new BpuFlushInfo
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {

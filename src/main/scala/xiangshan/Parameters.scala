@@ -43,6 +43,7 @@ import huancun._
 import huancun.debug._
 import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
+import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
@@ -67,8 +68,10 @@ case class XSCoreParameters
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
-  VAddrBits: Int = 39,
-  GPAddrBits: Int = 41,
+  VAddrBitsSv39: Int = 39,
+  GPAddrBitsSv39x4: Int = 41,
+  VAddrBitsSv48: Int = 48,
+  GPAddrBitsSv48x4: Int = 50,
   HasFPU: Boolean = true,
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
@@ -85,6 +88,7 @@ case class XSCoreParameters
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableFauFTB: Boolean = true,
+  EnableSv48: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -241,11 +245,14 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = false,
   EnableUncacheWriteOutstanding: Boolean = false,
+  EnableHardwareStoreMisalign: Boolean = true,
+  EnableHardwareLoadMisalign: Boolean = true,
   EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = false,
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
+  HasRVA23CMO: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
@@ -274,7 +281,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -283,7 +290,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
@@ -292,7 +299,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
@@ -301,7 +308,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
@@ -310,7 +317,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = false
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -527,6 +534,10 @@ case class XSCoreParameters
     ),
     iqWakeUpParams,
   )
+
+  // Parameters for trace extension.
+  // Trace parameters is useful for XSTOP.
+  val TraceGroupNum          = 3 // Width to Encoder
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -552,7 +563,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   final val PageOffsetWidth = 12
-  def NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
+  def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
@@ -569,20 +580,41 @@ trait HasXSParameter {
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension
+  def EnableSv48 = coreParams.EnableSv48
   def HasDiv = coreParams.HasDiv
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  def GPAddrBits = coreParams.GPAddrBits
+  def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
+  def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
+  def GPAddrBits = {
+    if (EnableSv48)
+      coreParams.GPAddrBitsSv48x4
+    else 
+      coreParams.GPAddrBitsSv39x4
+  }
   def VAddrBits = {
-    if(HasHExtension){
-      coreParams.GPAddrBits
-    }else{
-      coreParams.VAddrBits
+    if (HasHExtension) {
+      if (EnableSv48)
+        coreParams.GPAddrBitsSv48x4
+      else
+        coreParams.GPAddrBitsSv39x4
+    } else {
+      if (EnableSv48)
+        coreParams.VAddrBitsSv48
+      else
+        coreParams.VAddrBitsSv39
     }
   } // VAddrBits is Virtual Memory addr bits
+  require(PAddrBits == 48 || !EnableSv48) // Paddr bits should be 48 when Sv48 enable
 
-  def VAddrMaxBits = coreParams.VAddrBits max coreParams.GPAddrBits
+  def VAddrMaxBits = {
+    if(EnableSv48) {
+      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
+    } else {
+      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
+    }
+  }
 
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
@@ -760,11 +792,14 @@ trait HasXSParameter {
   def EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   def EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   def EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  def EnableHardwareStoreMisalign = coreParams.EnableHardwareStoreMisalign
+  def EnableHardwareLoadMisalign = coreParams.EnableHardwareLoadMisalign
   def EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
   def EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def HasRVA23CMO = coreParams.HasRVA23CMO
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
@@ -827,4 +862,7 @@ trait HasXSParameter {
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
   protected def TriggerChainMaxLength = 2
+
+  // Parameters for Trace extension
+  def TraceGroupNum          = coreParams.TraceGroupNum
 }
