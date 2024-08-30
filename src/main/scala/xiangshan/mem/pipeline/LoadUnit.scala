@@ -29,8 +29,8 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.fu.util.SdtrigExt
-
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
@@ -139,7 +139,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_uop = ValidIO(new DynInst) // early wakeup signal generated in load_s1, send to RS in load_s2
 
     // trigger
-    val trigger = Vec(TriggerNum, new LoadUnitTriggerIO)
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
 
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms

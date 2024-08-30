@@ -641,7 +641,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.lateKill          := s1_late_kill
 
   // trigger
-  val storeTrigger = Module(new StoreTrigger)
+  val storeTrigger = Module(new MemTrigger(MemType.STORE))
   storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp

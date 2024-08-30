@@ -180,7 +180,13 @@ class CsrTriggerBundle(implicit val p: Parameters) extends Bundle with HasXSPara
   val debugMode = Bool()
   val triggerCanRaiseBpExp = Bool()
 }
-class StoreTrigger(implicit val p: Parameters) extends Module with HasXSParameter with SdtrigExt {
+
+object MemType {
+  val LOAD  = true
+  val STORE = false
+}
+
+class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) extends Module with HasXSParameter with SdtrigExt {
   val io = IO(new Bundle(){
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
@@ -210,7 +216,7 @@ class StoreTrigger(implicit val p: Parameters) extends Module with HasXSParamete
       vaddr,
       tdataVec(i).tdata2,
       tdataVec(i).matchType,
-      tEnableVec(i) && tdataVec(i).store
+      tEnableVec(i) && (if(memType == MemType.LOAD) tdataVec(i).load else tdataVec(i).store)
     )
   }
   TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
