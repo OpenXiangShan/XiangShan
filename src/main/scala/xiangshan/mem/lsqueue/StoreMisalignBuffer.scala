@@ -446,7 +446,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     when (isMMIO) {
       unWriteStores := 0.U
       unSentStores := 0.U
-      splitStoreResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      splitStoreResp(curPtr).uop.exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
       // delegate to software
       splitStoreResp(curPtr).uop.exceptionVec(storeAddrMisaligned) := true.B
     } .elsewhen (hasException) {
@@ -558,13 +558,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
-  io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := Mux(
+  val exceptionVecSelect = Mux(
     globalMMIO || globalException,
     splitStoreResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  )
+    0.U.asTypeOf(ExceptionVec()))
+
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
+  io.writeBack.bits.uop := req.uop
+  io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(exceptionVecSelect, StaCfg) // TODO: is this ok?
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := unalignedStoreData

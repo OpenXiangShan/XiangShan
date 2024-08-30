@@ -476,7 +476,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isMMIO) {
       unSentLoads := 0.U
-      splitLoadResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      splitLoadResp(curPtr).uop.exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), LduCfg)
       // delegate to software
       splitLoadResp(curPtr).uop.exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
@@ -534,14 +534,14 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       combinedData := rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0))
     }
   }
+  val exceptionVecSelect = Mux(
+    globalMMIO || globalException,
+    splitLoadResp(curPtr).uop.exceptionVec,
+    0.U.asTypeOf(ExceptionVec()))
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := Mux(
-    globalMMIO || globalException,
-    splitLoadResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  )
+  io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(exceptionVecSelect, LduCfg) // TODO: is this ok?
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := combinedData
