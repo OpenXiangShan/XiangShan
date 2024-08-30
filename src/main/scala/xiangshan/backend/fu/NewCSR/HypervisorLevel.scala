@@ -62,13 +62,13 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when(!menvcfg.STCE.asBool) {
+    when(!menvcfg.STCE) {
       regOut.STCE := 0.U
     }
     when(!menvcfg.PBMTE) {
       regOut.PBMTE := 0.U
     }
-    when(!menvcfg.DTE.asBool) {
+    when(!menvcfg.DTE) {
       regOut.DTE := 0.U
     }
   }).setAddr(CSRs.henvcfg)
@@ -342,8 +342,10 @@ class HEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
-  if (CSRConfig.EXT_SSTC) {
-    this.DTE.setRW().withReset(1.U)
+  if (CSRConfig.EXT_DBLTRP) {
+    // software write envcfg to open ssdbltrp if need
+    // set 0 to pass ci
+    this.DTE.setRW().withReset(0.U)
   }
 }
 
