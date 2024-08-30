@@ -767,7 +767,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.alignedType    := s0_sel_src.alignedType
   s0_out.mbIndex        := s0_sel_src.mbIndex
   // s0_out.flowPtr         := s0_sel_src.flowPtr
-  s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_sel_src.vecActive
+  s0_out.uop.exceptionVec(loadAddrMisaligned) := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
   when(io.tlb.req.valid && s0_sel_src.isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()

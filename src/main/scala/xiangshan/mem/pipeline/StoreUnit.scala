@@ -214,7 +214,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   ))
   // if vector store sends 128-bit requests, its address must be 128-aligned
   XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
-  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, !s0_addr_aligned, false.B)
+  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
 
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
