@@ -493,7 +493,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isMMIO) {
       unSentLoads := 0.U
-      exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), LduCfg)
       // delegate to software
       exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
