@@ -597,7 +597,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
-    acquire_not_sent && (new_req.isFromLoad || new_req.isFromStore)
+    // acquire_not_sent && (new_req.isFromLoad || new_req.isFromStore)
+
+    // Since most acquire requests have been issued from pipe_reg,
+    // the number of such merge situations is currently small,
+    // So dont Merge anything for better timing.
+    false.B
   }
 
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
