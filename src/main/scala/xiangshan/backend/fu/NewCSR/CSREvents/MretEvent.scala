@@ -50,7 +50,10 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
            (nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Bare),
     sv39 = !nextPrivState.isModeM && !nextPrivState.isVirtual && satp.MODE === SatpMode.Sv39 ||
            nextPrivState.isVirtual && vsatp.MODE === SatpMode.Sv39,
-    sv39x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4
+    sv48 = !nextPrivState.isModeM && !nextPrivState.isVirtual && satp.MODE === SatpMode.Sv48 ||
+           nextPrivState.isVirtual && vsatp.MODE === SatpMode.Sv48,
+    sv39x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4,
+    sv48x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
   )
 
   out := DontCare

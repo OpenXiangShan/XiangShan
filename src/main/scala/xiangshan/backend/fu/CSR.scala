@@ -1547,7 +1547,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
                                    (virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 0.U)
   csrio.instrAddrTransType.sv39 := privilegeMode =/= ModeM && !virtMode && tlbBundle.satp.mode === 8.U ||
                                    virtMode && tlbBundle.vsatp.mode === 8.U
+  csrio.instrAddrTransType.sv48 := privilegeMode =/= ModeM && !virtMode && tlbBundle.satp.mode === 9.U ||
+                                   virtMode && tlbBundle.vsatp.mode === 9.U
   csrio.instrAddrTransType.sv39x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 8.U
+  csrio.instrAddrTransType.sv48x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 9.U
   assert(PopCount(csrio.instrAddrTransType.asUInt) === 1.U, "Exactly one instr fetch addr trans type can be asserted.")
 
   // Cache error debug support

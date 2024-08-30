@@ -117,7 +117,9 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val instrAddrTransType = AddrTransType(
     bare = satp.MODE === SatpMode.Bare,
     sv39 = satp.MODE === SatpMode.Sv39,
-    sv39x4 = false.B
+    sv48 = satp.MODE === SatpMode.Sv48,
+    sv39x4 = false.B,
+    sv48x4 = false.B
   )
 
   out := DontCare

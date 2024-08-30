@@ -632,21 +632,35 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
 }
 
 class AddrTransType(implicit p: Parameters) extends XSBundle {
-  val bare, sv39, sv39x4 = Bool()
+  val bare, sv39, sv39x4, sv48, sv48x4 = Bool()
 
   def checkAccessFault(target: UInt): Bool = bare && target(XLEN - 1, PAddrBits).orR
-  def checkPageFault(target: UInt): Bool = sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt
-  def checkGuestPageFault(target: UInt): Bool = sv39x4 && target(XLEN - 1, 41).orR
+  def checkPageFault(target: UInt): Bool =
+    sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt ||
+    sv48 && target(XLEN - 1, 48) =/= VecInit.fill(XLEN - 48)(target(47)).asUInt
+  def checkGuestPageFault(target: UInt): Bool =
+    sv39x4 && target(XLEN - 1, 41).orR || sv48x4 && target(XLEN - 1, 50).orR
 }
 
 object AddrTransType {
-  def apply(bare: Boolean = false, sv39: Boolean = false, sv39x4: Boolean = false)(implicit p: Parameters): AddrTransType =
-    (new AddrTransType).Lit(_.bare -> bare.B, _.sv39 -> sv39.B, _.sv39x4 -> sv39x4.B)
-  def apply(bare: Bool, sv39: Bool, sv39x4: Bool)(implicit p: Parameters): AddrTransType = {
+  def apply(bare: Boolean = false,
+            sv39: Boolean = false,
+            sv39x4: Boolean = false,
+            sv48: Boolean = false,
+            sv48x4: Boolean = false)(implicit p: Parameters): AddrTransType =
+    (new AddrTransType).Lit(_.bare -> bare.B,
+                            _.sv39 -> sv39.B,
+                            _.sv39x4 -> sv39x4.B,
+                            _.sv48 -> sv48.B,
+                            _.sv48x4 -> sv48x4.B)
+
+  def apply(bare: Bool, sv39: Bool, sv39x4: Bool, sv48: Bool, sv48x4: Bool)(implicit p: Parameters): AddrTransType = {
     val addrTransType = Wire(new AddrTransType)
     addrTransType.bare := bare
     addrTransType.sv39 := sv39
     addrTransType.sv39x4 := sv39x4
+    addrTransType.sv48 := sv48
+    addrTransType.sv48x4 := sv48x4
     addrTransType
   }
 }
