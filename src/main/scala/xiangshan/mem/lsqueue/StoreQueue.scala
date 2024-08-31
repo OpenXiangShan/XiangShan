@@ -70,9 +70,15 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 }
 
 class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  // The 1st StorePipelineWidth ports: sta exception generated at s1, except for af
+  // The 2nd StorePipelineWidth ports: sta af generated at s2
+  // The following VecStorePipelineWidth ports: vector st exception
+  // The last port: non-data error generated in SoC
+  val enqPortNum = StorePipelineWidth * 2 + VecStorePipelineWidth + 1
+
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val storeAddrIn = Vec(StorePipelineWidth * 2 + VecStorePipelineWidth, Flipped(ValidIO(new LsPipelineBundle())))
+    val storeAddrIn = Vec(enqPortNum, Flipped(ValidIO(new LsPipelineBundle())))
     val flushFrmMaBuf = Input(Bool())
     val exceptionAddr = new ExceptionAddrIO
   })
@@ -88,14 +94,14 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
   ))
 
   // S2: delay 1 cycle
-  val s2_req = (0 until StorePipelineWidth * 2 + VecStorePipelineWidth).map(i =>
+  val s2_req = (0 until enqPortNum).map(i =>
     RegEnable(s1_req(i), s1_valid(i)))
-  val s2_valid = (0 until StorePipelineWidth * 2 + VecStorePipelineWidth).map(i =>
+  val s2_valid = (0 until enqPortNum).map(i =>
     RegNext(s1_valid(i)) && !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
 
-  val s2_enqueue = Wire(Vec(StorePipelineWidth * 2 + VecStorePipelineWidth, Bool()))
-  for (w <- 0 until StorePipelineWidth * 2 + VecStorePipelineWidth) {
+  val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
+  for (w <- 0 until enqPortNum) {
     s2_enqueue(w) := s2_valid(w)
   }
 
@@ -774,6 +780,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   val uncacheUop = Reg(new DynInst)
+  val uncacheVAddr = Reg(UInt(VAddrBits.W))
   val cboFlushedSb = RegInit(false.B)
   switch(uncacheState) {
     is(s_idle) {
@@ -885,6 +892,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   when (io.mmioStout.fire) {
     allocated(deqPtr) := false.B
   }
+
+  exceptionBuffer.io.storeAddrIn.last.valid := io.mmioStout.fire
+  exceptionBuffer.io.storeAddrIn.last.bits := DontCare
+  exceptionBuffer.io.storeAddrIn.last.bits.vaddr := vaddrModule.io.rdata.head
+  exceptionBuffer.io.storeAddrIn.last.bits.uop := uncacheUop
 
   // (4) or vector store:
   // TODO: implement it!
