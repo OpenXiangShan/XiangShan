@@ -418,7 +418,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   updateU       := DontCare
 
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
-  val delay_updateMisPred = WireInit(0.U.asTypeOf(update.mispred_mask(numBr))) // the last one indicates jmp results
 
   //Using ghist create folded_hist
   val ufolded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
@@ -434,12 +433,28 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }
 
   //updating read
-  val u_req_buff_valid = RegInit(false.B)
-  val delay_full_target = RegInit(0.U.asTypeOf(update.full_target)) //if update target need buffer
-  val delay_u_pc     = RegInit(0.U.asTypeOf(update.pc))
-  val delay_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val u_idle :: u_buffer :: u_sec_buffer :: Nil = Enum(3)
+  val u_state = RegInit(u_idle)
+  val u_req_conflict_stall = RegInit(false.B)
 
-  val u_req_valid  = (updateValid || u_req_buff_valid) && !(io.s1_fire(3) && s1_isIndirect)
+  //If there is an update read req, the req data needs to be temporarily stored
+  val buffer_full_target = RegInit(0.U.asTypeOf(update.full_target))
+  val buffer_u_pc     = RegInit(0.U.asTypeOf(update.pc))
+  val buffer_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val buffer_updateMisPred = RegInit(0.U.asTypeOf(update.mispred_mask(numBr)))
+
+  //If there is already an update read req that is blocked,
+  //the value of the first request is temporarily stored in the second_buffer,
+  //and the value of the second update request is temporarily stored in the buffer.
+  val second_buffer_valid = RegInit(false.B)
+  val second_buffer_full_target = RegInit(0.U.asTypeOf(update.full_target))
+  val second_buffer_u_pc     = RegInit(0.U.asTypeOf(update.pc))
+  val second_buffer_updateMisPred = RegInit(0.U.asTypeOf(update.mispred_mask(numBr))) // the last one indicates jmp results
+  val second_buffer_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+
+  val u_req_valid  = (updateValid || u_req_conflict_stall) && !(io.s1_fire(3) && s1_isIndirect)
+  val u_req_pc = Mux(u_req_conflict_stall, Mux(u_state === u_sec_buffer, second_buffer_u_pc, buffer_u_pc), update.pc)
+  val u_req_folded_hist = Mux(u_req_conflict_stall, Mux(u_state === u_sec_buffer, second_buffer_ufolded_hist, buffer_ufolded_hist), ufolded_hist)
   val u_req_valid_reg = RegNext(u_req_valid)
   val u_req_conflict = updateValid && io.s1_fire(3) && s1_isIndirect
 
@@ -456,36 +471,74 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_altProviderCtr    = RegEnable(s2_altProviderCtr, u_req_valid_reg)
   val u_allocate          = RegInit(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))))
   val u_altDiffers        = Mux(u_altProvided, u_altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
-  val u_write_pc          = RegEnable(delay_u_pc, u_req_valid_reg)
-  val u_write_full_target = RegEnable(delay_full_target, u_req_valid_reg)
-  val u_write_updateMisPred = RegEnable(delay_updateMisPred, u_req_valid_reg)
-  val u_write_folded_hist = RegEnable(delay_ufolded_hist, u_req_valid_reg)
+  val u_write_pc          = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_u_pc, buffer_u_pc), u_req_valid_reg)
+  val u_write_full_target = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_full_target, buffer_full_target), u_req_valid_reg)
+  val u_write_updateMisPred = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_updateMisPred, buffer_updateMisPred), u_req_valid_reg)
+  val u_write_folded_hist = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_ufolded_hist,buffer_ufolded_hist), u_req_valid_reg)
 
-  //when a conflict occurs, need storage the update data.
-  //If a read request is sent during the update process，it need clean
-  when(u_req_conflict){
-    u_req_buff_valid := true.B
-  }.elsewhen(u_req_valid){
-    u_req_buff_valid := false.B
-  }
-  //For reading during updates, even if there are no conflicts, it is necessary to block FTQ and store the update information.
-  //Release when it can be written
-  when(updateValid){
-    delay_full_target := update.full_target
-    delay_u_pc := update.pc
-    delay_updateMisPred := update.mispred_mask(numBr)
-    delay_ufolded_hist := ufolded_hist
-  }.elsewhen(u_req_valid_reg){
-    delay_full_target := 0.U.asTypeOf(update.full_target)
-    delay_ufolded_hist := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
-    delay_updateMisPred := update.mispred_mask(numBr)
+  switch(u_state){
+    //if has update req, need buffer for r_resp_valid
+    is(u_idle){
+      when(updateValid){
+        u_state := u_buffer
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+      }
+      when(u_req_conflict){
+        u_req_conflict_stall := true.B
+      }
+    }
+    //wait resp
+    is(u_buffer){
+      when(u_req_valid){  //if an update req is issued, the block can be freed
+        u_req_conflict_stall := false.B
+      }
+      //if has second req and the first is blocked, it need stall second req
+      when(updateValid && u_req_conflict_stall){
+        u_state := u_sec_buffer
+
+        u_req_conflict_stall := true.B
+
+        second_buffer_valid := true.B
+        second_buffer_full_target := buffer_full_target
+        second_buffer_u_pc := buffer_u_pc
+        second_buffer_updateMisPred := buffer_updateMisPred
+        second_buffer_ufolded_hist := buffer_ufolded_hist
+
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+      }.elsewhen(updateValid){  //if has second req and first is not stalled, it need update buffer_*
+        u_req_conflict_stall := u_req_conflict
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+
+        when(u_req_conflict){ //if second req happen conflict, it need stall
+          u_req_conflict_stall := true.B
+        }
+      }.elsewhen(u_req_valid_reg){
+        u_state := u_idle
+        u_req_conflict_stall := false.B
+      }
+    }
+    is(u_sec_buffer){
+      when(u_req_valid_reg){
+        u_state := u_buffer
+        second_buffer_valid := false.B
+      }
+    }
   }
 
   // Predict
   tables.map { t => {
       t.io.req.valid := io.s1_fire(3) && s1_isIndirect || u_req_valid
-      t.io.req.bits.pc := Mux(u_req_valid, Mux(u_req_buff_valid, delay_u_pc, update.pc), s1_pc_dup(3))
-      t.io.req.bits.folded_hist := Mux(u_req_valid, Mux(u_req_buff_valid, delay_ufolded_hist, ufolded_hist), io.in.bits.s1_folded_hist(3))
+      t.io.req.bits.pc := Mux(u_req_valid, u_req_pc, s1_pc_dup(3))
+      t.io.req.bits.folded_hist := Mux(u_req_valid, u_req_folded_hist, io.in.bits.s1_folded_hist(3))
     }
   }
 
@@ -624,7 +677,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
   //if ittage table has conflict need block ftq update req
-  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_buff_valid
+  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_conflict_stall
   XSPerfAccumulate("ittage_update_not_ready", io.update.ready)
   val ittage_updateMask_and_read_conflict = RegNext(updateMask.reduce(_||_)) && io.s1_fire(3) && s1_isIndirect
   XSPerfAccumulate("ittage_updateMask_and_read_conflict", ittage_updateMask_and_read_conflict)
@@ -662,7 +715,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     }
   }
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
-  XSDebug(updateValid, p"correct(${!delay_updateMisPred})\n")
+  XSDebug(updateValid, p"correct(${!buffer_updateMisPred})\n")
 
   generatePerfEvent()
 }
