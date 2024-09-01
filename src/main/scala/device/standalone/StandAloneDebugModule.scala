@@ -50,13 +50,17 @@ class StandAloneDebugModule (
   debugModuleIntNode :*= IntBuffer() :*= debugModule.debug.dmOuter.dmOuter.intnode
   val int = InModuleBody(debugModuleIntNode.makeIOs())
 
-  class StandAloneDebugModuleImp(val outer: StandAloneDebugModule)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
+  class StandAloneDebugModuleImp(val outer: StandAloneDebugModule)(implicit p: Parameters) extends StandAloneDeviceRawImp(outer) {
     val io = IO(new outer.debugModule.DebugModuleIO)
+    childClock := io.clock.asClock
+    childReset := io.reset
     io <> outer.debugModule.module.io
-    outer.debugModule.module.io.resetCtrl.hartIsInReset :=
-      RegNextN(io.resetCtrl.hartIsInReset, 2, Some(0.U.asTypeOf(io.resetCtrl.hartIsInReset)))
-    io.resetCtrl.hartResetReq.foreach(req =>
-      req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.get, 0.U.asTypeOf(req)))
+    withClockAndReset(io.clock.asClock, io.reset) {
+      outer.debugModule.module.io.resetCtrl.hartIsInReset :=
+        RegNextN(io.resetCtrl.hartIsInReset, 2, Some(0.U.asTypeOf(io.resetCtrl.hartIsInReset)))
+      io.resetCtrl.hartResetReq.foreach(req =>
+        req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.get, 0.U.asTypeOf(req)))
+    }
   }
 
   override lazy val module = new StandAloneDebugModuleImp(this)
