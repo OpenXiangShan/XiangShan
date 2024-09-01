@@ -46,8 +46,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   tile.debug_int_node := IntBuffer(2) := debugIntNode
   tile.plic_int_node :*= IntBuffer(2) :*= plicIntNode
   class XSTileWrapImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
-    val chiAsyncBridgeParams = soc.CHIAsyncBridge
-
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
@@ -57,9 +55,15 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
-      val chi = if (enableCHI) Some(new AsyncPortIO(chiAsyncBridgeParams)) else None
+      val chi = EnableCHIAsyncBridge match {
+        case Some(param) => Some(new AsyncPortIO(param))
+        case None => Some(new PortIO)
+      }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
-      val clintTimeAsync = Flipped(new AsyncBundle(UInt(64.W), AsyncQueueParams(1)))
+      val clintTime = EnableClintAsyncBridge match {
+        case Some(param) => Some(Flipped(new AsyncBundle(UInt(64.W), param)))
+        case None => Some(Input(ValidIO(UInt(64.W))))
+      }
     })
 
     val imsicAsync = Module(new IMSICAsync())
@@ -73,17 +77,26 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
 
     // CLINT Async Queue Sink
-    val clintTimeAsyncQueueSink = Module(new AsyncQueueSink(UInt(64.W), AsyncQueueParams(1)))
-    clintTimeAsyncQueueSink.io.async <> io.clintTimeAsync
-    clintTimeAsyncQueueSink.io.deq.ready := true.B
-    tile.module.io.clintTime.valid := clintTimeAsyncQueueSink.io.deq.valid
-    tile.module.io.clintTime.bits := clintTimeAsyncQueueSink.io.deq.bits
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        val sink = Module(new AsyncQueueSink(UInt(64.W), param))
+        sink.io.async <> io.clintTime.get
+        sink.io.deq.ready := true.B
+        tile.module.io.clintTime.valid := sink.io.deq.valid
+        tile.module.io.clintTime.bits := sink.io.deq.bits
+      case None =>
+        tile.module.io.clintTime := io.clintTime.get
+    }
 
     // CHI Async Queue Source
-    if (enableCHI) {
-      val chiAsyncBridgeSource = Module(new CHIAsyncBridgeSource(chiAsyncBridgeParams))
-      chiAsyncBridgeSource.io.enq <> tile.module.io.chi.get
-      io.chi.get <> chiAsyncBridgeSource.io.async
+    EnableCHIAsyncBridge match {
+      case Some(param) =>
+        val source = Module(new CHIAsyncBridgeSource(param))
+        source.io.enq <> tile.module.io.chi.get
+        io.chi.get <> source.io.async
+      case None =>
+        require(enableCHI)
+        io.chi.get <> tile.module.io.chi.get
     }
 
     dontTouch(io.hartId)
