@@ -33,6 +33,8 @@ import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenUSWholeEmul}
 import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
+import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
+import xiangshan.backend.fu.util.CSRConst
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -195,6 +197,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.regCacheIdx   := DontCare
     uop.traceBlockInPipe := DontCare
   })
+  private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
+  private val isCsr        = Wire(Vec(RenameWidth, Bool()))
+  private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
+  private val isRoCsrr     = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -268,6 +274,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
+
+    // read only CSRR instruction support: remove blockBackward and waitForward
+    inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
+    isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
+    isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
+    isRoCsrr(i) := isCsrr(i) && LookupTreeDefault(
+      inst(i).CSRIDX, false.B, CSRConst.roCsrrAddr.map(_.U -> true.B))
+
+    uops(i).waitForward := io.in(i).bits.waitForward && !isRoCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isRoCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid

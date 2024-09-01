@@ -989,15 +989,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
-  val isCSR = inst.OPCODE5Bit === OPCODE5Bit.SYSTEM && inst.FUNCT3(1, 0) =/= 0.U
-  val isCSRR = isCSR && inst.FUNCT3 === BitPat("b?1?") && inst.RS1 === 0.U
-  val isCSRW = isCSR && inst.FUNCT3 === BitPat("b?10") && inst.RD  === 0.U
-  dontTouch(isCSRR)
-  dontTouch(isCSRW)
+  val isCsr = inst.OPCODE5Bit === OPCODE5Bit.SYSTEM && inst.FUNCT3(1, 0) =/= 0.U
+  val isCsrr = isCsr && inst.FUNCT3 === BitPat("b?1?") && inst.RS1 === 0.U
+  val isCsrw = isCsr && inst.FUNCT3 === BitPat("b?01") && inst.RD  === 0.U
+  dontTouch(isCsrr)
+  dontTouch(isCsrw)
 
   // for csrr vl instruction, convert to vsetvl
-  val isCsrrVlenb = isCSRR && inst.CSRIDX === CSRs.vlenb.U
-  val isCsrrVl    = isCSRR && inst.CSRIDX === CSRs.vl.U
+  val isCsrrVlenb = isCsrr && inst.CSRIDX === CSRs.vlenb.U
+  val isCsrrVl    = isCsrr && inst.CSRIDX === CSRs.vl.U
 
   // decode for SoftPrefetch instructions (prefetch.w / prefetch.r / prefetch.i)
   val isSoftPrefetch = inst.OPCODE === BitPat("b0010011") && inst.FUNCT3 === BitPat("b110") && inst.RD === 0.U
@@ -1064,9 +1064,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     isCsrrVlenb -> ALUOpType.add,
   ))
 
-  io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
-    isCSRR -> false.B,
-  ))
+  // io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
+  //   isRoCsrr -> false.B,
+  // ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
