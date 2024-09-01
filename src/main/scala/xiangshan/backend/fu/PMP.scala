@@ -28,6 +28,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 import utility._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
+import xiangshan.frontend.tracertl.{TraceRTLDontCare, TraceRTLChoose, TraceRTLDontCareValue}
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
@@ -403,9 +404,9 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
 trait PMPCheckMethod extends PMPConst {
   def pmp_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
-    resp.instr := TlbCmd.isExec(cmd) && !cfg.x
+    resp.ld := TraceRTLDontCareValue(TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r)
+    resp.st := TraceRTLDontCareValue((TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w)
+    resp.instr := TraceRTLDontCareValue(TlbCmd.isExec(cmd) && !cfg.x)
     resp.mmio := false.B
     resp.atomic := false.B
     resp

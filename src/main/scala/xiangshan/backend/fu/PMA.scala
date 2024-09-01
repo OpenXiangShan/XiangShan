@@ -21,6 +21,7 @@ import chisel3.util._
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegReadFn, RegWriteFn}
 import utility.{ParallelPriorityMux, ValidHold, ZeroExt}
 import xiangshan.cache.mmu.TlbCmd
+import xiangshan.frontend.tracertl.{TraceRTLDontCareValue, TraceRTLChoose}
 
 import scala.collection.mutable.ListBuffer
 
@@ -209,11 +210,11 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && !cfg.w
-    resp.instr := TlbCmd.isExec(cmd) && !cfg.x
+    resp.ld := TraceRTLDontCareValue(TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r)
+    resp.st := TraceRTLDontCareValue((TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && !cfg.w)
+    resp.instr := TraceRTLDontCareValue(TlbCmd.isExec(cmd) && !cfg.x)
     resp.mmio := !cfg.c
-    resp.atomic := cfg.atomic
+    resp.atomic := TraceRTLChoose(cfg.atomic, false.B)
     resp
   }
 
