@@ -59,10 +59,8 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  CHIAsyncBridge: AsyncQueueParams = AsyncQueueParams(
-    depth = 4,
-    sync = 3
-  )
+  EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 4, sync = 3)),
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(1))
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -96,6 +94,10 @@ trait HasSoCParameter {
   val SetIpNumValidSize = soc.NumHart * soc.NumIRFiles
 
   val NumIRSrc = soc.NumIRSrc
+
+  val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
+    soc.EnableCHIAsyncBridge else None
+  val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
 }
 
 class ILABundle extends Bundle {}
