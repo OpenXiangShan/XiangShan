@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst, TrapInstInfo}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -623,6 +623,8 @@ class CtrlBlockImp(
   // backend to rob
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
 
+  io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
+
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
@@ -661,6 +663,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
+  }
+  val toCSR = new Bundle {
+    val trapInstInfo = Output(ValidIO(new TrapInstInfo))
   }
   val intIQValidNumVec = Input(MixedVec(params.genIntIQValidNumBundle))
   val fpIQValidNumVec = Input(MixedVec(params.genFpIQValidNumBundle))

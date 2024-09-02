@@ -28,6 +28,8 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
+import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
+import xiangshan.frontend.FtqPtr
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -55,6 +57,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+
     // vtype update
     val isResumeVType = Input(Bool())
     val commitVType = new Bundle {
@@ -68,6 +71,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
+
+    val toCSR = new Bundle {
+      val trapInstInfo = ValidIO(new TrapInstInfo)
+    }
   })
 
   // io alias
@@ -96,6 +103,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
+
+  val isIllegalInstVec = VecInit((outValids lazyZip outReadys lazyZip io.out.map(_.bits)).map {
+    case (valid, ready, decodedInst) =>
+      valid && ready && (decodedInst.exceptionVec(ExceptionNO.EX_II) || decodedInst.exceptionVec(ExceptionNO.EX_VI))
+  })
+  val hasIllegalInst = Cat(isIllegalInstVec).orR
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(io.out.map(_.bits)), 0.U.asTypeOf(new DecodedInst))
 
   val complexNum = Wire(UInt(3.W))
   // (0, 1, 2, 3, 4, 5) + complexNum
@@ -180,6 +194,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
         "DecodeOut: can't wirte two regfile in one uop/instruction")
     }
   )
+
   for (i <- 0 until DecodeWidth) {
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
@@ -217,6 +232,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
                io.stallReason.out.backReason.bits,
                in)
   }
+
+  io.toCSR.trapInstInfo.valid := hasIllegalInst && !io.redirect
+  io.toCSR.trapInstInfo.bits.fromDecodedInst(illegalInst)
 
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))

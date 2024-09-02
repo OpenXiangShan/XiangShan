@@ -139,11 +139,20 @@ abstract class StandAloneDevice (
     axi4node
   })
 
-  lazy val module: StandAloneDeviceImp = new StandAloneDeviceImp(this)
+  lazy val module: LazyModuleImpLike = new StandAloneDeviceImp(this)
 
 }
 
 class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
+    val mod = this.toNamed
+    annotate(new ChiselAnnotation {
+      def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
+    })
+  }
+}
+
+class StandAloneDeviceRawImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyRawModuleImp(outer) {
   p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(new ChiselAnnotation {

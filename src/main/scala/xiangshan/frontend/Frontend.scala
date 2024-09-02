@@ -156,8 +156,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.toIbuffer    <> ibuffer.io.in
 
   ftq.io.fromBackend <> io.backend.toFtq
-  io.backend.fromFtq <> ftq.io.toBackend
-  io.backend.fromIfu <> ifu.io.toBackend
+  io.backend.fromFtq := ftq.io.toBackend
+  io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
@@ -332,7 +332,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
-  val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  val frontendBubble = Mux(io.backend.canAccept, DecodeWidth.U - PopCount(ibuffer.io.out.map(_.valid)), 0.U)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 

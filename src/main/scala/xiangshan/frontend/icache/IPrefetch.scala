@@ -196,6 +196,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_itlb_exception     = VecInit((0 until PortNumber).map( i =>
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits))
   ))
+  val s1_itlb_pbmt          = VecInit((0 until PortNumber).map( i =>
+    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.pbmt(0)), data = fromITLB(i).bits.pbmt(0))
+  ))
   val s1_itlb_exception_gpf = VecInit(s1_itlb_exception.map(_ === ExceptionType.gpf))
 
   /* Select gpaddr with the first gpf
@@ -293,6 +296,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
     toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
     toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
@@ -317,7 +321,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     p.bits.cmd  := TlbCmd.exec
   }
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
-  val s1_mmio          = VecInit(fromPMP.map(_.mmio))
+  val s1_pmp_mmio      = VecInit(fromPMP.map(_.mmio))
 
   // also raise af when meta array corrupt is detected, to cancel prefetch
   val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
@@ -328,6 +332,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     s1_pmp_exception,
     s1_meta_exception
   )
+
+  // merge pmp mmio and itlb pbmt
+  val s1_mmio = VecInit((s1_pmp_mmio zip s1_itlb_pbmt).map{ case (mmio, pbmt) =>
+    mmio || Pbmt.isUncache(pbmt)
+  })
 
   /**
     ******************************************************************************
@@ -340,9 +349,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       when(s1_valid) {
         when(!itlb_finish) {
           next_state := m_itlbResend
-        }.elsewhen(!toWayLookup.fire && !s1_isSoftPrefetch) {  // itlb_finish
+        }.elsewhen(!toWayLookup.fire) {  // itlb_finish
           next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // itlb_finish && (toWayLookup.fire || s1_isSoftPrefetch)
+        }.elsewhen(!s2_ready) {  // itlb_finish && toWayLookup.fire
           next_state := m_enterS2
         } // .otherwise { next_state := m_idle }
       } // .otherwise { next_state := m_idle }  // !s1_valid
@@ -351,34 +360,24 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       when(itlb_finish) {
         when(!toMeta.ready) {
           next_state := m_metaResend
-        }.elsewhen(!s1_isSoftPrefetch) { // toMeta.ready
+        }.otherwise { // toMeta.ready
           next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // toMeta.ready && s1_isSoftPrefetch
-          next_state := m_enterS2
-        }.otherwise { // toMeta.ready && s1_isSoftPrefetch && s2_ready
-          next_state := m_idle
         }
       } // .otherwise { next_state := m_itlbResend }  // !itlb_finish
     }
     is(m_metaResend) {
       when(toMeta.ready) {
-        when (!s1_isSoftPrefetch) {
-          next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // s1_isSoftPrefetch
-          next_state := m_enterS2
-        }.otherwise { // s1_isSoftPrefetch && s2_ready
-          next_state := m_idle
-        }
+        next_state := m_enqWay
       } // .otherwise { next_state := m_metaResend }  // !toMeta.ready
     }
     is(m_enqWay) {
-      // sanity check
-      assert(!s1_isSoftPrefetch, "Soft prefetch enters m_enqWay")
-      when(toWayLookup.fire && !s2_ready) {
-        next_state := m_enterS2
-      }.elsewhen(toWayLookup.fire && s2_ready) {
-        next_state := m_idle
-      }
+      when(toWayLookup.fire || s1_isSoftPrefetch) {
+        when (!s2_ready) {
+          next_state := m_enterS2
+        }.otherwise {  // s2_ready
+          next_state := m_idle
+        }
+      } // .otherwise { next_state := m_enqWay }
     }
     is(m_enterS2) {
       when(s2_ready) {

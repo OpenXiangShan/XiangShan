@@ -69,6 +69,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
 
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
 
+  private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
+
   private val fetchIsVirt = iMode.isVirtual
   private val memIsVirt   = dMode.isVirtual
 
@@ -77,12 +79,13 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
+  private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp 
+  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp
   private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp
   private val tvalFillGVA      =
@@ -90,6 +93,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     isLSGuestExcp|| isFetchGuestExcp ||
     (isFetchExcp || isBpExcp) && fetchIsVirt ||
     isMemExcp && memIsVirt
+  private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
     (tvalFillPc                     ) -> trapPC,
@@ -97,6 +101,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
     (isLSGuestExcp                  ) -> trapMemVA,
+    (tvalFillInst                   ) -> trapInst,
   ))
 
   private val tval2 = Mux1H(Seq(

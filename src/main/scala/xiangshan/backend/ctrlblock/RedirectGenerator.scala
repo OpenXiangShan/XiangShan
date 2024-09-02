@@ -81,7 +81,5 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.memPredUpdate.ldpc := RegEnable(XORFold(real_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := RegEnable(XORFold(store_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
-  // disle mdp
-  io.memPredUpdate := 0.U.asTypeOf(io.memPredUpdate)
 
 }

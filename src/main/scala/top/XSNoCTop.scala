@@ -52,6 +52,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     }
   }
 
+  require(enableCHI)
+
   // xstile
   val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
@@ -134,16 +136,28 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
-    val clintTimeAsyncQueueSource = withClockAndReset(soc_clock, soc_reset_sync) { Module(new AsyncQueueSource(UInt(64.W), AsyncQueueParams(1))) }
-    clintTimeAsyncQueueSource.io.enq.valid := io.clintTime.valid
-    clintTimeAsyncQueueSource.io.enq.bits := io.clintTime.bits
-    core_with_l2.module.io.clintTimeAsync <> clintTimeAsyncQueueSource.io.async
-
-    val chiAsyncBridgeSink = withClockAndReset(noc_clock, noc_reset_sync) {
-      Module(new CHIAsyncBridgeSink(soc.CHIAsyncBridge))
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        val source = withClockAndReset(soc_clock, soc_reset_sync) {
+          Module(new AsyncQueueSource(UInt(64.W), param))
+        }
+        source.io.enq.valid := io.clintTime.valid
+        source.io.enq.bits := io.clintTime.bits
+        core_with_l2.module.io.clintTime.get <> source.io.async
+      case None =>
+        core_with_l2.module.io.clintTime.get <> io.clintTime
     }
-    chiAsyncBridgeSink.io.async <> core_with_l2.module.io.chi.get
-    io.chi <> chiAsyncBridgeSink.io.deq
+
+    EnableCHIAsyncBridge match {
+      case Some(param) =>
+        val sink = withClockAndReset(noc_clock, noc_reset_sync) {
+          Module(new CHIAsyncBridgeSink(param))
+        }
+        sink.io.async <> core_with_l2.module.io.chi.get
+        io.chi <> sink.io.deq
+      case None =>
+        io.chi <> core_with_l2.module.io.chi.get
+    }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
     core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info

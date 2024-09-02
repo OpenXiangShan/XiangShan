@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
+import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
@@ -353,6 +354,13 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
+  val addrAligned = LookupTree(issueEew, List(
+    "b00".U   -> true.B,                   //b
+    "b01".U   -> (issueBaseAddr(0)    === 0.U), //h
+    "b10".U   -> (issueBaseAddr(1, 0) === 0.U), //w
+    "b11".U   -> (issueBaseAddr(2, 0) === 0.U)  //d
+  ))
+
   // data
   io.out.bits match { case x =>
     x.uop                   := issueUop
@@ -433,6 +441,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   val sqIdx = issueUop.sqIdx + splitIdx
   io.out.bits.uop.sqIdx := sqIdx
+  io.out.bits.uop.exceptionVec(storeAddrMisaligned) := !addrAligned && !issuePreIsSplit && io.out.bits.mask.orR
 
   // send data to sq
   val vstd = io.vstd.get
@@ -449,6 +458,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){
   io.out.bits.uop.lqIdx := issueUop.lqIdx + splitIdx
+  io.out.bits.uop.exceptionVec(loadAddrMisaligned) := !addrAligned && !issuePreIsSplit && io.out.bits.mask.orR
 }
 
 class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){

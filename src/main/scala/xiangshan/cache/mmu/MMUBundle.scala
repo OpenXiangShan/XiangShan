@@ -186,6 +186,8 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   */
   val level = Some(UInt(2.W))
   val ppn = UInt(sectorppnLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
+  val g_pbmt = UInt(ptePbmtLen.W)
   val perm = new TlbSectorPermBundle
   val valididx = Vec(tlbcontiguous, Bool())
   val pteidx = Vec(tlbcontiguous, Bool())
@@ -285,6 +287,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     ))
     this.level.map(_ := inner_level)
     this.perm.apply(item.s1)
+    this.pbmt := item.s1.entry.pbmt
 
     val s1tag = item.s1.entry.tag
     val s2tag = item.s2.entry.tag(gvpnLen - 1, sectortlbwidth)
@@ -319,6 +322,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.ppn_low := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn_low, s2ppn_low)
     this.vmid := item.s1.entry.vmid.getOrElse(0.U)
+    this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
     this.s2xlate := item.s2xlate
     this
@@ -373,6 +377,18 @@ object TlbCmd {
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
+// Svpbmt extension
+object Pbmt {
+  def pma:  UInt = "b00".U  // None
+  def nc:   UInt = "b01".U  // Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory
+  def io:   UInt = "b10".U  // Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O
+  def rsvd: UInt = "b11".U  // Reserved for future standard use
+  def width: Int = 2
+
+  def apply() = UInt(2.W)
+  def isUncache(a: UInt) = a===nc || a===io
+}
+
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
@@ -382,6 +398,8 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
+      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
@@ -401,7 +419,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
@@ -421,6 +439,8 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
+      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
+      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
@@ -438,7 +458,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
   }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
@@ -515,6 +535,7 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(GPAddrBits.W)))
+  val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
   val miss = Output(Bool())
   val fastMiss = Output(Bool())
   val excp = Vec(nDups, new Bundle {
@@ -639,10 +660,12 @@ abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
+  val n = UInt(pteNLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
   val reserved  = UInt(pteResLen.W)
   val ppn_high = UInt(ppnHignLen.W)
   val ppn  = UInt(ppnLen.W)
-  val rsw  = UInt(2.W)
+  val rsw  = UInt(pteRswLen.W)
   val perm = new Bundle {
     val d    = Bool()
     val a    = Bool()
@@ -665,29 +688,51 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   def isLeaf() = {
     (perm.r || perm.x || perm.w) && perm.v
   }
-  
+
+  def isNext() = {
+    !(perm.r || perm.x || perm.w) && perm.v
+  }
+
   def isPf(level: UInt) = {
-    !perm.v || (!perm.r && perm.w) || unaligned(level) || (!isLeaf() && (perm.u || perm.a || perm.d ))
-  }
-
-  // paddr of Xiangshan is 36 bits but ppn of sv39 is 44 bits
-  // access fault will be raised when ppn >> ppnLen is not zero
-  def isAf(mode: UInt = Sv39): Bool = {
-    val af = WireInit(false.B)
-    if (EnableSv48) {
-      when (mode === Sv39) {
-        af := !(ppn_high === 0.U && ppn(ppnLen - 1, vpnnLen * 3) === 0.U)
-      } .otherwise {
-        af := !(ppn_high === 0.U)
-      }
-    } else {
-      af := !(ppn_high === 0.U)
+    val pf = WireInit(false.B)
+    when (reserved =/= 0.U){
+      pf := true.B
+    }.elsewhen(pbmt === 3.U){
+      pf := true.B
+    }.elsewhen (isNext()) {
+      pf := (perm.u || perm.a || perm.d || n =/= 0.U || pbmt =/= 0.U)
+    }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+      pf := true.B
+    }.otherwise{
+      pf := unaligned(level)
     }
-    af
+    pf
   }
 
-  def isStage1Gpf() = {
-    !((Cat(ppn_high, ppn) >> gvpnLen) === 0.U)
+  def isGpf(level: UInt) = {
+    val gpf = WireInit(false.B)
+    when (isNext()) {
+      gpf := (perm.u || perm.a || perm.d )
+    }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+      gpf := true.B
+    }.elsewhen (!perm.u) {
+      gpf := true.B
+    }.otherwise{
+      gpf := unaligned(level)
+    }
+    gpf
+  }
+
+  // ppn of Xiangshan is 48 - 12 bits but ppn of sv48 is 44 bits
+  // access fault will be raised when ppn >> ppnLen is not zero
+  def isAf(): Bool = {
+    !(ppn_high === 0.U)
+  }
+
+  def isStage1Gpf(mode: UInt) = {
+    val sv39_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv39x4 - offLen)
+    val sv48_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv48x4 - offLen)
+    !(Mux(mode === Sv39, sv39_high, Mux(mode === Sv48, sv48_high, 0.U)) === 0.U)
   }
 
   def getPerm() = {
@@ -713,6 +758,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val tag = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = if (HasHExtension) Some(UInt(vmidLen.W)) else None
+  val pbmt = UInt(ptePbmtLen.W)
   val ppn = UInt(gvpnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level + 1).W)) else None
@@ -783,6 +829,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
+    pbmt := pte.asTypeOf(new PteBundle().cloneType).pbmt
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.asid := asid
@@ -802,7 +849,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   override def toPrintable: Printable = {
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
-    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} " +
+    p"tag:0x${Hexadecimal(tag)} pbmt: ${pbmt} ppn:0x${Hexadecimal(ppn)} " +
       (if (hasPerm) p"perm:${perm.getOrElse(0.U.asTypeOf(new PtePermBundle))} " else p"") +
       (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"") +
       p"prefetch:${prefetch}"
@@ -826,6 +873,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
   val tag  = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = Some(UInt(vmidLen.W))
+  val pbmts = Vec(num, UInt(ptePbmtLen.W))
   val ppns = Vec(num, UInt(gvpnLen.W))
   val vs   = Vec(num, Bool())
   val af   = Vec(num, Bool())
@@ -868,6 +916,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.ppn
       ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.af(i)   := Mux(s2xlate === allStage, false.B, pte.isAf()) // if allstage, this refill is from ptw or llptw, so the af is invalid
@@ -881,7 +930,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
     // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
     val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
-    p"asid: ${Hexadecimal(asid)} tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
+    p"asid: ${Hexadecimal(asid)} tag:0x${Hexadecimal(tag)} pbmt:${printVec(pbmts)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
       (if (hasPerm) p"perms:${printVec(permsInner)}" else p"")
   }
 }
@@ -967,6 +1016,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
+    this.entry.pbmt := pte.pbmt
     this.entry.prefetch := DontCare
     this.entry.asid := asid
     this.entry.v := !pf
@@ -990,6 +1040,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.tag := vpn
     this.entry.perm.map(_ := resp_pte.getPerm())
     this.entry.ppn := resp_pte.ppn
+    this.entry.pbmt := resp_pte.pbmt
     this.entry.prefetch := DontCare
     this.entry.asid := DontCare
     this.entry.vmid.map(_ := vmid)
@@ -1045,6 +1096,14 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     )
   }
 
+  def isLeaf() = {
+    (entry.perm.get.r || entry.perm.get.x || entry.perm.get.w) && entry.v
+  }
+
+  def isFakePte() = {
+    !pf && !entry.v
+  }
+
   def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
     require(vpn.getWidth == vpnLen)
     //    require(this.asid.getWidth <= asid.getWidth)
@@ -1096,12 +1155,13 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
     ptw_resp.ppn := resp_pte.getPPN()(ptePPNLen - 1, sectortlbwidth)
     ptw_resp.ppn_low := resp_pte.getPPN()(sectortlbwidth - 1, 0)
+    ptw_resp.pbmt := resp_pte.pbmt
     ptw_resp.level.map(_ := level)
     ptw_resp.perm.map(_ := resp_pte.getPerm())
     ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
     ptw_resp.pf := pf
     ptw_resp.af := af
-    ptw_resp.v := !pf
+    ptw_resp.v := resp_pte.perm.v
     ptw_resp.prefetch := DontCare
     ptw_resp.asid := asid
     ptw_resp.vmid.map(_ := vmid)

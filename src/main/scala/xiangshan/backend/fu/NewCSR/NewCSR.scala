@@ -18,6 +18,7 @@ import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
+import xiangshan.ExceptionNO._
 
 import scala.collection.immutable.SeqMap
 
@@ -38,6 +39,8 @@ object CSRConfig {
   final val VGEINWidth = 6
 
   final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
+
+  final val InstWidth = 32
 
   final val XLEN = 64 // Todo: use XSParams
 
@@ -100,6 +103,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val sret = Input(Bool())
       val dret = Input(Bool())
     }))
+    val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
       val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
@@ -108,7 +112,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
         val pcGPA = UInt(VaddrMaxWidth.W)
-        val instr = UInt(32.W)
+        val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
         val trigger = TriggerAction()
@@ -590,9 +594,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode
+  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode && !debugMode
+  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
   Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -600,6 +604,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
+        in.trapInst := io.trapInst
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
 
@@ -694,10 +699,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr === CSRs.mip.U) || (addr === CSRs.sip.U) || (addr === CSRs.vsip.U) ||
     (addr === CSRs.hip.U) || (addr === CSRs.mvip.U) || (addr === CSRs.hvip.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR ||
-    (addr === CSRs.stimecmp.U) ||
-    (addr === CSRs.mcounteren.U) ||
-    (addr === CSRs.scounteren.U) ||
-    (addr === CSRs.menvcfg.U)
+    (addr === CSRs.menvcfg.U) ||
+    (addr === CSRs.henvcfg.U) ||
+    (addr === CSRs.stimecmp.U)
   )
 
   // flush
@@ -803,6 +807,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     state === s_waitIMSIC && stateNext === s_idle
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
+
   io.out.bits.flushPipe := flushPipe
 
   io.out.bits.rData := MuxCase(0.U, Seq(
@@ -844,9 +849,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * debug_begin
    */
-
-  val tdata1Update  = tdata1.w.wen
-  val tdata2Update  = tdata2.w.wen
+  val tdata1Selected = Wire(new Tdata1Bundle)
+  tdata1Selected := tdata1.rdata
+  val dmodeInSelectedTrigger = tdata1Selected.DMODE.asBool
+  val triggerCanWrite = dmodeInSelectedTrigger && debugMode || !dmodeInSelectedTrigger
+  val tdata1Update  = tdata1.w.wen && triggerCanWrite
+  val tdata2Update  = tdata2.w.wen && triggerCanWrite
   val tdata1Vec = tdata1RegVec.map{ mod => {
     val tdata1Wire = Wire(new Tdata1Bundle)
     tdata1Wire := mod.rdata
@@ -1082,7 +1090,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.hfenceGVMA := isModeHS && mstatus.regOut.TVM || isModeHU
   io.toDecode.illegalInst.hfenceVVMA := isModeHU
   io.toDecode.virtualInst.hfence     := isModeVS || isModeVU
-  io.toDecode.illegalInst.hlsv       := isModeHU && hstatus.regOut.HU
+  io.toDecode.illegalInst.hlsv       := isModeHU && !hstatus.regOut.HU
   io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
   io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.FS === ContextStatus.Off
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off

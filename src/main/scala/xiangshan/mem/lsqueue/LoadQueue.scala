@@ -82,8 +82,9 @@ trait HasLoadHelper { this: XSModule =>
     val fpWen    = uop.fpWen
     val result = Cat(
       (fuOpType === LSUOpType.lw && fpWen),
+      (fuOpType === LSUOpType.lh && fpWen),
       (fuOpType === LSUOpType.lw && !fpWen) || (fuOpType === LSUOpType.hlvw),
-      (fuOpType === LSUOpType.lh)           || (fuOpType === LSUOpType.hlvh),
+      (fuOpType === LSUOpType.lh && !fpWen) || (fuOpType === LSUOpType.hlvh),
       (fuOpType === LSUOpType.lb)           || (fuOpType === LSUOpType.hlvb),
       (fuOpType === LSUOpType.ld)           || (fuOpType === LSUOpType.hlvd),
       (fuOpType === LSUOpType.lwu)          || (fuOpType === LSUOpType.hlvwu) || (fuOpType === LSUOpType.hlvxwu),
@@ -103,6 +104,7 @@ trait HasLoadHelper { this: XSModule =>
       SignExt(rdata(7, 0) , XLEN),
       SignExt(rdata(15, 0) , XLEN),
       SignExt(rdata(31, 0) , XLEN),
+      FPU.box(rdata, FPU.H),
       FPU.box(rdata, FPU.S)
     )
     Mux1H(select, selData)

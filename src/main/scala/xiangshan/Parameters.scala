@@ -252,6 +252,7 @@ case class XSCoreParameters
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
+  HasCMO: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
@@ -533,6 +534,10 @@ case class XSCoreParameters
     ),
     iqWakeUpParams,
   )
+
+  // Parameters for trace extension.
+  // Trace parameters is useful for XSTOP.
+  val TraceGroupNum          = 3 // Width to Encoder
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -580,6 +585,8 @@ trait HasXSParameter {
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
+  def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
   def GPAddrBits = {
     if (EnableSv48)
       coreParams.GPAddrBitsSv48x4
@@ -792,6 +799,7 @@ trait HasXSParameter {
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def HasCMO = coreParams.HasCMO && p(EnableCHI)
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
@@ -854,4 +862,7 @@ trait HasXSParameter {
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
   protected def TriggerChainMaxLength = 2
+
+  // Parameters for Trace extension
+  def TraceGroupNum          = coreParams.TraceGroupNum
 }
