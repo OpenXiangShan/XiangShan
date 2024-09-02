@@ -34,14 +34,14 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
       val s2_flush = s1_dataVec2(i)(j).robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val og2Failed = s2_toVfExuValid(i)(j) && !toVfExuFire(i)(j)
       val s1_ldCancel = LoadShouldCancel(s1_dataVec2(i)(j).loadDependency, io.ldCancel)
-      when(s1_validVec2(i)(j) && s1_readyVec2(i)(j) && !s2_flush && !og2Failed && !s1_ldCancel) {
-        s2_toVfExuValid(i)(j) := s1_validVec2(i)(j)
+      when(s1_validVec2(i)(j) && s1_readyVec2(i)(j) && !s2_flush && !s1_ldCancel) {
+        s2_toVfExuValid(i)(j) := true.B
         s2_toVfExuData(i)(j) := s1_dataVec2(i)(j)
         s2_toVfExuData(i)(j).loadDependency.foreach(_ := s1_dataVec2(i)(j).loadDependency.get.map(_ << 1))
       }.otherwise {
         s2_toVfExuValid(i)(j) := false.B
       }
-      s1_readyVec2(i)(j) := (toVfExuReady(i)(j) || !s1_validVec2(i)(j)) && !og2Failed && !s1_ldCancel
+      s1_readyVec2(i)(j) := true.B
       io.toVfExu(i)(j).valid := s2_toVfExuValid(i)(j)
       io.toVfExu(i)(j).bits := s2_toVfExuData(i)(j)
     }
@@ -50,7 +50,7 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
     case (toVfExu, iqId) =>
       toVfExu.zipWithIndex.foreach {
         case (og2Resp, exuId) =>
-          val og2Failed = s2_toVfExuValid(iqId)(exuId) && !toVfExuFire(iqId)(exuId)
+          val og2Failed = s2_toVfExuValid(iqId)(exuId) && !toVfExuReady(iqId)(exuId)
           og2Resp.valid := s2_toVfExuValid(iqId)(exuId)
           og2Resp.bits.robIdx := s2_toVfExuData(iqId)(exuId).robIdx
           og2Resp.bits.uopIdx.foreach(_ := s2_toVfExuData(iqId)(exuId).vpu.get.vuopIdx)
