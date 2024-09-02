@@ -1609,8 +1609,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_way.dmWay := s1_dmWay_dup_for_replace_way
 
   // send evict hint to sms
-  io.sms_agt_evict_req.valid := s2_valid && s2_req.miss && s2_fire_to_s3
-  io.sms_agt_evict_req.bits.vaddr := Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W))
+  val sms_agt_evict_valid = s2_valid && s2_req.miss && s2_fire_to_s3
+  io.sms_agt_evict_req.valid := GatedValidRegNext(sms_agt_evict_valid)
+  io.sms_agt_evict_req.bits.vaddr := RegEnable(Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W)), sms_agt_evict_valid)
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid
