@@ -36,7 +36,7 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
 class IssueQueueStatusBundle(numEnq: Int, numEntries: Int) extends Bundle {
   val empty = Output(Bool())
   val full = Output(Bool())
-  val validCnt = Output(UInt(log2Ceil(numEntries).W))
+  val validCnt = Output(UInt(log2Ceil(numEntries + 1).W))
   val leftVec = Output(Vec(numEnq + 1, Bool()))
 }
 
