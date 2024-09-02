@@ -521,7 +521,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     Option(s"VSegmentUnitPipelineConnect")
   )
 
-  io.vecDifftestInfo.valid         := state === s_send_data && segmentActive
+  io.vecDifftestInfo.valid         := io.sbuffer.valid
   io.vecDifftestInfo.bits          := uopq(deqPtr.value).uop
 
   /**
