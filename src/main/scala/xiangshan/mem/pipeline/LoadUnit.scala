@@ -1203,7 +1203,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //
   s2_out                     := s2_in
   s2_out.data                := 0.U // data will be generated in load s3
-  s2_out.uop.fpWen           := s2_in.uop.fpWen && !s2_exception
+  s2_out.uop.fpWen           := s2_in.uop.fpWen
   s2_out.mmio                := s2_mmio
   s2_out.uop.flushPipe       := false.B
   s2_out.uop.exceptionVec    := s2_exception_vec
@@ -1396,6 +1396,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && !io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
+  s3_out.bits.uop.fpWen       := s3_in.uop.fpWen && !s3_exception
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
