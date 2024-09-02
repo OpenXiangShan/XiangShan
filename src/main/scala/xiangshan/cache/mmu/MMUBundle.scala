@@ -1156,8 +1156,9 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   val entry = Vec(tlbcontiguous, new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
   val pteidx = Vec(tlbcontiguous, Bool())
   val not_super = Bool()
+  val not_merge = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true) = {
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true, not_merge: Boolean = false) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val resp_pte = pte
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
@@ -1175,7 +1176,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.vmid.map(_ := vmid)
     this.pteidx := UIntToOH(addr_low).asBools
     this.not_super := not_super.B
-
+    this.not_merge := not_merge.B
 
     for (i <- 0 until tlbcontiguous) {
       this.entry(i) := ptw_resp
