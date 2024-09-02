@@ -949,11 +949,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val exceptionValid = if(i == 0) hasException(rdataPtrExt(0).value) else {
-      hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value) && uop(rdataPtrExt(i).value).robIdx === uop(rdataPtrExt(i-1).value).robIdx)
+      hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value))
     }
     val vecNotAllMask = dataModule.io.rdata(i).mask.orR
     // Vector instructions that prevent triggered exceptions from being written to the 'databuffer'.
-    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
+    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr)
     if (i == 0) {
       // use dataBuffer write port 0 to writeback missaligned store out
       dataBuffer.io.enq(i).valid := Mux(
