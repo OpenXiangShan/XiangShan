@@ -1295,6 +1295,27 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   pcMap.log(pcVec, 1.U, "PC", clock, reset)
 
+  // PC-Head, ChiselMap
+  val pcRobHeadMap = ChiselMap.createTable("PCRobHead", Vec(1, new PCChiselMapBundle), basicDB = true)
+  val pcHead = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+  pcHead(0).valid := io.commits.commitValid(0) && io.commits.isCommit
+  pcHead(0).bits.pc := io.commits.info(0).debug_pc.get
+  pcRobHeadMap.log(pcHead, 1.U, "PCRoBHead", clock, reset)
+
+  // PC-Head, ChiselMap
+  val pcRobUopBlockMap = ChiselMap.createTable("PCRobUopBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+  val pcUopBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+  val headEntry_tmp = robEntries(deqPtr.value)
+  pcUopBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isUopWritebacked
+  pcUopBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
+  pcRobUopBlockMap.log(pcUopBlock, 1.U, "PCRoBUopBlock", clock, reset)
+
+  val pcRobBlockMap = ChiselMap.createTable("PCRobBlock", Vec(1, new PCChiselMapBundle), basicDB = true)
+  val pcBlock = Wire(Vec(1, Valid(new PCChiselMapBundle)))
+  pcBlock(0).valid := headEntry_tmp.valid && !headEntry_tmp.isWritebacked
+  pcBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
+  pcRobBlockMap.log(pcBlock, 1.U, "PCRoBBlock", clock, reset)
+
   // top-down info
   io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
   io.debugTopDown.toCore.robHeadVaddr.bits := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
