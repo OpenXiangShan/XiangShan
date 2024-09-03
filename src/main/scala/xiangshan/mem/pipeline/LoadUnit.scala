@@ -974,7 +974,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  loadTrigger.io.fromStore.vaddr                     := s1_vaddr
+  loadTrigger.io.fromLoadStore.vaddr                     := s1_vaddr
 
   s1_out.uop.trigger                  := loadTrigger.io.toLoadStore.triggerAction
   s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(loadTrigger.io.toLoadStore.triggerAction)

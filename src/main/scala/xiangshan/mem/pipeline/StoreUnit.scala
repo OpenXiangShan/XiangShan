@@ -310,7 +310,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+  storeTrigger.io.fromLoadStore.vaddr                     := s1_in.vaddr
 
   s1_out.uop.flushPipe                := false.B
   s1_out.uop.trigger                  := storeTrigger.io.toLoadStore.triggerAction

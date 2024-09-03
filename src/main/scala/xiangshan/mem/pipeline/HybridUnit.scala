@@ -646,7 +646,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromStore.vaddr                     := s1_vaddr
+  storeTrigger.io.fromLoadStore.vaddr                     := s1_vaddr
 
   when (s1_ld_flow) {
     when (!s1_late_kill) {
@@ -673,7 +673,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  loadTrigger.io.fromStore.vaddr                     := s1_vaddr
+  loadTrigger.io.fromLoadStore.vaddr                     := s1_vaddr
 
   when (s1_ld_flow) {
     s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(loadTrigger.io.toLoadStore.triggerAction)

@@ -190,7 +190,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
   val io = IO(new Bundle(){
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
-    val fromStore = Input(new Bundle {
+    val fromLoadStore = Input(new Bundle {
       val vaddr = UInt(VAddrBits.W)
     })
 
@@ -202,7 +202,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
   val tEnableVec    = io.fromCsrTrigger.tEnableVec
   val triggerCanRaiseBpExp = io.fromCsrTrigger.triggerCanRaiseBpExp
   val debugMode = io.fromCsrTrigger.debugMode
-  val vaddr = io.fromStore.vaddr
+  val vaddr = io.fromLoadStore.vaddr
 
   val triggerTimingVec = VecInit(tdataVec.map(_.timing))
   val triggerChainVec = VecInit(tdataVec.map(_.chain))
