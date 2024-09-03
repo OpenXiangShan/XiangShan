@@ -1316,6 +1316,37 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   pcBlock(0).bits.pc := headEntry_tmp.debug_pc.getOrElse(0.U)
   pcRobBlockMap.log(pcBlock, 1.U, "PCRoBBlock", clock, reset)
 
+  // PC-timer chiselmap
+  // ROB merge will make this counter im-precise
+  class InstrLatencyBundle extends Bundle {
+    val times = UInt(64.W)
+    val dispatch = UInt(64.W)
+    val rsEnq = UInt(64.W)
+    val rsSelect = UInt(64.W)
+    val rsIssue = UInt(64.W)
+    val exection = UInt(64.W)
+    val rsPlusFu = UInt(64.W)
+    val commit = UInt(64.W)
+  }
+  val pcLatencyMap = ChiselMap.createTableBase("PCLatency", Vec(CommitWidth, new PCChiselMapBundle), Vec(CommitWidth, new InstrLatencyBundle), basicDB = true)
+  val pcLatencyKey = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
+  val pcLatencyValue = Wire(Vec(CommitWidth, new InstrLatencyBundle))
+  (0 until CommitWidth).foreach { i =>
+    pcLatencyKey(i).valid := io.commits.commitValid(i) && io.commits.isCommit
+    pcLatencyKey(i).bits.pc := io.commits.info(i).debug_pc.get
+    pcLatencyValue(i).specifyField(
+      _.times := 1.U,
+      _.dispatch := dispatchLatency(i),
+      _.rsEnq := enqRsLatency(i),
+      _.rsSelect := selectLatency(i),
+      _.rsIssue := issueLatency(i),
+      _.exection := executeLatency(i),
+      _.rsPlusFu := rsFuLatency(i),
+      _.commit := commitLatency(i),
+    )
+  }
+  pcLatencyMap.log(pcLatencyKey, pcLatencyValue, "PCBackendLatency", clock, reset)
+
   // top-down info
   io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
   io.debugTopDown.toCore.robHeadVaddr.bits := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
