@@ -1064,9 +1064,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     isCsrrVlenb -> ALUOpType.add,
   ))
 
-  // io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
-  //   isRoCsrr -> false.B,
-  // ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",

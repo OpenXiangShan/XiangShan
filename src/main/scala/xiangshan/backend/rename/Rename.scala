@@ -282,8 +282,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     isRoCsrr(i) := isCsrr(i) && LookupTreeDefault(
       inst(i).CSRIDX, false.B, CSRConst.roCsrrAddr.map(_.U -> true.B))
 
+    /*
+     * For read-only CSRs, CSRR instructions do not need to wait forward instructions to finish.
+     * For all CSRs, CSRR instructions do not need to block backward instructions for issuing.
+     * Signal "isCsrr" contains not only alias instruction CSRR, but also other csr instructions which
+     *   do not require write to any CSR.
+     */
     uops(i).waitForward := io.in(i).bits.waitForward && !isRoCsrr(i)
-    uops(i).blockBackward := io.in(i).bits.blockBackward && !isRoCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
