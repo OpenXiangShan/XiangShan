@@ -475,15 +475,19 @@ class TraceFakeICache()(implicit p: Parameters) extends TraceModule {
     val resp = Valid(new TraceFakeICacheRespBundle)
   })
 
-  val helper = Module(new TraceICacheHelper)
-  helper.clock := clock
-  helper.reset := reset
-  helper.enable := io.req.valid
-  helper.addr := io.req.bits.addr
-  io.resp.valid := helper.legal_addr(0) && RegNext(io.req.valid)
-  io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
-  io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
-  io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+  if (env.TraceRTLMode) {
+    val helper = Module(new TraceICacheHelper)
+    helper.clock := clock
+    helper.reset := reset
+    helper.enable := io.req.valid
+    helper.addr := io.req.bits.addr
+    io.resp.valid := helper.legal_addr(0) && RegNext(io.req.valid)
+    io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
+    io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
+    io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+  } else {
+    io.resp := 0.U.asTypeOf(io.resp)
+  }
 }
 
 // Fake MMU, input is vaddr, output is paddr and hit

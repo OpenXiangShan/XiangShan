@@ -338,10 +338,12 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     }
   }
 
-  //checkNotTakenConsecutive
-  // checkTakenNotConsecutive
-  // checkTakenPC
-  // checkNotTakenPC
+  if (!env.TraceRTLMode) {
+    // checkNotTakenConsecutive
+    checkTakenNotConsecutive
+    checkTakenPC
+    checkNotTakenPC
+  }
 
   ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
