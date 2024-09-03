@@ -247,17 +247,19 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
       when (!need_rep) {
       // update control flag
-        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss
+        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss || io.ldin(i).bits.isSWPrefetch
         datavalid(loadWbIndex) :=
           (if (EnableFastForward) {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
              !io.ldin(i).bits.miss && // dcache miss
-             !io.ldin(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
+             !io.ldin(i).bits.dcacheRequireReplay || // do not writeback if that inst will be resend from rs
+              io.ldin(i).bits.isSWPrefetch
            } else {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
-             !io.ldin(i).bits.miss
+             !io.ldin(i).bits.miss ||
+              io.ldin(i).bits.isSWPrefetch
            })
 
         //
