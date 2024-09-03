@@ -242,6 +242,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val traceChecker = tracePDaC.io.traceChecker
   val traceBlock = traceDriver.io.out.block
   val traceForceJump = tracePDaC.io.traceForceJump
+  if (!env.TraceRTLMode) {
+    traceReader.io <> DontCare
+    tracePDaC.io <> DontCare
+    traceDriver.io <> DontCare
+    traceFakeICache.io <> DontCare
+  }
   dontTouch(traceReader.io)
   dontTouch(tracePDaC.io)
   dontTouch(traceDriver.io)
@@ -1092,7 +1098,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.specifyField(
     _.pc                := wb_pc,
     _.pd                := wb_pd,
-    // _.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)}, // use the pd valid
     _.ftqIdx            := wb_ftq_req.ftqIdx,
     _.ftqOffset         := wb_ftq_req.ftqOffset.bits,
     _.misOffset.valid   := ParallelOR(wb_check_result_stage2.fixedMissPred) || wb_half_flush,
@@ -1106,6 +1111,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
       io.toIbuffer.bits.enqEnable & io.toIbuffer.bits.valid,
       io.toIbuffer.bits.traceInfo)
   )
+  if (!env.TraceRTLMode) {
+    checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)} // use the pd valid
+  }
 
 
   toFtq.pdWb := Mux(wb_valid, checkFlushWb,  mmioFlushWb)
