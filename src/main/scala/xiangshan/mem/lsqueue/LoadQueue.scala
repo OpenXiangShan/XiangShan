@@ -181,12 +181,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val ncOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
-    val nack_rollback = Output(Valid(new Redirect))
+    val nack_rollback = Vec(2, Output(Valid(new Redirect))) // mmio, nc
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
@@ -210,7 +211,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
-  val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
+  val ioBuffer = Module(new IOBuffer) // uncache io buffer
+  val ncBuffer = Module(new NCBuffer) // uncache nc buffer
   /**
    * LoadQueueRAR
    */
@@ -274,7 +276,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.exceptionVec := io.vecFeedback(i).bits.exceptionVec
   }
   // mmio non-data error exception
-  exceptionBuffer.io.req.last := uncacheBuffer.io.exception
+  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth) := ioBuffer.io.exception
+  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth).bits.vaNeedExt := true.B
+  exceptionBuffer.io.req.last := ncBuffer.io.exception
   exceptionBuffer.io.req.last.bits.vaNeedExt := true.B
   exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
 
@@ -283,19 +287,47 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * Load uncache buffer
    */
-  uncacheBuffer.io.redirect   <> io.redirect
-  uncacheBuffer.io.ldout      <> io.ldout
-  uncacheBuffer.io.ld_raw_data  <> io.ld_raw_data
-  uncacheBuffer.io.rob        <> io.rob
-  uncacheBuffer.io.uncache    <> io.uncache
-  for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
-    buff.valid := io.ldu.ldin(w).valid // from load_s3
-    buff.bits := io.ldu.ldin(w).bits // from load_s3
+  //mmio
+  ioBuffer.io.redirect <> io.redirect
+  ioBuffer.io.ldout <> io.ldout
+  ioBuffer.io.ld_raw_data <> io.ld_raw_data
+  ioBuffer.io.rob <> io.rob
+  for ((mmio, w) <- ioBuffer.io.req.zipWithIndex) {
+    mmio.valid := io.ldu.ldin(w).valid // from load_s3
+    mmio.bits := io.ldu.ldin(w).bits // from load_s3
   }
-
+  ioBuffer.io.uncache.resp.valid := io.uncache.resp.valid
+  ioBuffer.io.uncache.resp.bits := io.uncache.resp.bits
+  //nc
+  ncBuffer.io.redirect <> io.redirect
+  ncBuffer.io.ncOut <> io.ncOut
+  for ((nc, w) <- ncBuffer.io.req.zipWithIndex) {
+    nc.valid := io.ldu.ldin(w).valid // from load_s3
+    nc.bits := io.ldu.ldin(w).bits // from load_s3
+  }
+  ncBuffer.io.uncache.resp.valid := io.uncache.resp.valid
+  ncBuffer.io.uncache.resp.bits := io.uncache.resp.bits
+  //uncache arbiter
+  ioBuffer.io.uncache.req.ready := io.uncache.req.ready
+  ncBuffer.io.uncache.req.ready := io.uncache.req.ready && !ioBuffer.io.uncache.req.valid
+  when(ioBuffer.io.uncache.req.valid){
+    io.uncache.req.valid := ioBuffer.io.uncache.req.valid
+    io.uncache.req.bits := ioBuffer.io.uncache.req.bits
+  }.otherwise{
+    io.uncache.req.valid := ncBuffer.io.uncache.req.valid
+    io.uncache.req.bits := ncBuffer.io.uncache.req.bits
+  }
+  io.uncache.resp.ready := true.B
+  //TODO lyq: uncache resp ready arbiter? always true?
+  // when(io.uncache.resp.bits.nc){
+  //   io.uncache.resp.ready := ncBuffer.io.uncache.resp.ready
+  // }.otherwise{
+  //   io.uncache.resp.ready := ioBuffer.io.uncache.resp.ready
+  // }
 
   io.nuke_rollback := loadQueueRAW.io.rollback
-  io.nack_rollback := uncacheBuffer.io.rollback
+  io.nack_rollback(0) := ioBuffer.io.rollback
+  io.nack_rollback(1) := ncBuffer.io.rollback
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -336,7 +368,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("full_mask_110", full_mask === 6.U)
   XSPerfAccumulate("full_mask_111", full_mask === 7.U)
   XSPerfAccumulate("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
-  XSPerfAccumulate("nack_rollabck", io.nack_rollback.valid)
+  XSPerfAccumulate("nack_rollabck", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
 
   // perf cnt
   val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++
@@ -350,7 +382,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("full_mask_110", full_mask === 6.U),
     ("full_mask_111", full_mask === 7.U),
     ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
-    ("nack_rollback", io.nack_rollback.valid)
+    ("nack_rollback", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
   )
   generatePerfEvent()
   // end

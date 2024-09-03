@@ -51,16 +51,16 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
   //  LoadQueueRAR field
-  //  +-------+-------+-------+----------+
-  //  | Valid |  Uop  | PAddr | Released |
-  //  +-------+-------+-------+----------+
+  //  +-------+-------+-------+----------+----+
+  //  | Valid |  Uop  | PAddr | Released | NC |
+  //  +-------+-------+-------+----------+----+
   //
   //  Field descriptions:
   //  Allocated   : entry is valid.
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released.
-  //
+  //  NC          : is NC with data.
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
@@ -74,6 +74,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  val nc = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
@@ -149,6 +150,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+      nc(enqIndex) := enq.bits.is_nc
     }
   }
 
@@ -196,7 +198,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
   // 1. Physical address match by CAM port.
-  // 2. release is set.
+  // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
   val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
   //val allocatedUInt = RegNext(allocated.asUInt)
@@ -212,7 +214,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       matchMaskReg(i) := (allocated(i) &
                          paddrModule.io.releaseViolationMmask(w)(i) &
                          robIdxMask(i) &&
-                         released(i))
+                         (nc(i) || released(i)))
       }
     val matchMask = GatedValidRegNext(matchMaskReg)
     //  Load-to-Load violation check result

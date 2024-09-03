@@ -169,6 +169,7 @@ case class XSCoreParameters
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 72,
   LoadUncacheBufferSize: Int = 20,
+  LoadNCBufferSize: Int = 20,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
@@ -783,6 +784,7 @@ trait HasXSParameter {
   def RollbackGroupSize = coreParams.RollbackGroupSize
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
+  def LoadNCBufferSize = coreParams.LoadNCBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   def StoreQueueSize = coreParams.StoreQueueSize
   def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueueSize
