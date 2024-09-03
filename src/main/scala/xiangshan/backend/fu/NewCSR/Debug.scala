@@ -47,14 +47,14 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   // debug_exception_ebreak
   val hasExp = hasTrap && !trapIsInterrupt
   val breakPoint = trapVec(ExceptionNO.breakPoint).asBool
-  val hasBreakPoint = hasExp && breakPoint
+  val isEbreak = hasExp && breakPoint && !TriggerAction.isExp(trigger)
   val ebreakEnterDebugMode =
     (privState.isModeM && dcsr.EBREAKM.asBool) ||
       (privState.isModeHS && dcsr.EBREAKS.asBool) ||
       (privState.isModeHU && dcsr.EBREAKU.asBool) ||
       (privState.isModeVS && dcsr.EBREAKVS.asBool) ||
       (privState.isModeVU && dcsr.EBREAKVU.asBool)
-  val hasDebugEbreakException = hasBreakPoint && ebreakEnterDebugMode
+  val hasDebugEbreakException = isEbreak && ebreakEnterDebugMode
 
   // debug_exception_trigger
   val mcontrolWireVec = tdata1Vec.map{ mod => {
