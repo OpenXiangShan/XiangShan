@@ -310,11 +310,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromLoadStore.vaddr                     := s1_in.vaddr
+  storeTrigger.io.fromLoadStore.vaddr                 := s1_in.vaddr
+
+  val s1_trigger_action = storeTrigger.io.toLoadStore.triggerAction
+  val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
+  val s1_trigger_breakpoint = TriggerAction.isExp(s1_trigger_action)
 
   s1_out.uop.flushPipe                := false.B
-  s1_out.uop.trigger                  := storeTrigger.io.toLoadStore.triggerAction
-  s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(storeTrigger.io.toLoadStore.triggerAction)
+  s1_out.uop.trigger                  := s1_trigger_action
+  s1_out.uop.exceptionVec(breakPoint) := s1_trigger_breakpoint
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf
@@ -322,7 +326,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits.miss := s1_tlb_miss
 
   // goto misalignBuffer
-  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && io.csrCtrl.hd_misalign_st_enable && !s1_in.isvec
+  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && !s1_in.isvec
   io.misalign_buf.bits  := io.lsq.bits
 
   // kill dcache write intent request when tlb miss or exception
@@ -348,10 +352,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
-  val s2_mis_align    = io.csrCtrl.hd_misalign_st_enable && !s2_in.isvec &&
-                        s2_in.uop.exceptionVec(storeAddrMisaligned) && !s2_in.uop.exceptionVec(breakPoint)
   val s2_frm_mabuf    = s2_in.isFrmMisAlignBuf
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
+  val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
+  val s2_mis_align = GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && !s2_in.isvec &&
+                     s2_in.uop.exceptionVec(storeAddrMisaligned) && !s2_in.uop.exceptionVec(breakPoint) && !s2_trigger_debug_mode
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -360,7 +365,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_pmp = WireInit(io.pmp)
 
-  val s2_exception = (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && RegNext(s1_feedback.bits.hit)
+  val s2_exception = RegNext(s1_feedback.bits.hit) &&
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR)
   val s2_mmio = (s2_in.mmio || s2_pmp.mmio || Pbmt.isUncache(s2_pbmt)) && RegNext(s1_feedback.bits.hit)
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
