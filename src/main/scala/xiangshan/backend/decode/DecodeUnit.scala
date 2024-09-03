@@ -1130,9 +1130,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     isFLI       -> Cat(1.U, inst.FMT, inst.RS1),
   ))
 
-  // io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
-  //   isRoCsrr -> false.B,
-  // ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
