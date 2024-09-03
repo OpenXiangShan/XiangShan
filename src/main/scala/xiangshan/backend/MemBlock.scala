@@ -89,7 +89,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val lsqio = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val pendingUncacheld = Input(Bool())
+    val pendingMMIOld = Input(Bool())
     val pendingld = Input(Bool())
     val pendingst = Input(Bool())
     val pendingVst = Input(Bool())
@@ -905,6 +905,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       loadUnits(i).io.lsq.uncache.bits := DontCare
     }
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
+    lsq.io.ncOut(i) <> loadUnits(i).io.lsq.nc_ldin
+    loadUnits(i).io.lsq.nc_ldin.valid := DontCare
+    loadUnits(i).io.lsq.nc_ldin.bits := DontCare
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
     lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword
@@ -1035,6 +1038,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
 
     // passdown to lsq (load s2)
+    hybridUnits(i).io.ldu_io.lsq.nc_ldin.valid := false.B
+    hybridUnits(i).io.ldu_io.lsq.nc_ldin.bits := DontCare
     lsq.io.ldu.ldin(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.ldin
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(StaCnt + i) <> hybridUnits(i).io.stu_io.st_mask_out
@@ -1074,7 +1079,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.redirect                <> redirect
   loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  loadMisalignBuffer.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
+  loadMisalignBuffer.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
   loadMisalignBuffer.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   loadMisalignBuffer.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
   loadMisalignBuffer.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
@@ -1087,7 +1092,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
   storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
-  storeMisalignBuffer.io.rob.pendingUncacheld   := io.ooo_to_mem.lsqio.pendingUncacheld
+  storeMisalignBuffer.io.rob.pendingMMIOld      := io.ooo_to_mem.lsqio.pendingMMIOld
   storeMisalignBuffer.io.rob.pendingld          := io.ooo_to_mem.lsqio.pendingld
   storeMisalignBuffer.io.rob.pendingst          := io.ooo_to_mem.lsqio.pendingst
   storeMisalignBuffer.io.rob.pendingVst         := io.ooo_to_mem.lsqio.pendingVst
@@ -1276,7 +1281,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
-  lsq.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
+  lsq.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
   lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
   lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
@@ -1298,7 +1303,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )).andR))
     resultOnehot
   }
-  val allRedirect = loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback) ++ Seq(lsq.io.nack_rollback) ++ lsq.io.nuke_rollback
+  val allRedirect = loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
   // memory replay would not cause IAF/IPF/IGPF

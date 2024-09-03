@@ -384,6 +384,9 @@ object Pbmt {
 
   def apply() = UInt(2.W)
   def isUncache(a: UInt) = a===nc || a===io
+  def isPMA(a: UInt) = a===pma
+  def isNC(a: UInt) = a===nc
+  def isIO(a: UInt) = a===io
 }
 
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {

@@ -32,7 +32,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 
 class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
-  val enqPortNum = LoadPipelineWidth + VecLoadPipelineWidth + 1 // 1 for mmio bus non-data error
+  val enqPortNum = LoadPipelineWidth + VecLoadPipelineWidth + 2 // 2 for mmio, nc bus non-data error
 
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))

@@ -56,7 +56,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     //  Client requests
     val req = Flipped(DecoupledIO(new UncacheWordReq))
-    val resp = DecoupledIO(new DCacheWordRespWithError)
+    val resp = DecoupledIO(new UncacheWordResp)
 
     //  TileLink
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -165,6 +165,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.tag_error := false.B
     io.resp.bits.error := false.B
     io.resp.bits.nderr := resp_nderr
+    io.resp.bits.nc := req.nc
 
     when (io.resp.fire) {
       state := s_invalid

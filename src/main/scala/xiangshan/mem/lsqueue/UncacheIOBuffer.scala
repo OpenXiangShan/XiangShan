@@ -29,7 +29,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.HasMemBlockParameters
 
-class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
+class IOBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasLoadHelper
 {
@@ -96,7 +96,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
-  val pendingld = GatedValidRegNext(io.rob.pendingUncacheld)
+  val pendingld = GatedValidRegNext(io.rob.pendingMMIOld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
 
   switch (uncacheState) {
@@ -202,7 +202,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   // end
 }
 
-class UncacheBuffer(implicit p: Parameters) extends XSModule
+class IOBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters {
   val io = IO(new Bundle() {
@@ -229,7 +229,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule
     val exception = Valid(new LqWriteBundle)
   })
 
-  val entries = Seq.tabulate(LoadUncacheBufferSize)(i => Module(new UncacheBufferEntry(i)))
+  val entries = Seq.tabulate(LoadUncacheBufferSize)(i => Module(new IOBufferEntry(i)))
 
   // freelist: store valid entries index.
   // +---+---+--------------+-----+-----+
