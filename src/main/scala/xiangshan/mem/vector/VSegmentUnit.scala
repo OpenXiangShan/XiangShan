@@ -400,8 +400,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
     val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := !addr_aligned && FuType.isVLoad(fuType) && canTriggerException
-    exceptionVec(storeAddrMisaligned) := !addr_aligned && !FuType.isVLoad(fuType) && canTriggerException
+    exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVLoad(fuType)  && canTriggerException
+    exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore(fuType) && canTriggerException
 
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
@@ -521,7 +521,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     Option(s"VSegmentUnitPipelineConnect")
   )
 
-  io.vecDifftestInfo.valid         := state === s_send_data && segmentActive
+  io.vecDifftestInfo.valid         := io.sbuffer.valid
   io.vecDifftestInfo.bits          := uopq(deqPtr.value).uop
 
   /**

@@ -33,16 +33,6 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
   val isDoubleLine  = Bool()
 }
 
-
-class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
-{
-  val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
-  val errors     = Vec(2, Vec(nWays ,Bool() ))
-  val entryValid = Vec(2, Vec(nWays, Bool()))
-
-  def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
-}
-
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx  = UInt(idxBits.W)
@@ -75,10 +65,20 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 
 }
 
+class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
+{
+  val metas      = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
+  val codes      = Vec(PortNumber, Vec(nWays, UInt(ICacheMetaCodeBits.W)))
+  val entryValid = Vec(PortNumber, Vec(nWays, Bool()))
+
+  // for compatibility
+  def tags = VecInit(metas.map(port => VecInit(port.map( way => way.tag ))))
+}
+
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas   = Vec(ICacheDataBanks, UInt(ICacheDataBits.W))
-  val codes   = Vec(ICacheDataBanks, UInt(ICacheCodeBits.W))
+  val codes   = Vec(ICacheDataBanks, UInt(ICacheDataCodeBits.W))
 }
 
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle

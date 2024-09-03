@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import coupledL2.{PrefetchRecv, RVA23CMOReq, RVA23CMOResp}
+import coupledL2.{PrefetchRecv, CMOReq, CMOResp}
 import device.MsiInfoBundle
 import utils._
 import utility._
@@ -237,8 +237,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
-  val cmo_sender  = if (coreParams.HasRVA23CMO) Some(BundleBridgeSource(() => DecoupledIO(new RVA23CMOReq))) else None
-  val cmo_reciver = if (coreParams.HasRVA23CMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new RVA23CMOResp)))) else None
+  val cmo_sender  = if (HasCMO) Some(BundleBridgeSource(() => DecoupledIO(new CMOReq))) else None
+  val cmo_reciver = if (HasCMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new CMOResp)))) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -1116,7 +1116,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       x.in.head._1  <> lsq.io.cmoOpResp
     case None =>
       lsq.io.cmoOpResp.valid := false.B
-      lsq.io.cmoOpResp.bits  := 0.U.asTypeOf(new RVA23CMOResp)
+      lsq.io.cmoOpResp.bits  := 0.U.asTypeOf(new CMOResp)
   }
 
   // Prefetcher
@@ -1421,8 +1421,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (env.EnableDifftest) {
     sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
       if (index == 0) {
-        sbufferPort.valid := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
-        sbufferPort.bits  := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
+        val vSegmentDifftestValid = vSegmentFlag && vSegmentUnit.io.vecDifftestInfo.valid
+        sbufferPort.valid := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
+        sbufferPort.bits  := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
 
         vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
         lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready

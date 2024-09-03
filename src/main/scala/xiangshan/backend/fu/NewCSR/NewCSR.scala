@@ -939,11 +939,6 @@ class NewCSR(implicit val p: Parameters) extends Module
    * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huancun 5)
    */
   // tmp: mhpmevents is wrapper of perfEvents, read/write/update mhpmevents -> read/write/update perfEvents
-  for (i <-0 until perfCntNum) {
-    when(mhpmevents(i).w.wen) {
-      perfEvents(i) := wdata
-    }
-  }
   val csrevents = perfEvents.slice(24, 29)
 
   val hcEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
@@ -980,8 +975,8 @@ class NewCSR(implicit val p: Parameters) extends Module
         ofFromPerfCntVec(i) := m.toMhpmeventOF
       case _ =>
     }
-    perfEvents(i)   := (perfEvents(i).head(1).asBool || ofFromPerfCntVec(i)) ## perfEvents(i).tail(1)
-    lcofiReqVec(i)  := ofFromPerfCntVec(i) && !mhpmevents(i).rdata.head(1)
+    perfEvents(i)  := Mux(mhpmevents(i).w.wen, wdata, (perfEvents(i).head(1).asBool || ofFromPerfCntVec(i)) ## perfEvents(i).tail(1))
+    lcofiReqVec(i) := ofFromPerfCntVec(i) && !mhpmevents(i).rdata.head(1)
   }
 
   val lcofiReq = lcofiReqVec.asUInt.orR
@@ -1115,7 +1110,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.hfenceGVMA := isModeHS && mstatus.regOut.TVM || isModeHU
   io.toDecode.illegalInst.hfenceVVMA := isModeHU
   io.toDecode.virtualInst.hfence     := isModeVS || isModeVU
-  io.toDecode.illegalInst.hlsv       := isModeHU && hstatus.regOut.HU
+  io.toDecode.illegalInst.hlsv       := isModeHU && !hstatus.regOut.HU
   io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
   io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.FS === ContextStatus.Off
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off

@@ -836,7 +836,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  WPUEnable: " + dwpuParam.enWPU)
   println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
   println("  WPUAlgorithm: " + dwpuParam.algoName)
-  println("  HasRVA23CMO: " + HasRVA23CMO)
+  println("  HasCMO: " + HasCMO)
 
   // Enable L1 Store prefetch
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
@@ -991,8 +991,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && extra_flag_access
-    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && !extra_flag_access
+    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && extra_flag_access
+    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && !extra_flag_access
   }
 
   // write extra meta

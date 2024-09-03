@@ -8,7 +8,8 @@ import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import xiangshan.backend.fu.vector.Bundles.VSew
-import yunsuan.VfpuType
+import xiangshan.FuOpType
+import yunsuan.{VfcvtType, VfpuType}
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
 
@@ -21,7 +22,11 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   private val src0 = inData.src(0)
   private val sew = fp_fmt
 
-  private val isRtz = opcode(2) & opcode(1)
+  private val isFround  = opcode === VfcvtType.fround
+  private val isFoundnx = opcode === VfcvtType.froundnx
+  private val isFcvtmod = opcode === VfcvtType.fcvtmod_w_d
+
+  private val isRtz = opcode(2) & opcode(1) | isFcvtmod
   private val isRod = opcode(2) & !opcode(1) & opcode(0)
   private val isFrm = !isRtz && !isRod
   private val vfcvtRm = Mux1H(
@@ -67,7 +72,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   val outIs16bits = RegNext(RegNext(outputWidth1H(1)))
   val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
   val outIsInt = !outCtrl.fuOpType(6)
-  val outIsMvInst = outCtrl.fuOpType(8)
+  val outIsMvInst = outCtrl.fuOpType === FuOpType.FMVXF
 
   // modules
   val fcvt = Module(new FPCVT(XLEN))
@@ -77,6 +82,8 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   fcvt.io.sew := sew
   fcvt.io.rm := vfcvtRm
   fcvt.io.isFpToVecInst := true.B
+  fcvt.io.isFround := Cat(isFoundnx, isFround)
+  fcvt.io.isFcvtmod := isFcvtmod
 
 
   //cycle2

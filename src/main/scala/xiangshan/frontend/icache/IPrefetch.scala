@@ -235,8 +235,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val s1_meta_ptags   = fromMeta.tags
   val s1_meta_valids  = fromMeta.entryValid
-  // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
-  val s1_meta_corrupt = VecInit(fromMeta.errors.map(_.asUInt.orR))
 
   def get_waymask(paddrs: Vec[UInt]): Vec[UInt] = {
     val ptags         = paddrs.map(get_phy_tag)
@@ -280,6 +278,23 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     s1_waymasks(i) := update_waymask(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i))
   }
 
+  // select ecc code
+  /* NOTE:
+   * When ECC check fails, s1_waymasks may be corrupted, so this selected meta_codes may be wrong.
+   * However, we can guarantee that the request sent to the l2 cache and the response to the IFU are both correct,
+   * considering the probability of bit flipping abnormally is very small, consider there's up to 1 bit being wrong:
+   * 1. miss -> fake hit: The wrong bit in s1_waymasks was set to true.B, thus selects the wrong meta_codes,
+   *                      but we can detect this by checking whether `encodeMetaECC(req_ptags) === meta_codes`.
+   * 2. hit -> fake multi-hit: In normal situation, multi-hit never happens, so multi-hit indicates ECC failure,
+   *                           we can detect this by checking whether `PopCount(waymasks) <= 1.U`,
+   *                           and meta_codes is not important in this situation.
+   * 3. hit -> fake miss: We can't detect this, but we can (pre)fetch the correct data from L2 cache, so it's not a problem.
+   * 4. hit -> hit / miss -> miss: ECC failure happens in a irrelevant way, so we don't care about it this time.
+   */
+  val s1_meta_codes = VecInit((0 until PortNumber).map { port =>
+    Mux1H(s1_waymasks(port), fromMeta.codes(port))
+  })
+
   /**
     ******************************************************************************
     * send enqueu req to WayLookup
@@ -292,12 +307,12 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toWayLookup.bits.waymask      := s1_waymasks
   toWayLookup.bits.ptag         := s1_req_ptags
   toWayLookup.bits.gpaddr       := s1_req_gpaddr
+  toWayLookup.bits.meta_codes   := s1_meta_codes
   (0 until PortNumber).foreach { i =>
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
     toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
     toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
-    toWayLookup.bits.meta_corrupt(i)   := excpValid && s1_meta_corrupt(i)
   }
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
@@ -323,14 +338,11 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_pmp_exception = VecInit(fromPMP.map(ExceptionType.fromPMPResp))
   val s1_pmp_mmio      = VecInit(fromPMP.map(_.mmio))
 
-  // also raise af when meta array corrupt is detected, to cancel prefetch
-  val s1_meta_exception = VecInit(s1_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
-
-  // merge s1 itlb/pmp/meta exceptions, itlb has the highest priority, pmp next, meta lowest
+  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next
+  // for timing consideration, meta_corrupt is not merged, and it will NOT cancel prefetch
   val s1_exception_out = ExceptionType.merge(
     s1_itlb_exception,
-    s1_pmp_exception,
-    s1_meta_exception
+    s1_pmp_exception
   )
 
   // merge pmp mmio and itlb pbmt
@@ -349,9 +361,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       when(s1_valid) {
         when(!itlb_finish) {
           next_state := m_itlbResend
-        }.elsewhen(!toWayLookup.fire && !s1_isSoftPrefetch) {  // itlb_finish
+        }.elsewhen(!toWayLookup.fire) {  // itlb_finish
           next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // itlb_finish && (toWayLookup.fire || s1_isSoftPrefetch)
+        }.elsewhen(!s2_ready) {  // itlb_finish && toWayLookup.fire
           next_state := m_enterS2
         } // .otherwise { next_state := m_idle }
       } // .otherwise { next_state := m_idle }  // !s1_valid
@@ -360,34 +372,24 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
       when(itlb_finish) {
         when(!toMeta.ready) {
           next_state := m_metaResend
-        }.elsewhen(!s1_isSoftPrefetch) { // toMeta.ready
+        }.otherwise { // toMeta.ready
           next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // toMeta.ready && s1_isSoftPrefetch
-          next_state := m_enterS2
-        }.otherwise { // toMeta.ready && s1_isSoftPrefetch && s2_ready
-          next_state := m_idle
         }
       } // .otherwise { next_state := m_itlbResend }  // !itlb_finish
     }
     is(m_metaResend) {
       when(toMeta.ready) {
-        when (!s1_isSoftPrefetch) {
-          next_state := m_enqWay
-        }.elsewhen(!s2_ready) { // s1_isSoftPrefetch
-          next_state := m_enterS2
-        }.otherwise { // s1_isSoftPrefetch && s2_ready
-          next_state := m_idle
-        }
+        next_state := m_enqWay
       } // .otherwise { next_state := m_metaResend }  // !toMeta.ready
     }
     is(m_enqWay) {
-      // sanity check
-      assert(!s1_isSoftPrefetch, "Soft prefetch enters m_enqWay")
-      when(toWayLookup.fire && !s2_ready) {
-        next_state := m_enterS2
-      }.elsewhen(toWayLookup.fire && s2_ready) {
-        next_state := m_idle
-      }
+      when(toWayLookup.fire || s1_isSoftPrefetch) {
+        when (!s2_ready) {
+          next_state := m_enterS2
+        }.otherwise {  // s2_ready
+          next_state := m_idle
+        }
+      } // .otherwise { next_state := m_enqWay }
     }
     is(m_enterS2) {
       when(s2_ready) {
@@ -421,12 +423,29 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_real_fire)
   val s2_doubleline   = RegEnable(s1_doubleline,    0.U.asTypeOf(s1_doubleline),    s1_real_fire)
   val s2_req_paddr    = RegEnable(s1_req_paddr,     0.U.asTypeOf(s1_req_paddr),     s1_real_fire)
-  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_real_fire)  // includes itlb/pmp/meta exception
+  val s2_exception    = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_real_fire)  // includes itlb/pmp exception
+//  val s2_exception_in = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_real_fire)  // disabled for timing consideration
   val s2_mmio         = RegEnable(s1_mmio,          0.U.asTypeOf(s1_mmio),          s1_real_fire)
   val s2_waymasks     = RegEnable(s1_waymasks,      0.U.asTypeOf(s1_waymasks),      s1_real_fire)
+//  val s2_meta_codes   = RegEnable(s1_meta_codes,    0.U.asTypeOf(s1_meta_codes),    s1_real_fire)  // disabled for timing consideration
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx)
   val s2_req_ptags    = s2_req_paddr.map(get_phy_tag)
+
+  // disabled for timing consideration
+//  // do metaArray ECC check
+//  val s2_meta_corrupt = VecInit((s2_req_ptags zip s2_meta_codes zip s2_waymasks).map{ case ((meta, code), waymask) =>
+//    val hit_num = PopCount(waymask)
+//    // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
+//    (encodeMetaECC(meta) =/= code && hit_num === 1.U) ||  // hit one way, but parity code does not match, ECC failure
+//      hit_num > 1.U                                       // hit multi way, must be a ECC failure
+//  })
+//
+//  // generate exception
+//  val s2_meta_exception = VecInit(s2_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+//
+//  // merge meta exception and itlb/pmp exception
+//  val s2_exception = ExceptionType.merge(s2_exception_in, s2_meta_exception)
 
   /**
     ******************************************************************************

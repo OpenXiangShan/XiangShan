@@ -208,6 +208,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
           )),
+          hasCMO = p.HasCMO && site(EnableCHI),
         )),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
@@ -295,7 +296,7 @@ class WithNKBL2
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
-        hasRVA23CMO = p.HasRVA23CMO,
+        hasCMO = p.HasCMO && site(EnableCHI),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,

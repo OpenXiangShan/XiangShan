@@ -214,7 +214,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   ))
   // if vector store sends 128-bit requests, its address must be 128-aligned
   XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
-  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, !s0_addr_aligned, false.B)
+  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
 
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
@@ -322,7 +322,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits.miss := s1_tlb_miss
 
   // goto misalignBuffer
-  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && io.csrCtrl.hd_misalign_st_enable
+  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && io.csrCtrl.hd_misalign_st_enable && !s1_in.isvec
   io.misalign_buf.bits  := io.lsq.bits
 
   // kill dcache write intent request when tlb miss or exception
@@ -348,7 +348,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
-  val s2_mis_align    = s2_in.uop.exceptionVec(storeAddrMisaligned) && io.csrCtrl.hd_misalign_st_enable
+  val s2_mis_align    = s2_in.uop.exceptionVec(storeAddrMisaligned) && io.csrCtrl.hd_misalign_st_enable && !s2_in.isvec
   val s2_frm_mabuf    = s2_in.isFrmMisAlignBuf
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
 

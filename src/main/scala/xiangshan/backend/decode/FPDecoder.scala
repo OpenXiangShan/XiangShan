@@ -48,13 +48,25 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
     FCVT_S_H, FCVT_H_S, FCVT_H_D, FCVT_D_H,
     FMV_X_W, FMV_X_D, FMV_X_H,
+    // zfa inst
+    FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
+    FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D, FCVTMOD_W_D,
   )
   val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
+  val isFP16Instrs = Seq(
+    // zfa inst
+    FLEQ_H, FLTQ_H, FMINM_H, FMAXM_H,
+    FROUND_H, FROUNDNX_H,
+  )
+  val isFP16Instr = isFP16Instrs.map(io.instr === _).reduce(_ || _)
   val isFP32Instrs = Seq(
     FADD_S, FSUB_S, FEQ_S, FLT_S, FLE_S, FMIN_S, FMAX_S,
     FMUL_S, FDIV_S, FSQRT_S,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S,
     FCLASS_S, FSGNJ_S, FSGNJX_S, FSGNJN_S,
+    // zfa inst
+    FLEQ_S, FLTQ_S, FMINM_S, FMAXM_S,
+    FROUND_S, FROUNDNX_S,
   )
   val isFP32Instr = isFP32Instrs.map(io.instr === _).reduce(_ || _)
   val isFP64Instrs = Seq(
@@ -69,6 +81,8 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
     FMV_X_W,
+    // zfa inst
+    FCVTMOD_W_D,
   )
   /*
   The optype for FCVT_D_H and FCVT_H_D is the same,
@@ -95,6 +109,8 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
     FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
+    // zfa inst
+    FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
   )
   val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
   io.vpuCtrl := 0.U.asTypeOf(io.vpuCtrl)
@@ -104,7 +120,7 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vill  := false.B
   io.vpuCtrl.vma   := true.B
   io.vpuCtrl.vta   := true.B
-  io.vpuCtrl.vsew  := Mux(isFP32Instr || isSew2Cvt32, VSew.e32, Mux(isSew2Cvt16, VSew.e16, VSew.e64))
+  io.vpuCtrl.vsew  := Mux(isFP32Instr || isSew2Cvt32, VSew.e32, Mux(isFP16Instr || isSew2Cvt16, VSew.e16, VSew.e64))
   io.vpuCtrl.vlmul := Mux(isFP32Instr || isLmulMf4Cvt, VLmul.mf4, VLmul.mf2)
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF

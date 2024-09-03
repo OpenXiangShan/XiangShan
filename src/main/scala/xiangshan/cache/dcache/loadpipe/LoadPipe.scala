@@ -430,8 +430,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
-  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isFromL1Prefetch(s2_hit_prefetch) && !resp.bits.miss)
-  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isFromL1Prefetch(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
+  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
+  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
@@ -527,7 +527,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
-  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_NULL
+  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
   io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)

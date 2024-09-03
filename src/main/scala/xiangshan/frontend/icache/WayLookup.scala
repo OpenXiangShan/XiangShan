@@ -35,7 +35,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
   val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
   val itlb_pbmt      : Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val meta_corrupt   : Vec[Bool] = Vec(PortNumber, Bool())
+  val meta_codes     : Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
@@ -52,7 +52,7 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   def ptag           : Vec[UInt] = entry.ptag
   def itlb_exception : Vec[UInt] = entry.itlb_exception
   def itlb_pbmt      : Vec[UInt] = entry.itlb_pbmt
-  def meta_corrupt   : Vec[Bool] = entry.meta_corrupt
+  def meta_codes     : Vec[UInt] = entry.meta_codes
   def gpaddr         : UInt      = gpf.gpaddr
 }
 
@@ -122,12 +122,11 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
         when(ptag_same) {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
-          // also clear previously found errors since data/metaArray is refilled
-          entry.meta_corrupt(i) := false.B
+          // also update meta_codes
+          entry.meta_codes(i) := encodeMetaECC(getPhyTagFromBlk(io.update.bits.blkPaddr))
         }.elsewhen(way_same) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
-          // do not clear previously found errors since way_same might be unreliable when error occurs
         }
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)

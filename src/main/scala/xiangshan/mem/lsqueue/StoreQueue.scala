@@ -34,7 +34,7 @@ import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.ExceptionNO._
-import coupledL2.{RVA23CMOReq, RVA23CMOResp}
+import coupledL2.{CMOReq, CMOResp}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -167,8 +167,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
     val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is, write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
-    val cmoOpReq  = DecoupledIO(new RVA23CMOReq)
-    val cmoOpResp = Flipped(DecoupledIO(new RVA23CMOResp))
+    val cmoOpReq  = DecoupledIO(new CMOReq)
+    val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -285,7 +285,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val scommit = GatedRegNext(io.rob.scommit)
 
   // RegNext misalign control for better timing
-  val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr))
+  val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr) && !isVec(deqPtr))
   val finishMisalignSt = GatedValidRegNext(doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException)
   val misalignBlock = doMisalignSt && !finishMisalignSt
   
@@ -949,11 +949,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val exceptionValid = if(i == 0) hasException(rdataPtrExt(0).value) else {
-      hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value) && uop(rdataPtrExt(i).value).robIdx === uop(rdataPtrExt(i-1).value).robIdx)
+      hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value))
     }
     val vecNotAllMask = dataModule.io.rdata(i).mask.orR
     // Vector instructions that prevent triggered exceptions from being written to the 'databuffer'.
-    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
+    val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr)
     if (i == 0) {
       // use dataBuffer write port 0 to writeback missaligned store out
       dataBuffer.io.enq(i).valid := Mux(

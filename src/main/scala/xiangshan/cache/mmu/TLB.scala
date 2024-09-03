@@ -181,7 +181,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := false.B
       need_gpa_robidx := req_out(i).debug.robIdx
     }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
-      resp_gpa_gvpn := ptw.resp.bits.s1.genPPN(need_gpa_vpn)
+      resp_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genPPN(need_gpa_vpn))
       resp_s1_level := ptw.resp.bits.s1.entry.level.get
       resp_s1_isLeaf := ptw.resp.bits.s1.isLeaf()
       resp_s1_isFakePte := ptw.resp.bits.s1.isFakePte()
