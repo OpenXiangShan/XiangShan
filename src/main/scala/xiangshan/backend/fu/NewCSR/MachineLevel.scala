@@ -164,7 +164,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasPerfEventBundle {
+    Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
       regOut := this.perfEvents(num - 3)
     })
       .setAddr(CSRs.mhpmevent3 - 3 + num)
