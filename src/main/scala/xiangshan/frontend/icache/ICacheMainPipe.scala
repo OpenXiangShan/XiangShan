@@ -175,7 +175,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_req_gpaddr     = fromWayLookup.bits.gpaddr
   val s0_itlb_exception = fromWayLookup.bits.itlb_exception
   val s0_itlb_pbmt      = fromWayLookup.bits.itlb_pbmt
-  val s0_meta_corrupt   = fromWayLookup.bits.meta_corrupt
+  val s0_meta_codes     = fromWayLookup.bits.meta_codes
   val s0_hits           = VecInit(fromWayLookup.bits.waymask.map(_.orR))
 
   when(s0_fire){
@@ -221,11 +221,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_itlb_exception = RegEnable(s0_itlb_exception, 0.U.asTypeOf(s0_itlb_exception), s0_fire)
   val s1_itlb_pbmt      = RegEnable(s0_itlb_pbmt,      0.U.asTypeOf(s0_itlb_pbmt),      s0_fire)
   val s1_waymasks       = RegEnable(s0_waymasks,       0.U.asTypeOf(s0_waymasks),       s0_fire)
-  val s1_meta_corrupt   = RegEnable(s0_meta_corrupt,   0.U.asTypeOf(s0_meta_corrupt),   s0_fire)
+  val s1_meta_codes     = RegEnable(s0_meta_codes,     0.U.asTypeOf(s0_meta_codes),     s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx)
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
   val s1_req_offset   = s1_req_vaddr(0)(log2Ceil(blockBytes)-1, 0)
+
+  // do metaArray ECC check
+  val s1_meta_corrupt = VecInit((s1_req_ptags zip s1_meta_codes zip s1_waymasks).map{ case ((meta, code), waymask) =>
+    val hit_num = PopCount(waymask)
+    // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
+    (encodeMetaECC(meta) =/= code && hit_num === 1.U) ||  // hit one way, but parity code does not match, ECC failure
+      hit_num > 1.U                                       // hit multi way, must be a ECC failure
+  })
 
   /**
     ******************************************************************************
@@ -326,7 +334,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   // check data error
   val s2_bankSel     = getBankSel(s2_req_offset, s2_valid)
-  val s2_bank_corrupt = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
+  val s2_bank_corrupt = (0 until ICacheDataBanks).map(i => (encodeDataECC(s2_datas(i)) =/= s2_codes(i)))
   val s2_data_corrupt = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
                          s2_bank_corrupt(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
   // meta error is checked in prefetch pipeline
