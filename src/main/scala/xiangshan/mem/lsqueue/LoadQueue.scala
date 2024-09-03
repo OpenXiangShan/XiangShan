@@ -111,8 +111,8 @@ trait HasLoadHelper { this: XSModule =>
   }
 
   def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
-    require(addrOffset.getWidth == 4)
-    VecInit((0 until 16).map{ case i =>
+    require(addrOffset.getWidth == 3)
+    VecInit((0 until 8).map{ case i =>
       addrOffset === i.U
     })
   }

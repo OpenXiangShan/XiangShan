@@ -83,21 +83,20 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
   // enqueue
   // S1:
   val s1_req = VecInit(io.storeAddrIn.map(_.bits))
-  val s1_valid = VecInit(io.storeAddrIn.map(_.valid))
+  val s1_valid = VecInit(io.storeAddrIn.map(x =>
+      x.valid && !x.bits.uop.robIdx.needFlush(io.redirect) && ExceptionNO.selectByFu(x.bits.uop.exceptionVec, StaCfg).asUInt.orR
+  ))
 
   // S2: delay 1 cycle
   val s2_req = (0 until StorePipelineWidth * 2 + VecStorePipelineWidth).map(i =>
     RegEnable(s1_req(i), s1_valid(i)))
   val s2_valid = (0 until StorePipelineWidth * 2 + VecStorePipelineWidth).map(i =>
-    RegNext(s1_valid(i)) &&
-      !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
-      !s2_req(i).uop.robIdx.needFlush(io.redirect)
+    RegNext(s1_valid(i)) && !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
-  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, StaCfg).asUInt.orR)
 
   val s2_enqueue = Wire(Vec(StorePipelineWidth * 2 + VecStorePipelineWidth, Bool()))
   for (w <- 0 until StorePipelineWidth * 2 + VecStorePipelineWidth) {
-    s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
+    s2_enqueue(w) := s2_valid(w)
   }
 
   when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
@@ -347,7 +346,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val canEnqueue = io.enq.req.map(_.valid)
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(!RegNext(io.brqRedirect.valid) && io.enq.canAccept && io.enq.lqCanAccept && canEnqueue(index), vLoadFlowNumItem, 0.U)}
+  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(!RegNext(io.brqRedirect.valid) && canEnqueue(index), vLoadFlowNumItem, 0.U)}
   val validVStoreOffset = vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVStoreOffsetRShift = 0.U +: validVStoreOffset.take(vStoreFlow.length - 1)
 

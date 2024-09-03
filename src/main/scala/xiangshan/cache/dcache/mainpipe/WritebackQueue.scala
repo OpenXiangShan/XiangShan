@@ -315,8 +315,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     //val probe_ttob_check_req = Flipped(ValidIO(new ProbeToBCheckReq))
     //val probe_ttob_check_resp = ValidIO(new ProbeToBCheckResp)
 
-    val miss_req = Flipped(Valid(UInt()))
-    val block_miss_req = Output(Bool()) 
+    // 5 miss_req to check: 3*LoadPipe + 1*MainPipe + 1*missReqArb_out
+    val miss_req_conflict_check = Vec(LoadPipelineWidth + 2, Flipped(Valid(UInt())))
+    val block_miss_req = Vec(LoadPipelineWidth + 2, Output(Bool()))
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -373,8 +374,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   io.mem_grant.ready := true.B
   block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR
-  val miss_req_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
-  io.block_miss_req := io.miss_req.valid && miss_req_conflict
+  val miss_req_conflict = io.miss_req_conflict_check.map{ r =>
+    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === r.bits)).asUInt.orR
+  }
+  io.block_miss_req.zipWithIndex.foreach{ case(blk, i) =>
+    blk := io.miss_req_conflict_check(i).valid && miss_req_conflict(i)
+  }
 
   TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
 
@@ -389,13 +394,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     io.mem_grant.bits.dump
   }
 
-  when (io.miss_req.valid) {
-    XSDebug("miss_req: addr: %x\n", io.miss_req.bits)
-  }
+  // when (io.miss_req.valid) {
+  //   XSDebug("miss_req: addr: %x\n", io.miss_req.bits)
+  // }
 
-  when (io.block_miss_req) {
-    XSDebug("block_miss_req\n")
-  }
+  // when (io.block_miss_req) {
+  //   XSDebug("block_miss_req\n")
+  // }
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire)

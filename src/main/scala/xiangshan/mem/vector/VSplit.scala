@@ -483,8 +483,10 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   splitPipeline.io.redirect <> io.redirect
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
+  // skid buffer
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect), "VLSplitSkidBuffer")
+
   // Split Buffer
-  splitBuffer.io.in <> splitPipeline.io.out
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
 }
@@ -498,8 +500,10 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   splitPipeline.io.redirect <> io.redirect
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
+  // skid buffer
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect),"VSSplitSkidBuffer")
+
   // Split Buffer
-  splitBuffer.io.in <> splitPipeline.io.out
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
   io.vstd.get <> splitBuffer.io.vstd.get

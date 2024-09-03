@@ -118,6 +118,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val miss_req = DecoupledIO(new MissReq)
     val miss_resp = Input(new MissResp) // miss resp is used to support plru update
     val refill_req = Flipped(DecoupledIO(new MainPipeReq))
+    // send miss request to wbq
+    val wbq_conflict_check = Valid(UInt())
+    val wbq_block_miss_req = Input(Bool())
     // store buffer
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
@@ -442,7 +445,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s2_valid_dup_for_status.foreach(_ := false.B)
   }
   s2_ready := !s2_valid_dup(3) || s2_can_go
-  val replay = !io.miss_req.ready
+  val replay = !io.miss_req.ready || io.wbq_block_miss_req
 
   val data_resp = Wire(io.data_resp.cloneType)
   data_resp := Mux(GatedValidRegNext(s1_fire), io.data_resp, RegEnable(data_resp, s2_valid))
@@ -1448,6 +1451,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.pc := DontCare
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
 
+  io.wbq_conflict_check.valid := s2_valid_dup(4) && s2_can_go_to_mq_dup(0)
+  io.wbq_conflict_check.bits := s2_req.addr
+
   io.store_replay_resp.valid := s2_valid_dup(5) && s2_can_go_to_mq_dup(1) && replay && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare
   io.store_replay_resp.bits.miss := true.B
@@ -1603,8 +1609,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_way.dmWay := s1_dmWay_dup_for_replace_way
 
   // send evict hint to sms
-  io.sms_agt_evict_req.valid := s2_valid && s2_req.miss && s2_fire_to_s3
-  io.sms_agt_evict_req.bits.vaddr := Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W))
+  val sms_agt_evict_valid = s2_valid && s2_req.miss && s2_fire_to_s3
+  io.sms_agt_evict_req.valid := GatedValidRegNext(sms_agt_evict_valid)
+  io.sms_agt_evict_req.bits.vaddr := RegEnable(Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W)), sms_agt_evict_valid)
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid

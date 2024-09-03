@@ -599,7 +599,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
   dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
-  dtlb.map(_.redirect := io.redirect)
+  dtlb.map(_.redirect := redirect)
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace == hytlbParams.outReplace)
@@ -805,7 +805,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val vsegmentDtlbReqValid = vSegmentUnit.io.dtlb.req.valid // segment tlb resquest need to delay 1 cycle
       dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || RegNext(vsegmentDtlbReqValid)
       vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
-      dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
+      dtlb_reqs.take(LduCnt)(i).req.bits  := ParallelPriorityMux(Seq(
         RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
         loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
@@ -1259,11 +1259,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // mmio store writeback will use store writeback port 0
-  lsq.io.mmioStout.ready := false.B
-  when (lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
+  val mmioStout = WireInit(0.U.asTypeOf(lsq.io.mmioStout))
+  NewPipelineConnect(
+    lsq.io.mmioStout, mmioStout, mmioStout.fire,
+    false.B,
+    Option("mmioStOutConnect")
+  )
+  mmioStout.ready := false.B
+  when (mmioStout.valid && !storeUnits(0).io.stout.valid) {
     stOut(0).valid := true.B
-    stOut(0).bits  := lsq.io.mmioStout.bits
-    lsq.io.mmioStout.ready := true.B
+    stOut(0).bits  := mmioStout.bits
+    mmioStout.ready := true.B
   }
   // vec mmio writeback
   lsq.io.vecmmioStout.ready := false.B
@@ -1466,9 +1472,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
-      Mux(vsSplit(i).io.out.fire,
-          vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
-          storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
+      vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VsSplitConnectStu")
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
@@ -1482,9 +1486,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
-      Mux(vlSplit(i).io.out.fire,
-          vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
-          loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
+      vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VlSplitConnectLdu")
     )
 
@@ -1738,7 +1740,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vSegmentUnit.io.dtlb.resp.valid <> dtlb_reqs.take(LduCnt).head.resp.valid
   vSegmentUnit.io.pmpResp <> pmp_check.head.resp
   vSegmentUnit.io.flush_sbuffer.empty := stIsEmpty
-  vSegmentUnit.io.redirect <> io.redirect
+  vSegmentUnit.io.redirect <> redirect
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
   vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict

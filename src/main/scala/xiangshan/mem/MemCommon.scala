@@ -150,6 +150,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
+  // hardware prefetch and fast replay no need to query tlb
+  val tlbNoQuery = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -178,6 +180,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
     if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
     if (latch) schedIndex := RegEnable(input.schedIndex, enable) else schedIndex := input.schedIndex
+    if (latch) tlbNoQuery := RegEnable(input.tlbNoQuery, enable) else tlbNoQuery := input.tlbNoQuery
     if (latch) isvec               := RegEnable(input.isvec, enable)               else isvec               := input.isvec
     if (latch) isLastElem          := RegEnable(input.isLastElem, enable)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
@@ -427,19 +430,26 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 
   val forward_result_valid = Bool()
 
-  def dcacheData(): UInt = {
-    // old dcache
-    // val dcache_data = Mux1H(bank_oh, bankedDcacheData)
-    // new dcache
+  def mergeTLData(): UInt = {
+    // merge TL D or MSHR data at load s2
     val dcache_data = respDcacheData
     val use_D = forward_D && forward_result_valid
     val use_mshr = forward_mshr && forward_result_valid
-    Mux(use_D, forwardData_D.asUInt, Mux(use_mshr, forwardData_mshr.asUInt, dcache_data))
+    Mux(
+      use_D || use_mshr,
+      Mux(
+        use_D,
+        forwardData_D.asUInt,
+        forwardData_mshr.asUInt
+      ),
+      dcache_data
+    )
   }
 
-  def mergedData(): UInt = {
+  def mergeLsqFwdData(dcacheData: UInt): UInt = {
+    // merge dcache and lsq forward data at load s3
     val rdataVec = VecInit((0 until VLEN / 8).map(j =>
-      Mux(forwardMask(j), forwardData(j), dcacheData()(8*(j+1)-1, 8*j))
+      Mux(forwardMask(j), forwardData(j), dcacheData(8*(j+1)-1, 8*j))
     ))
     rdataVec.asUInt
   }
