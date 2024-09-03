@@ -253,8 +253,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
-  val s1_hit_meta = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => meta_resp(w)))
-  val s1_hit_coh = s1_hit_meta.coh
+  //here use `pred_tag_match` for better timing when wpu is enable
+  val s1_pred_hit_meta = ParallelMux(s1_pred_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => meta_resp(w)))
+  val s1_pred_hit_coh = s1_pred_hit_meta.coh
   val s1_hit_error = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
   val s1_hit_prefetch = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
   val s1_hit_access = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).access))
@@ -276,10 +277,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.bloom_filter_query.query.bits.addr := io.bloom_filter_query.query.bits.get_addr(s1_paddr_dup_dcache)
 
   // get s1_will_send_miss_req in lpad_s1
-  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
-  val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
-  val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
-  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
+  val s1_pred_has_permission = s1_pred_hit_coh.onAccess(s1_req.cmd)._1
+  val s1_pred_new_hit_coh = s1_pred_hit_coh.onAccess(s1_req.cmd)._3
+  val s1_pred_hit = s1_tag_match_dup_dc && s1_pred_has_permission && s1_pred_hit_coh === s1_pred_new_hit_coh
+  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_pred_hit
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill_data_read && !s1_is_prefetch
@@ -345,8 +346,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   io.lsu.s2_hit := s2_hit_dup_lsu && !s2_wpu_pred_fail
 
-  val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
-  val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
+  val s2_meta_resp = RegEnable(meta_resp, s1_fire)
+  val s2_hit_meta = ParallelMux(s2_tag_match_way.asBools, (0 until nWays).map(w => s2_meta_resp(w)))
+  val s2_hit_coh = s2_hit_meta.coh
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
 
@@ -402,7 +404,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
   io.miss_req.bits.req_coh := s2_hit_coh
-  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
+  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_hit
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
 
