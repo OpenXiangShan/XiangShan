@@ -77,7 +77,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   val back_off_cnt = RegInit(0.U((log2Up(BACK_OFF_INTERVAL) + 1).W))
   val low_conf_cnt = RegInit(0.U((log2Up(LOW_CONF_INTERVAL) + 1).W))
 
-  val timely_reset = total_prefetch_cnt === TIMELY_CHECK_INTERVAL.U
+  val timely_reset = (total_prefetch_cnt === TIMELY_CHECK_INTERVAL.U) || (late_hit_prefetch_cnt >= TIMELY_CHECK_INTERVAL.U)
   val validity_reset = (good_prefetch_cnt + bad_prefetch_cnt) === VALIDITY_CHECK_INTERVAL.U
   val back_off_reset = back_off_cnt === BACK_OFF_INTERVAL.U
   val conf_reset = low_conf_cnt === LOW_CONF_INTERVAL.U
