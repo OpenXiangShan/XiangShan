@@ -239,6 +239,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
 
+  // Svpbmt extension enable
+  tlb.mPBMTE := csrMod.io.tlb.mPBMTE
+  tlb.hPBMTE := csrMod.io.tlb.hPBMTE
+
   io.in.ready := true.B // Todo: Async read imsic may block CSR
   io.out.valid := csrModOutValid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
