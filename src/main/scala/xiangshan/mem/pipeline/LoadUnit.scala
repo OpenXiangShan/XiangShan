@@ -29,8 +29,8 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
-
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
@@ -82,7 +82,6 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val forward         = new PipeLoadForwardQueryIO
   val stld_nuke_query = new LoadNukeQueryIO
   val ldld_nuke_query = new LoadNukeQueryIO
-  val trigger         = Flipped(new LqTriggerIO)
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -139,7 +138,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_uop = ValidIO(new DynInst) // early wakeup signal generated in load_s1, send to RS in load_s2
 
     // trigger
-    val trigger = Vec(TriggerNum, new LoadUnitTriggerIO)
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
 
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
@@ -970,6 +969,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.mshrid := s1_out.mshrid
   io.forward_mshr.paddr  := s1_out.paddr
 
+  val loadTrigger = Module(new MemTrigger(MemType.LOAD))
+  loadTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
+  loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+
+  val s1_trigger_action = loadTrigger.io.toLoadStore.triggerAction
+  val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
+  val s1_trigger_breakpoint = TriggerAction.isExp(s1_trigger_action)
+  s1_out.uop.trigger                  := s1_trigger_action
+  s1_out.uop.exceptionVec(breakPoint) := s1_trigger_breakpoint
+
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(s1_out.paddr)}, mmio ${s1_out.mmio}\n")
@@ -991,6 +1003,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(2, 0))
   val s2_frm_mabuf = s2_in.isFrmMisAlignBuf
   val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
+  val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1021,9 +1034,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
-  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR && s2_vecActive
-  val s2_mis_align = s2_valid && s2_exception_vec(loadAddrMisaligned) && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) && !s2_in.isvec
-
+  val s2_exception = s2_vecActive &&
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
+  val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) && !s2_in.isvec &&
+                     s2_exception_vec(loadAddrMisaligned) && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
@@ -1293,6 +1307,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_safe_writeback = RegEnable(s2_safe_writeback, s2_fire) || s3_dly_ld_err
   val s3_exception = RegEnable(s2_exception, s2_fire)
   val s3_mis_align = RegEnable(s2_mis_align, s2_fire)
+  val s3_trigger_debug_mode = RegEnable(s2_trigger_debug_mode, false.B, s2_fire)
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
   s3_vec_mb_nack     := false.B
@@ -1561,20 +1576,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.l2l_fwd_out.data := DontCare
     io.l2l_fwd_out.dly_ld_err := DontCare
   }
-
-   // trigger
-  val last_valid_data = RegNext(RegEnable(io.ldout.bits.data, io.ldout.fire))
-  val hit_ld_addr_trig_hit_vec = Wire(Vec(TriggerNum, Bool()))
-  val lq_ld_addr_trig_hit_vec = io.lsq.trigger.lqLoadAddrTriggerHitVec
-  (0 until TriggerNum).map{i => {
-    val tdata2    = GatedRegNext(io.trigger(i).tdata2)
-    val matchType = RegNext(io.trigger(i).matchType)
-    val tEnable   = RegNext(io.trigger(i).tEnable)
-
-    hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegEnable(s2_out.vaddr, 0.U, s2_valid), tdata2, matchType, tEnable)
-    io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-  }}
-  io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
   // s1
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
