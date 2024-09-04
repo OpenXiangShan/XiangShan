@@ -313,6 +313,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val nmi = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)
+  val virtualInterruptIsHvictlInject = RegEnable(intrMod.io.out.virtualInterruptIsHvictlInject, false.B, intrMod.io.out.interruptVec.valid)
 
   val trapHandleMod = Module(new TrapHandleModule)
 
@@ -331,6 +332,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.mtvec := mtvec.regOut
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
+  trapHandleMod.io.in.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -622,10 +624,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
   
-  trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !entryDebugMode  && !debugMode && !nmi
-  trapEntryMNEvent .valid := hasTrap && nmi && !debugMode
-  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
-  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
+  trapEntryMEvent.valid  := hasTrap && entryPrivState.isModeM && !entryDebugMode  && !debugMode && !nmi
+  trapEntryMNEvent.valid := hasTrap && nmi && !debugMode
+  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -657,6 +659,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.memExceptionVAddr := io.fromMem.excpVA
         in.memExceptionGPAddr := io.fromMem.excpGPA
+
+        in.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject
+        in.hvictlIID := hvictl.regOut.IID.asUInt
     }
   }
 
@@ -1138,7 +1143,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val hartId = io.fromTop.hartId
     val trapValid = io.fromRob.trap.valid
-    val trapNO = trapHandleMod.io.out.causeNO.ExceptionCode.asUInt
+    val trapNO = Mux(virtualInterruptIsHvictlInject && hasTrap, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val hasNMI = nmi && hasTrap
     val interruptNO = Mux(interrupt, trapNO, 0.U)
@@ -1167,6 +1172,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.exception := exceptionNO
     diffArchEvent.exceptionPC := exceptionPC
     diffArchEvent.hasNMI := hasNMI
+    diffArchEvent.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject && hasTrap
     if (env.EnableDifftest) {
       diffArchEvent.exceptionInst := io.fromRob.trap.bits.instr
     }
