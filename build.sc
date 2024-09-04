@@ -175,6 +175,10 @@ object difftest extends HasChisel {
 
   override def millSourcePath = pwd / "difftest"
 
+  override def sources = T.sources {
+    super.sources() ++ Seq(PathRef(millSourcePath / "src" / "generator" / "chisel"),
+                           PathRef(millSourcePath / "src" / "test" / "scala"))
+  }
 }
 
 object fudian extends HasChisel {
