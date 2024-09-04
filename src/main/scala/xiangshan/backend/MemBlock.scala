@@ -1417,7 +1417,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (env.EnableDifftest) {
     sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
       if (index == 0) {
-        val vSegmentDifftestValid = vSegmentFlag && vSegmentUnit.io.vecDifftestInfo.valid
+        val vSegmentDifftestValid = vSegmentUnit.io.vecDifftestInfo.valid
         sbufferPort.valid := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
         sbufferPort.bits  := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
 
