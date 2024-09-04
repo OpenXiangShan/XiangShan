@@ -179,33 +179,37 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
     * Rename: allocate free physical register and update rename table
     */
+  // uops: micro operations for renaming
   val uops = Wire(Vec(RenameWidth, new DynInst))
   uops.foreach( uop => {
-    uop.srcState      := DontCare
-    uop.debugInfo     := DontCare
-    uop.lqIdx         := DontCare
-    uop.sqIdx         := DontCare
-    uop.waitForRobIdx := DontCare
-    uop.singleStep    := DontCare
-    uop.snapshot      := DontCare
+    uop.srcState          := DontCare
+    uop.debugInfo         := DontCare
+    uop.lqIdx             := DontCare
+    uop.sqIdx             := DontCare
+    uop.waitForRobIdx     := DontCare
+    uop.singleStep        := DontCare
+    uop.snapshot          := DontCare
     uop.srcLoadDependency := DontCare
-    uop.numLsElem       :=  DontCare
-    uop.hasException  :=  DontCare
-    uop.useRegCache   := DontCare
-    uop.regCacheIdx   := DontCare
-    uop.traceBlockInPipe := DontCare
+    uop.numLsElem         := DontCare
+    uop.hasException      := DontCare
+    uop.useRegCache       := DontCare
+    uop.regCacheIdx       := DontCare
+    uop.traceBlockInPipe  := DontCare
   })
-  private val fuType       = uops.map(_.fuType)
-  private val fuOpType     = uops.map(_.fuOpType)
-  private val vtype        = uops.map(_.vpu.vtype)
-  private val sew          = vtype.map(_.vsew)
-  private val lmul         = vtype.map(_.vlmul)
-  private val eew          = uops.map(_.vpu.veew)
-  private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
-  private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))
-  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
-  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
-  private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map { case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
+  private val fuType       = uops.map(_.fuType)    // function unit type
+  private val fuOpType     = uops.map(_.fuOpType)  // function unit operation type
+  private val vtype        = uops.map(_.vpu.vtype) // CSR "vtype" of vector operation
+  private val sew          = vtype.map(_.vsew)     // CSR Field "SEW", Selected Element Width of vector operation
+  private val lmul         = vtype.map(_.vlmul)    // CSR Field "LMUL", vector register group multiplier
+  private val eew          = uops.map(_.vpu.veew)  // effective SEW "EEW"
+  private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem)) // vector addressing mode
+  private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))    // is VLS strided
+  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem)) // is Vector Segment Load/Store
+  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))  // is unit-stride mode
+  private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map {
+    case (fuOpTypeItem, nfItem) =>
+      Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem)
+  }
   private val mulBits      = 3 // dirty code
   private val emul         = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
     Mux(
@@ -217,11 +221,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         EewLog2(eew(index)) - sew(index) + lmul(index)
       )
     )
-  }
-  private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
-    isVlsTypeItme && isUnitStrideItem
-  }
-  private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+  } // "EMUL"
+  private val isVecUnitType = (isVlsType zip isUnitStride).map { case (a, b) => a && b }
+  private val instType = (isSegment zip mop).map { case (a, b) => Cat(a, b) }
+
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
   // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
@@ -232,15 +235,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
     )
   }
-  uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
+  uops.zipWithIndex.foreach { case(uop, i) =>
+    uop.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
   }
 
-  val needVecDest    = Wire(Vec(RenameWidth, Bool()))
-  val needFpDest     = Wire(Vec(RenameWidth, Bool()))
-  val needIntDest    = Wire(Vec(RenameWidth, Bool()))
-  val needV0Dest     = Wire(Vec(RenameWidth, Bool()))
-  val needVlDest     = Wire(Vec(RenameWidth, Bool()))
+  // The destination type of operation
+  val needVecDest = Wire(Vec(RenameWidth, Bool()))
+  val needFpDest  = Wire(Vec(RenameWidth, Bool()))
+  val needIntDest = Wire(Vec(RenameWidth, Bool()))
+  val needV0Dest  = Wire(Vec(RenameWidth, Bool()))
+  val needVlDest  = Wire(Vec(RenameWidth, Bool()))
   private val inHeadValid = io.in.head.valid
 
   val isMove = Wire(Vec(RenameWidth, Bool()))
