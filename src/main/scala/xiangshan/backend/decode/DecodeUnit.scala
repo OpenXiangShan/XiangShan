@@ -851,6 +851,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.vtype := decodedInst.vpu.vtype
   vecException.io.vstart := decodedInst.vpu.vstart
 
+  private val isCboClean = CBO_CLEAN === io.enq.ctrlFlow.instr
+  private val isCboFlush = CBO_FLUSH === io.enq.ctrlFlow.instr
+  private val isCboInval = CBO_INVAL === io.enq.ctrlFlow.instr
+  private val isCboZero  = CBO_ZERO  === io.enq.ctrlFlow.instr
+
   private val exceptionII =
     decodedInst.selImm === SelImm.INVALID_INSTR ||
     vecException.io.illegalInst ||
@@ -867,7 +872,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.illegalInst.vsIsOff    && FuType.FuTypeOrR(decodedInst.fuType, FuType.vecAll) ||
     io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType) ||
     (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
-    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm
+    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm ||
+    io.fromCSR.illegalInst.cboZ       && isCboZero ||
+    io.fromCSR.illegalInst.cboCF      && (isCboClean || isCboFlush) ||
+    io.fromCSR.illegalInst.cboI       && isCboInval
 
   private val exceptionVI =
     io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
@@ -875,7 +883,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.virtualInst.hfence     && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && (decodedInst.fuOpType === FenceOpType.hfence_g || decodedInst.fuOpType === FenceOpType.hfence_v) ||
     io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu)   && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
     io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType) ||
-    io.fromCSR.virtualInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
+    io.fromCSR.virtualInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType) ||
+    io.fromCSR.virtualInst.cboZ       && isCboZero ||
+    io.fromCSR.virtualInst.cboCF      && (isCboClean || isCboFlush) ||
+    io.fromCSR.virtualInst.cboI       && isCboInval
+
 
   decodedInst.exceptionVec(illegalInstr) := exceptionII || io.enq.ctrlFlow.exceptionVec(EX_II)
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
@@ -1089,11 +1101,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.selImm := SelImm.IMM_S
     decodedInst.fuType := FuType.ldu.U
     decodedInst.canRobCompress := false.B
-    decodedInst.fuOpType := Mux1H(Seq(
-      isPreW -> LSUOpType.prefetch_w,
-      isPreR -> LSUOpType.prefetch_r,
-      isPreI -> LSUOpType.prefetch_i,
-    ))
   }.elsewhen (isZimop) {
     // set srcType for zimop
     decodedInst.srcType(0) := SrcType.reg
@@ -1128,6 +1135,12 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     isCsrrVl    -> VSETOpType.csrrvl,
     isCsrrVlenb -> ALUOpType.add,
     isFLI       -> Cat(1.U, inst.FMT, inst.RS1),
+    (isPreW || isPreR || isPreI) -> Mux1H(Seq(
+      isPreW -> LSUOpType.prefetch_w,
+      isPreR -> LSUOpType.prefetch_r,
+      isPreI -> LSUOpType.prefetch_i,
+    )),
+    (isCboInval && io.fromCSR.special.cboI2F) -> LSUOpType.cbo_flush,
   ))
 
   //-------------------------------------------------------------

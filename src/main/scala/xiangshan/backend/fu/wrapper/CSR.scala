@@ -409,7 +409,26 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_II when frm.data > 4
      */
     val frm = Bool()
+
+    /**
+     * illegal CBO.ZERO
+     * raise [[EX_II]] when !isModeM && !MEnvCfg.CBZE || isModeHU && !SEnvCfg.CBZE
+     */
+    val cboZ = Bool()
+
+    /**
+     * illegal CBO.CLEAN/FLUSH
+     * raise [[EX_II]] when !isModeM && !MEnvCfg.CBCFE || isModeHU && !SEnvCfg.CBCFE
+     */
+    val cboCF = Bool()
+
+    /**
+     * illegal CBO.INVAL
+     * raise [[EX_II]] when !isModeM && MEnvCfg.CBIE = EnvCBIE.Off || isModeHU && SEnvCfg.CBIE = EnvCBIE.Off
+     */
+    val cboI = Bool()
   }
+
   val virtualInst = new Bundle {
     /**
      * illegal sfence.vma, svinval.vma
@@ -440,5 +459,37 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_VI when isModeVU && mstatus.TW=0 || isModeVS && mstatus.TW=0 && hstatus.VTW=1
      */
     val wfi = Bool()
+
+    /**
+     * illegal CBO.ZERO
+     * raise [[EX_VI]] when MEnvCfg.CBZE && (isModeVS && !HEnvCfg.CBZE || isModeVU && (!HEnvCfg.CBZE || !SEnvCfg.CBZE))
+     */
+    val cboZ = Bool()
+
+    /**
+     * illegal CBO.CLEAN/FLUSH
+     * raise [[EX_VI]] when MEnvCfg.CBZE && (isModeVS && !HEnvCfg.CBCFE || isModeVU && (!HEnvCfg.CBCFE || !SEnvCfg.CBCFE))
+     */
+    val cboCF = Bool()
+
+    /**
+     * illegal CBO.INVAL <br/>
+     * raise [[EX_VI]] when MEnvCfg.CBIE =/= EnvCBIE.Off && ( <br/>
+     *   isModeVS && HEnvCfg.CBIE === EnvCBIE.Off || <br/>
+     *   isModeVU && (HEnvCfg.CBIE === EnvCBIE.Off || SEnvCfg.CBIE === EnvCBIE.Off) <br/>
+     * ) <br/>
+     */
+    val cboI = Bool()
+  }
+
+  val special = new Bundle {
+    /**
+     * execute CBO.INVAL and perform flush operation when <br/>
+     * isModeHS && MEnvCfg.CBIE === EnvCBIE.Flush || <br/>
+     * isModeHU && (MEnvCfg.CBIE === EnvCBIE.Flush || SEnvCfg.CBIE === EnvCBIE.Flush) <br/>
+     * isModeVS && (MEnvCfg.CBIE === EnvCBIE.Flush || HEnvCfg.CBIE === EnvCBIE.Flush) <br/>
+     * isModeVU && (MEnvCfg.CBIE === EnvCBIE.Flush || HEnvCfg.CBIE === EnvCBIE.Flush || SEnvCfg.CBIE === EnvCBIE.Flush) <br/>
+     */
+    val cboI2F = Bool()
   }
 }

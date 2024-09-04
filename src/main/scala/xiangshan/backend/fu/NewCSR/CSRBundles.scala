@@ -43,17 +43,17 @@ object CSRBundles {
   class XtinstBundle extends FieldInitBundle
 
   abstract class EnvCfg extends CSRBundle {
-    // Set all fields as RO in base class
-    val STCE  = RO(    63).withReset(0.U) // Sstc Enable
-    val PBMTE = RO(    62).withReset(0.U) // Svpbmt Enable
-    val ADUE  = RO(    61).withReset(0.U) // Svadu extension Enable
-    val PMM   = RO(33, 32).withReset(0.U) // Smnpm extension
-    val CBZE  = RO(     7).withReset(0.U) // Zicboz extension
-    val CBCFE = RO(     6).withReset(0.U) // Zicbom extension
-    val CBIE  = RO( 5,  4).withReset(0.U) // Zicbom extension
-    val SSE   = RO(     3).withReset(0.U) // Zicfiss extension Enable in S mode
-    val LPE   = RO(     2).withReset(0.U) // Zicfilp extension
-    val FIOM  = RO(     0).withReset(0.U) // Fence of I/O implies Memory
+    // Set all fields not supported as RO in base class
+    val STCE  =      RO(    63)           .withReset(0.U) // Sstc Enable
+    val PBMTE =      RO(    62)           .withReset(0.U) // Svpbmt Enable
+    val ADUE  =      RO(    61)           .withReset(0.U) // Svadu extension Enable
+    val PMM   =      RO(33, 32)           .withReset(0.U) // Smnpm extension
+    val CBZE  =      RW(     7)           .withReset(1.U) // Zicboz extension
+    val CBCFE =      RW(     6)           .withReset(1.U) // Zicbom extension
+    val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval) // Zicbom extension
+    val SSE   =      RO(     3)           .withReset(0.U) // Zicfiss extension Enable in S mode
+    val LPE   =      RO(     2)           .withReset(0.U) // Zicfilp extension
+    val FIOM  =      RO(     0)           .withReset(0.U) // Fence of I/O implies Memory
   }
 
   class PrivState extends Bundle { self =>
