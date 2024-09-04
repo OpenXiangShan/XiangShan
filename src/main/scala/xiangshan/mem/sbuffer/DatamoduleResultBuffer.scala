@@ -25,6 +25,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.cache._
+import xiangshan.backend.datapath.NewPipelineConnect
 import difftest._
 
 class DatamoduleResultBufferIO[T <: Data](gen: T)(implicit p: Parameters) extends XSBundle
@@ -40,32 +41,42 @@ class DatamoduleResultBuffer[T <: Data]
   gen: T,
 )(implicit p: Parameters) extends XSModule {
 
-  val genType = {
+  private val size = EnsbufferWidth
+  private val genType = {
     requireIsChiselType(gen)
     gen
   }
 
   val io = IO(new DatamoduleResultBufferIO[T](gen))
 
-  val data = Reg(Vec(EnsbufferWidth, genType))
-  val valids = RegInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
-  val enq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // head is entry 0
-  val deq_flag = RegInit(0.U(log2Up(EnsbufferWidth).W)) // tail is entry 0
+  val data = Reg(Vec(size, genType))
+  val valids = RegInit(VecInit(Seq.fill(size)(false.B)))
+  val enq_flag = RegInit(0.U(log2Up(size).W)) // head is entry 0
+  val deq_flag = RegInit(0.U(log2Up(size).W)) // tail is entry 0
 
-  val entry_allowin = Wire(Vec(EnsbufferWidth, Bool()))
+  val entry_allowin = Wire(Vec(size, Bool()))
+  val port_allowout = Wire(Vec(EnsbufferWidth, Decoupled(gen)))
 
   (0 until EnsbufferWidth).foreach(index => {
-    io.deq(index).valid := valids(deq_flag + index.U) && (if (index == 0) 1.B else io.deq(index - 1).valid)
-    io.deq(index).bits := data(deq_flag + index.U)
+    NewPipelineConnect(
+      port_allowout(index), io.deq(index), io.deq(index).fire,
+      false.B,
+      Option(f"DatamoduleResultBufferToSbuffer${index}")
+    )
+  })
+
+  (0 until EnsbufferWidth).foreach(index => {
+    port_allowout(index).valid := valids(deq_flag + index.U) && (if (index == 0) 1.B else port_allowout(index - 1).valid)
+    port_allowout(index).bits := data(deq_flag + index.U)
   })
 
   (1 until EnsbufferWidth).foreach(i => {
-    assert(!(io.deq(i).valid && !io.deq(i - 1).valid))
-    assert(!(io.deq(i).ready && !io.deq(i - 1).ready))
+    assert(!(port_allowout(i).valid && !port_allowout(i - 1).valid))
+    assert(!(port_allowout(i).ready && !port_allowout(i - 1).ready))
   })
 
-  (0 until EnsbufferWidth).foreach(
-    index => entry_allowin(index) := !valids(index) || (0 until EnsbufferWidth).map(i => io.deq(i).fire && deq_flag + i.U === index.U).reduce(_ || _)
+  (0 until size).foreach(
+    index => entry_allowin(index) := !valids(index) || (0 until EnsbufferWidth).map(i => port_allowout(i).fire && deq_flag + i.U === index.U).reduce(_ || _)
   )
 
   (0 until EnsbufferWidth).foreach(
@@ -78,7 +89,7 @@ class DatamoduleResultBuffer[T <: Data]
   })
 
   (0 until EnsbufferWidth).foreach(index =>
-    when(io.deq(index).fire) {
+    when(port_allowout(index).fire) {
       valids(deq_flag + index.U) := 0.B
       if (EnsbufferWidth > 1) deq_flag := deq_flag + index.U + 1.U
     }
