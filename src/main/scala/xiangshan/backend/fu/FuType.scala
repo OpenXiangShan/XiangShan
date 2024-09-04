@@ -48,7 +48,7 @@ object FuType extends OHEnumeration {
   // ls
   val ldu = addType(name = "ldu")
   val stu = addType(name = "stu")
-  val mou = addType(name = "mou")
+  val mou = addType(name = "mou") // AMO Unit (?)
 
   // vec
   val vipu = addType(name = "vipu")
@@ -135,6 +135,10 @@ object FuType extends OHEnumeration {
   val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
 
+  /**
+   * Different type of an operation request
+   */
+
   def X = BitPat.N(num) // Todo: Don't Care
 
   def num = this.values.size
@@ -143,24 +147,49 @@ object FuType extends OHEnumeration {
 
   def apply() = UInt(num.W)
 
+  /** is Integer operation */
   def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll) || FuTypeOrR(fuType, vsetiwi, vsetiwf)
+
+  /** is Integer operation to Dispatch Queue 0 */
   def isIntDq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0All)
+
+  /** is Integer operation to Dispatch Queue 1 */
   def isIntDq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1All)
+
+  /** is Integer operation to Dispatch Queue 0, Issue Queue's Dequeue 0 (IQ0) */
   def isIntDq0Deq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0Deq0)
+
+  /** is Integer operation to Dispatch Queue 0, Issue Queue's Dequeue 1 (IQ1) */
   def isIntDq0Deq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0Deq1)
+
+  /** is Integer operation to Dispatch Queue 1, Issue Queue's Dequeue 0 (IQ0) */
   def isIntDq1Deq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1Deq0)
+
+  /** is Integer operation to Dispatch Queue 1, Issue Queue's Dequeue 1 (IQ1) */
   def isIntDq1Deq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1Deq1)
+
+  /** is Integer operation to Both Issue Queue's Dequeue 0 (IQ0/2) */
   def isBothDeq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intBothDeq0)
+
+  /** is Integer operation to Both Issue Queue's Dequeue 1 (IQ1/3) */
   def isBothDeq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intBothDeq1)
+
+  /** is Arithmetic Logic Unit operation */
   def isAlu(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(alu))
+
+  /** is Branch operation */
   def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh))
 
+  /** is vset{i}vl{i} type operation */
   def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
 
+  /** is Jump operation */
   def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 
+  /** is Float-point Arithmetic operation */
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
+  /** is Memory operation */
   def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
 
   def isLoadStore(fuType: UInt): Bool = FuTypeOrR(fuType, ldu, stu)
@@ -212,21 +241,23 @@ object FuType extends OHEnumeration {
   def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
 
   object FuTypeOrR {
-    def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
-      apply(fuType, fu0 +: fus)
-    }
-
     def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
       fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
     }
 
-    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = {
-      apply(fuType, fu0 +: fus)
+    def apply(fuType: OHType, fus: Seq[OHType]): Boolean = {
+      fus.map(fu => fu == fuType).fold(false)(_ || _)
     }
 
-    def apply(fuTupe: OHType, fus: Seq[OHType]): Boolean = {
-      fus.map(x => x == fuTupe).fold(false)(_ || _)
-    }
+    // Overload with argument list of function units
+    def apply(fuType: UInt, fu0: OHType, fus: OHType*)  : Bool    = apply(fuType, fu0 +: fus)
+    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = apply(fuType, fu0 +: fus)
+
+    // Overload, passing fuType implicitly
+    def apply(fus: Seq[OHType])(implicit fuType: UInt)  : Bool    = apply(fuType, fus)
+    def apply(fus: Seq[OHType])(implicit fuType: OHType): Boolean = apply(fuType, fus)
+    def apply(fu0: OHType, fus: OHType*)(implicit fuType: UInt)  : Bool    = apply(fuType, fu0 +: fus)
+    def apply(fu0: OHType, fus: OHType*)(implicit fuType: OHType): Boolean = apply(fuType, fu0 +: fus)
   }
 
   val functionNameMap = Map(
