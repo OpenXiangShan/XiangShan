@@ -123,10 +123,12 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
           // also update meta_codes
-          entry.meta_codes(i) := encodeMetaECC(getPhyTagFromBlk(io.update.bits.blkPaddr))
+          // we have getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i), so we can use entry.ptag(i) for better timing
+          entry.meta_codes(i) := encodeMetaECC(entry.ptag(i))
         }.elsewhen(way_same) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
+          // dont care meta_codes, since it's not used for a missed request
         }
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)
