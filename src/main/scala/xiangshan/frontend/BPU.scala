@@ -636,6 +636,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s1_pred_info.cfiIndex := resp.s1.cfiIndex.map { case x => x.bits }
 
   val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(new PreviousPredInfo), s1_fire_dup(0))
+  // val previous_s1_pred_info = Wire(new PreviousPredInfo)
+  // previous_s1_pred_info.hit         := RegEnable(s1_pred_info.hit        , 0.U.asTypeOf(s1_pred_info.hit)        , s1_fire_dup(0))
+  // previous_s1_pred_info.taken       := RegEnable(s1_pred_info.taken      , 0.U.asTypeOf(s1_pred_info.taken)      , s1_fire_dup(0))
+  // previous_s1_pred_info.target      := RegEnable(s1_pred_info.target     , 0.U.asTypeOf(s1_pred_info.target)     , s1_fire_dup(0))
+  // previous_s1_pred_info.lastBrPosOH := RegEnable(s1_pred_info.lastBrPosOH, 0.U.asTypeOf(s1_pred_info.lastBrPosOH), s1_fire_dup(0))
+  // previous_s1_pred_info.takenMask   := RegEnable(s1_pred_info.takenMask  , 0.U.asTypeOf(s1_pred_info.takenMask)  , s1_fire_dup(0))
+  // previous_s1_pred_info.cfiIndex    := RegEnable(s1_pred_info.cfiIndex   , 0.U.asTypeOf(s1_pred_info.cfiIndex)   , s1_fire_dup(0))
+  // XSPerfAccumulate("previous_s1_pred_info_old", s1_fire_dup(0))
 
   val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
@@ -708,7 +716,39 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
+  // ------- To optimize Clock Gate Efficiency of bpu/previous_* -------
   val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+
+  // val previous_s2_pred = Wire(new BranchPredictionBundle)
+  // previous_s2_pred.pc := RegEnable(resp.s2.pc, 0.U.asTypeOf(resp.s2.pc), s2_fire_dup(0))
+  // previous_s2_pred.valid := RegEnable(resp.s2.valid, 0.U.asTypeOf(resp.s2.valid), s2_fire_dup(0))
+  // previous_s2_pred.hasRedirect := RegEnable(resp.s2.hasRedirect, 0.U.asTypeOf(resp.s2.hasRedirect), s2_fire_dup(0))
+  // previous_s2_pred.ftq_idx := RegEnable(resp.s2.ftq_idx, 0.U.asTypeOf(resp.s2.ftq_idx), s2_fire_dup(0))
+  // previous_s2_pred.full_pred := RegEnable(resp.s2.full_pred, 0.U.asTypeOf(resp.s2.full_pred), s2_fire_dup(0))
+  // previous_s2_pred.full_pred.zip(resp.s2.full_pred).map {case (prev_fp, new_fp) => 
+  //   prev_fp.targets.zip(new_fp.taken_mask_on_slot.zipWithIndex).map{ case(target, (taken_mask, slotIdx)) =>
+  //     target := RegEnable(new_fp.targets(slotIdx), 0.U.asTypeOf(new_fp.targets(slotIdx)), s2_fire_dup(0) && taken_mask) // s2_fire_dup(dupIdx) && !new_fp.taken_mask_on_slot.take(slotIdx).fold(false.B)(_||_) && taken_mask && new_fp.hit
+  //   }
+  //   prev_fp.fallThroughAddr := RegEnable(new_fp.fallThroughAddr, 0.U.asTypeOf(new_fp.fallThroughAddr), s2_fire_dup(0) && resp.s2.full_pred(0).hit && !resp.s2.full_pred(0).taken_mask_on_slot(0)) // s2_fire_dup(dupIdx) && new_fp.hit && !new_fp.taken_mask_on_slot.reduce(_||_)
+  // }
+
+  XSPerfAccumulate("previous_s2_pred_full_pred_old", s2_fire_dup(0)) // 148632
+  XSPerfAccumulate("previous_s2_pred_full_pred_fallThroughAddr_new", s2_fire_dup(0) && resp.s2.full_pred(0).hit && !resp.s2.full_pred(0).taken_mask_on_slot.reduce(_||_)) // 16470
+  XSPerfAccumulate("previous_s2_pred_full_pred_fallThroughAddr_not_taken0", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(0)) // 85656
+  XSPerfAccumulate("previous_s2_pred_full_pred_fallThroughAddr_with_hit_not_taken0", s2_fire_dup(0) && resp.s2.full_pred(0).hit && !resp.s2.full_pred(0).taken_mask_on_slot(0)) // 55294
+  XSPerfAccumulate("previous_s2_pred_full_pred_fallThroughAddr_not_taken1", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(1)) // 88607
+  XSPerfAccumulate("previous_s2_pred_full_pred_targets_old", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot.reduce(_||_)) // 101800
+  XSPerfAccumulate("previous_s2_pred_full_pred_only_hit", s2_fire_dup(0) && resp.s2.full_pred(0).hit) // 118270
+  XSPerfAccumulate("previous_s2_pred_full_pred_targets_new", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot.reduce(_||_) && resp.s2.full_pred(0).hit) // 101800
+  XSPerfAccumulate("previous_s2_pred_full_pred_target0_new", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot(0) && resp.s2.full_pred(0).hit) // 62976
+  XSPerfAccumulate("previous_s2_pred_full_pred_target0_new_not_hit", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot(0)) // 62976
+  XSPerfAccumulate("previous_s2_pred_full_pred_target0_new_not_hit_not_valid", s2_fire_dup(0) && resp.s2.full_pred(0).br_taken_mask(0)) // 110078, 说明hit可以去掉，valid建议留
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(0) && resp.s2.full_pred(0).taken_mask_on_slot(1) && resp.s2.full_pred(0).hit) // 38824
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new_not_hit", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(0) && resp.s2.full_pred(0).taken_mask_on_slot(1)) // 38824
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new_only_valid", s2_fire_dup(0) && resp.s2.full_pred(1).tail_slot_valid) // 83247
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new_taken_mask_on_slot", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot(1)) // 60025
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new_not_taken_target0", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(0)) // 85656
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new_not_taken_target0_and_target1_valid", s2_fire_dup(0) && !resp.s2.full_pred(0).taken_mask_on_slot(0) && resp.s2.full_pred(1).tail_slot_valid) // 46548
 
   val s3_redirect_on_br_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask().asUInt =/= fp2.real_br_taken_mask().asUInt}
   val s3_both_first_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask()(0) && fp2.real_br_taken_mask()(0)}
@@ -765,6 +805,118 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
   predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
+  XSPerfAccumulate("predictors_io_update_valid", io.ftq_to_bpu.update.valid)
+  
+  // ------- To optimize Clock Gate Efficiency of bpu/predictors_update* -------
+  // Update pc
+  predictors.io.update.bits.pc := SegmentedAddrNext(io.ftq_to_bpu.update.bits.pc, pcSegments, io.ftq_to_bpu.update.valid, Some("predictors.io.update.pc")).getAddr()
+
+  // Update ftb_entry 
+  val FTBEntryUpdateValid = io.ftq_to_bpu.update.bits.ftb_entry.valid && io.ftq_to_bpu.update.valid
+  predictors.io.update.bits.ftb_entry := RegEnable(io.ftq_to_bpu.update.bits.ftb_entry, FTBEntryUpdateValid)
+  predictors.io.update.bits.ftb_entry.valid := RegEnable(FTBEntryUpdateValid, io.ftq_to_bpu.update.valid) // not useful
+  
+  // Get UpdateMeta of each Predictor
+  // | <------------- io.update.bits.meta ------------> |
+  // |---- x -----| uftb | tage-sc | ftb | ittage | ras |
+  val metaSizeSeq = predictors.asInstanceOf[Composer].getEachMetaSize()
+  val metaStartIdxWithSize = metaSizeSeq.foldLeft(Seq[(Int, Int)]()) { (acc, len) =>
+    val start = if (acc.isEmpty) 0 else acc.last._1 + acc.last._2
+    acc :+ (start, len)
+  }
+  val Seq((   ras_meta_sta,    ras_meta_sz),
+          (ittage_meta_sta, ittage_meta_sz), 
+          (   ftb_meta_sta,    ftb_meta_sz), 
+          (  tage_meta_sta,   tage_meta_sz), 
+          (  uftb_meta_sta,   uftb_meta_sz)) = metaStartIdxWithSize.take(5)
+  
+  println(p"uftb_meta_sta   = $uftb_meta_sta  , uftb_meta_sz   = $uftb_meta_sz  ")
+  println(p"tage_meta_sta   = $tage_meta_sta  , tage_meta_sz   = $tage_meta_sz  ")
+  println(p"ftb_meta_sta    = $ftb_meta_sta   , ftb_meta_sz    = $ftb_meta_sz   ")
+  println(p"ittage_meta_sta = $ittage_meta_sta, ittage_meta_sz = $ittage_meta_sz")
+  println(p"ras_meta_sta    = $ras_meta_sta   , ras_meta_sz    = $ras_meta_sz   ")
+
+  val UpdateTageMeta   = io.ftq_to_bpu.update.bits.meta(  tage_meta_sta +   tage_meta_sz - 1,   tage_meta_sta).asTypeOf(new TageMeta)
+  val UpdateFTBMeta    = io.ftq_to_bpu.update.bits.meta(   ftb_meta_sta +    ftb_meta_sz - 1,    ftb_meta_sta).asTypeOf(new FTBMeta)
+  val UpdateITTageMeta = io.ftq_to_bpu.update.bits.meta(ittage_meta_sta + ittage_meta_sz - 1, ittage_meta_sta).asTypeOf(new ITTageMeta)
+  val UpdateRASMeta    = io.ftq_to_bpu.update.bits.meta(   ras_meta_sta +    ras_meta_sz - 1,    ras_meta_sta).asTypeOf(new RASMeta)
+
+  // Update Meta of each Predictor
+  val new_uftb_meta = RegEnable(io.ftq_to_bpu.update.bits.meta(uftb_meta_sta + uftb_meta_sz - 1, uftb_meta_sta), io.ftq_to_bpu.update.valid)
+  val new_ftb_meta  = RegEnable(UpdateFTBMeta, io.ftq_to_bpu.update.valid && !io.ftq_to_bpu.update.bits.old_entry)
+  val new_ras_meta  = RegEnable(UpdateRASMeta, io.ftq_to_bpu.update.valid && (io.ftq_to_bpu.update.bits.is_call || io.ftq_to_bpu.update.bits.is_ret))
+
+  XSPerfAccumulate("predictors_io_update_new_uftb_meta", io.ftq_to_bpu.update.valid) // 52687
+  XSPerfAccumulate("predictors_io_update_new_ftb_meta", io.ftq_to_bpu.update.valid && !io.ftq_to_bpu.update.bits.old_entry)
+  XSPerfAccumulate("predictors_io_update_new_ras_meta", io.ftq_to_bpu.update.valid && (io.ftq_to_bpu.update.bits.is_call_taken || io.ftq_to_bpu.update.bits.is_ret_taken)) // 4857
+  XSPerfAccumulate("predictors_io_update_new_ras_meta_new1", io.ftq_to_bpu.update.valid && (io.ftq_to_bpu.update.bits.is_call || io.ftq_to_bpu.update.bits.is_ret)) // 7828
+  XSPerfAccumulate("predictors_io_update_new_ras_meta_new2", io.ftq_to_bpu.update.valid && io.ftq_to_bpu.update.bits.jmp_taken && (io.ftq_to_bpu.update.bits.is_call || io.ftq_to_bpu.update.bits.is_ret)) // 4864
+
+  val new_ittage_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
+  new_ittage_meta := RegEnable(UpdateITTageMeta, io.ftq_to_bpu.update.valid)
+  new_ittage_meta.provider.bits     := RegEnable(UpdateITTageMeta.provider.bits    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  new_ittage_meta.providerTarget    := RegEnable(UpdateITTageMeta.providerTarget   , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  new_ittage_meta.allocate.bits     := RegEnable(UpdateITTageMeta.allocate.bits    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.allocate.valid   )
+  new_ittage_meta.altProvider.bits  := RegEnable(UpdateITTageMeta.altProvider.bits , io.ftq_to_bpu.update.valid && UpdateITTageMeta.altProvider.valid)
+  new_ittage_meta.altProviderTarget := RegEnable(UpdateITTageMeta.altProviderTarget, io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid && 
+                                                                                     UpdateITTageMeta.altProvider.valid && 
+                                                                                     UpdateITTageMeta.providerCtr === 0.U)
+  XSPerfAccumulate("predictors_io_update_new_ittage_meta_provider_bits"    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  XSPerfAccumulate("predictors_io_update_new_ittage_meta_providerTarget"   , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  XSPerfAccumulate("predictors_io_update_new_ittage_meta_allocate_bits"    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.allocate.valid   )
+  XSPerfAccumulate("predictors_io_update_new_ittage_meta_altProvider_bits" , io.ftq_to_bpu.update.valid && UpdateITTageMeta.altProvider.valid)
+  XSPerfAccumulate("predictors_io_update_new_ittage_meta_altProviderTarget", io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid &&
+                                                                             UpdateITTageMeta.altProvider.valid && 
+                                                                             UpdateITTageMeta.providerCtr === 0.U)
+
+  val new_tage_meta = WireInit(0.U.asTypeOf(new TageMeta))
+  new_tage_meta := RegEnable(UpdateTageMeta, io.ftq_to_bpu.update.valid)
+  val TageUpdateValidsOld = VecInit((0 until TageBanks).map(w =>
+      io.ftq_to_bpu.update.bits.ftb_entry.brValids(w) && io.ftq_to_bpu.update.valid && !io.ftq_to_bpu.update.bits.ftb_entry.always_taken(w) &&
+      !(PriorityEncoder(io.ftq_to_bpu.update.bits.br_taken_mask) < w.U)))
+  val TageUpdateValidsNew = VecInit((0 until TageBanks).map(w =>
+      io.ftq_to_bpu.update.bits.ftb_entry.brValids(w) && io.ftq_to_bpu.update.valid)) // ftq_to_bpu.update.bits.ftb_entry.always_taken require lots of timing(FTQEntryGen)
+  for(i <- 0 until numBr){
+    val TageUpdateProvided = UpdateTageMeta.providers(i).valid
+    new_tage_meta.providers(i).bits := RegEnable(UpdateTageMeta.providers(i).bits, TageUpdateProvided && TageUpdateValidsNew(i))
+    new_tage_meta.providerResps(i) := RegEnable(UpdateTageMeta.providerResps(i), TageUpdateProvided && TageUpdateValidsNew(i)) // `TageUpdateProvided` 只影响perfAccumulate
+    new_tage_meta.altUsed(i) := RegEnable(UpdateTageMeta.altUsed(i), TageUpdateValidsNew(i))
+    new_tage_meta.allocates(i) := RegEnable(UpdateTageMeta.allocates(i), io.ftq_to_bpu.update.valid && io.ftq_to_bpu.update.bits.mispred_mask(i)) //  && io.ftq_to_bpu.update.bits.mispred_mask(i)
+  }
+  if(EnableSC){
+    for(w <- 0 until TageBanks){
+      new_tage_meta.scMeta.get.scPreds(w) := RegEnable(UpdateTageMeta.scMeta.get.scPreds(w), TageUpdateValidsNew(w) && UpdateTageMeta.providers(w).valid)
+      new_tage_meta.scMeta.get.ctrs(w) := RegEnable(UpdateTageMeta.scMeta.get.ctrs(w), TageUpdateValidsNew(w) && UpdateTageMeta.providers(w).valid)
+    }
+  }
+
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_provider_0_bits_new"    , TageUpdateValidsNew(0) && UpdateTageMeta.providers(0).valid) // 21101
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_provider_0_bits_old"    , TageUpdateValidsOld(0) && UpdateTageMeta.providers(0).valid) // 20984
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_allocates_0_old"        , TageUpdateValidsOld(0) && io.ftq_to_bpu.update.bits.mispred_mask(0)) // 4013
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_allocates_0_new1"        , TageUpdateValidsNew(0)) // 45000
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_allocates_0_new2"        , TageUpdateValidsNew(0) && io.ftq_to_bpu.update.bits.mispred_mask(0)) // 4416
+  XSPerfAccumulate("predictors_io_update_new_tage_meta_allocates_0_new3"        , io.ftq_to_bpu.update.valid && io.ftq_to_bpu.update.bits.mispred_mask(0)) // 4416
+  
+  predictors.io.update.bits.meta := Cat(0.U((MaxMetaLength - metaSizeSeq.foldLeft(0)(_ + _)).W), 
+                                        new_uftb_meta.asUInt, 
+                                        new_tage_meta.asUInt, 
+                                        new_ftb_meta.asUInt, 
+                                        new_ittage_meta.asUInt, 
+                                        new_ras_meta.asUInt)
+
+  // Update full_target
+  val gatedCond1 = UpdateITTageMeta.provider.valid
+  val gatedCond2 = io.ftq_to_bpu.update.bits.mispred_mask(numBr)
+  predictors.io.update.bits.full_target := RegEnable(io.ftq_to_bpu.update.bits.full_target, io.ftq_to_bpu.update.valid && ( gatedCond1 || gatedCond2 ))
+  XSPerfAccumulate("predictors_io_update_bits_full_target_old"        , io.ftq_to_bpu.update.valid && ( gatedCond1 || (io.ftq_to_bpu.update.bits.mispred_mask(numBr) && !(UpdateITTageMeta.provider.valid && UpdateITTageMeta.providerCtr === 0.U)) )) // 714
+  XSPerfAccumulate("predictors_io_update_bits_full_target_new1"       , io.ftq_to_bpu.update.valid && ( gatedCond1 || !(UpdateITTageMeta.provider.valid && UpdateITTageMeta.providerCtr === 0.U) )) // 52687
+  XSPerfAccumulate("predictors_io_update_bits_full_target_new2"       , io.ftq_to_bpu.update.valid && ( gatedCond1 || io.ftq_to_bpu.update.bits.mispred_mask(numBr) )) // 714
+
+
+  // Update cfi_idx
+  predictors.io.update.bits.cfi_idx.bits := RegEnable(io.ftq_to_bpu.update.bits.cfi_idx.bits, io.ftq_to_bpu.update.valid && io.ftq_to_bpu.update.bits.cfi_idx.valid)
+  
+  // Update ghist
   predictors.io.update.bits.ghist := RegEnable(
     getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr), io.ftq_to_bpu.update.valid)
 
