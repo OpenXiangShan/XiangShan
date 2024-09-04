@@ -198,6 +198,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           l0nWays = 8,
           spSize = 4,
         ),
+        softTLB = true,
         L2CacheParamsOpt = Some(L2Param(
           name = "L2",
           ways = 8,

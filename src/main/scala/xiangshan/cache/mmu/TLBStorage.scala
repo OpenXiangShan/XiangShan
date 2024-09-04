@@ -314,6 +314,13 @@ class TLBFakeFA(
         1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
         2.U -> ppn)
       )
+
+      resp.bits.g_perm(d) := 0.U.asTypeOf(resp.bits.g_perm(d) )
+      resp.bits.s2xlate(d) := 0.U
+
+    }
+    when (req.valid) {
+      XSError(req.bits.s2xlate =/= 0.U, s"Softtlb port${i}. Doesn't support s2xlate")
     }
   }
 
