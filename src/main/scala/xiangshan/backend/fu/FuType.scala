@@ -254,10 +254,8 @@ object FuType extends OHEnumeration {
     def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = apply(fuType, fu0 +: fus)
 
     // Overload, passing fuType implicitly
-    def apply(fus: Seq[OHType])(implicit fuType: UInt)  : Bool    = apply(fuType, fus)
-    def apply(fus: Seq[OHType])(implicit fuType: OHType): Boolean = apply(fuType, fus)
-    def apply(fu0: OHType, fus: OHType*)(implicit fuType: UInt)  : Bool    = apply(fuType, fu0 +: fus)
-    def apply(fu0: OHType, fus: OHType*)(implicit fuType: OHType): Boolean = apply(fuType, fu0 +: fus)
+    def apply(fus: Seq[OHType])(implicit fuType: UInt): Bool = apply(fuType, fus)
+    def apply(fu0: OHType, fus: OHType*)(implicit fuType: UInt): Bool = apply(fuType, fu0 +: fus)
   }
 
   val functionNameMap = Map(
