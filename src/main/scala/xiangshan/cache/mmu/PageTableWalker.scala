@@ -174,10 +174,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     ))),
     0.U(offLen.W))
   ))
-  val gvpn_gpf = Mux(enableS2xlate && io.csr.vsatp.mode === Sv39, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(enableS2xlate && io.csr.vsatp.mode === Sv48, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
+  val gvpn_gpf = Mux(enableS2xlate && io.csr.hgatp.mode === Sv39x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(enableS2xlate && io.csr.hgatp.mode === Sv48x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val fake_h_resp = 0.U.asTypeOf(new HptwResp)
+  fake_h_resp.entry.tag := get_pn(gpaddr)
+  fake_h_resp.entry.vmid.map(_ := io.csr.hgatp.vmid)
   fake_h_resp.gpf := true.B
 
   val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
@@ -281,8 +283,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     pte_valid := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
-      last_s2xlate := true.B
-      s_hptw_req := false.B
+      when(io.req.bits.req_info.s2xlate === onlyStage2 && gvpn_gpf){
+        mem_addr_update := true.B
+        last_s2xlate := false.B
+      }.otherwise{
+        last_s2xlate := true.B
+        s_hptw_req := false.B
+      }
     }.otherwise {
       last_s2xlate := false.B
       s_pmp_check := false.B

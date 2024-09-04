@@ -581,11 +581,12 @@ class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
-  val s1_kill  = Output(Bool())
-  val s2_kill  = Output(Bool())
-  val s0_pc = Output(UInt(VAddrBits.W))
-  val s1_pc = Output(UInt(VAddrBits.W))
-  val s2_pc = Output(UInt(VAddrBits.W))
+  val s1_kill_data_read = Output(Bool()) // only kill bandedDataRead at s1
+  val s1_kill           = Output(Bool()) // kill loadpipe req at s1
+  val s2_kill           = Output(Bool())
+  val s0_pc             = Output(UInt(VAddrBits.W))
+  val s1_pc             = Output(UInt(VAddrBits.W))
+  val s2_pc             = Output(UInt(VAddrBits.W))
   // cycle 0: load has updated replacement before
   val replacementUpdated = Output(Bool())
   val is128Req = Bool()
@@ -785,6 +786,92 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l2_hint = Input(Valid(new L2ToL1Hint()))
 }
 
+private object ArbiterCtrl {
+  def apply(request: Seq[Bool]): Seq[Bool] = request.length match {
+    case 0 => Seq()
+    case 1 => Seq(true.B)
+    case _ => true.B +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
+  }
+}
+
+class TreeArbiter[T <: MissReqWoStoreData](val gen: T, val n: Int) extends Module{
+  val io = IO(new ArbiterIO(gen, n))
+
+  def selectTree(in: Vec[Valid[T]], sIdx: UInt): Tuple2[UInt, T] = {
+    if (in.length == 1) {
+      (sIdx, in(0).bits)
+    } else if (in.length == 2) {
+      (
+        Mux(in(0).valid, sIdx, sIdx + 1.U),
+        Mux(in(0).valid, in(0).bits, in(1).bits)
+      )
+    } else {
+      val half = in.length / 2
+      val leftValid = in.slice(0, half).map(_.valid).reduce(_ || _)
+      val (leftIdx, leftSel) = selectTree(VecInit(in.slice(0, half)), sIdx)
+      val (rightIdx, rightSel) = selectTree(VecInit(in.slice(half, in.length)), sIdx + half.U)
+      (
+        Mux(leftValid, leftIdx, rightIdx),
+        Mux(leftValid, leftSel, rightSel)
+      )
+    }
+  }
+  val ins = Wire(Vec(n, Valid(gen)))
+  for (i <- 0 until n) {
+    ins(i).valid := io.in(i).valid
+    ins(i).bits  := io.in(i).bits
+  }
+  val (idx, sel) = selectTree(ins, 0.U)
+  // NOTE: io.chosen is very slow, dont use it
+  io.chosen := idx
+  io.out.bits := sel
+
+  val grant = ArbiterCtrl(io.in.map(_.valid))
+  for ((in, g) <- io.in.zip(grant))
+    in.ready := g && io.out.ready
+  io.out.valid := !grant.last || io.in.last.valid
+}
+
+class DCacheMEQueryIOBundle(implicit p: Parameters) extends DCacheBundle
+{
+  val req              = ValidIO(new MissReqWoStoreData)
+  val primary_ready    = Input(Bool())
+  val secondary_ready  = Input(Bool())
+  val secondary_reject = Input(Bool())
+}
+
+class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
+{
+  val req    = ValidIO(new MissReq)
+  val ready  = Input(Bool())
+}
+
+class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val in = Vec(n, Flipped(DecoupledIO(new MissReq)))
+    val queryMQ = Vec(n, new DCacheMQQueryIOBundle)
+  })
+
+  val mqReadyVec = io.queryMQ.map(_.ready)
+
+  io.queryMQ.zipWithIndex.foreach{
+    case (q, idx) => {
+      q.req.valid := io.in(idx).valid
+      q.req.bits  := io.in(idx).bits
+    }
+  }
+  io.in.zipWithIndex.map {
+    case (r, idx) => {
+      if (idx == 0) {
+        r.ready := mqReadyVec(idx)
+      } else {
+        r.ready := mqReadyVec(idx) && !Cat(io.in.slice(0, idx).map(_.valid)).orR
+      }
+    }
+  }
+
+}
+
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
@@ -871,12 +958,22 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.dump()
 
   //----------------------------------------
+  // miss queue
+  // missReqArb port:
+  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
+  // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
+  // higher priority is given to lower indices
+  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
+  val MainPipeMissReqPort = 0
+  val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
+
+  //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
   // val refillPipe   = Module(new RefillPipe)
-  val missQueue    = Module(new MissQueue(edge))
+  val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
 
@@ -1266,27 +1363,26 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
-  //----------------------------------------
-  // miss queue
-  // missReqArb port:
-  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
-  // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
-  // higher priority is given to lower indices
-  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
-  val MainPipeMissReqPort = 0
-  val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
-
   // Request
-  val missReqArb = Module(new ArbiterFilterByCacheLineAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
+  val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))
+  // seperately generating miss queue enq ready for better timeing
+  val missReadyGen = Module(new MissReadyGen(MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
-  for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  missReadyGen.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
+  for (w <- 0 until backendParams.LduCnt) {
+    missReqArb.io.in(w + 1) <> ldu(w).io.miss_req
+    missReadyGen.io.in(w + 1) <> ldu(w).io.miss_req
+  }
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp
 
   if(StorePrefetchL1Enabled) {
-    for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req }
+    for (w <- 0 until backendParams.StaCnt) {
+      missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req
+      missReadyGen.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req
+    }
   }else {
     for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
   }
@@ -1302,24 +1398,31 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     if (StorePrefetchL1Enabled) {
       when (ldu(HybridLoadReqPort).io.miss_req.valid) {
         missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+        missReadyGen.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
       } .otherwise {
         missReqArb.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
+        missReadyGen.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
       }
     } else {
       missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+      missReadyGen.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
     }
   }
 
-
-  wb.io.miss_req.valid := missReqArb.io.out.valid
-  wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
-
-  // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
-  missReqArb.io.out <> missQueue.io.req
-  when(wb.io.block_miss_req) {
-    missQueue.io.req.bits.cancel := true.B
-    missReqArb.io.out.ready := false.B
+  for(w <- 0 until LoadPipelineWidth) {
+    wb.io.miss_req_conflict_check(w) := ldu(w).io.wbq_conflict_check
+    ldu(w).io.wbq_block_miss_req     := wb.io.block_miss_req(w)
   }
+
+  wb.io.miss_req_conflict_check(3) := mainPipe.io.wbq_conflict_check
+  mainPipe.io.wbq_block_miss_req   := wb.io.block_miss_req(3)
+  
+  wb.io.miss_req_conflict_check(4).valid := missReqArb.io.out.valid
+  wb.io.miss_req_conflict_check(4).bits  := missReqArb.io.out.bits.addr
+  missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
+
+  missReqArb.io.out <> missQueue.io.req
+  missReadyGen.io.queryMQ <> missQueue.io.queryMQ
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
@@ -1357,10 +1460,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  // block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
-  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, refill_req)
-  // block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
-  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refill_req)
+  probeQueue.io.pipe_req <> mainPipe.io.probe_req
+  io.lsu.store.req <> mainPipe.io.store_req
 
   io.lsu.store.replay_resp.valid := RegNext(mainPipe.io.store_replay_resp.valid)
   io.lsu.store.replay_resp.bits := RegEnable(mainPipe.io.store_replay_resp.bits, mainPipe.io.store_replay_resp.valid)

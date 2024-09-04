@@ -538,7 +538,7 @@ def get_free_cores(n):
                 continue
             window_usage = core_usage[i * n : i * n + n]
             if sum(window_usage) < 30 * n and True not in map(lambda x: x > 90, window_usage):
-                return (((i * n) % 128)// 64, i * n, i * n + n - 1)
+                return (((i * n) % num_logical_core) // (num_logical_core // 2), i * n, i * n + n - 1)
         print(f"No free {n} cores found. CPU usage: {core_usage}\n")
 
 if __name__ == "__main__":
