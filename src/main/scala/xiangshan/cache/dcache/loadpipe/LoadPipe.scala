@@ -404,7 +404,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
   io.miss_req.bits.req_coh := s2_hit_coh
-  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_hit
+  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_wpu_pred_fail_and_real_hit
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
 
