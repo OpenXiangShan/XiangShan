@@ -391,15 +391,11 @@ def create_filelist(filelist_name, out_dir, file_dirs=None, extra_lines=[]):
             if filename.endswith(".v") or filename.endswith(".sv"):
                 # check whether it exists in previous directories
                 # this infers an implicit priority between the file_dirs
-                has_found = False
-                for entry in filelist_entries:
-                    if entry.endswith(filename):
-                        has_found = True
-                        break
-                if has_found:
-                    continue
                 filelist_entry = os.path.join(file_dir, filename)
-                filelist_entries.append(filelist_entry)
+                if filelist_entry in filelist_entries:
+                    print(f'[warning]: {filelist_entry} is already in filelist_entries')
+                else:
+                    filelist_entries.append(filelist_entry)
     with open(os.path.join(out_dir, f"{filelist_name}.f"), "w") as f:
         for entry in filelist_entries + extra_lines:
             f.write(f"{entry}\n")
