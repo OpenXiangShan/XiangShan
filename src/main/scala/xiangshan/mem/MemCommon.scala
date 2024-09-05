@@ -216,10 +216,11 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
 
   def asPrefetchReqBundle(): PrefetchReqBundle = {
     val res = Wire(new PrefetchReqBundle)
-    res.vaddr := this.vaddr
-    res.paddr := this.paddr
-    res.pc    := this.uop.pc
-    res.miss  := this.miss
+    res.vaddr       := this.vaddr
+    res.paddr       := this.paddr
+    res.pc          := this.uop.pc
+    res.miss        := this.miss
+    res.pfHitStream := isFromStream(this.meta_prefetch)
 
     res
   }

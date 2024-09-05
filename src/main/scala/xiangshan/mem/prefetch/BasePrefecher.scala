@@ -41,10 +41,11 @@ class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
 }
 
 class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
-  val vaddr = UInt(VAddrBits.W)
-  val paddr = UInt(PAddrBits.W)
-  val pc    = UInt(VAddrBits.W)
-  val miss  = Bool()
+  val vaddr       = UInt(VAddrBits.W)
+  val paddr       = UInt(PAddrBits.W)
+  val pc          = UInt(VAddrBits.W)
+  val miss        = Bool()
+  val pfHitStream = Bool()
 }
 
 trait PrefetcherParams
