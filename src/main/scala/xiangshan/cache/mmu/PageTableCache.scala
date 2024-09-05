@@ -547,12 +547,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     //cause llptw will not trigger bitmapcheck
     if(HasCVMExtension){
       //add a coniditonal logic
-      val hit = Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw) , ParallelOR(hitVec) &&  l0bitmapreg(hitWay)(pte_index) === 1.U , ParallelOR(hitVec))
+      hit := Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw) , ParallelOR(hitVec) &&  l0bitmapreg(hitWay)(pte_index) === 1.U , ParallelOR(hitVec))
       when(bitmapEnable && (s2x_info === noS2xlate || ishptw) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U){
       jmp_bitmap_check := true.B
     }
     }else{
-      val hit = ParallelOR(hitVec)
+      hit := ParallelOR(hitVec)
     }
     val eccError = WireInit(false.B)
     if (l2tlbParams.enablePTWECC) {
@@ -599,12 +599,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val jmp_bitmap_check  = WireInit(false.B)
     val hit = WireInit(false.B)
     if(HasCVMExtension){
-      val hit = Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw), ParallelOR(hitVec) &&  spBitmapReg(OHToUInt(hitVec)) === 1.U , ParallelOR(hitVec))
+      hit := Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw), ParallelOR(hitVec) &&  spBitmapReg(OHToUInt(hitVec)) === 1.U , ParallelOR(hitVec))
       when(bitmapEnable && (s2x_info === noS2xlate || ishptw) && ParallelOR(hitVec) && spBitmapReg(OHToUInt(hitVec)) === 0.U){
         jmp_bitmap_check := true.B
       }
     }else{
-      val hit = ParallelOR(hitVec)
+      hit := ParallelOR(hitVec)
     }
 
     when (hit && stageDelay_valid_1cycle) { spreplace.access(OHToUInt(hitVec)) }
