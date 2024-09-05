@@ -261,11 +261,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
     val onlyS1 = s2xlate === onlyStage1 || s2xlate === noS2xlate
-    resp(idx).bits.pbmt(d) := Mux(
-      portTranslateEnable(idx),
-      Mux(onlyS1, pbmt, g_pbmt),
-      0.U
-    )
+    val res = MuxLookup(s2xlate, 0.U)(Seq(
+      onlyStage1 -> pbmt,
+      onlyStage2 -> g_pbmt,
+      allStage -> Mux(pbmt =/= 0.U, pbmt, g_pbmt),
+      noS2xlate -> pbmt
+    ))
+    resp(idx).bits.pbmt(d) := Mux(portTranslateEnable(idx), res, 0.U)
   }
 
   // for timing optimization, pmp check is divided into dynamic and static
