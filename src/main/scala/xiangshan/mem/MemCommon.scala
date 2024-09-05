@@ -28,6 +28,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuInput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
+import xiangshan.backend.fu.FuType
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
 import math._
@@ -76,6 +77,51 @@ object shiftMaskToLow {
   }
 }
 
+object convertTofuType {
+  def apply(fuTypeInMem: UInt): UInt = {
+    val fuType = WireInit(0.U.asTypeOf(FuType()))
+    switch (fuTypeInMem) {
+      is ("b001".U)     {fuType := FuType.ldu.U}
+      is ("b010".U)     {fuType := FuType.stu.U}
+      is ("b011".U)     {fuType := FuType.mou.U}
+      is ("b100".U)     {fuType := FuType.vldu.U}
+      is ("b101".U)     {fuType := FuType.vstu.U}
+      is ("b110".U)     {fuType := FuType.vsegldu.U}
+      is ("b111".U)     {fuType := FuType.vsegstu.U}
+    }
+    fuType
+  }
+}
+object convertTofuTypeInMem {
+  def apply(fuType: UInt): UInt = {
+    val fuTypeInMem = WireInit(0.U(3.W))
+    switch (fuType) {
+     is (FuType.ldu.U)     {fuTypeInMem := "b001".U(3.W)}
+     is (FuType.stu.U)     {fuTypeInMem := "b010".U(3.W)}
+     is (FuType.mou.U)     {fuTypeInMem := "b011".U(3.W)}
+     is (FuType.vldu.U)    {fuTypeInMem := "b100".U(3.W)}
+     is (FuType.vstu.U)    {fuTypeInMem := "b101".U(3.W)}
+     is (FuType.vsegldu.U) {fuTypeInMem := "b110".U(3.W)}
+     is (FuType.vsegstu.U) {fuTypeInMem := "b111".U(3.W)}
+    }
+    fuTypeInMem
+  }
+}
+
+object FuTypeInMem {
+  def isStoreMem(fuTypeInMem: UInt): Bool = {
+    !fuTypeInMem(2) && fuTypeInMem(1) && !fuTypeInMem(0)
+  }
+  def isVLoadMem(fuTypeInMem: UInt): Bool = {
+    !fuTypeInMem(0) && fuTypeInMem(2)
+  }
+  def isVStoreMem(fuTypeInMem: UInt): Bool = {
+    fuTypeInMem(0) && fuTypeInMem(2)
+  }
+  def isVlsMem(fuTypeInMem: UInt): Bool = {
+    fuTypeInMem(2)
+  }
+}
 class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters
   with HasVLSUParameters {
@@ -106,6 +152,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // misalignBuffer
   val isFrmMisAlignBuf = Bool()
 
+  val fuTypeInMem     = UInt(3.W)
   // vector
   val isvec = Bool()
   val isLastElem = Bool()

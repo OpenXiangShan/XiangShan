@@ -222,6 +222,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val vaddr         = UInt(VAddrBits.W)
     val mask          = UInt((VLEN/8).W)
     val uop           = new DynInst
+    val fuTypeInMem   = UInt(3.W) //log2Up(fuTypeInMemNum).W
     val try_l2l       = Bool()
     val has_rob_entry = Bool()
     val rep_carry     = new ReplayCarry(nWays)
@@ -386,6 +387,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.vaddr         := src.vaddr
     out.mask          := src.mask
     out.uop           := src.uop
+    out.fuTypeInMem   := src.fuTypeInMem
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
     out.rep_carry     := src.replayCarry
@@ -409,6 +411,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := src.mask
     out.uop           := src.uop
+    out.fuTypeInMem   := src.fuTypeInMem
     out.try_l2l       := false.B
     out.has_rob_entry := src.hasROBEntry
     out.rep_carry     := src.rep_info.rep_carry
@@ -442,6 +445,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := 0.U
     out.uop           := src.uop
+    out.fuTypeInMem   := convertTofuTypeInMem(src.uop.fuType)
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
@@ -464,6 +468,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := Mux(src.isvec, src.mask, genVWmask(src.vaddr, src.uop.fuOpType(1, 0)))
     out.uop           := src.uop
+    out.fuTypeInMem   := src.fuTypeInMem
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
     out.rep_carry     := src.replayCarry
@@ -497,6 +502,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := 0.U
     out.uop           := DontCare
+    out.fuTypeInMem   := 0.U
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
@@ -518,6 +524,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := src.mask
     out.uop           := src.uop
+    out.fuTypeInMem   := convertTofuTypeInMem(src.uop.fuType)
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
     // TODO: VLSU, implement replay carry
@@ -560,6 +567,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val addr           = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
     out.mask          := genVWmask(addr, src.uop.fuOpType(1,0))
     out.uop           := src.uop
+    out.fuTypeInMem   := convertTofuTypeInMem(src.uop.fuType)
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
@@ -593,6 +601,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.frm_mabuf          := false.B
     out.rep_carry          := 0.U.asTypeOf(out.rep_carry)
     out.isFirstIssue       := true.B
+    out.fuTypeInMem        := 1.U(3.W)
     out.fast_rep           := false.B
     out.ld_rep             := false.B
     out.l2l_fwd            := true.B
@@ -685,6 +694,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.vaddr         := s0_dcache_vaddr
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
+  s0_out.fuTypeInMem   := s0_sel_src.fuTypeInMem
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
   s0_out.hasROBEntry   := s0_sel_src.has_rob_entry
   s0_out.isPrefetch    := s0_sel_src.prf
@@ -936,6 +946,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                s1_fast_mismatch
 
       s1_in.uop           := io.ldin.bits.uop
+      s1_in.fuTypeInMem   := convertTofuTypeInMem(io.ldin.bits.uop.fuType)
       s1_in.isFirstIssue  := io.ldin.bits.isFirstIssue
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -1243,6 +1254,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_prefetch_train_valid = WireInit(false.B)
   s2_prefetch_train_valid              := s2_valid && !s2_actually_mmio && (!s2_in.tlbMiss || s2_hw_prf)
   io.prefetch_train.valid              := GatedValidRegNext(s2_prefetch_train_valid)
+  io.prefetch_train.bits.fuTypeInMem   := 0.U
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   io.prefetch_train.bits.miss          := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_valid)
@@ -1253,6 +1265,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_prefetch_train_l1_valid = WireInit(false.B)
   s2_prefetch_train_l1_valid              := s2_valid && !s2_actually_mmio
   io.prefetch_train_l1.valid              := GatedValidRegNext(s2_prefetch_train_l1_valid)
+  io.prefetch_train_l1.bits.fuTypeInMem   := 0.U
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_l1_valid)
   io.prefetch_train_l1.bits.miss          := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_l1_valid)
   io.prefetch_train_l1.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_l1_valid)
@@ -1316,7 +1329,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
-
+  s3_mmio.bits.uop.fuType := convertTofuType(RegNextN(s0_sel_src.fuTypeInMem, 3))
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
@@ -1364,6 +1377,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid && s3_safe_writeback
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.fpWen       := s3_in.uop.fpWen && !s3_exception
+  s3_out.bits.uop.fuType      := convertTofuType(s3_in.fuTypeInMem)
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
@@ -1557,7 +1571,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
-    io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
+    io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && FuTypeInMem.isVlsMem(s0_out.fuTypeInMem)
     //io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
   io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf

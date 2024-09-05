@@ -223,6 +223,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) // The control signals need to explicitly indicate the initial value
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
+  val fuTypeInMem = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(3.W))))
   val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W),
@@ -524,6 +525,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val s1_replayIdx = s1_oldestSel(i).bits
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
     val s2_vecReplay = RegEnable(vecReplay(s1_replayIdx), s1_can_go(i))
+    val s2_fuTypeInMem = RegEnable(fuTypeInMem(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))
     val s2_missDbUpdated = RegEnable(missDbUpdated(s1_replayIdx), s1_can_go(i))
@@ -536,6 +538,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).valid             := s2_oldestSel(i).valid
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
+    replay_req(i).bits.fuTypeInMem  := s2_fuTypeInMem
     replay_req(i).bits.isvec        := s2_vecReplay.isvec
     replay_req(i).bits.isLastElem   := s2_vecReplay.isLastElem
     replay_req(i).bits.is128bit     := s2_vecReplay.is128bit
@@ -700,6 +703,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       replayCarryReg(enqIndex) := replayInfo.rep_carry
       replacementUpdated(enqIndex) := enq.bits.replacementUpdated
       missDbUpdated(enqIndex) := enq.bits.missDbUpdated
+      fuTypeInMem(enqIndex) := enq.bits.fuTypeInMem
       // update mshr_id only when the load has already been handled by mshr
       when(enq.bits.handledByMSHR) {
         missMSHRId(enqIndex) := replayInfo.mshr_id

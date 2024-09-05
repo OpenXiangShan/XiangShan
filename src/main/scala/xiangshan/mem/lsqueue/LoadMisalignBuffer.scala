@@ -275,6 +275,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       new128Load.vaddr := aligned16BytesAddr
       // new128Load.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
       new128Load.mask  := 0xffff.U
+      new128Load.fuTypeInMem := req.fuTypeInMem
       new128Load.uop   := req.uop
       new128Load.uop.exceptionVec(loadAddrMisaligned) := false.B
       new128Load.is128bit := true.B
@@ -283,9 +284,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       // split this unaligned load into `maxSplitNum` aligned loads
       unSentLoads := Fill(maxSplitNum, 1.U(1.W))
       curPtr := 0.U
+      lowAddrLoad.fuTypeInMem := req.fuTypeInMem
       lowAddrLoad.uop := req.uop
       lowAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
       highAddrLoad.uop := req.uop
+      highAddrLoad.fuTypeInMem := req.fuTypeInMem
       highAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
 
       switch (req.uop.fuOpType(1, 0)) {
@@ -541,6 +544,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
+  io.writeBack.bits.uop.fuType := convertTofuType(req.fuTypeInMem)
   io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(exceptionVecSelect, LduCfg) // TODO: is this ok?
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B

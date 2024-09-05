@@ -171,6 +171,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.ldout.valid              := (uncacheState === s_wait)
   io.ldout.bits               := DontCare
   io.ldout.bits.uop           := selUop
+  io.ldout.bits.uop.fuType    := convertTofuType(req.fuTypeInMem)
   io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
   io.ldout.bits.uop.exceptionVec(loadAccessFault) := nderr
   io.ldout.bits.data          := rdataPartialLoad

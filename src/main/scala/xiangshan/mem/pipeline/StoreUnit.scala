@@ -99,6 +99,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       s0_vecstin.uop
     )
   )
+  val s0_fuTypeInMem   = Mux(
+    s0_use_flow_ma,
+    io.misalign_stin.bits.fuTypeInMem,
+    Mux(
+      s0_use_flow_rs,
+      convertTofuTypeInMem(s0_stin.uop.fuType),
+      convertTofuTypeInMem(s0_vecstin.uop.fuType)
+    )
+  )
   val s0_isFirstIssue = Mux(
     s0_use_flow_ma,
     false.B,
@@ -188,6 +197,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
   s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
+  s0_out.fuTypeInMem  := s0_fuTypeInMem
   s0_out.miss         := false.B
   s0_out.mask         := s0_mask
   s0_out.isFirstIssue := s0_isFirstIssue
@@ -417,11 +427,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     io.s1_prefetch_spec := s1_fire
     io.s2_prefetch_spec := s2_prefetch_train_valid
     io.prefetch_train.valid := RegNext(s2_prefetch_train_valid)
+    io.prefetch_train.bits.fuTypeInMem   := 0.U
     io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   }else {
     io.s1_prefetch_spec := false.B
     io.s2_prefetch_spec := false.B
     io.prefetch_train.valid := false.B
+    io.prefetch_train.bits.fuTypeInMem   := 0.U
     io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
   }
   // override miss bit
@@ -477,6 +489,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     if (i == 0) {
       sx_valid(i)          := s3_valid
       sx_in(i).output      := s3_out
+      sx_in(i).fuTypeInMem := s3_in.fuTypeInMem
       sx_in(i).vecFeedback := s3_vecFeedback
       sx_in(i).mmio        := s3_in.mmio
       sx_in(i).usSecondInv := s3_in.usSecondInv
@@ -503,11 +516,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val sx_last_in    = sx_in.takeRight(1).head
   sx_last_ready := !sx_last_valid || sx_last_in.output.uop.robIdx.needFlush(io.redirect) || io.stout.ready
 
-  io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
+  io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && FuTypeInMem.isStoreMem(sx_last_in.fuTypeInMem)
   io.stout.bits := sx_last_in.output
   io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
 
-  io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
+  io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && FuTypeInMem.isVStoreMem(sx_last_in.fuTypeInMem)
   // TODO: implement it!
   io.vecstout.bits.mBIndex := sx_last_in.mbIndex
   io.vecstout.bits.hit := sx_last_in.vecFeedback

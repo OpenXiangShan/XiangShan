@@ -266,6 +266,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       // new128Store.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
       new128Store.mask  := 0xffff.U
       new128Store.uop   := req.uop
+      new128Store.fuTypeInMem := req.fuTypeInMem
       new128Store.uop.exceptionVec(storeAddrMisaligned) := false.B
       new128Store.is128bit := true.B
       splitStoreReqs(0) := new128Store
@@ -275,8 +276,10 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       unSentStores := Fill(maxSplitNum, 1.U(1.W))
       curPtr := 0.U
       lowAddrStore.uop := req.uop
+      lowAddrStore.fuTypeInMem := req.fuTypeInMem
       lowAddrStore.uop.exceptionVec(storeAddrMisaligned) := false.B
       highAddrStore.uop := req.uop
+      highAddrStore.fuTypeInMem := req.fuTypeInMem
       highAddrStore.uop.exceptionVec(storeAddrMisaligned) := false.B
 
       switch (req.uop.fuOpType(1, 0)) {
@@ -565,6 +568,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
   io.writeBack.bits.uop := req.uop
+  io.writeBack.bits.uop.fuType := convertTofuType(req.fuTypeInMem)
   io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(exceptionVecSelect, StaCfg) // TODO: is this ok?
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
