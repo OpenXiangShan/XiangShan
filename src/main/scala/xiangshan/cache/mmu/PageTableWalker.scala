@@ -144,11 +144,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val s_bitmap_check = RegInit(true.B)
   val w_bitmap_resp = RegInit(true.B)
   val checkfalied = RegInit(false.B)
-  val whether_need_bitmap_check = RegInit(false.B)
 
   val idle = RegInit(true.B)
   val finish = WireInit(false.B)
-  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish && (if(HasCVMExtension) !jmp_bitmap_check else true.B)
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
 
   val pageFault = pte.isPf(level, s1Pbmte)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
@@ -270,13 +269,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
 
-  when(io.req.fire && (if(HasCVMExtension) true.B else false.B) && io.req.bits.jmp_bitmap_check){
+  when(io.req.fire && (if(HasCVMExtension) io.req.bits.jmp_bitmap_check else false.B)){
     idle := false.B
     vpn := io.req.bits.req_info.vpn
     s_bitmap_check := false.B
   }
 
-  when (io.req.fire && io.req.bits.stage1Hit){
+  when (io.req.fire && io.req.bits.stage1Hit && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
     idle := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     s_last_hptw_req := false.B
@@ -291,7 +290,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     idle := true.B
   }
 
-  when (io.req.fire && !io.req.bits.stage1Hit){
+  when (io.req.fire && !io.req.bits.stage1Hit && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
     val req = io.req.bits
     val gvpn_wire = Wire(UInt(ptePPNLen.W))
     if (EnableSv48) {
@@ -411,7 +410,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
-      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -430,7 +428,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
-      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -444,12 +441,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_mem_resp := true.B
     af_level := af_level - 1.U
     s_llptw_req := false.B
-    when(bitmap_enable){
-      whether_need_bitmap_check := true.B
-    }.otherwise{
-      mem_addr_update := true.B
-      whether_need_bitmap_check := false.B
-    }
     gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
     full_gvpn := pte.getPPN()
@@ -460,13 +451,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     when(whether_need_bitmap_check){
       when((!enableS2xlate || onlyS1xlate) && pte.isLeaf()){
         s_bitmap_check := false.B
-        whether_need_bitmap_check := false.B
       }.otherwise{
         mem_addr_update := true.B
-        whether_need_bitmap_check := false.B
       }
+    }else{
+      mem_addr_update := true.B
     }
   }
+
+
   //bitmapcheck
   when(io.bitmap.req.fire){
     s_bitmap_check := true.B
@@ -528,7 +521,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
-      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -749,7 +741,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     to_hptw_req -> state_hptw_req
   ))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
-  when (io.in.fire) {
+  when (io.in.fire  && (if(HasCVMExtension) !io.in.bits.jmp_bitmap_check else true.B)) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
     // so 2 + FilterSize is enough to avoid dead-lock
@@ -773,7 +765,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_resp_hit(enq_ptr) := to_bitmap_req || to_mem_out || to_last_hptw_req
   }
   
-  when((if(HasCVMExtension) true.B else false.B) && io.in.fire && io.in.bits.jmp_bitmap_check){
+  when((if(HasCVMExtension) io.in.bits.jmp_bitmap_check else false.B) && io.in.fire){
     state(enq_ptr) := state_bitmap_check
     entries(enq_ptr).req_info := io.in.bits.req_info
     entries(enq_ptr).ppn := io.in.bits.ptes(io.in.bits.req_info.vpn(sectortlbwidth - 1, 0)).asTypeOf(new PteBundle().cloneType).ppn
@@ -1134,10 +1126,9 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val finish = WireInit(false.B)
   val s_bitmap_check = RegInit(true.B)
   val w_bitmap_resp = RegInit(true.B)
-  val whether_need_bitmap_check = RegInit(false.B)
   val checkfalied = RegInit(false.B)
 
-  val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish && (if(HasCVMExtension) !jmp_bitmap_check else true.B)
+  val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish
   val pageFault = pte.isGpf(level, mpbmte) || (!pte.isLeaf() && level === 0.U)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
 
@@ -1170,7 +1161,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd := TlbCmd.read
 
-  val way_info = Mux(bypassed,DataHoldBypass(io.l0_way_info,io.req.valid),RegEnable(io.l0_way_info, RegNext(io.mem.resp.fire, init=false.B)))
+  val way_info = Mux(bypassed,DataHoldBypass(io.l0_way_info,io.req.valid),DataHoldBypass(io.l0_way_info, RegNext(io.mem.resp.fire, init=false.B)))
   val cache_hitway = RegEnable(io.req.bits.hitway,io.req.fire)
   val cache_level = RegEnable(io.req.bits.SPlevel,io.req.fire)
   if(HasCVMExtension){
@@ -1200,14 +1191,14 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.refill.req_info.source := source
   io.refill.req_info.s2xlate := onlyStage2
 
-  when((if(HasCVMExtension) true.B else false.B) && io.req.fire && io.req.bits.jmp_bitmap_check){
-    idle := false.B
-    gpaddr := Cat(io.req.bits.gvpn, 0.U(offLen.W))
-    s_bitmap_check := false.B
-  }
-
   when (idle){
-    when(io.req.fire){
+    when((if(HasCVMExtension) io.req.bits.jmp_bitmap_check else false.B) && io.req.fire){
+      idle := false.B
+      gpaddr := Cat(io.req.bits.gvpn, 0.U(offLen.W))
+      s_bitmap_check := false.B
+      id := io.req.bits.id
+    }
+    when(io.req.fire && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
       bypassed := io.req.bits.bypassed
       idle := false.B
       gpaddr := Cat(io.req.bits.gvpn, 0.U(offLen.W))
@@ -1248,7 +1239,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
-      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -1261,25 +1251,18 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   when(io.mem.resp.fire && !w_mem_resp){
     w_mem_resp := true.B
     af_level := af_level - 1.U
-    when(bitmap_enable){
-      whether_need_bitmap_check := true.B
-    }.otherwise{
-      mem_addr_update := true.B
-      whether_need_bitmap_check := false.B
-    }
-  }
-  if(HasCVMExtension){
-    //judge this mem resp whether need bitmap check
-    when(whether_need_bitmap_check){
-      when(pte.isLeaf()){
+    if(HasCVMExtension){
+      //judge this mem resp whether need bitmap check
+      when(bitmap_enable && pte.isLeaf()){
         s_bitmap_check := false.B
-        whether_need_bitmap_check := false.B
       }.otherwise{
         mem_addr_update := true.B
-        whether_need_bitmap_check := false.B
       }
+    }else{
+      mem_addr_update := true.B
     }
   }
+  
   //bitmapcheck
   when(io.bitmap.req.fire){
     s_bitmap_check := true.B
@@ -1315,7 +1298,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
-      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }

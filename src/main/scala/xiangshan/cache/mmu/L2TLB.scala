@@ -231,14 +231,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
     !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptwReq && // hptw reqs are not sent to missqueue
     (cache.io.resp.bits.bypassed || (
-      ((!cache.io.resp.bits.toFsm.l1Hit || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
-      || (cache.io.resp.bits.toFsm.l1Hit && !llptw.io.in.ready) // send to llptw, llptw is full
+      (((!cache.io.resp.bits.toFsm.l1Hit && !cache.io.resp.bits.toFsm.toLLPTW)|| cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
+      || ((cache.io.resp.bits.toFsm.l1Hit || cache.io.resp.bits.toFsm.toLLPTW) && !llptw.io.in.ready) // send to llptw, llptw is full
     ))
 
   mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
   mq_arb.io.in(0).bits.isHptwReq := false.B
   mq_arb.io.in(0).bits.hptwId :=  DontCare
-  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l1Hit
+  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l1Hit || cache.io.resp.bits.toFsm.toLLPTW
   mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
   mq_arb.io.in(1).bits.isHptwReq := false.B
   mq_arb.io.in(1).bits.hptwId := DontCare
