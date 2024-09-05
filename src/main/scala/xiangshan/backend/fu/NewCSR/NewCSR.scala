@@ -11,7 +11,7 @@ import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
@@ -78,6 +78,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with Unprivileged
   with CSRAIA
   with HasExternalInterruptBundle
+  with HasNonMaskableIRPBundle
   with CSREvents
   with DebugLevel
   with CSRCustom
@@ -99,6 +100,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val addr = UInt(12.W)
       val src = UInt(64.W)
       val wdata = UInt(64.W)
+      val mnret = Input(Bool())
       val mret = Input(Bool())
       val sret = Input(Bool())
       val dret = Input(Bool())
@@ -233,9 +235,10 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val wenLegal = permitMod.io.out.hasLegalWen
 
-  val legalSret = permitMod.io.out.hasLegalSret
-  val legalMret = permitMod.io.out.hasLegalMret
-  val legalDret = permitMod.io.out.hasLegalDret
+  val legalSret  = permitMod.io.out.hasLegalSret
+  val legalMret  = permitMod.io.out.hasLegalMret
+  val legalMNret = permitMod.io.out.hasLegalMNret
+  val legalDret  = permitMod.io.out.hasLegalDret
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
@@ -295,13 +298,27 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.hviprio2 := hviprio2.rdata.asUInt
   intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
+  intrMod.io.in.mnstatusNMIE := mnstatus.regOut.NMIE.asBool
 
+  val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
+  when(nonMaskableIRP.NMI) {
+    nmip.NMI := true.B
+  }
+  
+  intrMod.io.in.nmi := nmip.asUInt.orR
+  intrMod.io.in.nmiVec := nmip.asUInt
+
+  when(intrMod.io.out.nmi && intrMod.io.out.interruptVec.valid) {
+    nmip.NMI := false.B
+  }
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
+  val nmi = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)
 
   val trapHandleMod = Module(new TrapHandleModule)
 
   trapHandleMod.io.in.trapInfo.valid := hasTrap
   trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
+  trapHandleMod.io.in.trapInfo.bits.nmi := nmi
   trapHandleMod.io.in.trapInfo.bits.intrVec := intrVec
   trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   trapHandleMod.io.in.privState := privState
@@ -351,9 +368,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
 
-  permitMod.io.in.mret := io.in.bits.mret && valid
-  permitMod.io.in.sret := io.in.bits.sret && valid
-  permitMod.io.in.dret := io.in.bits.dret && valid
+  permitMod.io.in.mnret := io.in.bits.mnret && valid
+  permitMod.io.in.mret  := io.in.bits.mret  && valid
+  permitMod.io.in.sret  := io.in.bits.sret  && valid
+  permitMod.io.in.dret  := io.in.bits.dret  && valid
   permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
@@ -474,6 +492,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
+      case m: TrapEntryMNEventSinkBundle =>
+        m.trapToMN := trapEntryMNEvent.out
+      case _ =>
+    }
+    mod match {
       case m: TrapEntryHSEventSinkBundle =>
         m.trapToHS := trapEntryHSEvent.out
       case _ =>
@@ -486,6 +509,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: MretEventSinkBundle =>
         m.retFromM := mretEvent.out
+      case _ =>
+    }
+    mod match {
+      case m: MNretEventSinkBundle =>
+        m.retFromMN := mnretEvent.out
       case _ =>
     }
     mod match {
@@ -593,12 +621,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
+  
+  trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !entryDebugMode  && !debugMode && !nmi
+  trapEntryMNEvent .valid := hasTrap && nmi && !debugMode
+  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
+  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
 
-  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode && !debugMode
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode
-
-  Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
+  Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
       case in: TrapEntryEventInput =>
         in.causeNO := trapHandleMod.io.out.causeNO
@@ -610,8 +639,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
-        in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP, PRVM)
-        in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
+        // when NMIE is zero, force to behave as MPRV is zero
+        in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool && mnstatus.regOut.NMIE.asBool, mstatus.regOut.MPP, PRVM)
+        in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && mnstatus.regOut.NMIE.asBool && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
 
         in.privState := privState
         in.mstatus := mstatus.regOut
@@ -628,6 +658,14 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.memExceptionVAddr := io.fromMem.excpVA
         in.memExceptionGPAddr := io.fromMem.excpGPA
     }
+  }
+
+  mnretEvent.valid := legalMNret
+  mnretEvent.in match {
+    case in =>
+      in.mstatus := mstatus.regOut
+      in.mnepc   := mnepc.regOut
+      in.mnstatus:= mnstatus.regOut
   }
 
   mretEvent.valid := legalMret
@@ -767,8 +805,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   })
 
-  private val needTargetUpdate = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
-    trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid || trapEntryDEvent.out.targetPc.valid
+  private val needTargetUpdate = mnretEvent.out.targetPc.valid || mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
+    trapEntryMEvent.out.targetPc.valid || trapEntryMNEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid || trapEntryDEvent.out.targetPc.valid
 
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
 
@@ -819,10 +857,12 @@ class NewCSR(implicit val p: Parameters) extends Module
     Mux(trapEntryDEvent.out.targetPc.valid,
       trapEntryDEvent.out.targetPc.bits,
       Mux1H(Seq(
-        mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
-        sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
-        dretEvent.out.targetPc.valid -> dretEvent.out.targetPc.bits,
+        mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
+        mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
+        sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
+        dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
         trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
+        trapEntryMNEvent.out.targetPc.valid -> trapEntryMNEvent.out.targetPc.bits,
         trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
         trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits)
       )
@@ -1067,13 +1107,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.spvp :=  hstatus.regOut.SPVP.asBool
 
   io.tlb.imode := PRVM.asUInt
+  // when NMIE is zero, force to behave as MPRV is zero
   io.tlb.dmode := Mux(
-    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV,
+    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV && mnstatus.regOut.NMIE,
     mstatus.regOut.MPP.asUInt,
     PRVM.asUInt
   )
   io.tlb.dvirt := Mux(
-    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV && mstatus.regOut.MPP =/= PrivMode.M,
+    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV && mnstatus.regOut.NMIE && mstatus.regOut.MPP =/= PrivMode.M,
     mstatus.regOut.MPV.asUInt,
     V.asUInt
   )
@@ -1099,6 +1140,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val trapValid = io.fromRob.trap.valid
     val trapNO = trapHandleMod.io.out.causeNO.ExceptionCode.asUInt
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
+    val hasNMI = nmi && hasTrap
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
     val isSv39: Bool =
@@ -1124,6 +1166,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := interruptNO
     diffArchEvent.exception := exceptionNO
     diffArchEvent.exceptionPC := exceptionPC
+    diffArchEvent.hasNMI := hasNMI
     if (env.EnableDifftest) {
       diffArchEvent.exceptionInst := io.fromRob.trap.bits.instr
     }

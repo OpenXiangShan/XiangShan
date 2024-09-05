@@ -15,15 +15,19 @@ trait CSREvents { self: NewCSR =>
 
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
 
+  val trapEntryMNEvent = Module(new TrapEntryMNEventModule())
+
   val trapEntryHSEvent = Module(new TrapEntryHSEventModule)
 
   val trapEntryVSEvent = Module(new TrapEntryVSEventModule)
 
-  val mretEvent = Module(new MretEventModule)
+  val mretEvent  = Module(new MretEventModule)
 
-  val sretEvent = Module(new SretEventModule)
+  val mnretEvent = Module(new MNretEventModule)
 
-  val dretEvent = Module(new DretEventModule)
+  val sretEvent  = Module(new SretEventModule)
+
+  val dretEvent  = Module(new DretEventModule)
 
   val events: Seq[Module with CSREventBase] = Seq(
     trapEntryDEvent,
