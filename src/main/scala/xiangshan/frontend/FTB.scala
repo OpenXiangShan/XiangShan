@@ -173,7 +173,7 @@ class FTBEntry_FtqMem(implicit p: Parameters) extends FTBEntry_part with FTBPara
   def getBrMaskByOffset(offset: UInt) =
     brSlots.map{ s => s.valid && s.offset <= offset } :+
     (tailSlot.valid && tailSlot.offset <= offset && tailSlot.sharing)
-  
+
   def newBrCanNotInsert(offset: UInt) = {
     val lastSlotForBr = tailSlot
     lastSlotForBr.valid && lastSlotForBr.offset < offset
@@ -673,33 +673,41 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val fauftb_ftb_entry_consistent_counter = RegInit(0.U(FTBCLOSE_THRESHOLD_SZ.W))
   val fauftb_ftb_entry_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftbBank_dup(0))
 
-  //if close ftb_req, the counter need keep
-  when(io.s2_fire(0) && s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
-    fauftb_ftb_entry_consistent_counter := Mux(fauftb_ftb_entry_consistent, fauftb_ftb_entry_consistent_counter + 1.U, 0.U)
-  } .elsewhen(io.s2_fire(0) && !s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
-    fauftb_ftb_entry_consistent_counter := 0.U
-  }
+  val EnableCloseFTB = false
 
-  when((fauftb_ftb_entry_consistent_counter >= FTBCLOSE_THRESHOLD) && io.s0_fire(0)){
-    s0_close_ftb_req := true.B
+  //if close ftb_req, the counter need keep
+  if (EnableCloseFTB) {
+    when(io.s2_fire(0) && s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
+      fauftb_ftb_entry_consistent_counter := Mux(fauftb_ftb_entry_consistent, fauftb_ftb_entry_consistent_counter + 1.U, 0.U)
+    } .elsewhen(io.s2_fire(0) && !s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
+      fauftb_ftb_entry_consistent_counter := 0.U
+    }
+
+    when((fauftb_ftb_entry_consistent_counter >= FTBCLOSE_THRESHOLD) && io.s0_fire(0)){
+      s0_close_ftb_req := true.B
+    }
   }
 
   //Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
   val needReopen = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
   ftb_false_hit := io.update.valid && io.update.bits.false_hit
-  when(needReopen){
-    fauftb_ftb_entry_consistent_counter := 0.U
-    s0_close_ftb_req := false.B
+  if (EnableCloseFTB) {
+    when(needReopen){
+      fauftb_ftb_entry_consistent_counter := 0.U
+      s0_close_ftb_req := false.B
+    }
   }
 
-  val s2_close_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftb_entry_dup(0))
-  val s2_not_close_consistent = s2_ftbBank_dup(0).entryConsistent(s2_ftb_entry_dup(0))
+  if (EnableCloseFTB) {
+    val s2_close_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftb_entry_dup(0))
+    val s2_not_close_consistent = s2_ftbBank_dup(0).entryConsistent(s2_ftb_entry_dup(0))
 
-  when(s2_close_ftb_req && io.s2_fire(0)){
-    assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
-  }.elsewhen(!s2_close_ftb_req &&  io.s2_fire(0)){
-    assert(s2_not_close_consistent, s"Entry inconsistency after ftb req is not closed!")
+    when(s2_close_ftb_req && io.s2_fire(0)){
+      assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
+    }.elsewhen(!s2_close_ftb_req &&  io.s2_fire(0)){
+      assert(s2_not_close_consistent, s"Entry inconsistency after ftb req is not closed!")
+    }
   }
 
   val  reopenCounter = !s1_close_ftb_req && s2_close_ftb_req &&  io.s2_fire(0)
