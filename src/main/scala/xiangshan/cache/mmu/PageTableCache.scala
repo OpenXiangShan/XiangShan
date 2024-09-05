@@ -24,6 +24,7 @@ import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import utility._
+import coupledL2.utils.SplittedSRAM
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
@@ -157,8 +158,8 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
   val ecc = Code.fromString(l2tlbParams.ecc)
-  val l1EntryType = new PTWEntriesWithEcc(ecc, num = PtwL1SectorSize, tagLen = PtwL1TagLen, level = 1, hasPerm = false)
-  val l0EntryType = new PTWEntriesWithEcc(ecc, num = PtwL0SectorSize, tagLen = PtwL0TagLen, level = 0, hasPerm = true)
+  val l1EntryType = new PTWEntriesWithEcc(ecc, num = PtwL1SectorSize, tagLen = PtwL1TagLen, level = 1, hasPerm = false, ReservedBits = 10)
+  val l0EntryType = new PTWEntriesWithEcc(ecc, num = PtwL0SectorSize, tagLen = PtwL0TagLen, level = 0, hasPerm = true, ReservedBits = 3)
 
   // TODO: four caches make the codes dirty, think about how to deal with it
 
@@ -209,11 +210,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l2h = Reg(Vec(l2tlbParams.l2Size, UInt(2.W)))
 
   // l1: level 1 non-leaf pte
-  val l1 = Module(new SRAMTemplate(
+  val l1 = Module(new SplittedSRAM(
     l1EntryType,
     set = l2tlbParams.l1nSets,
     way = l2tlbParams.l1nWays,
-    singlePort = sramSinglePort
+    waySplit = 2,
+    dataSplit = 4,
+    singlePort = sramSinglePort,
+    readMCP2 = false
   ))
   val l1v = RegInit(0.U((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
   val l1g = Reg(UInt((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
@@ -233,11 +237,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // l0: level 0 leaf pte of 4KB pages
-  val l0 = Module(new SRAMTemplate(
+  val l0 = Module(new SplittedSRAM(
     l0EntryType,
     set = l2tlbParams.l0nSets,
     way = l2tlbParams.l0nWays,
-    singlePort = sramSinglePort
+    waySplit = 4,
+    dataSplit = 4,
+    singlePort = sramSinglePort,
+    readMCP2 = false
   ))
   val l0v = RegInit(0.U((l2tlbParams.l0nSets * l2tlbParams.l0nWays).W))
   val l0g = Reg(UInt((l2tlbParams.l0nSets * l2tlbParams.l0nWays).W))
