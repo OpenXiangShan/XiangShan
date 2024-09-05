@@ -84,6 +84,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
   val priv   = csr_dup(0).priv
+  val mPBMTE = csr_dup(0).mPBMTE
+  val hPBMTE = csr_dup(0).hPBMTE
   val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed
 
   val pmp = Module(new PMP())
@@ -500,7 +502,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbFsmPort).bits.s2 := ptw.io.resp.bits.h_resp
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
-    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id), contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate))
+    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
+      llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id),
+      contiguous_pte_to_merge_ptwResp(
+        resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, 
+        true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE, hPBMTE
+      )
+    )
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
@@ -545,10 +553,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // not_super means that this is a normal page
   // valididx(i) will be all true when super page to be convenient for l1 tlb matching
-  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true, s2xlate: UInt) : PtwMergeResp = {
+  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, s2xlate: UInt, mPBMTE: Bool, hPBMTE: Bool, not_super: Boolean = true) : PtwMergeResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_merge_resp = Wire(new PtwMergeResp())
     val hasS2xlate = s2xlate =/= noS2xlate
+    val pbmte = Mux(s2xlate === onlyStage1 || s2xlate === allStage, hPBMTE, mPBMTE)
     for (i <- 0 until tlbcontiguous) {
       val pte_in = pte(64 * i + 63, 64 * i).asTypeOf(new PteBundle())
       val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
@@ -558,8 +567,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.pbmt := pte_in.pbmt
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
-      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U) || !pte_in.isLeaf())
-      ptw_resp.af := (if (!af_first) pte_in.isPf(0.U) else true.B) && (af || Mux(s2xlate === allStage, false.B, pte_in.isAf()))
+      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U, pbmte) || !pte_in.isLeaf())
+      ptw_resp.af := (if (!af_first) pte_in.isPf(0.U, pbmte) else true.B) && (af || Mux(s2xlate === allStage, false.B, pte_in.isAf()))
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)

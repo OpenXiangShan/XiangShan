@@ -693,15 +693,17 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     !(perm.r || perm.x || perm.w) && perm.v
   }
 
-  def isPf(level: UInt) = {
+  def isPf(level: UInt, pbmte: Bool) = {
     val pf = WireInit(false.B)
     when (reserved =/= 0.U){
       pf := true.B
-    }.elsewhen(pbmt === 3.U){
+    }.elsewhen(pbmt === 3.U || (!pbmte && pbmt =/= 0.U)){
       pf := true.B
     }.elsewhen (isNext()) {
       pf := (perm.u || perm.a || perm.d || n =/= 0.U || pbmt =/= 0.U)
     }.elsewhen (!perm.v || (!perm.r && perm.w)) {
+      pf := true.B
+    }.elsewhen (n =/= 0.U && ppn(3, 0) =/= 8.U) {
       pf := true.B
     }.otherwise{
       pf := unaligned(level)
@@ -709,13 +711,19 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     pf
   }
 
-  def isGpf(level: UInt) = {
+  def isGpf(level: UInt, pbmte: Bool) = {
     val gpf = WireInit(false.B)
-    when (isNext()) {
-      gpf := (perm.u || perm.a || perm.d )
+    when (reserved =/= 0.U){
+      gpf := true.B
+    }.elsewhen(pbmt === 3.U || (!pbmte && pbmt =/= 0.U)){
+      gpf := true.B
+    }.elsewhen (isNext()) {
+      gpf := (perm.u || perm.a || perm.d || n =/= 0.U || pbmt =/= 0.U)
     }.elsewhen (!perm.v || (!perm.r && perm.w)) {
       gpf := true.B
     }.elsewhen (!perm.u) {
+      gpf := true.B
+    }.elsewhen (n =/= 0.U && ppn(3, 0) =/= 8.U) {
       gpf := true.B
     }.otherwise{
       gpf := unaligned(level)
@@ -905,7 +913,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
     asid_hit && vmid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }
 
-  def genEntries(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt) = {
+  def genEntries(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
@@ -918,7 +926,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.ppn
-      ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.vs(i)   := !pte.isPf(levelUInt, pbmte) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.af(i)   := Mux(s2xlate === allStage, false.B, pte.isAf()) // if allstage, this refill is from ptw or llptw, so the af is invalid
       ps.perms.map(_(i) := pte.perm)
     }
@@ -981,8 +989,8 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     Cat(res).orR
   }
 
-  def gen(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt) = {
-    this.entries := entries.genEntries(vpn, asid, vmid, data, levelUInt, prefetch, s2xlate)
+  def gen(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool) = {
+    this.entries := entries.genEntries(vpn, asid, vmid, data, levelUInt, prefetch, s2xlate, pbmte)
     this.encode()
   }
 }
