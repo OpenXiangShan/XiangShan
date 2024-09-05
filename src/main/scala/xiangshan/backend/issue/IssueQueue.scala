@@ -49,7 +49,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-  val og2Resp = Option.when(params.inVfSchd)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val og2Resp = Option.when(params.needOg2Resp)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val finalIssueResp = Option.when(params.LdExuCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val memAddrIssueResp = Option.when(params.LdExuCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val vecLoadIssueResp = Option.when(params.VlduCnt > 0)(Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
@@ -322,7 +322,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp                                                   := io.og1Resp(i)
     }
-    if (params.inVfSchd) {
+    if (params.needOg2Resp) {
       entriesIO.og2Resp.get.zipWithIndex.foreach { case (og2Resp, i) =>
         og2Resp                                                 := io.og2Resp.get(i)
       }

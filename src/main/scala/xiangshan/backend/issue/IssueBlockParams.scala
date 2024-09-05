@@ -54,9 +54,9 @@ case class IssueBlockParams(
 
   def isHyAddrIQ: Boolean = inMemSchd && HyuCnt > 0
 
-  def isVecLduIQ: Boolean = inMemSchd && VlduCnt > 0
+  def isVecLduIQ: Boolean = inMemSchd && (VlduCnt + VseglduCnt) > 0
 
-  def isVecStuIQ: Boolean = inMemSchd && VstuCnt > 0
+  def isVecStuIQ: Boolean = inMemSchd && (VstuCnt + VsegstuCnt) > 0
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
@@ -196,6 +196,10 @@ case class IssueBlockParams(
 
   def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
 
+  def VseglduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegldu)).sum
+
+  def VsegstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegstu)).sum
+
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
   def numWriteRegCache: Int = exuBlockParams.map(x => if (x.needWriteRegCache) 1 else 0).sum
@@ -203,6 +207,8 @@ case class IssueBlockParams(
   def needWriteRegCache: Boolean = numWriteRegCache > 0
 
   def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
+
+  def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
   /**
     * Get the regfile type that this issue queue need to read
