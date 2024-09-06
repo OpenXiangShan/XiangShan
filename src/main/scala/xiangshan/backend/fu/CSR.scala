@@ -31,6 +31,7 @@ import xiangshan.cache._
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
+import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 class FpuCsrIO extends Bundle {
@@ -91,6 +92,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val vpu = Flipped(new VpuCsrIO)
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
+  val robDeqPtr = Input(new RobPtr)
   // to ROB
   val isXRet = Output(Bool())
   val trapTarget = Output(new TargetPCBundle)

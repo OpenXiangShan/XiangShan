@@ -109,9 +109,10 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   ))
 
   private val tval2 = Mux1H(Seq(
-    (isFetchGuestExcp && !fetchCrossPage) -> trapPCGPA,
-    (isFetchGuestExcp && fetchCrossPage ) -> (trapPCGPA + 2.U),
-    (isLSGuestExcp                      ) -> trapMemGPA,
+    (isFetchGuestExcp && isFetchMalAddr                    ) -> in.fetchMalTval,
+    (isFetchGuestExcp && !isFetchMalAddr && !fetchCrossPage) -> trapPCGPA,
+    (isFetchGuestExcp && !isFetchMalAddr && fetchCrossPage ) -> (trapPCGPA + 2.U),
+    (isLSGuestExcp                                         ) -> trapMemGPA,
   ))
 
   private val instrAddrTransType = AddrTransType(
@@ -144,10 +145,10 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.hstatus.bits.SPVP         := Mux(!current.privState.isVirtual, in.hstatus.SPVP.asUInt, current.privState.PRVM.asUInt(0, 0))
   out.hstatus.bits.GVA          := tvalFillGVA
-  out.sepc.bits.epc             := Mux(isFetchMalAddr, 1.U << (XLEN - 1 - 1), trapPC(63, 1))
+  out.sepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.scause.bits.Interrupt     := isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
-  out.stval.bits.ALL            := Mux(isFetchMalAddr, 1.U << (XLEN - 1), tval)
+  out.stval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
   out.htinst.bits.ALL           := 0.U
   out.targetPc.bits.pc          := in.pcFromXtvec

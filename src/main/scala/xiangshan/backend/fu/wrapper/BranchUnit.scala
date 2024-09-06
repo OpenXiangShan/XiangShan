@@ -47,6 +47,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
       redirect.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
       redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
+      redirect.bits.fullTarget := addModule.io.target
       redirect.bits.cfiUpdate.isMisPred := dataModule.io.mispredict
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken

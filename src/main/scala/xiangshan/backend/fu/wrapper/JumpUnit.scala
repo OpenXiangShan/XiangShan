@@ -37,6 +37,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.robIdx := io.in.bits.ctrl.robIdx
   redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
+  redirect.fullTarget := jumpDataModule.io.target
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
   redirect.cfiUpdate.target := jumpDataModule.io.target

@@ -16,6 +16,7 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.ExceptionNO._
@@ -122,6 +123,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFetchMalAddr = Bool()
       })
       val commit = Input(new RobCommitCSR)
+      val robDeqPtr = Input(new RobPtr)
     })
 
     val perf = Input(new PerfCounterIO)
@@ -131,6 +133,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val EX_VI = Bool()
       val flushPipe = Bool()
       val rData = UInt(64.W)
+      val targetPcUpdate = Bool()
       val targetPc = new TargetPCBundle
       val regOut = UInt(64.W)
       // perf
@@ -186,6 +189,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
 
     val toDecode = new CSRToDecode
+
+    val fetchMalTval = Input(UInt(XLEN.W))
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -609,6 +614,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
         in.trapInst := io.trapInst
+        in.fetchMalTval := io.fetchMalTval
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
@@ -842,6 +848,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       )
     ),
   needTargetUpdate)
+  io.out.bits.targetPcUpdate := needTargetUpdate
   io.out.bits.isPerfCnt := addrInPerfCnt
 
   io.status.privState := privState

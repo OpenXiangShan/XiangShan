@@ -133,10 +133,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsstatus.bits.SPIE         := current.vsstatus.SIE
   out.vsstatus.bits.SIE          := 0.U
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
-  out.vsepc.bits.epc             := Mux(isFetchMalAddr, 1.U << (XLEN - 1 - 1), trapPC(63, 1))
+  out.vsepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := highPrioTrapNO
-  out.vstval.bits.ALL            := Mux(isFetchMalAddr, 1.U << (XLEN - 1), tval)
+  out.vstval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.targetPc.bits.pc           := in.pcFromXtvec
   out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)

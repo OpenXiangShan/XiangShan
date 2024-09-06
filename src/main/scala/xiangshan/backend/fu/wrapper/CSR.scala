@@ -62,6 +62,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val csrMod = Module(new NewCSR)
   val trapInstMod = Module(new TrapInstMod)
+  val trapTvalMod = Module(new TrapTvalMod)
 
   private val privState = csrMod.io.status.privState
   // The real reg value in CSR, with no read mask
@@ -100,6 +101,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.dret := isDret
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
+  csrMod.io.fetchMalTval := trapTvalMod.io.tval
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
   csrMod.io.fromMem.excpGPA := csrIn.memExceptionGPAddr
 
@@ -135,6 +137,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.valid := true.B  // Todo: valid control signal
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
+  csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+
   csrMod.io.perf  := csrIn.perf
 
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
@@ -165,6 +169,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     case t =>
       t.valid && !t.bits.isInterrupt && (t.bits.trapVec(EX_II) || t.bits.trapVec(EX_VI))
   })
+
+  trapTvalMod.io.targetPc.valid := csrMod.io.out.bits.targetPcUpdate
+  trapTvalMod.io.targetPc.bits := csrMod.io.out.bits.targetPc
+  trapTvalMod.io.clear := csrIn.exception.valid && csrIn.exception.bits.isFetchMalAddr
+  trapTvalMod.io.fromCtrlBlock.flush := io.flush
+  trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
   private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
   imsic.i.hartId := io.csrin.get.hartId

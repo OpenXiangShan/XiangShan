@@ -106,6 +106,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val trapPc = Input(UInt(VaddrMaxWidth.W))
   val trapPcGPA = Input(UInt(GPAddrBits.W))
   val trapInst = Input(ValidIO(UInt(InstWidth.W)))
+  val fetchMalTval = Input(UInt(XLEN.W))
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
   val isFetchMalAddr = Input(Bool())
@@ -134,8 +135,10 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
 }
 
 class TargetPCBundle extends Bundle {
-  val pc = UInt(VaddrMaxWidth.W)
+  val pc = UInt(XLEN.W)
   val raiseIPF = Bool()
   val raiseIAF = Bool()
   val raiseIGPF = Bool()
+
+  def raiseFault = raiseIPF || raiseIAF || raiseIGPF
 }

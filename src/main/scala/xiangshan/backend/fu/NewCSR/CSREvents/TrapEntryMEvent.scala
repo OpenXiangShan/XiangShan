@@ -107,9 +107,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   ))
 
   private val tval2 = Mux1H(Seq(
-    (isFetchGuestExcp && !fetchCrossPage) -> trapPCGPA,
-    (isFetchGuestExcp && fetchCrossPage ) -> (trapPCGPA + 2.U),
-    (isLSGuestExcp                      ) -> trapMemGPA,
+    (isFetchGuestExcp && isFetchMalAddr                    ) -> in.fetchMalTval,
+    (isFetchGuestExcp && !isFetchMalAddr && !fetchCrossPage) -> trapPCGPA,
+    (isFetchGuestExcp && !isFetchMalAddr && fetchCrossPage ) -> (trapPCGPA + 2.U),
+    (isLSGuestExcp                                         ) -> trapMemGPA,
   ))
 
   out := DontCare
@@ -130,10 +131,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.GVA          := tvalFillGVA
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
-  out.mepc.bits.epc             := Mux(isFetchMalAddr, 1.U << (XLEN - 1 - 1), trapPC(63, 1))
+  out.mepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mcause.bits.Interrupt     := isInterrupt
   out.mcause.bits.ExceptionCode := highPrioTrapNO
-  out.mtval.bits.ALL            := Mux(isFetchMalAddr, 1.U << (XLEN - 1), tval)
+  out.mtval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.mtval2.bits.ALL           := tval2 >> 2
   out.mtinst.bits.ALL           := 0.U
   out.tcontrol.bits.MPTE        := in.tcontrol.MTE

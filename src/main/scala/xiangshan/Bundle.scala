@@ -135,6 +135,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.topAddr := entry.topAddr
     this
   }
+
+  def hasBackendFault = backendIGPF || backendIPF || backendIAF
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -311,6 +313,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val level = RedirectLevel()
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
+  val fullTarget = UInt(XLEN.W) // only used for tval storage in backend
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
