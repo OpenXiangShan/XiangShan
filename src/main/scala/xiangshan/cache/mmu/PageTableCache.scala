@@ -549,10 +549,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     //cause llptw will not trigger bitmapcheck
     if(HasCVMExtension){
       //add a coniditonal logic
-      hit := Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw) , ParallelOR(hitVec) &&  l0bitmapreg(hitWay)(pte_index) === 1.U , ParallelOR(hitVec))
-      when(bitmapEnable && (s2x_info === noS2xlate || ishptw) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U){
-      jmp_bitmap_check := true.B
-    }
+      hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw) , ParallelOR(hitVec) &&  l0bitmapreg(hitWay)(pte_index) === 1.U , ParallelOR(hitVec))
+      when(bitmapEnable && (s2x_info =/= allStage || ishptw) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U){
+        jmp_bitmap_check := true.B
+      }
     }else{
       hit := ParallelOR(hitVec)
     }
@@ -601,8 +601,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val jmp_bitmap_check  = WireInit(false.B)
     val hit = WireInit(false.B)
     if(HasCVMExtension){
-      hit := Mux(bitmapEnable && (s2x_info === noS2xlate || ishptw), ParallelOR(hitVec) &&  spBitmapReg(OHToUInt(hitVec)) === 1.U , ParallelOR(hitVec))
-      when(bitmapEnable && (s2x_info === noS2xlate || ishptw) && ParallelOR(hitVec) && spBitmapReg(OHToUInt(hitVec)) === 0.U){
+      hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw), ParallelOR(hitVec) &&  spBitmapReg(OHToUInt(hitVec)) === 1.U , ParallelOR(hitVec))
+      when(bitmapEnable && (s2x_info =/= allStage || ishptw) && ParallelOR(hitVec) && spBitmapReg(OHToUInt(hitVec)) === 0.U){
         jmp_bitmap_check := true.B
       }
     }else{
@@ -677,7 +677,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.stage1Hit := stage1Hit
   if(HasCVMExtension){
     io.resp.bits.toFsm.jmp_bitmap_check := resp_res.l0.jmp_bitmap_check || resp_res.sp.jmp_bitmap_check
-    io.resp.bits.toFsm.toLLPTW := resp_res.l0.jmp_bitmap_check
+    io.resp.bits.toFsm.toLLPTW := resp_res.l0.jmp_bitmap_check && (stageResp.bits.req_info.s2xlate === noS2xlate || stageResp.bits.req_info.s2xlate === onlyStage1)
     io.resp.bits.toFsm.hitway := resp_res.l0.hitway
     io.resp.bits.toFsm.pte := resp_res.sp.pte
     io.resp.bits.toFsm.ptes := resp_res.l0.ptes
