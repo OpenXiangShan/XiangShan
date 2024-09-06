@@ -218,10 +218,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val tmp_level = level.get
     val tag_matchs = Wire(Vec(Level + 1, Bool()))
     tag_matchs(0) := tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth)
-    for (i <- 1 until Level + 1) {
+    for (i <- 1 until Level) {
       tag_matchs(i) := tag(vpnnLen * (i + 1) - sectortlbwidth - 1, vpnnLen * i - sectortlbwidth) === vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
     }
-
+    tag_matchs(Level) := tag(sectorvpnLen - 1, vpnnLen * Level - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * Level)
     val level_matchs = Wire(Vec(Level + 1, Bool()))
     for (i <- 0 until Level) {
       level_matchs(i) := tag_matchs(i) || tmp_level >= (i + 1).U
@@ -253,10 +253,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val tmp_level = level.get
     val tag_matchs = Wire(Vec(Level + 1, Bool()))
     tag_matchs(0) := tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth)
-    for (i <- 1 until Level + 1) {
+    for (i <- 1 until Level) {
       tag_matchs(i) := tag(vpnnLen * (i + 1) - sectortlbwidth - 1, vpnnLen * i - sectortlbwidth) === vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
     }
-
+    tag_matchs(Level) := tag(sectorvpnLen - 1, vpnnLen * Level - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * Level)
     val level_matchs = Wire(Vec(Level + 1, Bool()))
     for (i <- 0 until Level) {
       level_matchs(i) := tag_matchs(i) || tmp_level >= (i + 1).U
@@ -1227,10 +1227,10 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     val level = s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)
 
     val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
-    for (i <- 0 until 4) {
+    for (i <- 0 until 3) {
       tag_match(i) := vpn(vpnnLen * (i + 1) - 1, vpnnLen * i) === s1vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
     }
-
+    tag_match(3) := vpn(vpnLen - 1, vpnnLen * 3) === s1vpn(vpnLen - 1, vpnnLen * 3)
     val level_match = MuxLookup(level, false.B)(Seq(
       3.U -> tag_match(3),
       2.U -> (tag_match(3) && tag_match(2)),
