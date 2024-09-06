@@ -125,9 +125,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val levelNext = level - 1.U
   val l3Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
-  val jmp_bitmap_check = RegEnable(io.req.bits.jmp_bitmap_check,io.req.fire)
+  val jmp_bitmap_check_w = io.req.bits.jmp_bitmap_check && io.req.bits.req_info.s2xlate =/= onlyStage2
+  val jmp_bitmap_check_r = RegEnable(jmp_bitmap_check_w, io.req.fire)
   val cache_pte = RegEnable(io.req.bits.pte.asTypeOf(new PteBundle().cloneType),io.req.fire)
-  val pte = Mux(jmp_bitmap_check , cache_pte, io.mem.resp.bits.asTypeOf(new PteBundle().cloneType))
+  val pte = Mux(jmp_bitmap_check_r , cache_pte, io.mem.resp.bits.asTypeOf(new PteBundle().cloneType))
 
   // s/w register
   val s_pmp_check = RegInit(true.B)
@@ -243,7 +244,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     io.bitmap.req.bits.bmppn := pte.ppn
     io.bitmap.req.bits.id := FsmReqID.U(bMemID.W)
     io.bitmap.req.bits.vpn := vpn
-    io.bitmap.req.bits.level := Mux(jmp_bitmap_check,cache_level,level)
+    io.bitmap.req.bits.level := Mux(jmp_bitmap_check_r,cache_level,level)
     io.bitmap.req.bits.way_info := DontCare
   }else{
     io.bitmap.req.valid := DontCare
@@ -269,13 +270,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
 
-  when(io.req.fire && (if(HasCVMExtension) io.req.bits.jmp_bitmap_check else false.B)){
+  when(io.req.fire && (if(HasCVMExtension) jmp_bitmap_check_w else false.B)){
     idle := false.B
     vpn := io.req.bits.req_info.vpn
     s_bitmap_check := false.B
   }
 
-  when (io.req.fire && io.req.bits.stage1Hit && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
+  when (io.req.fire && io.req.bits.stage1Hit && (if(HasCVMExtension) !jmp_bitmap_check_w else true.B)){
     idle := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     s_last_hptw_req := false.B
@@ -290,7 +291,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     idle := true.B
   }
 
-  when (io.req.fire && !io.req.bits.stage1Hit && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
+  when (io.req.fire && !io.req.bits.stage1Hit && (if(HasCVMExtension) !jmp_bitmap_check_w else true.B)){
     val req = io.req.bits
     val gvpn_wire = Wire(UInt(ptePPNLen.W))
     if (EnableSv48) {
