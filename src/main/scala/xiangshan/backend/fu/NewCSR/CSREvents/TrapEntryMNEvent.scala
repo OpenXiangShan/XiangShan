@@ -8,6 +8,7 @@ import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
   val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE))
@@ -61,7 +62,10 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO
-  out.targetPc.bits              := in.pcFromXtvec
+  out.targetPc.bits.pc           := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF     := false.B
+  out.targetPc.bits.raiseIAF     := AddrTransType(bare = true).checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF    := false.B
 
 }
 
