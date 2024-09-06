@@ -850,8 +850,18 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
   }
   private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq)).asUInt).reduce(_ | _)
-  private val othersCanotIn = othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
-
+  private val othersCanotIn = Wire(Bool())
+  othersCanotIn := othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
+  // if has simp Entry, othersCanotIn will be simpCanotIn
+  if (params.numSimp > 0) {
+    val simpLeftOneCaseVec = Wire(Vec(params.numSimp, UInt((params.numSimp).W)))
+    simpLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
+      leftone := ~(1.U((params.numSimp).W) << i)
+    }
+    val simpLeftOne = simpLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt).reduce(_ | _)
+    val simpCanotIn = simpLeftOne || validVec.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
+    othersCanotIn := simpCanotIn
+  }
   io.enq.foreach(_.ready := (!othersCanotIn || !enqHasValid) && !enqHasIssued)
   io.status.empty := !Cat(validVec).orR
   io.status.full := othersCanotIn
