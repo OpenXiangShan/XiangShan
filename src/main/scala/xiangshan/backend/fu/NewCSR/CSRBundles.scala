@@ -10,7 +10,6 @@ import xiangshan.backend.fu.fpu.Bundles.Fflags
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxsat}
 import xiangshan.frontend.BPUCtrl
 import chisel3.experimental.noPrefix
-import xiangshan.AddrTransType
 
 object CSRBundles {
   class XtvecBundle extends CSRBundle {

@@ -677,6 +677,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.mstatus := mstatus.regOut
       in.mnepc   := mnepc.regOut
       in.mnstatus:= mnstatus.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   mretEvent.valid := legalMret

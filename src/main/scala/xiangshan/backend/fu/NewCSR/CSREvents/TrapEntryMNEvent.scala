@@ -13,7 +13,7 @@ class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE))
   val mnepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc = ValidIO(new TargetPCBundle)
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -37,6 +37,8 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isInterrupt = in.causeNO.Interrupt.asBool
 
+  private val isFetchMalAddr = in.isFetchMalAddr
+
   private val trapPC = genTrapVA(
     iMode,
     satp,
@@ -56,7 +58,7 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnstatus.bits.MNPP         := current.privState.PRVM
   out.mnstatus.bits.MNPV         := current.privState.V
   out.mnstatus.bits.NMIE         := 0.U
-  out.mnepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
+  out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO
   out.targetPc.bits              := in.pcFromXtvec
