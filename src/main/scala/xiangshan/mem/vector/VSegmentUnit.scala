@@ -281,9 +281,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
     when(!sbufferOut.fire && segmentActive) {
       stateNext := s_send_data
-    }.elsewhen(((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) ||
-               ((segmentIdx === maxSegIdx) && !segmentActive)) {
-
+    }.elsewhen((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields || !segmentActive)) {
       stateNext := s_finish // segment instruction finish
     }.otherwise {
       stateNext := s_tlb_req // need continue
