@@ -422,7 +422,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   updateU         := DontCare
 
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
-  val delay_updateMisPred = WireInit(0.U.asTypeOf(update.mispred_mask(numBr))) // the last one indicates jmp results
+  val buffer_updateMisPred = RegInit(0.U.asTypeOf(update.mispred_mask(numBr))) // the last one indicates jmp results
 
   //Using ghist create folded_hist
   val ufolded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
@@ -438,17 +438,26 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }
 
   //updating read
-  val u_req_buff_valid = RegInit(false.B)
-  val delay_full_target = RegInit(0.U.asTypeOf(update.full_target)) //if update target need buffer
-  val delay_u_pc     = RegInit(0.U.asTypeOf(update.pc))
-  val delay_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val u_req_conflict_stall = RegInit(false.B)
+  val buffer_valid = RegInit(false.B)
+  val buffer_fire = WireInit(false.B)
+  val buffer_full_target = RegInit(0.U.asTypeOf(update.full_target)) //if update target need buffer
+  val buffer_u_pc     = RegInit(0.U.asTypeOf(update.pc))
+  val buffer_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
 
-  val u_req_valid  = (updateValid || u_req_buff_valid) && !(io.s1_fire(3) && s1_isIndirect)
+  val u_write_ready       = WireInit(false.B)
+
+
+  val u_req_valid  = (updateValid || u_req_conflict_stall) && !(io.s1_fire(3) && s1_isIndirect) && u_write_ready
   val u_req_valid_reg = RegNext(u_req_valid)
-  val u_req_conflict = updateValid && io.s1_fire(3) && s1_isIndirect
+  val u_req_conflict = updateValid && (io.s1_fire(3) && s1_isIndirect || !u_write_ready)
 
   //Read during updates
-  val u_updateValid       = RegNext(u_req_valid_reg, init = false.B)
+  val u_updateValid       = RegInit(false.B)
+  // val u_updateValid       = RegEnable(true.B, false.B, buffer_fire)
+  // val u_updateValid       = RegNext(buffer_fire, init = false.B)
+  // val u_updateValid       = RegNext(u_req_valid_reg, init = false.B)
+  val u_write_fire        = WireInit(false.B)
   val u_providerTarget    = RegEnable(s2_providerTarget, u_req_valid_reg)
   val u_altProviderTarget = RegEnable(s2_altProviderTarget, u_req_valid_reg)
   val u_provided          = RegEnable(s2_provided, u_req_valid_reg)
@@ -460,36 +469,37 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val u_altProviderCtr    = RegEnable(s2_altProviderCtr, u_req_valid_reg)
   val u_allocate          = RegInit(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))))
   val u_altDiffers        = Mux(u_altProvided, u_altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
-  val u_write_pc          = RegEnable(delay_u_pc, u_req_valid_reg)
-  val u_write_full_target = RegEnable(delay_full_target, u_req_valid_reg)
-  val u_write_updateMisPred = RegEnable(delay_updateMisPred, u_req_valid_reg)
-  val u_write_folded_hist = RegEnable(delay_ufolded_hist, u_req_valid_reg)
+  val u_write_pc          = RegEnable(buffer_u_pc, u_req_valid_reg)
+  val u_write_full_target = RegEnable(buffer_full_target, u_req_valid_reg)
+  val u_write_updateMisPred = RegEnable(buffer_updateMisPred, u_req_valid_reg)
+  val u_write_folded_hist = RegEnable(buffer_ufolded_hist, u_req_valid_reg)
 
   //when a conflict occurs, need storage the update data.
   //If a read request is sent during the update process，it need clean
-  when(u_req_conflict){
-    u_req_buff_valid := true.B
-  }.elsewhen(u_req_valid){
-    u_req_buff_valid := false.B
-  }
+  when(u_req_conflict)      { u_req_conflict_stall := true.B  }
+    .elsewhen(u_req_valid)  { u_req_conflict_stall := false.B }
   //For reading during updates, even if there are no conflicts, it is necessary to block FTQ and store the update information.
   //Release when it can be written
   when(updateValid){
-    delay_full_target := update.full_target
-    delay_u_pc := update.pc
-    delay_updateMisPred := update.mispred_mask(numBr)
-    delay_ufolded_hist := ufolded_hist
-  }.elsewhen(u_req_valid_reg){
-    delay_full_target := 0.U.asTypeOf(update.full_target)
-    delay_ufolded_hist := 0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))
-    delay_updateMisPred := update.mispred_mask(numBr)
+    buffer_valid := true.B
+    buffer_full_target := update.full_target
+    buffer_u_pc := update.pc
+    buffer_updateMisPred := update.mispred_mask(numBr)
+    buffer_ufolded_hist := ufolded_hist
+  }.elsewhen(buffer_fire){
+    buffer_valid := false.B
   }
-
+  buffer_fire := buffer_valid && u_req_valid_reg
+  // val buffer_fire = tables.map(_.io.update.ready).reduce(_&&_) && buffer_valid
+  u_write_fire := u_updateValid && tables.map(_.io.update.ready).reduce(_&&_)
+  u_write_ready := (u_write_fire || !u_updateValid) && tables.map(_.io.update.ready).reduce(_&&_)
+  when(buffer_fire)         { u_updateValid := true.B  }
+    .elsewhen(u_write_fire) { u_updateValid := false.B }
   // Predict
   tables.map { t => {
       t.io.req.valid := io.s1_fire(3) && s1_isIndirect || u_req_valid
-      t.io.req.bits.pc := Mux(u_req_valid, Mux(u_req_buff_valid, delay_u_pc, update.pc), s1_pc_dup(3))
-      t.io.req.bits.folded_hist := Mux(u_req_valid, Mux(u_req_buff_valid, delay_ufolded_hist, ufolded_hist), io.in.bits.s1_folded_hist(3))
+      t.io.req.bits.pc := Mux(u_req_valid, Mux(u_req_conflict_stall, buffer_u_pc, update.pc), s1_pc_dup(3))
+      t.io.req.bits.folded_hist := Mux(u_req_valid, Mux(u_req_conflict_stall, buffer_ufolded_hist, ufolded_hist), io.in.bits.s1_folded_hist(3))
     }
   }
 
@@ -579,7 +589,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       updateMask(provider)   := true.B
       updateUMask(provider)  := true.B
 
-      updateU(provider) := Mux(!u_altDiffers, u_providerU, !u_write_updateMisPred)
+      updateU(provider) := Mux(!u_altDiffers, u_providerU, u_providerTarget === updateRealTarget)
       updateCorrect(provider)  := u_providerTarget === updateRealTarget
       updateTarget(provider) := updateRealTarget
       updateOldTarget(provider) := u_providerTarget
@@ -631,7 +641,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
   //if ittage table has conflict need block ftq update req
-  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_buff_valid
+  io.update.ready := (!buffer_valid || buffer_fire) && !u_req_conflict_stall
   XSPerfAccumulate("ittage_update_not_ready", io.update.ready)
   val ittage_updateMask_and_read_conflict = RegNext(updateMask.reduce(_||_)) && io.s1_fire(3) && s1_isIndirect
   XSPerfAccumulate("ittage_updateMask_and_read_conflict", ittage_updateMask_and_read_conflict)
@@ -673,7 +683,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     }
   }
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
-  XSDebug(updateValid, p"correct(${!delay_updateMisPred})\n")
+  XSDebug(updateValid, p"correct(${!buffer_updateMisPred})\n")
 
   generatePerfEvent()
 }

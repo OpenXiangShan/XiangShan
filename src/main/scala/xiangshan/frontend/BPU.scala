@@ -451,7 +451,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits                              := predictors.io.out
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr := s3_ghist_ptr_dup(2)
 
-  io.ftq_to_bpu.update.ready := predictors.io.update.ready
 
   val full_pred_diff        = WireInit(false.B)
   val full_pred_diff_stage  = WireInit(0.U)
@@ -865,12 +864,17 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map { case (hr, r) => hr := r }
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
-  predictors.io.update.bits  := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
+  val predictors_valid = RegInit(false.B)
+  // val predictors_valid = RegNext(io.ftq_to_bpu.update.valid, init = false.B)
+  predictors.io.update.valid := predictors_valid && predictors.io.update.ready
+  predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
   predictors.io.update.bits.ghist := RegEnable(
     getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr),
     io.ftq_to_bpu.update.valid
   )
+  io.ftq_to_bpu.update.ready := predictors.io.update.valid || !predictors_valid
+  when(io.ftq_to_bpu.update.valid)        { predictors_valid := true.B  }
+    .elsewhen(predictors.io.update.valid) { predictors_valid := false.B }
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
