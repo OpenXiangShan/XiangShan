@@ -269,6 +269,7 @@ trait HasCSRConst {
 
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
+  def privMNret  = 0x702.U
   def privMret   = 0x302.U
   def privSret   = 0x102.U
   def privUret   = 0x002.U

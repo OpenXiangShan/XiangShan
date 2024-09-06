@@ -896,27 +896,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // --------------------------------
     // Load Triggers
     // --------------------------------
-    val loadTriggerHitVec = Wire(Vec(TriggerNum, Bool()))
-    val loadTriggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
-
-    for (j <- 0 until TriggerNum) {
-      loadUnits(i).io.trigger(j).tdata2 := tdata(j).tdata2
-      loadUnits(i).io.trigger(j).matchType := tdata(j).matchType
-      loadUnits(i).io.trigger(j).tEnable := tEnable(j) && tdata(j).load
-      // Just let load triggers that match data unavailable
-      loadTriggerHitVec(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(j).select && !debugMode
-    }
-    TriggerCheckCanFire(TriggerNum, loadTriggerCanFireVec, loadTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-    lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
-
-    val actionVec = VecInit(tdata.map(_.action))
-    val triggerAction = Wire(TriggerAction())
-    TriggerUtil.triggerActionGen(triggerAction, loadTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
-
-    io.mem_to_ooo.writebackLda(i).bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
-    io.mem_to_ooo.writebackLda(i).bits.uop.trigger                  := triggerAction
-    XSDebug(loadTriggerCanFireVec.asUInt.orR && io.mem_to_ooo.writebackLda(i).valid, p"Debug Mode: Load Inst No.${i}" +
-      p"has trigger fire vec ${loadTriggerCanFireVec.asUInt.orR}\n")
+    loadUnits(i).io.fromCsrTrigger.tdataVec := tdata
+    loadUnits(i).io.fromCsrTrigger.tEnableVec := tEnable
+    loadUnits(i).io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+    loadUnits(i).io.fromCsrTrigger.debugMode := debugMode
   }
 
   for (i <- 0 until HyuCnt) {
@@ -1018,7 +1001,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.ldin
-    lsq.io.trigger(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.trigger
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(StaCnt + i) <> hybridUnits(i).io.stu_io.st_mask_out
 
@@ -1028,30 +1010,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.stu_io.prefetch_req <> sbuffer.io.store_prefetch(StaCnt + i)
 
     io.mem_to_ooo.s3_delayed_load_error(LduCnt + i) := hybridUnits(i).io.ldu_io.s3_dly_ld_err
-
-    // --------------------------------
-    // Load Triggers
-    // --------------------------------
-    val loadTriggerHitVec = Wire(Vec(TriggerNum, Bool()))
-    val loadTriggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
-
-    for (j <- 0 until TriggerNum) {
-      hybridUnits(i).io.ldu_io.trigger(j).tdata2 := tdata(j).tdata2
-      hybridUnits(i).io.ldu_io.trigger(j).matchType := tdata(j).matchType
-      hybridUnits(i).io.ldu_io.trigger(j).tEnable := tEnable(j) && tdata(j).load
-      // Just let load triggers that match data unavailable
-      loadTriggerHitVec(j) := hybridUnits(i).io.ldu_io.trigger(j).addrHit && !tdata(j).select
-    }
-    TriggerCheckCanFire(TriggerNum, loadTriggerCanFireVec, loadTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-
-    val actionVec =  VecInit(tdata.map(_.action))
-    val triggerAction = Wire(TriggerAction())
-    TriggerUtil.triggerActionGen(triggerAction, loadTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
-
-    io.mem_to_ooo.writebackHyuLda(i).bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
-    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger                  := triggerAction
-    XSDebug(loadTriggerCanFireVec.asUInt.orR && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
-      p"has trigger fire vec ${loadTriggerCanFireVec.asUInt.orR}\n")
 
     // ------------------------------------
     //  Store Port
@@ -1427,7 +1385,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (env.EnableDifftest) {
     sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
       if (index == 0) {
-        val vSegmentDifftestValid = vSegmentFlag && vSegmentUnit.io.vecDifftestInfo.valid
+        val vSegmentDifftestValid = vSegmentUnit.io.vecDifftestInfo.valid
         sbufferPort.valid := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
         sbufferPort.bits  := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
 
@@ -1722,6 +1680,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
     x.externalInterrupt.seip  := outer.plic_int_sink.in.last._1(0)
     x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+    x.externalInterrupt.nmi.nmi := false.B
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
   }

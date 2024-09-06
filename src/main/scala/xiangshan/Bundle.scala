@@ -368,6 +368,12 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val meip = Input(Bool())
   val seip = Input(Bool())
   val debug = Input(Bool())
+  val nmi = new NonmaskableInterruptIO()
+}
+
+class NonmaskableInterruptIO(implicit p: Parameters) extends XSBundle {
+  val nmi = Input(Bool())
+  // reserve for other nmi type
 }
 
 class CSRSpecialIO(implicit p: Parameters) extends XSBundle {

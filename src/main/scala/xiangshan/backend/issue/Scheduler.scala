@@ -132,7 +132,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
   }) else None
-  val fromOg2 = if(params.isVfSchd) Some(MixedVec(params.issueBlockParams.map(x => Flipped(x.genOG2RespBundle)))) else None
+  val fromOg2Resp = if(params.needOg2Resp) Some(MixedVec(params.issueBlockParams.filter(_.needOg2Resp).map(x => Flipped(x.genOG2RespBundle)))) else None
 }
 
 abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
@@ -427,14 +427,16 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.vecLoadIssueResp.foreach(_.zipWithIndex.foreach { case (resp, deqIdx) =>
       resp := io.vecLoadIssueResp(i)(deqIdx)
     })
-    if(params.isVfSchd) {
-      iq.io.og2Resp.get.zipWithIndex.foreach { case (og2Resp, exuIdx) =>
-        og2Resp := io.fromOg2.get(i)(exuIdx)
-      }
-    }
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
     iq.io.replaceRCIdx.foreach(x => x := 0.U.asTypeOf(x))
+  }
+  if (params.needOg2Resp) {
+    issueQueues.filter(_.params.needOg2Resp).zip(io.fromOg2Resp.get).foreach{ case (iq, og2RespVec) =>
+      iq.io.og2Resp.get.zip(og2RespVec).foreach{ case (iqOg2Resp, og2Resp) =>
+        iqOg2Resp := og2Resp
+      }
+    }
   }
 
   // Connect each replace RCIdx to IQ

@@ -244,39 +244,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     waymasks
   }
 
-  val s1_SRAM_waymasks = VecInit((0 until PortNumber).map(i =>
-                            Mux(tlb_valid_pulse(i), get_waymask(s1_req_paddr_wire)(i), get_waymask(s1_req_paddr_reg)(i))))
-
-  /**
-    ******************************************************************************
-    * update waymask according to MSHR update data
-    ******************************************************************************
-    */
-  def update_waymask(mask: UInt, vSetIdx: UInt, ptag: UInt): UInt = {
-    require(mask.getWidth == nWays)
-    val new_mask  = WireInit(mask)
-    val valid = fromMSHR.valid && !fromMSHR.bits.corrupt
-    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
-    val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
-    val way_same  = fromMSHR.bits.waymask === mask
-    when(valid && vset_same) {
-      when(ptag_same) {
-        new_mask := fromMSHR.bits.waymask
-      }.elsewhen(way_same) {
-        new_mask := 0.U
-      }
-    }
-    new_mask
-  }
-
-  val s1_SRAM_valid = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
-  val s1_MSHR_valid = fromMSHR.valid && !fromMSHR.bits.corrupt
-  val s1_waymasks   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
-  val s1_waymasks_r = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_SRAM_valid || s1_MSHR_valid)
-  (0 until PortNumber).foreach{i =>
-    val old_waymask = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
-    s1_waymasks(i) := update_waymask(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i))
-  }
+  val s1_SRAM_waymasks = VecInit((0 until PortNumber).map { port =>
+    Mux(tlb_valid_pulse(port), get_waymask(s1_req_paddr_wire)(port), get_waymask(s1_req_paddr_reg)(port))
+  })
 
   // select ecc code
   /* NOTE:
@@ -291,9 +261,52 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
    * 3. hit -> fake miss: We can't detect this, but we can (pre)fetch the correct data from L2 cache, so it's not a problem.
    * 4. hit -> hit / miss -> miss: ECC failure happens in a irrelevant way, so we don't care about it this time.
    */
-  val s1_meta_codes = VecInit((0 until PortNumber).map { port =>
-    Mux1H(s1_waymasks(port), fromMeta.codes(port))
+  val s1_SRAM_meta_codes = VecInit((0 until PortNumber).map { port =>
+    Mux1H(s1_SRAM_waymasks(port), fromMeta.codes(port))
   })
+
+  /**
+    ******************************************************************************
+    * update waymasks and meta_codes according to MSHR update data
+    ******************************************************************************
+    */
+  def update_meta_info(mask: UInt, vSetIdx: UInt, ptag: UInt, code: UInt): Tuple2[UInt, UInt] = {
+    require(mask.getWidth == nWays)
+    val new_mask  = WireInit(mask)
+    val new_code  = WireInit(code)
+    val valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
+    val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
+    val way_same  = fromMSHR.bits.waymask === mask
+    when(valid && vset_same) {
+      when(ptag_same) {
+        new_mask := fromMSHR.bits.waymask
+        // also update meta_codes
+        // we have getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag, so we can use ptag directly for better timing
+        new_code := encodeMetaECC(ptag)
+      }.elsewhen(way_same) {
+        new_mask := 0.U
+        // we dont care about new_code, since it's not used for a missed request
+      }
+    }
+    (new_mask, new_code)
+  }
+
+  val s1_SRAM_valid = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
+  val s1_MSHR_valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+  val s1_waymasks   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
+  val s1_waymasks_r = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_SRAM_valid || s1_MSHR_valid)
+  val s1_meta_codes   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(ICacheMetaCodeBits.W))))
+  val s1_meta_codes_r = RegEnable(s1_meta_codes, 0.U.asTypeOf(s1_meta_codes), s1_SRAM_valid || s1_MSHR_valid)
+
+  // update waymasks and meta_codes
+  (0 until PortNumber).foreach{i =>
+    val old_waymask    = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i),   s1_waymasks_r(i))
+    val old_meta_codes = Mux(s1_SRAM_valid, s1_SRAM_meta_codes(i), s1_meta_codes_r(i))
+    val new_info = update_meta_info(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i), old_meta_codes)
+    s1_waymasks(i)   := new_info._1
+    s1_meta_codes(i) := new_info._2
+  }
 
   /**
     ******************************************************************************

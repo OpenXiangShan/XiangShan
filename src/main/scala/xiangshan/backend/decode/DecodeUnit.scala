@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import freechips.rocketchip.rocket.Instructions._
+import freechips.rocketchip.rocket.CustomInstructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
@@ -220,6 +221,7 @@ object XDecode extends DecodeConstants {
     ECALL   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     SRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     MRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    MNRET   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     DRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     WFI     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.csr, CSROpType.wfi, SelImm.X    , xWen = T, noSpec = T, blockBack = T),
 
@@ -1005,7 +1007,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
     val isVle = decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse
     val isVlm = decodedInst.fuOpType === VlduType.vlm
-    val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV
+    val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
     val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
     val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
     decodedInst.vpu.isNarrow := isNarrow

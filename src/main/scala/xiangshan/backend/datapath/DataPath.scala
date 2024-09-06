@@ -567,8 +567,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         }.reduce(_ || _) && s0.valid
       } else s0_cancel := false.B
       val s0_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
-      when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel) {
-        s1_valid := s0.valid
+      when (s0.fire && !s1_flush && !s0_ldCancel) {
+        s1_valid := true.B
       }.otherwise {
         s1_valid := false.B
       }
@@ -576,7 +576,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         s1_data.fromIssueBundle(s0.bits) // no src data here
         s1_addrOH := s0.bits.addrOH
       }
-      s0.ready := (s1_ready || !s1_valid) && notBlock && !s0_cancel
+      s0.ready := notBlock && !s0_cancel
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
     }
   }
@@ -589,7 +589,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         case (toIU, iuIdx) =>
           // IU: issue unit
           val og0resp = toIU.og0resp
-          og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && (!fromIQFire(iqIdx)(iuIdx))
+          og0FailedVec2(iqIdx)(iuIdx)   := fromIQ(iqIdx)(iuIdx).valid && !fromIQ(iqIdx)(iuIdx).ready
           og0resp.valid                 := og0FailedVec2(iqIdx)(iuIdx)
           og0resp.bits.robIdx           := fromIQ(iqIdx)(iuIdx).bits.common.robIdx
           og0resp.bits.uopIdx.foreach(_ := fromIQ(iqIdx)(iuIdx).bits.common.vpu.get.vuopIdx)
@@ -599,16 +599,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og0resp.bits.fuType           := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
           val og1resp = toIU.og1resp
-          og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !toExuFire(iqIdx)(iuIdx)
+          og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
           og1resp.valid                 := s1_toExuValid(iqIdx)(iuIdx)
           og1resp.bits.robIdx           := s1_toExuData(iqIdx)(iuIdx).robIdx
           og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
           og1resp.bits.sqIdx.foreach(_ :=  0.U.asTypeOf(new SqPtr))
           og1resp.bits.lqIdx.foreach(_ :=  0.U.asTypeOf(new LqPtr))
-          // respType:  fuIdle      ->IQ entry clear
-          //            fuUncertain ->IQ entry no action
-          //            fuBusy      ->IQ entry issued set false, then re-issue
-          // hyu, lda and sta are fuUncertain at OG1 stage
+          // respType:  success    -> IQ entry clear
+          //            uncertain  -> IQ entry no action
+          //            block      -> IQ entry issued set false, then re-issue
+          // hyu, lda and sta are uncertain at OG1 stage
           // and all vector arith exu should check success in og2 stage
           og1resp.bits.resp             := Mux(og1FailedVec2(iqIdx)(iuIdx),
             RespType.block,

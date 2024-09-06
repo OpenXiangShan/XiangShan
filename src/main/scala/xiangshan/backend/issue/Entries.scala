@@ -60,7 +60,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = Wire(Vec(4, chiselTypeOf(io.og0Resp)))
 
-  if (params.inVfSchd)
+  if (params.needOg2Resp)
     resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, WireDefault(0.U.asTypeOf(io.og0Resp)))
   else
     resps := Seq(io.og0Resp, io.og1Resp, WireDefault(0.U.asTypeOf(io.og0Resp)), WireDefault(0.U.asTypeOf(io.og0Resp)))
@@ -273,7 +273,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   //issueRespVec
   if (params.needFeedBackSqIdx || params.needFeedBackLqIdx) {
     issueRespVec.lazyZip(sqIdxVec.get.zip(lqIdxVec.get)).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (sqIdx, lqIdx), (issueTimer, deqPortIdx)) =>
-      val respInDatapath = resps(issueTimer(0))(deqPortIdx)
+      val respInDatapath = if (!params.isVecMemIQ) resps(issueTimer(0))(deqPortIdx)
+                           else resps(issueTimer)(deqPortIdx)
       val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
       val hitRespsVec = VecInit(memEtyResps.map(x =>
         x.valid &&
@@ -283,7 +284,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       respAfterDatapath.valid := hitRespsVec.reduce(_ | _)
       respAfterDatapath.bits  := (if (memEtyResps.size == 1) memEtyResps.head.bits
                                   else Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq))
-      issueResp := Mux(issueTimer(1), respAfterDatapath, respInDatapath)
+      issueResp := (if (!params.isVecMemIQ) Mux(issueTimer(1), respAfterDatapath, respInDatapath)
+                    else Mux(issueTimer === "b11".U, respAfterDatapath, respInDatapath))
     }
   }
   else {
@@ -522,7 +524,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
   val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  val og2Resp             = OptionWrapper(params.inVfSchd, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
+  val og2Resp             = OptionWrapper(params.needOg2Resp, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))

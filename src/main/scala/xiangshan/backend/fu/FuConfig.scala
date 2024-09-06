@@ -182,7 +182,10 @@ case class FuConfig (
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
                             fuType == FuType.vidiv
 
-  def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf
+  def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
+                          fuType == FuType.vsegldu || fuType == FuType.vsegstu
+
+  def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || isVecMem
 
   def isSta: Boolean = name.contains("sta")
 
@@ -416,7 +419,7 @@ object FuConfig {
     writeIntRf = true,
     writeFpRf = true,
     latency = UncertainLatency(3),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
@@ -758,7 +761,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
@@ -776,7 +779,7 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
@@ -796,7 +799,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
@@ -814,7 +817,7 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,

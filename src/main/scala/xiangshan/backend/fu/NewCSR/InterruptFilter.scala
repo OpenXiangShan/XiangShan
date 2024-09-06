@@ -294,17 +294,24 @@ class InterruptFilter extends Module {
   dontTouch(vsMapHostIRVec)
 
   // support debug interrupt
-  val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
+  // support smrnmi when NMIE is 0, all interrupt disable
+  val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool) || !io.in.mnstatusNMIE
   val debugInterupt = ((io.in.debugIntr && !io.in.debugMode) << CSRConst.IRQ_DEBUG).asUInt
 
-  val intrVec = VecInit((mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
+  val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt
+  val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableInterrupt)).asUInt
   // delay at least 6 cycles to maintain the atomic of sret/mret
+  // 65bit indict current interrupt is NMI
   val intrVecReg = RegInit(0.U(64.W))
+  val nmiReg = RegInit(false.B)
   intrVecReg := intrVec
+  nmiReg := io.in.nmi
   val delayedIntrVec = DelayN(intrVecReg, 5)
+  val delayedNMI = DelayN(nmiReg, 5)
 
   io.out.interruptVec.valid := delayedIntrVec.orR
   io.out.interruptVec.bits := delayedIntrVec
+  io.out.nmi := delayedNMI
 
   dontTouch(hsip)
   dontTouch(hsie)
@@ -342,9 +349,14 @@ class InterruptFilterIO extends Bundle {
 
     val miprios = UInt((64*8).W)
     val hsiprios = UInt((64*8).W)
+    //smrnmi
+    val nmi = Bool()
+    val nmiVec = UInt(64.W)
+    val mnstatusNMIE = Bool()
   })
 
   val out = Output(new Bundle {
+    val nmi = Bool()
     val interruptVec = ValidIO(UInt(64.W))
     val mtopi  = new TopIBundle
     val stopi  = new TopIBundle
