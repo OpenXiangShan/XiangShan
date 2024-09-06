@@ -248,7 +248,8 @@ object Bundles {
     def isWFI: Bool = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
 
     def isSvinvalBegin(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && !flush
-    def isSvinval(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.sfence && !flush
+    def isSvinval(flush: Bool) = FuType.isFence(fuType) &&
+      Cat(Seq(FenceOpType.sfence, FenceOpType.hfence_v, FenceOpType.hfence_g).map(_ === fuOpType)).orR && !flush
     def isSvinvalEnd(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && flush
     def isNotSvinval = !FuType.isFence(fuType)
 
