@@ -115,6 +115,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val s3_pushAddr = Input(UInt(VAddrBits.W))
       val spec_pop_addr = Output(UInt(VAddrBits.W))
 
+      val commit_valid      = Input(Bool())
       val commit_push_valid = Input(Bool())
       val commit_pop_valid = Input(Bool())
       val commit_push_addr = Input(UInt(VAddrBits.W))
@@ -503,10 +504,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
 
-      BOS := io.commit_meta_TOSW
-
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
+    }
+
+    when (io.commit_push_valid) {
+      BOS := io.commit_meta_TOSW
+    } .elsewhen(io.commit_valid && (distanceBetween(io.commit_meta_TOSW,BOS) > 2.U)) {
+      BOS := specPtrDec(io.commit_meta_TOSW)
     }
 
     when (io.redirect_valid) {
@@ -650,6 +655,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
   val updateValid = io.update.valid
 
+  stack.commit_valid      := updateValid  
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken
   stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)
