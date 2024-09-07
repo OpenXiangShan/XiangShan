@@ -175,7 +175,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     0.U(offLen.W))
   ))
   val gvpn_gpf = Mux(enableS2xlate && io.csr.hgatp.mode === Sv39x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(enableS2xlate && io.csr.hgatp.mode === Sv48x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
-  val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
+  val check_g_perm_fail = RegInit(false.B)
+  val guestFault = hptw_pageFault || hptw_accessFault || check_g_perm_fail || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val fake_h_resp = 0.U.asTypeOf(new HptwResp)
   fake_h_resp.entry.tag := get_pn(gpaddr)
@@ -234,17 +235,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.req.fire && io.req.bits.stage1Hit){
     idle := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
-    s_hptw_req := false.B
+    s_last_hptw_req := false.B
     hptw_resp_stage2 := false.B
     last_s2xlate := false.B
+    check_g_perm_fail := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
-  }
-
-  when (io.hptw.resp.fire && w_hptw_resp === false.B && stage1Hit){
-    w_hptw_resp := true.B
-    hptw_resp_stage2 := true.B
-    hptw_resp := io.hptw.resp.bits.h_resp
   }
 
   when (io.resp.fire && stage1Hit){
@@ -281,6 +277,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     hptw_pageFault := false.B
     hptw_accessFault := false.B
     pte_valid := false.B
+    check_g_perm_fail := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       val onlys2_gpaddr = Cat(io.req.bits.req_info.vpn, 0.U(offLen.W)) // is 50 bits, don't need to check high bits when sv48x4 is enabled
@@ -290,7 +287,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         last_s2xlate := false.B
       }.otherwise{
         last_s2xlate := true.B
-        s_hptw_req := false.B
+        s_last_hptw_req := false.B
       }
     }.otherwise {
       last_s2xlate := false.B
@@ -303,25 +300,30 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_hptw_resp := false.B
   }
 
-  when(io.hptw.resp.fire && w_hptw_resp === false.B && !stage1Hit) {
+  when(io.hptw.resp.fire && w_hptw_resp === false.B) {
     hptw_pageFault := io.hptw.resp.bits.h_resp.gpf
     hptw_accessFault := io.hptw.resp.bits.h_resp.gaf
     hptw_resp := io.hptw.resp.bits.h_resp
     w_hptw_resp := true.B
-    when(onlyS2xlate){
-      mem_addr_update := true.B
-      last_s2xlate := false.B
-    }.elsewhen(!(io.hptw.resp.bits.h_resp.gpf || io.hptw.resp.bits.h_resp.gaf)) {
+    val g_perm_fail = !io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x)
+    check_g_perm_fail := g_perm_fail
+    when(!(g_perm_fail || io.hptw.resp.bits.h_resp.gpf || io.hptw.resp.bits.h_resp.gaf)) {
       s_pmp_check := false.B
     }
   }
-
+  
   when(io.hptw.req.fire && s_last_hptw_req === false.B) {
     w_last_hptw_resp := false.B
     s_last_hptw_req := true.B
   }
 
-  when(io.hptw.resp.fire && w_last_hptw_resp === false.B){
+  when (io.hptw.resp.fire && w_last_hptw_resp === false.B && stage1Hit){
+    w_hptw_resp := true.B
+    hptw_resp_stage2 := true.B
+    hptw_resp := io.hptw.resp.bits.h_resp
+  }
+
+  when(io.hptw.resp.fire && w_last_hptw_resp === false.B && !stage1Hit){
     hptw_pageFault := io.hptw.resp.bits.h_resp.gpf
     hptw_accessFault := io.hptw.resp.bits.h_resp.gaf
     hptw_resp := io.hptw.resp.bits.h_resp
@@ -424,6 +426,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
     w_last_hptw_resp := true.B
+    check_g_perm_fail := false.B
   }
 
 
@@ -684,9 +687,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
-        when (io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
+        val check_g_perm_fail = !io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x)
+        when (check_g_perm_fail || io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+          entries(i).hptw_resp.gpf := io.hptw.resp.bits.h_resp.gpf || check_g_perm_fail
           entries(i).first_s2xlate_fault := io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf
         }.otherwise{ // change the entry that is waiting hptw resp
           val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
