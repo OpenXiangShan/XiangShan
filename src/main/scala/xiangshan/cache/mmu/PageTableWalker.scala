@@ -320,7 +320,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when (io.hptw.resp.fire && w_last_hptw_resp === false.B && stage1Hit){
-    w_hptw_resp := true.B
+    w_last_hptw_resp := true.B
     hptw_resp_stage2 := true.B
     hptw_resp := io.hptw.resp.bits.h_resp
   }
