@@ -1202,11 +1202,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   /** LoadMissDB: record load miss state */
   val hartId = p(XSCoreParamsKey).HartId
-  val isWriteLoadMissTable = Constantin.createRecord(s"isWriteLoadMissTable$hartId")
+//   val isWriteLoadMissTable = Constantin.createRecord(s"isWriteLoadMissTable$hartId")
+  val isWriteLoadMissTable = true.B
   val isFirstHitWrite = Constantin.createRecord(s"isFirstHitWrite$hartId")
   val tableName = s"LoadMissDB$hartId"
   val siteName = s"DcacheWrapper$hartId"
-  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
+  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry, basicDB = true)
   for( i <- 0 until LoadPipelineWidth){
     val loadMissEntry = Wire(new LoadMissEntry)
     val loadMissWriteEn =
@@ -1230,8 +1231,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     )
   }
 
-  val isWriteLoadAccessTable = Constantin.createRecord(s"isWriteLoadAccessTable$hartId")
-  val loadAccessTable = ChiselDB.createTable(s"LoadAccessDB$hartId", new LoadAccessEntry)
+//   val isWriteLoadAccessTable = Constantin.createRecord(s"isWriteLoadAccessTable$hartId")
+  val isWriteLoadAccessTable = true.B
+  val loadAccessTable = ChiselDB.createTable(s"LoadAccessDB$hartId", new LoadAccessEntry, basicDB = true)
   for (i <- 0 until LoadPipelineWidth) {
     val loadAccessEntry = Wire(new LoadAccessEntry)
     loadAccessEntry.timeCnt := GTimer()

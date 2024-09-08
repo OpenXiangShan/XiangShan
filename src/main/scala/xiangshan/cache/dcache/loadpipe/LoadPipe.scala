@@ -415,6 +415,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := io.miss_req.fire && !io.mq_enq_cancel && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
+  when(s2_valid && s2_nack_no_mshr) {
+    assert(resp.valid && resp.bits.replay)
+  }
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   io.lsu.debug_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
@@ -592,6 +595,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_replay", io.lsu.resp.fire && resp.bits.replay)
   XSPerfAccumulate("load_replay_for_dcache_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data)
   XSPerfAccumulate("load_replay_for_dcache_no_mshr", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr)
+  XSPerfAccumulate("load_miss_for_dcache_no_mshr_or_reject", s2_nack_no_mshr)
   XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow)
   XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire && !real_miss)

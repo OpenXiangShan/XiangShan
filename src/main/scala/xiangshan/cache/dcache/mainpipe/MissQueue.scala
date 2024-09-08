@@ -948,25 +948,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     req_alloc_priority(i) := Cat((0 until cfg.nMSHRPorts).map(j => 
       if(i == j) false.B
       else
-      io.req(i).valid && 
-        Mux(io.req(j).valid && !reject(j) && !io.req(j).bits.cancel,
-            merge_with_port_req(j) || merge(j) || Mux(
-                io.req(i).bits.source =/= io.req(j).bits.source,
-                io.req(i).bits.source < io.req(j).bits.source,
-                Mux(
-                    io.req(i).bits.isFromPrefetch,
-                    (i < j).B,
-                    isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx)
-                )
-            ),
-            true.B
-        )
-    //   io.req(i).valid && 
-    //     Mux(io.req(j).valid, 
-    //         io.req(i).bits.isFromStore || io.req(j).bits.isFromPrefetch || // Highest priority for store req, and lowest for prefetch
-    //         (merge_with_port_req(j) || merge(j)) || isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx),
-    //         true.B
-    //     )
+      io.req(i).valid &&
+          Mux(io.req(j).valid && !reject(j) && !io.req(j).bits.cancel,
+              merge_with_port_req(j) || merge(j) || (i < j).B,
+              true.B
+          )
     )).asUInt
   }
 
@@ -1259,8 +1245,21 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfAccumulate("miss_req_fire_3", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 3.U)
   XSPerfAccumulate("miss_req_fire_2", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 2.U)
   XSPerfAccumulate("miss_req_fire_1", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 1.U)
-  XSPerfAccumulate("req_enq_failed", primary_ready_cnt > 0.U && Cat(io.req.zipWithIndex.map{case(r, i) => r.valid && !r.bits.cancel && !reject(i)}).orR)
-  // XSPerfAccumulate("miss_req", io.req.fire && !io.req.bits.cancel)
+  val alloc_success_req = PopCount(io.req.zipWithIndex.map{case(r, i) => r.valid && accept(i) && !reject(i) && io.resp(i).handled && !io.resp(i).merged})
+  val alloc_failed_req = PopCount(io.req.zipWithIndex.map{case(r, i) => r.valid && accept(i) && !reject(i) && !io.resp(i).handled})
+  when (alloc_failed_req > 0.U) {
+    assert(primary_ready_cnt - alloc_success_req === 0.U)
+  }
+  val req_need_replay = io.req.zipWithIndex.map{case(r,i) => r.valid && !reject(i) && !r.bits.cancel && !io.resp(i).handled}
+  val load_req_need_replay = io.req.zipWithIndex.map{case(r,i) => r.valid && !reject(i) && !r.bits.cancel && !io.resp(i).handled && !req_alloc_valid(i) && r.bits.isFromLoad}
+  val pf_req_need_replay = io.req.zipWithIndex.map{case(r,i) => r.valid && !reject(i) && !r.bits.cancel && !io.resp(i).handled && !req_alloc_valid(i) && r.bits.isFromPrefetch}
+  XSPerfAccumulate("req_enq_failed", primary_ready_cnt > alloc_success_req && alloc_failed_req > 0.U)
+  XSPerfAccumulate("mshr_full",  primary_ready_cnt === 0.U)
+  XSPerfAccumulate("mshr_not_full", primary_ready_cnt > 0.U)
+  XSPerfAccumulate("load_replay_for_no_mshr", PopCount(load_req_need_replay))
+  XSPerfAccumulate("pf_replay_for_no_mshr", PopCount(pf_req_need_replay))
+  XSPerfAccumulate("miss_queue_has_enq_req", PopCount(io.req.map(_.valid)))
+  XSPerfAccumulate("miss_req", PopCount(io.req.map{r => r.fire && !r.bits.cancel}))
   XSPerfAccumulate("miss_req_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i)}))
   XSPerfAccumulate("miss_req_load_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromLoad}))
   XSPerfAccumulate("miss_req_store_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromStore}))

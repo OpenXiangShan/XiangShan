@@ -1529,6 +1529,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
   XSPerfAccumulate("mainpipe_s2_missqueue_replay", s2_valid && s2_can_go_to_mq_replay)
+  XSPerfAccumulate("mainpipe_s2_missqueue_replay_by_replace_block", s2_valid && s2_can_go_to_mq_replay && io.replace_block)
   XSPerfAccumulate("mainpipe_slot_conflict_1_2", (s1_idx === s2_idx && s1_way_en === s2_way_en && s1_req.miss && s2_req.miss && s1_valid && s2_valid ))
   XSPerfAccumulate("mainpipe_slot_conflict_1_3", (s1_idx === s3_idx_dup_for_replace_access && s1_way_en === s3_way_en && s1_req.miss && s3_req.miss && s1_valid && s3_valid))
   XSPerfAccumulate("mainpipe_slot_conflict_2_3", (s2_idx === s3_idx_dup_for_replace_access && s2_way_en === s3_way_en && s2_req.miss && s3_req.miss && s2_valid && s3_valid))
