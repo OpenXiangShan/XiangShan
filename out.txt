@@ -1,5 +1,0 @@
-mkdir -p build/rtl
-Wed, 04 Sep 2024 09:08:27 +0800
-time -avp -o ./build/time.log mill -i xiangshan.test.runMain top.SimTop    \
-	--target-dir build/rtl --config DefaultConfig --issue B --firtool-opt "--repl-seq-mem --repl-seq-mem-file=SimTop.sv.conf"		\
-	--num-cores 1 --with-dramsim3 --with-chiseldb --dump-fir --target systemverilog --split-verilog --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none" --enable-difftest --full-stacktrace
