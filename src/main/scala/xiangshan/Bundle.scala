@@ -229,7 +229,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
-  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+  def needWriteRf: Bool = rfWen || fpWen || vecWen
   def isHyperInst: Bool = {
     fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
   }
