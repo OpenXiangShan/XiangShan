@@ -18,8 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer}
-import utils.XSError
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer, XSError}
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
 import utility.ParallelPriorityMux

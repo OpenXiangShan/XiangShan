@@ -431,7 +431,7 @@ class TraceICacheHelper extends ExtModule
        |  input             reset,
        |  input             enable,
        |  input      [63:0] addr,
-       |$getDataPort
+       |${getDataPort()}
        |  output reg [7:0]  legal_addr
        |);
        |

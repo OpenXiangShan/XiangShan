@@ -18,8 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.ParallelPriorityEncoder
-import utils.{XSError}
+import utility.{ParallelPriorityEncoder, XSError}
 import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, FaultType}
 
 // TracePredictChecker is just the same with the IFU's PredChecker

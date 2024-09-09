@@ -19,8 +19,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
-import utils.XSError
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, XSError}
 
 class TraceDriveCollectBundle(implicit p: Parameters) extends TraceBundle {
   val pc = UInt(64.W)

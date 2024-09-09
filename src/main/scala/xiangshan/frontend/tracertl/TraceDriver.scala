@@ -20,8 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
 import xiangshan.frontend.BranchPredictionRedirect
-import utility.ChiselMap
-import utils.XSPerfAccumulate
+import utility.{ChiselMap, XSPerfAccumulate}
 
 class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
   // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
