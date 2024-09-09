@@ -1278,11 +1278,45 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * DataBase info:
    * log trigger is at writeback valid
    * */
+  if (!env.FPGAPlatform) {
+    val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
+    val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
+    // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
+    for (wb <- exuWBs) {
+      when(wb.valid) {
+        val debug_instData = Wire(new InstInfoEntry)
+        val idx = wb.bits.robIdx.value
+        debug_instData.robIdx := idx
+        debug_instData.dvaddr := wb.bits.debug.vaddr
+        debug_instData.dpaddr := wb.bits.debug.paddr
+        debug_instData.issueTime := wb.bits.debugInfo.issueTime
+        debug_instData.writebackTime := wb.bits.debugInfo.writebackTime
+        debug_instData.dispatchLatency := wb.bits.debugInfo.dispatchTime - wb.bits.debugInfo.renameTime
+        debug_instData.enqRsLatency := wb.bits.debugInfo.enqRsTime - wb.bits.debugInfo.dispatchTime
+        debug_instData.selectLatency := wb.bits.debugInfo.selectTime - wb.bits.debugInfo.enqRsTime
+        debug_instData.issueLatency := wb.bits.debugInfo.issueTime - wb.bits.debugInfo.selectTime
+        debug_instData.executeLatency := wb.bits.debugInfo.writebackTime - wb.bits.debugInfo.issueTime
+        debug_instData.rsFuLatency := wb.bits.debugInfo.writebackTime - wb.bits.debugInfo.enqRsTime
+        debug_instData.tlbLatency := wb.bits.debugInfo.tlbRespTime - wb.bits.debugInfo.tlbFirstReqTime
+        debug_instData.exceptType := Cat(wb.bits.exceptionVec.getOrElse(ExceptionVec(false.B)))
+        debug_instData.lsInfo := debug_lsInfo(idx)
+        // debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
+        // debug_instData.instType := wb.bits.uop.ctrl.fuType
+        // debug_instData.ivaddr := wb.bits.uop.cf.pc
+        // debug_instData.mdpInfo.ssid := wb.bits.uop.cf.ssid
+        // debug_instData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
+        debug_instTable.log(
+          data = debug_instData,
+          en = wb.valid,
+          site = instSiteName,
+          clock = clock,
+          reset = reset
+        )
+      }
+    }
+  }
 
-  /**
-   * @todo add InstInfoEntry back
-   * @author Maxpicca-Li
-   */
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
