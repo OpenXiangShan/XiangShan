@@ -726,13 +726,13 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   // ppn of Xiangshan is 48 - 12 bits but ppn of sv48 is 44 bits
   // access fault will be raised when ppn >> ppnLen is not zero
   def isAf(): Bool = {
-    !(ppn_high === 0.U)
+    !(ppn_high === 0.U) && perm.v
   }
 
   def isStage1Gpf(mode: UInt) = {
     val sv39_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv39x4 - offLen)
     val sv48_high = Cat(ppn_high, ppn) >> (GPAddrBitsSv48x4 - offLen)
-    !(Mux(mode === Sv39, sv39_high, Mux(mode === Sv48, sv48_high, 0.U)) === 0.U)
+    !(Mux(mode === Sv39, sv39_high, Mux(mode === Sv48, sv48_high, 0.U)) === 0.U) && perm.v
   }
 
   def getPerm() = {
