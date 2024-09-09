@@ -16,9 +16,10 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(XLEN.W))
   })
-  io.target := SignExt(SignExt(io.pc, VAddrBits + 1) + Mux(io.taken,
-    SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1),
-    Mux(io.isRVC, 2.U, 4.U)
+  val pcExtend = SignExt(io.pc, VAddrBits + 1)
+  io.target := SignExt(Mux(io.taken,
+  pcExtend + SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1),
+  pcExtend + Mux(io.isRVC, 2.U, 4.U)
   ), XLEN)
 }
 
