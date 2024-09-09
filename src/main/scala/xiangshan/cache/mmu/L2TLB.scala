@@ -320,22 +320,22 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem_arb.io.in(2) <> hptw.io.mem.req
   mem_arb.io.out.ready := mem.a.ready && !flush
 
-  // assert, should not send mem access at same addr for twice.
-  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
-  val last_resp_s2xlate = RegEnable(cache.io.refill.bits.req_info_dup(0).s2xlate, cache.io.refill.valid)
-  val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
-  val last_resp_v = RegInit(false.B)
-  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR || cache.io.refill.bits.sel_pte_dup(0).asTypeOf(new PteBundle).isAf()
-  when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
-  when (flush) { last_resp_v := false.B }
-  XSError(last_resp_v && cache.io.refill.valid &&
-    (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
-    (cache.io.refill.bits.level_dup(0) === last_resp_level) &&
-    (cache.io.refill.bits.req_info_dup(0).s2xlate === last_resp_s2xlate),
-    "l2tlb should not access mem at same addr for twice")
-  // ATTENTION: this may wrongly assert when: a ptes is l2, last part is valid,
-  // but the current part is invalid, so one more mem access happened
-  // If this happened, remove the assert.
+  // // assert, should not send mem access at same addr for twice.
+  // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
+  // val last_resp_s2xlate = RegEnable(cache.io.refill.bits.req_info_dup(0).s2xlate, cache.io.refill.valid)
+  // val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
+  // val last_resp_v = RegInit(false.B)
+  // val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR || cache.io.refill.bits.sel_pte_dup(0).asTypeOf(new PteBundle).isAf()
+  // when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
+  // when (flush) { last_resp_v := false.B }
+  // XSError(last_resp_v && cache.io.refill.valid &&
+  //   (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
+  //   (cache.io.refill.bits.level_dup(0) === last_resp_level) &&
+  //   (cache.io.refill.bits.req_info_dup(0).s2xlate === last_resp_s2xlate),
+  //   "l2tlb should not access mem at same addr for twice")
+  // // ATTENTION: this may wrongly assert when: a ptes is l2, last part is valid,
+  // // but the current part is invalid, so one more mem access happened
+  // // If this happened, remove the assert.
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
