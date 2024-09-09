@@ -686,12 +686,29 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // TODO: handle sfenceLatch outsize
   if (EnableSv48) {
+    // L3 refill
+    val l3GoodToRefill = WireInit(false.B)
+    switch (refill.req_info_dup(2).s2xlate) {
+      is (allStage) {
+        l3GoodToRefill := !memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode)
+      }
+      is (onlyStage1) {
+        l3GoodToRefill := !memPte(2).isAf()
+      }
+      is (onlyStage2) {
+        l3GoodToRefill := !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
+      }
+      is (noS2xlate) {
+        l3GoodToRefill := !memPte(2).isAf()
+      }
+    }
+
     when (
-      !flush_dup(2) && refill.levelOH.l3.get && !memPte(2).isLeaf() && !memPte(2).isPf(refill.level_dup(2), pbmte) &&
-      Mux(refill.req_info_dup(2).s2xlate === allStage, !memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode),
-      Mux(refill.req_info_dup(2).s2xlate === onlyStage1, !(memPte(2).isAf() || memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode)),
-      Mux(refill.req_info_dup(2).s2xlate === onlyStage2, !memPte(2).isGpf(refill.level_dup(2), mPBMTE),
-      !memPte(2).isAf())))
+      !flush_dup(2) && 
+      refill.levelOH.l3.get && 
+      !memPte(2).isLeaf() && 
+      !memPte(2).isPf(refill.level_dup(2), pbmte) && 
+      l3GoodToRefill
     ) {
       val refillIdx = replaceWrapper(l3v.get, ptwl3replace.get.way)
       refillIdx.suggestName(s"Ptwl3RefillIdx")
@@ -721,12 +738,28 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
   }
 
+  // L2 refill
+  val l2GoodToRefill = WireInit(false.B)
+  switch (refill.req_info_dup(2).s2xlate) {
+    is (allStage) {
+      l2GoodToRefill := !memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode)
+    }
+    is (onlyStage1) {
+      l2GoodToRefill := !memPte(2).isAf()
+    }
+    is (onlyStage2) {
+      l2GoodToRefill := !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
+    }
+    is (noS2xlate) {
+      l2GoodToRefill := !memPte(2).isAf()
+    }
+  }
   when (
-    !flush_dup(2) && refill.levelOH.l2 && !memPte(2).isLeaf() && !memPte(2).isPf(refill.level_dup(2), pbmte) &&
-    Mux(refill.req_info_dup(2).s2xlate === allStage, !memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode),
-    Mux(refill.req_info_dup(2).s2xlate === onlyStage1, !(memPte(2).isAf() || memPte(2).isStage1Gpf(io.csr_dup(2).vsatp.mode)),
-    Mux(refill.req_info_dup(2).s2xlate === onlyStage2, !memPte(2).isGpf(refill.level_dup(2), mPBMTE),
-    !memPte(2).isAf())))
+    !flush_dup(2) && 
+    refill.levelOH.l2 && 
+    !memPte(2).isLeaf() && 
+    !memPte(2).isPf(refill.level_dup(2), pbmte) && 
+    l2GoodToRefill
   ) {
     val refillIdx = replaceWrapper(l2v, ptwl2replace.way)
     refillIdx.suggestName(s"Ptwl2RefillIdx")
@@ -755,12 +788,32 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfOH.suggestName(s"l2_rfOH")
   }
 
+  // L1 refill
+  val l1GoodToRefill = WireInit(false.B)
+  switch (refill.req_info_dup(1).s2xlate) {
+    is (allStage) {
+      // l1GoodToRefill := !memPte(1).isStage1Gpf(io.csr_dup(1).vsatp.mode)
+      l1GoodToRefill := !Cat(memPtes.map(_.isStage1Gpf(io.csr_dup(1).vsatp.mode))).orR
+    }
+    is (onlyStage1) {
+      // l1GoodToRefill := !memPte(1).isAf()
+      l1GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+    is (onlyStage2) {
+      // l1GoodToRefill := !memPte(1).isGpf(refill.level_dup(1))
+      // l1GoodToRefill := !Cat(memPtes.map(_.isGpf(refill.level_dup(1)))).orR
+      l1GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+    is (noS2xlate) {
+      // l1GoodToRefill := !memPte(1).isAf()
+      l1GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+  }
   when (
-    !flush_dup(1) && refill.levelOH.l1 && !memPte(1).isLeaf() && !memPte(1).isPf(refill.level_dup(1), pbmte) &&
-    Mux(refill.req_info_dup(1).s2xlate === allStage, !memPte(1).isStage1Gpf(io.csr_dup(1).vsatp.mode),
-    Mux(refill.req_info_dup(1).s2xlate === onlyStage1, !(memPte(1).isAf() || memPte(1).isStage1Gpf(io.csr_dup(1).vsatp.mode)),
-    Mux(refill.req_info_dup(1).s2xlate === onlyStage2, !memPte(1).isGpf(refill.level_dup(1), mPBMTE),
-    !memPte(1).isAf())))
+    !flush_dup(1) && refill.levelOH.l1 && 
+    !memPte(1).isLeaf() && 
+    !memPte(1).isPf(refill.level_dup(1), pbmte) && 
+    l1GoodToRefill
   ) {
     val refillIdx = genPtwL1SetIdx(refill.req_info_dup(1).vpn)
     val victimWay = replaceWrapper(getl1vSet(refill.req_info_dup(1).vpn), ptwl1replace.way(refillIdx))
@@ -803,13 +856,29 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfvOH.suggestName(s"l1_rfvOH")
   }
 
-  when (
-    !flush_dup(0) && refill.levelOH.l0 &&
-    Mux(refill.req_info_dup(0).s2xlate === allStage, !memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode),
-    Mux(refill.req_info_dup(0).s2xlate === onlyStage1, !(memPte(0).isAf() || memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode)),
-    Mux(refill.req_info_dup(0).s2xlate === onlyStage2, !memPte(0).isGpf(refill.level_dup(0), mPBMTE),
-    !memPte(0).isAf())))
-  ) {
+  // L0 refill
+  val l0GoodToRefill = WireInit(false.B)
+  switch (refill.req_info_dup(0).s2xlate) {
+    is (allStage) {
+      // l0GoodToRefill := !memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode)
+      l0GoodToRefill := !Cat(memPtes.map(_.isStage1Gpf(io.csr_dup(0).vsatp.mode))).orR
+    }
+    is (onlyStage1) {
+      // l0GoodToRefill := !memPte(0).isAf()
+      l0GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+    is (onlyStage2) {
+      // l0GoodToRefill := !memPte(0).isGpf(refill.level_dup(0))
+      // l0GoodToRefill := !Cat(memPtes.map(_.isGpf(refill.level_dup(0)))).orR
+      l0GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+    is (noS2xlate) {
+      // l0GoodToRefill := !memPte(0).isAf()
+      l0GoodToRefill := !Cat(memPtes.map(_.isAf())).orR
+    }
+  }
+
+  when (!flush_dup(0) && refill.levelOH.l0 && l0GoodToRefill) {
     val refillIdx = genPtwL0SetIdx(refill.req_info_dup(0).vpn)
     val victimWay = replaceWrapper(getl0vSet(refill.req_info_dup(0).vpn), ptwl0replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)
@@ -853,12 +922,27 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
 
   // misc entries: super & invalid
+  val spGoodToRefill = WireInit(false.B)
+  switch (refill.req_info_dup(0).s2xlate) {
+    is (allStage) {
+      spGoodToRefill := !memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode)
+    }
+    is (onlyStage1) {
+      spGoodToRefill := !memPte(0).isAf()
+    }
+    is (onlyStage2) {
+      spGoodToRefill := !memPte(0).isGpf(refill.level_dup(0), mPBMTE)
+    }
+    is (noS2xlate) {
+      spGoodToRefill := !memPte(0).isAf()
+    }
+  }
+
   when (
-    !flush_dup(0) && refill.levelOH.sp && (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0), pbmte) &&
-    Mux(refill.req_info_dup(0).s2xlate === allStage, !memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode),
-    Mux(refill.req_info_dup(0).s2xlate === onlyStage1, !(memPte(0).isAf() || memPte(0).isStage1Gpf(io.csr_dup(0).vsatp.mode)),
-    Mux(refill.req_info_dup(0).s2xlate === onlyStage2, !memPte(0).isGpf(refill.level_dup(0), mPBMTE),
-    !memPte(0).isAf()))))
+    !flush_dup(0) && 
+    refill.levelOH.sp && 
+    (memPte(0).isLeaf() || memPte(0).isPf(refill.level_dup(0), pbmte)) && 
+    spGoodToRefill
   ) {
     val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
     val rfOH = UIntToOH(refillIdx)
