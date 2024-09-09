@@ -194,8 +194,10 @@ class MinimalConfig(n: Int = 1) extends Config(
           l2Size = 4,
           l1nSets = 4,
           l1nWays = 4,
+          l1ReservedBits = 1,
           l0nSets = 4,
           l0nWays = 8,
+          l0ReservedBits = 0,
           spSize = 4,
         ),
         L2CacheParamsOpt = Some(L2Param(
