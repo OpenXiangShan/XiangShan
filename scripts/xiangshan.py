@@ -538,24 +538,24 @@ class XiangShan(object):
         # select a random SPEC checkpoint
         assert(name == "random")
         all_cpt = [
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt"
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt"
         ]
         all_json = [
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/simpoint_summary.json"
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json",
+            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/simpoint_summary.json"
         ]
         assert(len(all_cpt) == len(all_json))
         cpt_path, json_path = random.choice(list(zip(all_cpt, all_json)))
