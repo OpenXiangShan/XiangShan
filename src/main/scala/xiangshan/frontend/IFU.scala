@@ -920,7 +920,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio
       },
     _.foldpc      := f3_foldpc,
-    _.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+    _.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec),
     _.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none),
     _.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none),
     _.illegalInstr:= f3_ill,

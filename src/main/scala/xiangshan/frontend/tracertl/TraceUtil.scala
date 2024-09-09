@@ -51,7 +51,7 @@ object TraceRTLDontCareValue {
 }
 
 object TraceRTLDontCare {
-  def apply[T <: Data](origin: T)(implicit p: Parameters) {
+  def apply[T <: Data](origin: T)(implicit p: Parameters): Unit = {
     val env = p(DebugOptionsKey)
     if (env.TraceRTLMode) {
       origin := 0.U.asTypeOf(origin)

@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.{PreDecodeResp, PredCheckerResp}
-import utils.XSError
+import utility.XSError
 
 class TraceCheckerResp(implicit p: Parameters) extends TraceBundle {
   val traceRange = UInt(PredictWidth.W)
