@@ -400,6 +400,9 @@ class WithFuzzer extends Config((site, here, up) => {
 })
 
 class BitmapCompile extends Config((site, here, up) => {
+  case SoCParamsKey => up(SoCParamsKey).copy(
+    HasMEMencryption = Some(true)
+  )
   case XSTileKey => up(XSTileKey).map(_.copy(
     HasCVMExtension = Some(true)))
 })

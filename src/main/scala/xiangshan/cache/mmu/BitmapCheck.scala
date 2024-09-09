@@ -256,7 +256,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst{
 
   io.mem.req.bits.hptw_bypassed := false.B
 
-  io.wakeup.valid := io.resp.valid && !entries(mem_ptr).hit
+  io.wakeup.valid := io.resp.valid
   io.wakeup.bits.setIndex := genPtwL0SetIdx(entries(mem_ptr).vpn)
   io.wakeup.bits.tag := entries(mem_ptr).vpn(vpnLen - 1, vpnLen - PtwL0TagLen)
   io.wakeup.bits.isSp := entries(mem_ptr).level =/= 0.U
