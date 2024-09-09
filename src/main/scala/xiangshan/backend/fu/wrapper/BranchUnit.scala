@@ -34,7 +34,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   addModule.io.pc := io.in.bits.data.pc.get // pc
   addModule.io.offset := io.in.bits.data.imm // imm
-  addModule.io.taken := dataModule.io.taken
+  addModule.io.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0))
   addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
 
   io.out.valid := io.in.valid
@@ -55,7 +55,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         ),
         _.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0)),
         _.cfiUpdate.predTaken := dataModule.io.pred_taken,
-        _.cfiUpdate.target := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
+        _.cfiUpdate.target := addModule.io.target,
         _.cfiUpdate.pc := io.in.bits.data.pc.get,
         _.traceInfo := io.in.bits.ctrl.traceInfo
       )
@@ -63,6 +63,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)
     XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
+    XSError(io.in.valid && io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= io.in.bits.ctrl.traceInfo.target),
+      "when taken, addMod's target should equal to traceInfo's target")
+    // TraceInfo's target is the 'taken' target
   }
 
   connect0LatencyCtrlSingal
