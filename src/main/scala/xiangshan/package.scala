@@ -187,6 +187,7 @@ package object xiangshan {
   object ExceptionVec {
     val ExceptionVecSize = 24
     def apply() = Vec(ExceptionVecSize, Bool())
+    def apply(init: Bool) = VecInit(Seq.fill(ExceptionVecSize)(init))
   }
 
   object PMAMode {
