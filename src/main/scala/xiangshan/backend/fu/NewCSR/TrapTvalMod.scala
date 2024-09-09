@@ -20,27 +20,27 @@ class TrapTvalMod(implicit p: Parameters) extends XSModule with HasCircularQueue
     val tval = Output(UInt(XLEN.W))
   })
 
-  val valid = RegInit(false.B)
-  val tval = Reg(UInt(XLEN.W))
-  val robIdx = Reg(new RobPtr)
+  private val valid = RegInit(false.B)
+  private val tval = Reg(UInt(XLEN.W))
+  private val robIdx = Reg(new RobPtr)
 
-  val update_flush = io.fromCtrlBlock.flush.valid && io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
-  val clear_flush = io.fromCtrlBlock.flush.valid && !io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
+  private val updateFromFlush = io.fromCtrlBlock.flush.valid && io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
+  private val clearFromFlush = io.fromCtrlBlock.flush.valid && !io.fromCtrlBlock.flush.bits.cfiUpdate.hasBackendFault
 
   when(io.targetPc.valid && io.targetPc.bits.raiseFault) {
     valid := true.B
     tval := io.targetPc.bits.pc
     robIdx := io.fromCtrlBlock.robDeqPtr
   }.elsewhen(valid) {
-    when(update_flush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx)) {
+    when(updateFromFlush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx)) {
       valid := true.B
       tval := io.fromCtrlBlock.flush.bits.fullTarget
       robIdx := io.fromCtrlBlock.flush.bits.robIdx
-    }.elsewhen(clear_flush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx) || io.clear) {
+    }.elsewhen(clearFromFlush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx) || io.clear) {
       valid := false.B
     }
   }.otherwise {
-    when(update_flush) {
+    when(updateFromFlush) {
       valid := true.B
       tval := io.fromCtrlBlock.flush.bits.fullTarget
       robIdx := io.fromCtrlBlock.flush.bits.robIdx

@@ -1184,7 +1184,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       mstatusNew.ie.m := mstatusOld.pie.m
       privilegeMode := mstatusOld.mpp
       if (HasHExtension) {
-        virtMode := Mux(mstatusOld.mpp === ModeM, false.B, mstatusOld.mpv)
+        virtMode := mstatusOld.mpv
         mstatusNew.mpv := 0.U
       }
       mstatusNew.pie.m := true.B
@@ -1292,11 +1292,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
-  val iexceptionPC = Mux(csrio.exception.bits.isFetchMalAddr,
-    1.U << 63,
-    Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
-  )
-  val iexceptionGPAddr = csrio.exception.bits.gpaddr
+  val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
+  val iexceptionGPAddr = Mux(ivmEnable, SignExt(csrio.exception.bits.gpaddr, XLEN), csrio.exception.bits.gpaddr)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
   XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
@@ -1304,7 +1301,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // exceptions from rob need to handle
   val exceptionVecFromRob    = csrio.exception.bits.exceptionVec
-  val isFetchMalAddr         = csrio.exception.bits.isFetchMalAddr
   val hasException           = csrio.exception.valid && !csrio.exception.bits.isInterrupt
   val hasInstrPageFault      = hasException && exceptionVecFromRob(instrPageFault)
   val hasLoadPageFault       = hasException && exceptionVecFromRob(loadPageFault)
@@ -1362,7 +1358,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // mtval write logic
   // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  val memExceptionGPAddr = csrio.memExceptionGPAddr
+  val memExceptionGPAddr = SignExt(csrio.memExceptionGPAddr, XLEN)
   val updateTval = VecInit(Seq(
     hasInstrPageFault,
     hasLoadPageFault,
@@ -1385,11 +1381,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
         RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault || hasBreakPoint)),
-        Mux(RegNext(RegNext(isFetchMalAddr)), 1.U << (XLEN - 1), RegNext(RegNext(Mux(
+        RegNext(RegNext(Mux(
           csrio.exception.bits.crossPageIPFFix,
           SignExt(csrio.exception.bits.pc + 2.U, XLEN),
           iexceptionPC
-        )))),
+        ))),
         memExceptionAddr
     )
     // because we update tval two beats later, we can choose xtval according to the privilegeMode which has been updated
@@ -1409,7 +1405,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       RegNext(RegNext(hasInstGuestPageFault)),
       RegNext(RegNext(Mux(
         csrio.exception.bits.crossPageIPFFix,
-        csrio.exception.bits.gpaddr + 2.U,
+        SignExt(csrio.exception.bits.gpaddr + 2.U, XLEN),
         iexceptionGPAddr
       ))),
       memExceptionGPAddr
@@ -1444,7 +1440,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret || illegalVSModeSret, isXRet)
 
   private val xtvec = Mux(delegS, Mux(delegVS, vstvec, stvec), mtvec)
-  private val xtvecBase = xtvec(XLEN - 1, 2)
+  private val xtvecBase = xtvec(VAddrBits - 1, 2)
   // When MODE=Vectored, all synchronous exceptions into M/S mode
   // cause the pc to be set to the address in the BASE field, whereas
   // interrupts cause the pc to be set to the address in the BASE field
@@ -1494,7 +1490,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       //do nothing
     }.elsewhen (delegVS) {
       vscause := (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO - 1.U, exceptionNO)
-      vsepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
+      vsepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       vsstatusNew.spp := privilegeMode
       vsstatusNew.pie.s := vsstatusOld.ie.s
       vsstatusNew.ie.s := false.B
@@ -1513,7 +1509,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       }
       virtMode := false.B
       scause := causeNO
-      sepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := privilegeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -1529,7 +1525,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       mstatusNew.mpv := virtMode
       virtMode := false.B
       mcause := causeNO
-      mepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault, iexceptionPC, dexceptionPC)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := privilegeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
@@ -1542,18 +1538,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     hstatus := hstatusNew.asUInt
     debugMode := debugModeNew
   }
-
-  // instruction fetch address translation type
-  csrio.instrAddrTransType.bare := privilegeMode === ModeM ||
-                                   (!virtMode && tlbBundle.satp.mode === 0.U) ||
-                                   (virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 0.U)
-  csrio.instrAddrTransType.sv39 := privilegeMode =/= ModeM && !virtMode && tlbBundle.satp.mode === 8.U ||
-                                   virtMode && tlbBundle.vsatp.mode === 8.U
-  csrio.instrAddrTransType.sv48 := privilegeMode =/= ModeM && !virtMode && tlbBundle.satp.mode === 9.U ||
-                                   virtMode && tlbBundle.vsatp.mode === 9.U
-  csrio.instrAddrTransType.sv39x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 8.U
-  csrio.instrAddrTransType.sv48x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 9.U
-  assert(PopCount(csrio.instrAddrTransType.asUInt) === 1.U, "Exactly one instr fetch addr trans type can be asserted.")
 
   // Cache error debug support
   if(HasCustomCSRCacheOp){
