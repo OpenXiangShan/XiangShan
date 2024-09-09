@@ -89,8 +89,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
-    val noc_clock = IO(Input(Clock()))
-    val noc_reset = IO(Input(AsyncReset()))
+    val noc_clock = EnableCHIAsyncBridge.map(_ => IO(Input(Clock())))
+    val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
@@ -150,7 +150,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     EnableCHIAsyncBridge match {
       case Some(param) =>
-        val sink = withClockAndReset(noc_clock, noc_reset_sync) {
+        val sink = withClockAndReset(noc_clock.get, noc_reset_sync) {
           Module(new CHIAsyncBridgeSink(param))
         }
         sink.io.async <> core_with_l2.module.io.chi.get
