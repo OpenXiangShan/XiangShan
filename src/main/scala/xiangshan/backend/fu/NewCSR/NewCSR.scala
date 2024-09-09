@@ -20,6 +20,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.ExceptionNO._
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLChoose}
 
 import scala.collection.immutable.SeqMap
 
@@ -81,6 +82,8 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val mret = Input(Bool())
   val sret = Input(Bool())
   val dret = Input(Bool())
+
+  val traceInfo = new TraceInstrBundle
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
@@ -139,6 +142,8 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isHls = Bool()
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
+
+        val traceInfo = Input(new TraceInstrBundle)
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -927,19 +932,22 @@ class NewCSR(implicit val p: Parameters) extends Module
       io.in.fire -> rdata,
       fromAIA.rdata.valid -> fromAIA.rdata.bits.data
     )), 0.U(64.W), io.in.fire || fromAIA.rdata.valid)
+
+  val traceTargetFromFu = io.in.bits.traceInfo.target
+  val traceTargetFromRob = io.fromRob.trap.bits.traceInfo.target
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,
       trapEntryDEvent.out.targetPc.bits,
       Mux1H(Seq(
-        mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
-        mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
-        sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
-        dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
-        trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
-        trapEntryMNEvent.out.targetPc.valid -> trapEntryMNEvent.out.targetPc.bits,
-        trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
-        trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits)
+        mnretEvent.out.targetPc.valid -> TraceRTLChoose(mnretEvent.out.targetPc.bits, traceTargetFromFu),
+        mretEvent.out.targetPc.valid  -> TraceRTLChoose(mretEvent.out.targetPc.bits, traceTargetFromFu),
+        sretEvent.out.targetPc.valid  -> TraceRTLChoose(sretEvent.out.targetPc.bits, traceTargetFromFu),
+        dretEvent.out.targetPc.valid  -> TraceRTLChoose(dretEvent.out.targetPc.bits, traceTargetFromFu),
+        trapEntryMEvent.out.targetPc.valid  -> TraceRTLChoose(trapEntryMEvent.out.targetPc.bits, traceTargetFromRob),
+        trapEntryMNEvent.out.targetPc.valid -> TraceRTLChoose(trapEntryMNEvent.out.targetPc.bits, traceTargetFromRob),
+        trapEntryHSEvent.out.targetPc.valid -> TraceRTLChoose(trapEntryHSEvent.out.targetPc.bits, traceTargetFromRob),
+        trapEntryVSEvent.out.targetPc.valid -> TraceRTLChoose(trapEntryVSEvent.out.targetPc.bits, traceTargetFromRob))
       )
     ),
   needTargetUpdate)

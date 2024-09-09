@@ -102,6 +102,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.mnret := isMNret
       in.bits.sret := isSret
       in.bits.dret := isDret
+
+      in.bits.traceInfo := io.in.bits.ctrl.traceInfo
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
@@ -123,6 +125,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
+  csrMod.io.fromRob.trap.bits.traceInfo := csrIn.exception.bits.traceInfo
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -285,6 +288,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.cfiUpdate.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
+  redirect.traceInfo := io.in.bits.ctrl.traceInfo
 
   connectNonPipedCtrlSingalForCSR
 
