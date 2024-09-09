@@ -119,7 +119,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
-    case Reg_I => x.rfWen && x.ldest =/= 0.U
+    case Reg_I => x.rfWen
     case Reg_F => x.fpWen
     case Reg_V => x.vecWen
     case Reg_V0 => x.v0Wen
@@ -136,7 +136,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   def needDestRegWalk[T <: RabCommitInfo](reg_t: RegType, x: T): Bool = {
     reg_t match {
-      case Reg_I => x.rfWen && x.ldest =/= 0.U
+      case Reg_I => x.rfWen
       case Reg_F => x.fpWen
       case Reg_V => x.vecWen
       case Reg_V0 => x.v0Wen

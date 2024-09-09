@@ -278,7 +278,7 @@ object Bundles {
       this
     }
 
-    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen || v0Wen || vlWen
+    def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
   }
 
   trait BundleSource {
