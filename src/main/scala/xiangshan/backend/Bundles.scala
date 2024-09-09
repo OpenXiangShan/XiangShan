@@ -44,6 +44,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
@@ -56,6 +57,7 @@ object Bundles {
       this.pc               := source.pc
       this.foldpc           := source.foldpc
       this.exceptionVec     := source.exceptionVec
+      this.isFetchMalAddr   := source.exceptionFromBackend
       this.trigger          := source.trigger
       this.preDecodeInfo    := source.pd
       this.pred_taken       := source.pred_taken
@@ -73,6 +75,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
@@ -166,6 +169,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
@@ -850,6 +854,7 @@ object Bundles {
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
+    val isFetchMalAddr = Bool()
     val gpaddr = UInt(GPAddrBits.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()

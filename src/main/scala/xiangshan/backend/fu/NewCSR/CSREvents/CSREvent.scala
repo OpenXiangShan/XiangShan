@@ -110,8 +110,10 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val trapPc = Input(UInt(VaddrMaxWidth.W))
   val trapPcGPA = Input(UInt(GPAddrBits.W))
   val trapInst = Input(ValidIO(UInt(InstWidth.W)))
+  val fetchMalTval = Input(UInt(XLEN.W))
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
+  val isFetchMalAddr = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -126,7 +128,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
 
   val tcontrol = Input(new TcontrolBundle)
 
-  val pcFromXtvec = Input(UInt(VaddrMaxWidth.W))
+  val pcFromXtvec = Input(UInt(XLEN.W))
 
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
@@ -136,4 +138,13 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
   val virtualInterruptIsHvictlInject = Input(Bool())
   val hvictlIID = Input(UInt(HIIDWidth.W))
+}
+
+class TargetPCBundle extends Bundle {
+  val pc = UInt(XLEN.W)
+  val raiseIPF = Bool()
+  val raiseIAF = Bool()
+  val raiseIGPF = Bool()
+
+  def raiseFault = raiseIPF || raiseIAF || raiseIGPF
 }

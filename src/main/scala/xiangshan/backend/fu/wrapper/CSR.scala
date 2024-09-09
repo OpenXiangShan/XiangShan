@@ -63,6 +63,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val csrMod = Module(new NewCSR)
   val trapInstMod = Module(new TrapInstMod)
+  val trapTvalMod = Module(new TrapTvalMod)
 
   private val privState = csrMod.io.status.privState
   // The real reg value in CSR, with no read mask
@@ -102,6 +103,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.dret := isDret
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
+  csrMod.io.fetchMalTval := trapTvalMod.io.tval
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
   csrMod.io.fromMem.excpGPA := csrIn.memExceptionGPAddr
 
@@ -117,6 +119,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
   csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
+  csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -135,6 +138,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromRob.commit.instNum.valid := true.B  // Todo: valid control signal
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
+
+  csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
 
   csrMod.io.perf  := csrIn.perf
 
@@ -167,6 +172,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     case t =>
       t.valid && !t.bits.isInterrupt && (t.bits.trapVec(EX_II) || t.bits.trapVec(EX_VI))
   })
+
+  trapTvalMod.io.targetPc.valid := csrMod.io.out.bits.targetPcUpdate
+  trapTvalMod.io.targetPc.bits := csrMod.io.out.bits.targetPc
+  trapTvalMod.io.clear := csrIn.exception.valid && csrIn.exception.bits.isFetchMalAddr
+  trapTvalMod.io.fromCtrlBlock.flush := io.flush
+  trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
   private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
   imsic.i.hartId := io.csrin.get.hartId
@@ -254,7 +265,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
-  redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc
+  redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc.pc
+  redirect.cfiUpdate.backendIPF := csrMod.io.out.bits.targetPc.raiseIPF
+  redirect.cfiUpdate.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
+  redirect.cfiUpdate.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 
@@ -322,6 +336,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // virtual mode
       custom.virtMode := csrMod.io.status.privState.V.asBool
   }
+
+  csrOut.instrAddrTransType := csrMod.io.status.instrAddrTransType
 
   csrToDecode := csrMod.io.toDecode
 }

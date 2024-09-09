@@ -554,6 +554,28 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit = Wire(Bool())
 
+  // Instruction page fault and instruction access fault are sent from backend with redirect requests.
+  // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
+  // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
+  // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
+  // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
+  val backendIpf = RegInit(false.B)
+  val backendIgpf = RegInit(false.B)
+  val backendIaf = RegInit(false.B)
+  val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
+  when (fromBackendRedirect.valid) {
+    backendIpf := fromBackendRedirect.bits.cfiUpdate.backendIPF
+    backendIgpf := fromBackendRedirect.bits.cfiUpdate.backendIGPF
+    backendIaf := fromBackendRedirect.bits.cfiUpdate.backendIAF
+    when (fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF || fromBackendRedirect.bits.cfiUpdate.backendIAF) {
+      backendPcFaultPtr := ifuWbPtr_write
+    }
+  } .elsewhen (ifuWbPtr =/= backendPcFaultPtr) {
+    backendIpf := false.B
+    backendIgpf := false.B
+    backendIaf := false.B
+  }
+
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
@@ -862,6 +884,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     copy.fromFtqPcBundle(toICachePcBundle(i))
     copy.ftqIdx := ifuPtr
   }
+  io.toICache.req.bits.backendIpf := backendIpf && backendPcFaultPtr === ifuPtr
+  io.toICache.req.bits.backendIgpf := backendIgpf && backendPcFaultPtr === ifuPtr
+  io.toICache.req.bits.backendIaf := backendIaf && backendPcFaultPtr === ifuPtr
 
   io.toPrefetch.req.valid := toPrefetchEntryToSend && pfPtr =/= bpuPtr
   io.toPrefetch.req.bits.fromFtqPcBundle(toPrefetchPcBundle)

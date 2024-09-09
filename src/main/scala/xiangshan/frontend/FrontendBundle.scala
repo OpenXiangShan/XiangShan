@@ -92,6 +92,9 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
+  val backendIpf          = Bool()
+  val backendIgpf         = Bool()
+  val backendIaf          = Bool()
 }
 
 
@@ -119,20 +122,38 @@ object ExceptionType {
   def af    : UInt = "b11".U // instruction access fault
   def width : Int  = 2
 
+  def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
+    assert(
+      PopCount(VecInit(has_pf, has_gpf, has_af)) <= 1.U,
+      "ExceptionType.fromOH receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
+      has_pf, has_gpf, has_af
+    )
+    // input is at-most-one-hot encoded, so we don't worry about priority here.
+    MuxCase(none, Seq(
+      has_pf  -> pf,
+      has_gpf -> gpf,
+      has_af  -> af
+    ))
+  }
+
+  // raise pf/gpf/af according to ftq(backend) request
+  def fromFtq(req: FtqToICacheRequestBundle): UInt = {
+    fromOH(
+      req.backendIpf,
+      req.backendIgpf,
+      req.backendIaf
+    )
+  }
+
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): UInt = {
     require(useDup >= 0 && useDup < resp.excp.length)
-    assert(
-      PopCount(VecInit(resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr)) <= 1.U,
-      "tlb resp has more than 1 exception, af=%d, pf=%d, gpf=%d",
-      resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr
+    // itlb is guaranteed to respond at most one exception
+    fromOH(
+      resp.excp(useDup).pf.instr,
+      resp.excp(useDup).gpf.instr,
+      resp.excp(useDup).af.instr
     )
-    // itlb is guaranteed to respond at most one exception, so we don't worry about priority here.
-    MuxCase(none, Seq(
-      resp.excp(useDup).pf.instr  -> pf,
-      resp.excp(useDup).gpf.instr -> gpf,
-      resp.excp(useDup).af.instr  -> af
-    ))
   }
 
   // raise af if pmp check failed
@@ -232,6 +253,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val exceptionFromBackend = Vec(PredictWidth, Bool())
   val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val illegalInstr = Vec(PredictWidth, Bool())

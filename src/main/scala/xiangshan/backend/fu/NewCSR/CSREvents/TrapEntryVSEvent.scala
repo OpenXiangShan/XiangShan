@@ -7,8 +7,9 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
+import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 
 class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -17,7 +18,7 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc = ValidIO(new TargetPCBundle)
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -89,6 +90,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
   private val fetchCrossPage = in.isCrossPageIPF
+  private val isFetchMalAddr = in.isFetchMalAddr
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
@@ -109,6 +111,14 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     (tvalFillInst                   ) -> trapInst,
   ))
 
+  private val instrAddrTransType = AddrTransType(
+    bare = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Bare,
+    sv39 = vsatp.MODE === SatpMode.Sv39,
+    sv48 = vsatp.MODE === SatpMode.Sv48,
+    sv39x4 = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4,
+    sv48x4 = vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
+  )
+
   out := DontCare
 
   out.privState.valid := valid
@@ -125,11 +135,14 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsstatus.bits.SPIE         := current.vsstatus.SIE
   out.vsstatus.bits.SIE          := 0.U
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
-  out.vsepc.bits.epc             := trapPC(63, 1)
+  out.vsepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
-  out.vstval.bits.ALL            := tval
-  out.targetPc.bits              := in.pcFromXtvec
+  out.vstval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
+  out.targetPc.bits.pc           := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF    := instrAddrTransType.checkGuestPageFault(in.pcFromXtvec)
 
   dontTouch(tvalFillGVA)
 }

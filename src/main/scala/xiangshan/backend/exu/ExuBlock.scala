@@ -53,6 +53,9 @@ class ExuBlockImp(
 //    }
     XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
+  exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
+    exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
+  }
   val aluFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
   for (i <- 0 until (aluFireSeq.size + 1)){
     XSPerfAccumulate(s"alu_fire_${i}_cnt", PopCount(aluFireSeq) === i.U)

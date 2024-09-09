@@ -295,10 +295,16 @@ class CtrlBlockImp(
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
   private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr, s2_robFlushPc)
+  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.pc, s2_robFlushPc)
+  val s5_trapTargetIAF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIAF, false.B)
+  val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
+  val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
   }
 
   for (i <- 0 until DecodeWidth) {

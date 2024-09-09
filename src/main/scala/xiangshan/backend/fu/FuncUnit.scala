@@ -94,6 +94,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
+  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {

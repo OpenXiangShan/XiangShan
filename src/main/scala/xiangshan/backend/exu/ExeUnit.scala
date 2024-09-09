@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
-import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
+import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
@@ -44,6 +44,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
+  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -329,6 +330,7 @@ class ExeUnitImp(
     fuio =>
       exuio <> fuio
       fuio.exception := DelayN(exuio.exception, 2)
+      fuio.robDeqPtr := DelayN(exuio.robDeqPtr, 2)
   }))
   io.csrin.foreach(exuio => funcUnits.foreach(fu => fu.io.csrin.foreach{fuio => fuio := exuio}))
   io.csrToDecode.foreach(toDecode => funcUnits.foreach(fu => fu.io.csrToDecode.foreach(fuOut => toDecode := fuOut)))
@@ -339,6 +341,7 @@ class ExeUnitImp(
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
   io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))
   io.vlIsVlmax.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsVlmax.foreach(fuio => exuio := fuio)))
+  io.instrAddrTransType.foreach(exuio => funcUnits.foreach(fu => fu.io.instrAddrTransType.foreach(fuio => fuio := exuio)))
 
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)

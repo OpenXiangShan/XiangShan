@@ -9,13 +9,14 @@ import top.{ArgParser, Generator}
 import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt}
 import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, HgatpMode, PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.ExceptionNO._
@@ -121,8 +122,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
         val isHls = Bool()
+        val isFetchMalAddr = Bool()
       })
       val commit = Input(new RobCommitCSR)
+      val robDeqPtr = Input(new RobPtr)
     })
 
     val perf = Input(new PerfCounterIO)
@@ -132,7 +135,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       val EX_VI = Bool()
       val flushPipe = Bool()
       val rData = UInt(64.W)
-      val targetPc = UInt(VaddrMaxWidth.W)
+      val targetPcUpdate = Bool()
+      val targetPc = new TargetPCBundle
       val regOut = UInt(64.W)
       // perf
       val isPerfCnt = Bool()
@@ -163,6 +167,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       // trigger
       val frontendTrigger = new FrontendTdataDistributeIO()
       val memTrigger = new MemTdataDistributeIO()
+      // Instruction fetch address translation type
+      val instrAddrTransType = new AddrTransType
       // custom
       val custom = new CSRCustomState
     })
@@ -185,6 +191,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
 
     val toDecode = new CSRToDecode
+
+    val fetchMalTval = Input(UInt(XLEN.W))
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -212,6 +220,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trigger = io.fromRob.trap.bits.trigger
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
+  val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -636,8 +645,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
         in.trapInst := io.trapInst
+        in.fetchMalTval := io.fetchMalTval
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
+        in.isFetchMalAddr := trapIsFetchMalAddr
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
@@ -671,6 +682,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.mstatus := mstatus.regOut
       in.mnepc   := mnepc.regOut
       in.mnstatus:= mnstatus.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   mretEvent.valid := legalMret
@@ -679,6 +693,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
       in.tcontrol := tcontrol.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   sretEvent.valid := legalSret
@@ -690,6 +707,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.vsstatus := vsstatus.regOut
       in.sepc := sepc.regOut
       in.vsepc := vsepc.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   dretEvent.valid := legalDret
@@ -698,6 +718,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.dcsr := dcsr.regOut
       in.dpc  := dpc.regOut
       in.mstatus := mstatus.regOut
+      in.satp := satp.regOut
+      in.vsatp := vsatp.regOut
+      in.hgatp := hgatp.regOut
   }
 
   PRVM := MuxCase(
@@ -873,6 +896,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       )
     ),
   needTargetUpdate)
+  io.out.bits.targetPcUpdate := needTargetUpdate
   io.out.bits.isPerfCnt := addrInPerfCnt
 
   io.status.privState := privState
@@ -1060,6 +1084,17 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
+
+  io.status.instrAddrTransType.bare := privState.isModeM ||
+    (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
+    (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Bare)
+  io.status.instrAddrTransType.sv39 := !privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv39 ||
+    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv39
+  io.status.instrAddrTransType.sv48 := !privState.isModeM && !privState.isVirtual && satp.regOut.MODE === SatpMode.Sv48 ||
+    privState.isVirtual && vsatp.regOut.MODE === SatpMode.Sv48
+  io.status.instrAddrTransType.sv39x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv39x4
+  io.status.instrAddrTransType.sv48x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4
+  assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
   private val csrAccess = wen || ren
 

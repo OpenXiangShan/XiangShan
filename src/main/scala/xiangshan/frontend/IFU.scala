@@ -315,12 +315,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   /**
    * In order to reduce power consumption, avoid calculating the full PC value in the first level.
    * code of original logic, this code has been deprecated
-   * val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>  
+   * val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>
    *  Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
-   * 
    */
   val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + (i * 2).U)) // cat with overflow bit
-  
+
   val f1_pc                 = CatPC(f1_pc_lower_result, f1_pc_high, f1_pc_high_plus1)
 
   val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
@@ -378,6 +377,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
   val f2_exception    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.exception))
+  val f2_except_fromBackend = fromICache(0).bits.exceptionFromBackend
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
@@ -501,6 +501,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_exception      = RegEnable(f2_exception,  f2_fire)
   val f3_mmio           = RegEnable(f2_mmio,       f2_fire)
+  val f3_except_fromBackend = RegEnable(f2_except_fromBackend, f2_fire)
 
   val f3_instr          = RegEnable(f2_instr, f2_fire)
 
@@ -528,7 +529,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pc_last_lower_result_plus2 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 2.U, f2_fire)
   val f3_pc_last_lower_result_plus4 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 4.U, f2_fire)
   //val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
-  
+
   /**
     ***********************************************************************
     * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
@@ -819,6 +820,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+  // exceptionFromBackend only needs to be set for the first instruction.
+  // Other instructions in the same block may have pf or af set,
+  // which is a side effect of the first instruction and actually not necessary.
+  io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
+    case 0 => f3_except_fromBackend
+    case _ => false.B
+  }
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
   io.toIbuffer.bits.illegalInstr:= f3_ill
   io.toIbuffer.bits.triggered   := f3_triggered

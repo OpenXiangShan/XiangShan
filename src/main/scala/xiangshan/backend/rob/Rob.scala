@@ -559,6 +559,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
+  io.exception.bits.isFetchMalAddr := RegEnable(exceptionDataRead.bits.isFetchMalAddr, exceptionHappen)
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
@@ -574,7 +575,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.pc)} intr $intrEnable " +
       p"excp $deqHasException flushPipe $isFlushPipe " +
-      p"Trap_target 0x${Hexadecimal(io.csr.trapTarget)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
+      p"Trap_target 0x${Hexadecimal(io.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
 
 
   /**
@@ -1075,6 +1076,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
     exceptionGen.io.enq(i).bits.hasException := io.enq.req(i).bits.hasException
+    exceptionGen.io.enq(i).bits.isFetchMalAddr := io.enq.req(i).bits.isFetchMalAddr
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.flushPipe
     exceptionGen.io.enq(i).bits.isVset := io.enq.req(i).bits.isVset
     exceptionGen.io.enq(i).bits.replayInst := false.B
@@ -1099,6 +1101,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
     exc_wb.bits.exceptionVec    := wb.bits.exceptionVec.get
     exc_wb.bits.hasException    := wb.bits.exceptionVec.get.asUInt.orR // Todo: use io.writebackNeedFlush(i) instead
+    exc_wb.bits.isFetchMalAddr  := false.B
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
     exc_wb.bits.isVset          := false.B
     exc_wb.bits.replayInst      := wb.bits.replay.getOrElse(false.B)

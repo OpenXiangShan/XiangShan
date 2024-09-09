@@ -16,7 +16,7 @@ import xiangshan.backend.fu.NewCSR._
 class TrapEntryDEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr            = ValidIO((new DcsrBundle).addInEvent(_.CAUSE, _.V, _.PRV))
   val dpc             = ValidIO((new Epc       ).addInEvent(_.epc))
-  val targetPc        = ValidIO(UInt(VaddrMaxWidth.W))
+  val targetPc        = ValidIO(new TargetPCBundle)
   val debugMode       = ValidIO(Bool())
   val debugIntrEnable = ValidIO(Bool())
 
@@ -81,23 +81,26 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
 
   out := DontCare
   // output
-  out.dcsr.valid            := valid
-  out.dpc.valid             := valid
+  out.dcsr.valid              := valid
+  out.dpc.valid               := valid
   // !debugMode trap || debugMode hasExp
-  out.targetPc.valid        := valid || hasExceptionInDmode
-  out.debugMode.valid       := valid
-  out.privState.valid       := valid
-  out.debugIntrEnable.valid := valid
+  out.targetPc.valid          := valid || hasExceptionInDmode
+  out.debugMode.valid         := valid
+  out.privState.valid         := valid
+  out.debugIntrEnable.valid   := valid
 
-  out.dcsr.bits.V           := current.privState.V.asUInt
-  out.dcsr.bits.PRV         := current.privState.PRVM.asUInt
-  out.dcsr.bits.CAUSE       := Mux(hasDebugIntr, causeIntr, causeExp)
-  out.dpc.bits.epc          := trapPC(63, 1)
+  out.dcsr.bits.V             := current.privState.V.asUInt
+  out.dcsr.bits.PRV           := current.privState.PRVM.asUInt
+  out.dcsr.bits.CAUSE         := Mux(hasDebugIntr, causeIntr, causeExp)
+  out.dpc.bits.epc            := trapPC(63, 1)
 
-  out.targetPc.bits         := debugPc
-  out.debugMode.bits        := true.B
-  out.privState.bits        := PrivState.ModeM
-  out.debugIntrEnable.bits  := false.B
+  out.targetPc.bits.pc        := debugPc
+  out.targetPc.bits.raiseIPF  := false.B
+  out.targetPc.bits.raiseIAF  := false.B
+  out.targetPc.bits.raiseIGPF := false.B
+  out.debugMode.bits          := true.B
+  out.privState.bits          := PrivState.ModeM
+  out.debugIntrEnable.bits    := false.B
 
 }
 
