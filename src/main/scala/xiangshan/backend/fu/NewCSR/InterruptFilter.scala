@@ -300,18 +300,26 @@ class InterruptFilter extends Module {
 
   val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt
   val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableInterrupt)).asUInt
+
+  // virtual interrupt with hvictl injection
+  val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
+  val SelectCandidate5 = Candidate123LowCandidate45 && Candidate5
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
   val intrVecReg = RegInit(0.U(64.W))
   val nmiReg = RegInit(false.B)
+  val viIsHvictlInjectReg = RegInit(false.B)
   intrVecReg := intrVec
   nmiReg := io.in.nmi
+  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
   val delayedIntrVec = DelayN(intrVecReg, 5)
   val delayedNMI = DelayN(nmiReg, 5)
+  val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR
+  io.out.interruptVec.valid := delayedIntrVec.orR || delayedVIIsHvictlInjectReg
   io.out.interruptVec.bits := delayedIntrVec
   io.out.nmi := delayedNMI
+  io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
 
   dontTouch(hsip)
   dontTouch(hsie)
@@ -361,5 +369,6 @@ class InterruptFilterIO extends Bundle {
     val mtopi  = new TopIBundle
     val stopi  = new TopIBundle
     val vstopi = new TopIBundle
+    val virtualInterruptIsHvictlInject = Bool()
   })
 }

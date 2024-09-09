@@ -386,6 +386,10 @@ object InterruptNO {
     SEI, VSEI, MEI,
     SGEI
   )
+
+  def getLocal = localHighGroup ++ localLowGroup ++
+                 customHighestGroup ++ customMiddleHighGroup ++
+                 customMiddleLowGroup ++ customLowestGroup ++ Seq(COI)
 }
 
 trait HasIpIeBundle { self: CSRModule[_] =>

@@ -48,10 +48,12 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val trapCode = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
   private val isInterrupt = in.causeNO.Interrupt.asBool
+  private val virtualInterruptIsHvictlInject = in.virtualInterruptIsHvictlInject
+  private val hvictlIID = in.hvictlIID
 
-  when(valid && isInterrupt) {
+  when(valid && isInterrupt && !virtualInterruptIsHvictlInject) {
     assert(
-      (InterruptNO.getVS ++ InterruptNO.getHS).map(_.U === trapCode).reduce(_ || _),
+      (InterruptNO.getVS ++ InterruptNO.getLocal).map(_.U === trapCode).reduce(_ || _),
       "The VS mode can only handle VSEI, VSTI, VSSI and local interrupts"
     )
   }
@@ -135,7 +137,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.vsepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.vscause.bits.Interrupt     := isInterrupt
-  out.vscause.bits.ExceptionCode := highPrioTrapNO
+  out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
   out.vstval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.targetPc.bits.pc           := in.pcFromXtvec
   out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
