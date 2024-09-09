@@ -175,8 +175,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     0.U(offLen.W))
   ))
   val gvpn_gpf = Mux(enableS2xlate && io.csr.hgatp.mode === Sv39x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(enableS2xlate && io.csr.hgatp.mode === Sv48x4, gpaddr(gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
-  val check_g_perm_fail = RegInit(false.B)
-  val guestFault = hptw_pageFault || hptw_accessFault || check_g_perm_fail || gvpn_gpf
+  val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val fake_h_resp = 0.U.asTypeOf(new HptwResp)
   fake_h_resp.entry.tag := get_pn(gpaddr)
@@ -238,7 +237,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_last_hptw_req := false.B
     hptw_resp_stage2 := false.B
     last_s2xlate := false.B
-    check_g_perm_fail := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
   }
@@ -277,7 +275,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     hptw_pageFault := false.B
     hptw_accessFault := false.B
     pte_valid := false.B
-    check_g_perm_fail := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate === onlyStage2){
       val onlys2_gpaddr = Cat(io.req.bits.req_info.vpn, 0.U(offLen.W)) // is 50 bits, don't need to check high bits when sv48x4 is enabled
@@ -303,12 +300,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when(io.hptw.resp.fire && w_hptw_resp === false.B) {
-    hptw_pageFault := io.hptw.resp.bits.h_resp.gpf
-    hptw_accessFault := io.hptw.resp.bits.h_resp.gaf
-    hptw_resp := io.hptw.resp.bits.h_resp
     w_hptw_resp := true.B
     val g_perm_fail = !io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x)
-    check_g_perm_fail := g_perm_fail
+    hptw_pageFault := io.hptw.resp.bits.h_resp.gpf || g_perm_fail
+    hptw_accessFault := io.hptw.resp.bits.h_resp.gaf
+    hptw_resp := io.hptw.resp.bits.h_resp
+    hptw_resp.gpf := io.hptw.resp.bits.h_resp.gpf || g_perm_fail
     when(!(g_perm_fail || io.hptw.resp.bits.h_resp.gpf || io.hptw.resp.bits.h_resp.gaf)) {
       s_pmp_check := false.B
     }
@@ -428,7 +425,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
     w_last_hptw_resp := true.B
-    check_g_perm_fail := false.B
   }
 
 
