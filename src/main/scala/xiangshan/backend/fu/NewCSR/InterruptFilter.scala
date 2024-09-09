@@ -4,14 +4,16 @@ import chisel3._
 import chisel3.util._
 import utility.DelayN
 import utils._
-import xiangshan.ExceptionNO
+import xiangshan.{ExceptionNO, XSModule}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
 import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.NewCSR.InterruptNO
+import xiangshan.frontend.tracertl.TraceRTLChoose
+import org.chipsalliance.cde.config.Parameters
 
 
-class InterruptFilter extends Module {
+class InterruptFilter(implicit p: Parameters) extends XSModule {
   val io = IO(new InterruptFilterIO)
 
   val privState = io.in.privState
@@ -295,7 +297,7 @@ class InterruptFilter extends Module {
 
   // support debug interrupt
   // support smrnmi when NMIE is 0, all interrupt disable
-  val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool) || !io.in.mnstatusNMIE
+  val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool) || !io.in.mnstatusNMIE || TraceRTLChoose(false.B, true.B)
   val debugInterupt = ((io.in.debugIntr && !io.in.debugMode) << CSRConst.IRQ_DEBUG).asUInt
 
   val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt
