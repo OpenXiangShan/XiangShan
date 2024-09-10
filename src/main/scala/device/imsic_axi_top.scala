@@ -82,7 +82,7 @@ class imsic_bus_top(
     val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         "tl",
-        sourceId = IdRange(0, 1)
+        sourceId = IdRange(0, 16)
       ))
     ))))
     val axi4nodes = Seq.fill(2)(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
