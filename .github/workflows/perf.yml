@@ -10,7 +10,7 @@ on:
 jobs:
   run:
     runs-on: node
-    continue-on-error: true
+    continue-on-error: false
     # At most 2 days to finish
     timeout-minutes: 2880
     name: Performance Regression - Checkpoints
@@ -20,15 +20,14 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          export SHORT_SHA=$(git rev-parse --short HEAD)
-          export DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/share/liyanqin/env-scripts/perf"
-          echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr$(DATE)-$(SHORT_SHA)"
-          mkdir -p $SPEC_DIR
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf
+          SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}
+          mkdir -p ${SPEC_DIR}
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -43,7 +42,7 @@ jobs:
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py \
-            /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc \
+            /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
             /nfs/home/share/liyanqin/env-scripts/perf/json/test.json \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
             -L "node033 node034 node036 node037 node038 node039 node040 node041 node042"
@@ -51,7 +50,7 @@ jobs:
       - name: report SPEC CPU2006 score
         run: |
           python3 xs_autorun_multiServer.py \
-            /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc \
+            /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
             /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
