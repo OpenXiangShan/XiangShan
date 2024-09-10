@@ -179,7 +179,7 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
 
 class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new BranchPredictionRedirect)
-  val update = Valid(new BranchPredictionUpdate)
+  val update = DecoupledIO(new BranchPredictionUpdate)
   val enq_ptr = Output(new FtqPtr)
   val redirctFromIFU = Output(Bool())
 }
@@ -1279,6 +1279,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   // **************************** to bpu ****************************
   // ****************************************************************
+  val bpu_update_ready = io.toBpu.update.ready
 
   io.toBpu.redirctFromIFU := ifuRedirectToBpu.valid
   io.toBpu.redirect := Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
@@ -1291,7 +1292,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
-  may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
+  may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U || !bpu_update_ready
 
   val validInstructions = commitStateQueueReg(commPtr.value).map(s => s === c_toCommit || s === c_committed)
   val lastInstructionStatus = PriorityMux(validInstructions.reverse.zip(commitStateQueueReg(commPtr.value).reverse))
@@ -1503,6 +1504,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   XSPerfAccumulate("entry", validEntries)
   XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
+  XSPerfAccumulate("bpu_to_ftq_stall_due_to_update_stall", enq.valid && !enq.ready && !bpu_update_ready)
   XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
   XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
   XSPerfAccumulate("predecodeRedirect", fromIfuRedirect.valid)

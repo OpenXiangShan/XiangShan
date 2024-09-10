@@ -52,8 +52,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
 // reuse TAGE implementation
 
 trait ITTageHasFoldedHistory {
-  val histLen: Int
-  def compute_folded_hist(hist: UInt, l: Int) = {
+  def compute_folded_hist(hist: UInt, histLen: Int, l: Int) = {
     if (histLen > 0) {
       val nChunks = (histLen + l - 1) / l
       val hist_chunks = (0 until nChunks) map {i =>
@@ -63,6 +62,7 @@ trait ITTageHasFoldedHistory {
     }
     else 0.U
   }
+  val compute_folded_ghist = compute_folded_hist(_: UInt, _: Int, _: Int)
 }
 
 
@@ -88,9 +88,8 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
-  val ghist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   // update tag and ctr
-  val valid = Bool()
   val correct = Bool()
   val alloc = Bool()
   val oldCtr = UInt(ITTageCtrBits.W)
@@ -106,23 +105,8 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
 // reuse TAGE Implementation
 
 class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
-  val provider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
-  val altProvider = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
-  val altDiffers = Bool()
-  val providerU = Bool()
-  val providerCtr = UInt(ITTageCtrBits.W)
-  val altProviderCtr = UInt(ITTageCtrBits.W)
-  val allocate = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
-  val providerTarget = UInt(VAddrBits.W)
-  val altProviderTarget = UInt(VAddrBits.W)
-  // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
-
-  override def toPrintable = {
-    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
-    p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget)})"
-  }
 }
 
 
@@ -144,7 +128,7 @@ class ITTageTable
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new ITTageReq))
     val resp = Output(Valid(new ITTageResp))
-    val update = Input(new ITTageUpdate)
+    val update = Flipped(DecoupledIO(new ITTageUpdate))
   })
 
   val SRAM_SIZE=128
@@ -154,10 +138,6 @@ class ITTageTable
   if (nRows < SRAM_SIZE) {
     println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
   }
-
-  // override val debug = true
-  // bypass entries for tage update
-  val wrBypassEntries = 4
 
   require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
   val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
@@ -221,20 +201,16 @@ class ITTageTable
   val read_write_conflict = io.update.valid && io.req.valid
   val s1_read_write_conflict = RegEnable(read_write_conflict, io.req.valid)
 
-  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !s1_read_write_conflict else true.B) && s1_valid // && s1_mask(b)
+  io.resp.valid := (if (tagLen != 0) s1_req_rhit else true.B) && s1_valid // && s1_mask(b)
   io.resp.bits.ctr := table_read_data.ctr
   io.resp.bits.u := table_read_data.useful
   io.resp.bits.target := table_read_data.target
 
-  // Use fetchpc to compute hash
-  val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  // Use updating buffered folded_hist
+  val update_folded_hist = io.update.bits.folded_hist
 
-  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
-  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen)
-  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen-1)
-  dontTouch(update_folded_hist)
-  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), update_folded_hist)
-  val update_target = io.update.target
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.bits.pc), update_folded_hist)
+  val update_target = io.update.bits.target
   val update_wdata = Wire(new ITTageEntry)
 
 
@@ -242,30 +218,39 @@ class ITTageTable
   val updateNoBitmask = VecInit.fill(ittageEntrySz)(0.U).asUInt                         //update no
   val updateNoUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U >= ITTageUsBits.U).asUInt //update others besides useful bit
   val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < ITTageUsBits.U).asUInt    //update useful bit
-
+  val update_buff_valid = RegInit(false.B)
   val needReset = RegInit(false.B)
-  val useful_can_reset = !(io.req.fire || io.update.valid) && needReset
+  val useful_can_reset = !(io.req.fire || io.update.valid || update_buff_valid) && needReset
   val (resetSet, resetFinish) = Counter(useful_can_reset, nRows)
-  when (io.update.reset_u) {
+  when (io.update.bits.reset_u) {
     needReset := true.B
   }.elsewhen (resetFinish) {
     needReset := false.B
   }
-  val update_bitmask =  Mux(io.update.uValid && io.update.valid,
+  val update_bitmask =  Mux(io.update.bits.uValid && io.update.valid,
                           updateAllBitmask,
                           Mux(io.update.valid, updateNoUsBitmask,
                             Mux(useful_can_reset, updateUsBitmask, updateNoBitmask)
                           ))
 
+  val update_buff_data    = RegEnable(update_wdata, read_write_conflict)
+  val update_buff_idx     = RegEnable(update_idx, read_write_conflict)
+  val update_buff_bitmask = RegEnable(update_bitmask(ITTageUsBits - 1, 0), read_write_conflict)  //for update bitmask only need store bitmask(0)
+  when(read_write_conflict){
+    update_buff_valid := true.B
+  }.elsewhen(!io.req.fire){
+    update_buff_valid := false.B
+  }
+
   table.io.w.apply(
-    valid   = io.update.valid || useful_can_reset,
-    data    = update_wdata,
-    setIdx  = Mux(useful_can_reset, resetSet, update_idx),
+    valid   = (io.update.valid || update_buff_valid) && !io.req.fire || useful_can_reset, //read first
+    data    = Mux(update_buff_valid, update_buff_data, update_wdata),
+    setIdx  = Mux(useful_can_reset, resetSet, Mux(update_buff_valid, update_buff_idx, update_idx)),
     waymask = true.B,
-    bitmask = update_bitmask
+    bitmask = Mux(update_buff_valid, Cat(Fill(ittageEntrySz - ITTageUsBits, 1.U), update_buff_bitmask), update_bitmask)
   )
 
-  // Power-on reset
+// Power-on reset
   val powerOnResetState = RegInit(true.B)
   when(table.io.r.req.ready) {
     // When all the SRAM first reach ready state, we consider power-on reset is done
@@ -276,29 +261,24 @@ class ITTageTable
   // We do not want write request block the whole BPU pipeline
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
+  io.update.ready := !update_buff_valid
+  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_table_update_buff_valid", update_buff_valid)
 
-  val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
-
-  wrbypass.io.wen := io.update.valid
-  wrbypass.io.write_idx := update_idx
-  wrbypass.io.write_data.map(_ := update_wdata.ctr)
-
-  val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
+  val old_ctr = io.update.bits.oldCtr
   update_wdata.valid := true.B
-  update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
+  update_wdata.ctr   := Mux(io.update.bits.alloc, 2.U, inc_ctr(old_ctr, io.update.bits.correct))
   update_wdata.tag   := update_tag
-  update_wdata.useful:= Mux(useful_can_reset, false.B, io.update.u)
+  update_wdata.useful:= Mux(useful_can_reset, false.B, io.update.bits.u)
   // only when ctr is null
-  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
-
+  update_wdata.target := Mux(io.update.bits.alloc || ctr_null(old_ctr), update_target, io.update.bits.old_target)
 
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
-  XSPerfAccumulate("ittage_us_tick_reset", io.update.reset_u)
-  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_us_tick_reset", io.update.bits.reset_u)
 
   if (BPUDebug && debug) {
-    val u = io.update
+    val u = io.update.bits
     val idx = s0_idx
     val tag = s0_tag
     XSDebug(io.req.fire,
@@ -327,7 +307,7 @@ class ITTageTable
 
 }
 
-abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITTageParams with BPUUtils {
+abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITTageParams with ITTageHasFoldedHistory with BPUUtils {
   // class TAGEResp {
   //   val takens = Vec(PredictWidth, Bool())
   //   val hits = Vec(PredictWidth, Bool())
@@ -438,14 +418,127 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   updateU       := DontCare
 
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
-  val updateMisPred = update.mispred_mask(numBr) // the last one indicates jmp results
 
+  //Using ghist create folded_hist
+  val ufolded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val ittageFoldedGHistInfos = (ITTageTableInfos.map{ case (nRows, h, t) =>
+    if (h > 0)
+      Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+    else
+      Set[FoldedHistoryInfo]()
+    }.reduce(_++_).toSet).toList
+  ittageFoldedGHistInfos.map{
+    case (h, l) =>
+      ufolded_hist.getHistWithInfo((h, l)).folded_hist := compute_folded_hist(update.ghist, h, l)
+  }
+
+  //updating read
+  val u_idle :: u_buffer :: u_sec_buffer :: Nil = Enum(3)
+  val u_state = RegInit(u_idle)
+  val u_req_conflict_stall = RegInit(false.B)
+
+  //If there is an update read req, the req data needs to be temporarily stored
+  val buffer_full_target = RegInit(0.U.asTypeOf(update.full_target))
+  val buffer_u_pc     = RegInit(0.U.asTypeOf(update.pc))
+  val buffer_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  val buffer_updateMisPred = RegInit(0.U.asTypeOf(update.mispred_mask(numBr)))
+
+  //If there is already an update read req that is blocked,
+  //the value of the first request is temporarily stored in the second_buffer,
+  //and the value of the second update request is temporarily stored in the buffer.
+  val second_buffer_valid = RegInit(false.B)
+  val second_buffer_full_target = RegInit(0.U.asTypeOf(update.full_target))
+  val second_buffer_u_pc     = RegInit(0.U.asTypeOf(update.pc))
+  val second_buffer_updateMisPred = RegInit(0.U.asTypeOf(update.mispred_mask(numBr))) // the last one indicates jmp results
+  val second_buffer_ufolded_hist = RegInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+
+  val u_req_valid  = (updateValid || u_req_conflict_stall) && !(io.s1_fire(3) && s1_isIndirect)
+  val u_req_pc = Mux(u_req_conflict_stall, Mux(u_state === u_sec_buffer, second_buffer_u_pc, buffer_u_pc), update.pc)
+  val u_req_folded_hist = Mux(u_req_conflict_stall, Mux(u_state === u_sec_buffer, second_buffer_ufolded_hist, buffer_ufolded_hist), ufolded_hist)
+  val u_req_valid_reg = RegNext(u_req_valid)
+  val u_req_conflict = updateValid && io.s1_fire(3) && s1_isIndirect
+
+  //Read during updates
+  val u_updateValid       = RegNext(u_req_valid_reg, init = false.B)
+  val u_providerTarget    = RegEnable(s2_providerTarget, u_req_valid_reg)
+  val u_altProviderTarget = RegEnable(s2_altProviderTarget, u_req_valid_reg)
+  val u_provided          = RegEnable(s2_provided, u_req_valid_reg)
+  val u_provider          = RegEnable(s2_provider, u_req_valid_reg)
+  val u_altProvided       = RegEnable(s2_altProvided, u_req_valid_reg)
+  val u_altProvider       = RegEnable(s2_altProvider, u_req_valid_reg)
+  val u_providerU         = RegEnable(s2_providerU, false.B, u_req_valid_reg)
+  val u_providerCtr       = RegEnable(s2_providerCtr, u_req_valid_reg)
+  val u_altProviderCtr    = RegEnable(s2_altProviderCtr, u_req_valid_reg)
+  val u_allocate          = RegInit(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))))
+  val u_altDiffers        = Mux(u_altProvided, u_altProviderCtr(ITTageCtrBits-1), true.B) =/= 1.B
+  val u_write_pc          = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_u_pc, buffer_u_pc), u_req_valid_reg)
+  val u_write_full_target = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_full_target, buffer_full_target), u_req_valid_reg)
+  val u_write_updateMisPred = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_updateMisPred, buffer_updateMisPred), u_req_valid_reg)
+  val u_write_folded_hist = RegEnable(Mux(u_state === u_sec_buffer, second_buffer_ufolded_hist,buffer_ufolded_hist), u_req_valid_reg)
+
+  switch(u_state){
+    //if has update req, need buffer for r_resp_valid
+    is(u_idle){
+      when(updateValid){
+        u_state := u_buffer
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+      }
+      when(u_req_conflict){
+        u_req_conflict_stall := true.B
+      }
+    }
+    //wait resp
+    is(u_buffer){
+      when(u_req_valid){  //if an update req is issued, the block can be freed
+        u_req_conflict_stall := false.B
+      }
+      //if has second req and the first is blocked, it need stall second req
+      when(updateValid && u_req_conflict_stall){
+        u_state := u_sec_buffer
+
+        u_req_conflict_stall := true.B
+
+        second_buffer_valid := true.B
+        second_buffer_full_target := buffer_full_target
+        second_buffer_u_pc := buffer_u_pc
+        second_buffer_updateMisPred := buffer_updateMisPred
+        second_buffer_ufolded_hist := buffer_ufolded_hist
+
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+      }.elsewhen(updateValid){  //if has second req and first is not stalled, it need update buffer_*
+        u_req_conflict_stall := u_req_conflict
+        buffer_full_target := update.full_target
+        buffer_u_pc := update.pc
+        buffer_updateMisPred := update.mispred_mask(numBr)
+        buffer_ufolded_hist := ufolded_hist
+
+        when(u_req_conflict){ //if second req happen conflict, it need stall
+          u_req_conflict_stall := true.B
+        }
+      }.elsewhen(u_req_valid_reg){
+        u_state := u_idle
+        u_req_conflict_stall := false.B
+      }
+    }
+    is(u_sec_buffer){
+      when(u_req_valid_reg){
+        u_state := u_buffer
+        second_buffer_valid := false.B
+      }
+    }
+  }
 
   // Predict
   tables.map { t => {
-      t.io.req.valid := io.s1_fire(3) && s1_isIndirect
-      t.io.req.bits.pc := s1_pc_dup(3)
-      t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist(3)
+      t.io.req.valid := io.s1_fire(3) && s1_isIndirect || u_req_valid
+      t.io.req.bits.pc := Mux(u_req_valid, u_req_pc, s1_pc_dup(3))
+      t.io.req.bits.folded_hist := Mux(u_req_valid, u_req_folded_hist, io.in.bits.s1_folded_hist(3))
     }
   }
 
@@ -494,16 +587,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     yield
     fp.jalr_target := s3_tageTarget
 
-  resp_meta.provider.valid    := s3_provided
-  resp_meta.provider.bits     := s3_provider
-  resp_meta.altProvider.valid := s3_altProvided
-  resp_meta.altProvider.bits  := s3_altProvider
-  resp_meta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
-  resp_meta.providerU         := s3_providerU
-  resp_meta.providerCtr       := s3_providerCtr
-  resp_meta.altProviderCtr    := s3_altProviderCtr
-  resp_meta.providerTarget    := s3_providerTarget
-  resp_meta.altProviderTarget := s3_altProviderTarget
   resp_meta.pred_cycle.map(_:= GTimer())
   // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
@@ -514,48 +597,49 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
   val s2_maskedEntry = PriorityEncoder(s2_allocatableSlots & s2_allocLFSR)
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
-  resp_meta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, io.s2_fire(3))
-  resp_meta.allocate.bits  := RegEnable(s2_allocEntry, io.s2_fire(3))
 
   // Update in loop
-  val updateRealTarget = update.full_target
-  when (updateValid) {
-    when (updateMeta.provider.valid) {
-      val provider = updateMeta.provider.bits
+  when(u_req_valid_reg){
+    u_allocate.valid       := s2_allocatableSlots =/= 0.U
+    u_allocate.bits        := s2_allocEntry
+  }
+  val updateRealTarget = u_write_full_target
+  when (u_updateValid) {
+    when (u_provided) {
+      val provider = u_provider
       XSDebug(true.B, p"update provider $provider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
-      val altProvider = updateMeta.altProvider.bits
-      val usedAltpred = updateMeta.altProvider.valid && updateMeta.providerCtr === 0.U
-      when (usedAltpred && updateMisPred) { // update altpred if used as pred
+      val altProvider = u_altProvider
+      val usedAltpred = u_altProvided && u_providerCtr === 0.U
+      when (usedAltpred && u_write_updateMisPred) { // update altpred if used as pred
         XSDebug(true.B, p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
 
         updateMask(altProvider)    := true.B
         updateUMask(altProvider)   := false.B
         updateCorrect(altProvider) := false.B
-        updateOldCtr(altProvider)  := updateMeta.altProviderCtr
+        updateOldCtr(altProvider)  := u_altProviderCtr
         updateAlloc(altProvider)   := false.B
         updateTarget(altProvider)  := updateRealTarget
-        updateOldTarget(altProvider) := updateMeta.altProviderTarget
+        updateOldTarget(altProvider) := u_altProviderTarget
       }
-
 
       updateMask(provider)   := true.B
       updateUMask(provider)  := true.B
 
-      updateU(provider) := Mux(!updateMeta.altDiffers, updateMeta.providerU, !updateMisPred)
-      updateCorrect(provider)  := updateMeta.providerTarget === updateRealTarget
+      updateU(provider) := Mux(!u_altDiffers, u_providerU, !u_write_updateMisPred)
+      updateCorrect(provider)  := u_providerTarget === updateRealTarget
       updateTarget(provider) := updateRealTarget
-      updateOldTarget(provider) := updateMeta.providerTarget
-      updateOldCtr(provider) := updateMeta.providerCtr
+      updateOldTarget(provider) := u_providerTarget
+      updateOldCtr(provider) := u_providerCtr
       updateAlloc(provider)  := false.B
     }
   }
 
   // if mispredicted and not the case that
   // provider offered correct target but used altpred due to unconfident
-  val providerCorrect = updateMeta.provider.valid && updateMeta.providerTarget === updateRealTarget
-  val providerUnconf = updateMeta.providerCtr === 0.U
-  when (updateValid && updateMisPred && !(providerCorrect && providerUnconf)) {
-    val allocate = updateMeta.allocate
+  val providerCorrect = u_provided && u_providerTarget === updateRealTarget
+  val providerUnconf = u_providerCtr === 0.U
+  when (u_updateValid && u_write_updateMisPred && !(providerCorrect && providerUnconf)) {
+    val allocate = u_allocate
     tickCtr := satUpdate(tickCtr, TickWidth, !allocate.valid)
     when (allocate.valid) {
       XSDebug(true.B, p"allocate new table entry, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
@@ -575,22 +659,28 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i), init = false.B)
-    tables(i).io.update.reset_u := RegNext(updateResetU, init = false.B)
-    tables(i).io.update.correct := RegEnable(updateCorrect(i), updateMask(i))
-    tables(i).io.update.target := RegEnable(updateTarget(i), updateMask(i))
-    tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
-    tables(i).io.update.alloc := RegEnable(updateAlloc(i), updateMask(i))
-    tables(i).io.update.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
+    tables(i).io.update.bits.reset_u := RegNext(updateResetU, init = false.B)
+    tables(i).io.update.bits.correct := RegEnable(updateCorrect(i), updateMask(i))
+    tables(i).io.update.bits.target := RegEnable(updateTarget(i), updateMask(i))
+    tables(i).io.update.bits.old_target := RegEnable(updateOldTarget(i), updateMask(i))
+    tables(i).io.update.bits.alloc := RegEnable(updateAlloc(i), updateMask(i))
+    tables(i).io.update.bits.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
 
-    tables(i).io.update.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
-    tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
-    tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
+    tables(i).io.update.bits.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
+    tables(i).io.update.bits.u := RegEnable(updateU(i), updateMask(i))
+    tables(i).io.update.bits.pc := RegEnable(u_write_pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.ghist := RegEnable(update.ghist, updateMask(i))
+    tables(i).io.update.bits.folded_hist := RegEnable(u_write_folded_hist, updateMask(i))
   }
+
 
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
+  //if ittage table has conflict need block ftq update req
+  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_) && !u_req_conflict_stall
+  XSPerfAccumulate("ittage_update_not_ready", io.update.ready)
+  val ittage_updateMask_and_read_conflict = RegNext(updateMask.reduce(_||_)) && io.s1_fire(3) && s1_isIndirect
+  XSPerfAccumulate("ittage_updateMask_and_read_conflict", ittage_updateMask_and_read_conflict)
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
@@ -609,41 +699,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val pred_use_bim_as_altpred = pred_use_altpred && !s2_altProvided
   val pred_use_bim_as_pred = !s2_provided
 
-  val commit_use_provider = updateMeta.provider.valid && !ctr_null(updateMeta.providerCtr)
-  val commit_use_altpred = updateMeta.provider.valid && ctr_null(updateMeta.providerCtr)
-  val commit_use_ht_as_altpred = commit_use_altpred && updateMeta.altProvider.valid
-  val commit_use_bim_as_altpred = commit_use_altpred && !updateMeta.altProvider.valid
-  val commit_use_bim_as_pred = !updateMeta.provider.valid
-
-  for (i <- 0 until ITTageNTables) {
-    val pred_this_is_provider = s2_provider === i.U
-    val pred_this_is_altpred  = s2_altProvider === i.U
-    val commit_this_is_provider = updateMeta.provider.bits === i.U
-    val commit_this_is_altpred  = updateMeta.altProvider.bits === i.U
-    ittage_perf(s"table_${i}_final_provided",
-      pred_use_provider && pred_this_is_provider,
-      commit_use_provider && commit_this_is_provider
-    )
-    ittage_perf(s"table_${i}_provided_not_used",
-      pred_use_altpred && pred_this_is_provider,
-      commit_use_altpred && commit_this_is_provider
-    )
-    ittage_perf(s"table_${i}_alt_provider_as_final_pred",
-      pred_use_ht_as_altpred && pred_this_is_altpred,
-      commit_use_ht_as_altpred && commit_this_is_altpred
-    )
-    ittage_perf(s"table_${i}_alt_provider_not_used",
-      pred_use_provider && pred_this_is_altpred,
-      commit_use_provider && commit_this_is_altpred
-    )
-  }
-
-  ittage_perf("provided", s2_provided, updateMeta.provider.valid)
-  ittage_perf("use_provider", pred_use_provider, commit_use_provider)
-  ittage_perf("use_altpred", pred_use_altpred, commit_use_altpred)
-  ittage_perf("use_ht_as_altpred", pred_use_ht_as_altpred, commit_use_ht_as_altpred)
-  ittage_perf("use_bim_when_no_provider", pred_use_bim_as_pred, commit_use_bim_as_pred)
-  ittage_perf("use_bim_as_alt_provider", pred_use_bim_as_altpred, commit_use_bim_as_altpred)
   // XSPerfAccumulate("ittage_provider_right")
   XSPerfAccumulate("updated", updateValid)
 
@@ -660,8 +715,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     }
   }
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
-  XSDebug(updateValid, updateMeta.toPrintable+p"\n")
-  XSDebug(updateValid, p"correct(${!updateMisPred})\n")
+  XSDebug(updateValid, p"correct(${!buffer_updateMisPred})\n")
 
   generatePerfEvent()
 }
