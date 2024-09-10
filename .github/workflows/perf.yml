@@ -1,10 +1,11 @@
 name: Performance Regression
 on:
-  workflow_dispatch:
-    # Manual triggering is allowed
   schedule:
     # run at 15:30 UTC (23:30 UTC+8)
     - cron: '30 15 * * 5'
+  # temporary setting for test
+  push:
+    branches: [ ci-perf-2409 ]
 
 jobs:
   run:
