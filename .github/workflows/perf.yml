@@ -20,14 +20,13 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)  
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf
-          SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}
-          mkdir -p ${SPEC_DIR}
+          echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
+          echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -49,6 +48,7 @@ jobs:
           mv $NOOP_HOME/*.vcd $SPEC_DIR
       - name: report SPEC CPU2006 score
         run: |
+          cd $PERF_HOME
           python3 xs_autorun_multiServer.py \
             /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
             /nfs/home/share/liyanqin/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json \
