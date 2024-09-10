@@ -196,6 +196,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.regCacheIdx       := DontCare
     uop.traceBlockInPipe  := DontCare
   })
+  private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
+  private val isCsr        = Wire(Vec(RenameWidth, Bool()))
+  private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
+  private val isRoCsrr     = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)    // function unit type
   private val fuOpType     = uops.map(_.fuOpType)  // function unit operation type
   private val vtype        = uops.map(_.vpu.vtype) // CSR "vtype" of vector operation
