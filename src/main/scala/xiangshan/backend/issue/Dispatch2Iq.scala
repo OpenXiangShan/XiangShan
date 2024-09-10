@@ -926,6 +926,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
     enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i) && !isSegment(i)
     enqLsqIO.req(i).bits := io.in(i).bits
+    enqLsqIO.iqAccept(i) := io.in(i).ready
 
     // This is to make it easier to calculate in LSQ.
     // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
