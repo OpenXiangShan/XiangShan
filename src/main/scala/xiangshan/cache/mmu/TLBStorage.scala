@@ -311,9 +311,9 @@ class TLBFakeFA(
       resp.bits.pbmt(d) := pte.pbmt
       resp.bits.g_pbmt(d) := 0.U.asTypeOf(resp.bits.g_pbmt(d))
       resp.bits.ppn(d) := MuxLookup(level, 0.U)(Seq(
-        0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
+        2.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
         1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
-        2.U -> ppn)
+        0.U -> ppn)
       )
 
       resp.bits.g_perm(d) := 0.U.asTypeOf(resp.bits.g_perm(d) )
