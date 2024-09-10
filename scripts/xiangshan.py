@@ -319,7 +319,8 @@ class XiangShan(object):
             return 0
 
     def __get_ci_cputest(self, name=None):
-        base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
+        # base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
+        base_dir = "/nfs/home/share/ci-workloads/nexus-am-workloads/tests/cputest"
         cputest = os.listdir(base_dir)
         cputest = filter(lambda x: x.endswith(".bin"), cputest)
         cputest = map(lambda x: os.path.join(base_dir, x), cputest)
@@ -339,15 +340,15 @@ class XiangShan(object):
         workloads = [
             "bitmanip/bitMisc.bin",
             "crypto/crypto-riscv64-noop.bin",
-            "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
-            "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
-            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
-            "ext_intr/amtest-riscv64-xs.bin",
-            "cache-alias/aliastest-riscv64-xs.bin",
+            # "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
+            # "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
+            # "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/external_intr-riscv64-xs.bin",
+            "nexus-am-workloads/tests/aliastest/aliastest-riscv64-xs.bin",
             "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
-            "pmp/pmp-am/amtest-riscv64-xs.bin",
-            "pmp/hugepage-pmp-atom/amtest-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/pmp_test-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/sv39_hp_atom_test-riscv64-xs.bin",
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
@@ -400,7 +401,7 @@ class XiangShan(object):
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
-            "dualcoretest/ldvio-riscv64-xs.bin"
+            "nexus-am-workloads/tests/dualcoretest/ldvio-riscv64-xs.bin"
         ]
         mc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return mc_tests
@@ -414,8 +415,9 @@ class XiangShan(object):
         return tests
 
     def __am_apps_path(self, bench):
-        filename = f"{bench}-riscv64-noop.bin"
-        return [os.path.join(self.args.am_home, "apps", bench, "build", filename)]
+        base_dir = '/nfs/home/share/ci-workloads/nexus-am-workloads/apps'
+        filename = f"{bench}-riscv64-xs.bin"
+        return [os.path.join(base_dir, bench, filename)]
 
     def __get_ci_workloads(self, name):
         workloads = {
