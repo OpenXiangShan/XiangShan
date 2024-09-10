@@ -144,6 +144,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val s_bitmap_check = RegInit(true.B)
   val w_bitmap_resp = RegInit(true.B)
+  val whether_need_bitmap_check = RegInit(false.B)
   val checkfalied = RegInit(false.B)
 
   val idle = RegInit(true.B)
@@ -411,6 +412,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
+      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -429,6 +431,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
+      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -445,18 +448,21 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
     full_gvpn := pte.getPPN()
+    when(bitmap_enable){
+      whether_need_bitmap_check := true.B
+    }.otherwise{
+      mem_addr_update := true.B
+      whether_need_bitmap_check := false.B
+    }
   }
 
-  if(HasCVMExtension){
-    //when find pte and this req is nos2xlate,must check bitmap
-    when(whether_need_bitmap_check){
-      when((!enableS2xlate || onlyS1xlate) && pte.isLeaf()){
-        s_bitmap_check := false.B
-      }.otherwise{
-        mem_addr_update := true.B
-      }
-    }else{
+  when(whether_need_bitmap_check){
+    when(bitmap_enable && (!enableS2xlate || onlyS1xlate) && pte.isLeaf()){
+      s_bitmap_check := false.B
+      whether_need_bitmap_check := false.B
+    }.otherwise{
       mem_addr_update := true.B
+      whether_need_bitmap_check := false.B
     }
   }
 
@@ -522,6 +528,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
+      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -1127,6 +1134,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val finish = WireInit(false.B)
   val s_bitmap_check = RegInit(true.B)
   val w_bitmap_resp = RegInit(true.B)
+  val whether_need_bitmap_check = RegInit(false.B)
   val checkfalied = RegInit(false.B)
 
   val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish
@@ -1240,6 +1248,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
+      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
@@ -1252,18 +1261,24 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   when(io.mem.resp.fire && !w_mem_resp){
     w_mem_resp := true.B
     af_level := af_level - 1.U
-    if(HasCVMExtension){
-      //judge this mem resp whether need bitmap check
-      when(bitmap_enable && pte.isLeaf()){
-        s_bitmap_check := false.B
-      }.otherwise{
-        mem_addr_update := true.B
-      }
-    }else{
+    when(bitmap_enable){
+      whether_need_bitmap_check := true.B
+    }.otherwise{
       mem_addr_update := true.B
+      whether_need_bitmap_check := false.B
     }
   }
   
+  when(whether_need_bitmap_check){
+    when(bitmap_enable && pte.isLeaf()){
+      s_bitmap_check := false.B
+      whether_need_bitmap_check := false.B
+    }.otherwise{
+      mem_addr_update := true.B
+      whether_need_bitmap_check := false.B
+    }
+  }
+
   //bitmapcheck
   when(io.bitmap.req.fire){
     s_bitmap_check := true.B
@@ -1299,6 +1314,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     if(HasCVMExtension){
       s_bitmap_check := true.B
       w_bitmap_resp := true.B
+      whether_need_bitmap_check := false.B
       checkfalied := false.B
     }
   }
