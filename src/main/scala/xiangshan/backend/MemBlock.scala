@@ -1438,7 +1438,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vlsuCanAccept = (0 until VlduCnt).map(
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
-  val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
+  val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVSegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
 
   // init port
   /**
@@ -1592,14 +1592,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
-    assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
+    assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).map(_._1).reduce(_ || _))
   }
   for (i <- 0 until HyuCnt) when(st_atomics(StaCnt + i)) {
     io.ooo_to_mem.issueHya(i).ready := atomicsUnit.io.in.ready
     hybridUnits(i).io.lsin.valid := false.B
 
     state := s_atomics(StaCnt + i)
-    assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))
+    assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).map(_._1).reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
     assert((0 until StaCnt + HyuCnt).map(state === s_atomics(_)).reduce(_ || _))
@@ -1609,7 +1609,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.in.valid := st_atomics.reduce(_ || _)
   atomicsUnit.io.in.bits  := Mux1H(Seq.tabulate(StaCnt)(i =>
     st_atomics(i) -> io.ooo_to_mem.issueSta(i).bits) ++
-    Seq.tabulate(HyuCnt)(i => st_atomics(StaCnt+i) -> io.ooo_to_mem.issueHya(i).bits))
+    Seq.tabulate(HyuCnt)(i => st_atomics(StaCnt + i) -> io.ooo_to_mem.issueHya(i).bits))
   atomicsUnit.io.storeDataIn.valid := st_data_atomics.reduce(_ || _)
   atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(StdCnt)(i =>
     st_data_atomics(i) -> stData(i).bits))
@@ -1636,7 +1636,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsUnit.io.dtlb <> amoTlb
 
     // hw prefetch should be disabled while executing atomic insts
-    loadUnits.map(i => i.io.prefetch_req.valid := false.B)
+    loadUnits.foreach(_.io.prefetch_req.valid := false.B)
 
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)

@@ -184,7 +184,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // MicroOp
   val baseVaddr                       = instMicroOp.baseVaddr
   val alignedType                     = instMicroOp.alignedType
-  val fuType                          = instMicroOp.uop.fuType
+  implicit val fuType                 = instMicroOp.uop.fuType
   val mask                            = instMicroOp.mask
   val exceptionVec                    = instMicroOp.uop.exceptionVec
   val issueEew                        = instMicroOp.uop.vpu.veew
@@ -327,7 +327,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.uopFlowNumMask        := GenVlMaxMask(uopFlowNum, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
-    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad
   }
   // latch data
   when(io.in.fire){
@@ -367,11 +367,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req                         := DontCare
   io.dtlb.resp.ready                  := true.B
   io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
-  io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad(fuType), TlbCmd.read, TlbCmd.write)
+  io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.vaddr              := vaddr
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
-  io.dtlb.req.bits.memidx.is_ld       := FuType.isVLoad(fuType)
-  io.dtlb.req.bits.memidx.is_st       := FuType.isVStore(fuType)
+  io.dtlb.req.bits.memidx.is_ld       := FuType.isVLoad
+  io.dtlb.req.bits.memidx.is_st       := FuType.isVStore
   io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
@@ -400,8 +400,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
     val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVLoad(fuType)  && canTriggerException
-    exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore(fuType) && canTriggerException
+    exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVLoad  && canTriggerException
+    exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore && canTriggerException
 
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
@@ -477,7 +477,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
-  io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
+  io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := latchVaddr
   io.rdcache.req.bits.mask          := mask

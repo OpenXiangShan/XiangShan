@@ -204,7 +204,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val eew          = uops.map(_.vpu.veew)  // effective SEW "EEW"
   private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem)) // vector addressing mode
   private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))    // is VLS strided
-  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem)) // is Vector Segment Load/Store
+  private val isSegment    = fuType.map(fuTypeItem => isVSegls(fuTypeItem)) // is Vector Segment Load/Store
   private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))  // is unit-stride mode
   private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map {
     case (fuOpTypeItem, nfItem) =>

@@ -853,7 +853,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   private val isVlsType       = fuType.map(fuTypeItem => isVls(fuTypeItem))
-  private val isSegment       = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
+  private val isSegment       = fuType.map(fuTypeItem => isVSegls(fuTypeItem))
   private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
   private val isVecUnitType   = isVlsType.zip(isUnitStride).map{ case (isVlsTypeItme, isUnitStrideItem) =>
     isVlsTypeItme && isUnitStrideItem

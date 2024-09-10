@@ -116,15 +116,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     * Part 1: choose the target dispatch queue and the corresponding write ports
     */
   // valid bits for different dispatch queues
-  val isInt = VecInit(io.fromRename.map(req => req.valid && FuType.isInt(req.bits.fuType)))
+  val isInt    = VecInit(io.fromRename.map(req => req.valid && FuType.isInt(req.bits.fuType)))
   val isIntDq0 = VecInit(io.fromRename.map(req => req.valid && FuType.isIntDq0(req.bits.fuType)))
   val isIntDq1 = VecInit(io.fromRename.map(req => req.valid && FuType.isIntDq1(req.bits.fuType)))
-  val isAlu = VecInit(io.fromRename.map(req => req.valid && FuType.isBothDeq0(req.bits.fuType)))
-  val isBrh = VecInit(io.fromRename.map(req => req.valid && (FuType.isBrh(req.bits.fuType) || FuType.isJump(req.bits.fuType))))
-  val popAlu = isAlu.zipWithIndex.map { case (_, i) => PopCount(isAlu.take(i + 1)) }
-  val popBrh = isBrh.zipWithIndex.map { case (_, i) => PopCount(isBrh.take(i + 1)) }
-  val isOnlyDq0 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 && !dq1 })
-  val isOnlyDq1 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq1 && !dq0 })
+  val isAlu    = VecInit(io.fromRename.map(req => req.valid && FuType.isBothDeq0(req.bits.fuType)))
+  val isBrh    = VecInit(io.fromRename.map(req => req.valid && FuType.isBrhJump(req.bits.fuType)))
+  val popAlu = isAlu.indices.map(i => PopCount(isAlu.take(i + 1)))
+  val popBrh = isBrh.indices.map(i => PopCount(isBrh.take(i + 1)))
+  val isOnlyDq0  = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 && !dq1 })
+  val isOnlyDq1  = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq1 && !dq0 })
   val isBothDq01 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 || dq1 }) // alu,brh
   val IQ0Deq0Num = io.intIQValidNumVec(0)(0)
   val IQ0Deq1Num = io.intIQValidNumVec(0)(1)
@@ -151,7 +151,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val lessDeq0IsDq0 = Dq1SumDeq0 > Dq0SumDeq0
   val lessDeq1IsDq0 = (Dq1SumDeq1 << 1).asUInt > Dq0SumDeq1
   val equalDeq0IsDq0 = Dq1SumDeq0 === Dq0SumDeq0
-  val equalDeq1IsDq0 = (Dq1SumDeq1 << 1).asUInt  === Dq0SumDeq1
+  val equalDeq1IsDq0 = (Dq1SumDeq1 << 1).asUInt === Dq0SumDeq1
   // val diffDeq0 = Mux(lessDeq0IsDq0, Dq1SumDeq0 - Dq0SumDeq0, Dq0SumDeq0 - Dq1SumDeq0)
   // val diffDeq1 = Mux(lessDeq1IsDq0, Dq1SumDeq1 - Dq0SumDeq1, Dq0SumDeq1 - Dq1SumDeq1)
   // val popAluIsMore = popAlu.map(_ > diffDeq0)
@@ -162,7 +162,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // val brhSelectLessDq = isBrh.zip(popBrhIsMore).zip(popBrh).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastBrhSelectDq0) }
   val aluSelectDq0 = isAlu.zip(popAlu).map { case (i, p) => i && (p(0).asBool ^ lastLastAluSelectDq0) }
   //val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && (p(0).asBool ^ lastLastBrhSelectDq0) }
-  val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && !(lastLastBrhSelectDq0 && (p === 1.U || p === 4.U) || !lastLastBrhSelectDq0 && (p === 3.U || p === 6.U))}
+  val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && !(lastLastBrhSelectDq0 && (p === 1.U || p === 4.U) ||
+                                                                   !lastLastBrhSelectDq0 && (p === 3.U || p === 6.U))}
   val lastAluSelectDq0 = PriorityMuxDefault(isAlu.reverse.zip(aluSelectDq0.reverse), lastLastAluSelectDq0)
   val lastBrhSelectDq0 = PriorityMuxDefault(isBrh.reverse.zip(brhSelectDq0.reverse), lastLastBrhSelectDq0)
   when(isAlu.asUInt.orR && io.toIntDq0.canAccept && io.toIntDq1.canAccept){
@@ -173,23 +174,31 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
   val toIntDq0Valid = Wire(Vec(RenameWidth, Bool()))
   val toIntDq1Valid = Wire(Vec(RenameWidth, Bool()))
-  toIntDq0Valid.indices.map { case i =>
-    toIntDq0Valid(i) := Mux(!io.toIntDq0.canAccept, false.B, Mux(!io.toIntDq1.canAccept, isOnlyDq0(i) || isBothDq01(i), isOnlyDq0(i) || aluSelectDq0(i) || brhSelectDq0(i)))
+  toIntDq0Valid.indices.foreach { i =>
+    toIntDq0Valid(i) := Mux(!io.toIntDq0.canAccept,
+      false.B,
+      Mux(!io.toIntDq1.canAccept,
+        isOnlyDq0(i) ||isBothDq01(i),
+        isOnlyDq0(i) || aluSelectDq0(i) || brhSelectDq0(i)))
   }
-  toIntDq1Valid.indices.map { case i =>
-    toIntDq1Valid(i) := Mux(!io.toIntDq1.canAccept, false.B, Mux(!io.toIntDq0.canAccept, isOnlyDq1(i) || isBothDq01(i), isOnlyDq1(i) || (isAlu(i) ^ aluSelectDq0(i)) || (isBrh(i) && !brhSelectDq0(i))))
+  toIntDq1Valid.indices.foreach { i =>
+    toIntDq1Valid(i) := Mux(!io.toIntDq1.canAccept,
+      false.B,
+      Mux(!io.toIntDq0.canAccept,
+        isOnlyDq1(i) || isBothDq01(i),
+        isOnlyDq1(i) || (isAlu(i) ^ aluSelectDq0(i)) || (isBrh(i) && !brhSelectDq0(i))))
   }
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
     !req.bits.preDecodeInfo.notCFI || FuType.isJump(req.bits.fuType)
   ))
-  val isFp = VecInit(io.fromRename.map(req => FuType.isFArith(req.bits.fuType)))
-  val isVec     = VecInit(io.fromRename.map(req => FuType.isVArith (req.bits.fuType) ||
+  val isFp     = VecInit(io.fromRename.map(req => FuType.isFArith(req.bits.fuType)))
+  val isVec    = VecInit(io.fromRename.map(req => FuType.isVArith(req.bits.fuType) ||
                                                   FuType.isVsetRvfWvf(req.bits.fuType)))
   val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType) ||
-                                                  FuType.isVls (req.bits.fuType)))
+                                                  FuType.isVls(req.bits.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
-  val isVls    = VecInit(io.fromRename.map(req => FuType.isVls (req.bits.fuType)))
+  val isVls    = VecInit(io.fromRename.map(req => FuType.isVls(req.bits.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStore(req.bits.fuType)))
   val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
