@@ -1636,6 +1636,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadMisalignBuffer.io.overwriteExpBuf.vaddr,
     storeMisalignBuffer.io.overwriteExpBuf.vaddr
   )
+  val misalignBufExceptionGpaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
+    loadMisalignBuffer.io.overwriteExpBuf.gpaddr,
+    storeMisalignBuffer.io.overwriteExpBuf.gpaddr
+  )
 
   val vSegmentException = RegInit(false.B)
   when (DelayN(redirect.valid, 10) && vSegmentException) {
@@ -1648,6 +1652,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vSegmentExceptionVl     = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vl, vSegmentUnit.io.exceptionInfo.valid)
   val vSegmentExceptionAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vaddr, vSegmentUnit.io.exceptionInfo.valid)
   val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.gpaddr, atomicsUnit.io.exceptionAddr.valid)
+  val vSegmentExceptionGPAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.gpaddr, vSegmentUnit.io.exceptionInfo.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
@@ -1671,8 +1676,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   )
 
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
-  io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(atomicsException, atomicsExceptionGPAddress, lsq.io.exceptionAddr.gpaddr))
-
+  io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(
+    atomicsException,
+    atomicsExceptionGPAddress,
+    Mux(misalignBufExceptionOverwrite,
+      misalignBufExceptionGpaddr,
+      Mux(vSegmentException,
+        vSegmentExceptionGPAddress,
+        lsq.io.exceptionAddr.gpaddr
+      )
+    )
+  ))
   io.mem_to_ooo.topToBackendBypass match { case x =>
     x.hartId            := io.hartId
     x.externalInterrupt.msip  := outer.clint_int_sink.in.head._1(0)

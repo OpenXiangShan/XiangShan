@@ -49,7 +49,9 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val exceptionVaddr   = UInt(VAddrBits.W)
+  val exceptionGpaddr  = UInt(GPAddrBits.W)
   val exception_va     = Bool()
+  val exception_gpa    = Bool()
   val exception_pa     = Bool()
   val exceptionVstart  = UInt(elemIdxBits.W)
   val exceptionVl      = UInt(elemIdxBits.W)
@@ -172,6 +174,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val splitPtrNext      = WireInit(0.U.asTypeOf(new VSegUPtr))
 
   val exception_va      = WireInit(false.B)
+  val exception_gpa     = WireInit(false.B)
   val exception_pa      = WireInit(false.B)
 
   val maxSegIdx         = instMicroOp.vl - 1.U
@@ -251,7 +254,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   }.elsewhen(state === s_pm){
     /* if is vStore, send data to sbuffer, so don't need query dcache */
-    stateNext := Mux(exception_pa || exception_va,
+    stateNext := Mux(exception_pa || exception_va || exception_gpa,
                      s_finish,
                      Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_cache_req, s_send_data))
 
@@ -379,12 +382,15 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger
   // tlb resp
   when(io.dtlb.resp.fire && state === s_wait_tlb_resp){
-      exceptionVec(storePageFault)    := io.dtlb.resp.bits.excp(0).pf.st && canTriggerException
-      exceptionVec(loadPageFault)     := io.dtlb.resp.bits.excp(0).pf.ld && canTriggerException
-      exceptionVec(storeAccessFault)  := io.dtlb.resp.bits.excp(0).af.st && canTriggerException
-      exceptionVec(loadAccessFault)   := io.dtlb.resp.bits.excp(0).af.ld && canTriggerException
+      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st && canTriggerException
+      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld && canTriggerException
+      exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st && canTriggerException
+      exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld && canTriggerException
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st && canTriggerException
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld && canTriggerException
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
+        instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
       }
   }
   // pmp
@@ -401,17 +407,19 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVLoad(fuType)  && canTriggerException
     exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore(fuType) && canTriggerException
 
-    exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
+    exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
-    exception_pa := (pmp.st || pmp.ld || pmp.mmio) && canTriggerException
+    exception_gpa := exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
+    exception_pa  := (pmp.st || pmp.ld || pmp.mmio) && canTriggerException
 
-    instMicroOp.exception_pa := exception_pa
-    instMicroOp.exception_va := exception_va
+    instMicroOp.exception_pa  := exception_pa
+    instMicroOp.exception_va  := exception_va
+    instMicroOp.exception_gpa := exception_gpa
     // update storeAccessFault bit. Currently, we don't support vector MMIO
     exceptionVec(loadAccessFault)  := (exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio) && canTriggerException
     exceptionVec(storeAccessFault) := (exceptionVec(storeAccessFault) || pmp.st || pmp.mmio) && canTriggerException
 
-    when(exception_va || exception_pa) {
+    when(exception_va || exception_gpa || exception_pa) {
       when(canTriggerException) {
         instMicroOp.exceptionVaddr  := vaddr
         instMicroOp.exceptionVl     := segmentIdx // for exception
@@ -653,6 +661,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uop.vpu.vuopIdx
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
+  io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }

@@ -485,6 +485,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).mbIndex     := s3_in.mbIndex
       sx_in(i).mask        := s3_in.mask
       sx_in(i).vaddr       := s3_in.vaddr
+      sx_in(i).gpaddr      := s3_in.gpaddr
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -522,6 +523,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.alignedType := sx_last_in.alignedType
   io.vecstout.bits.mask        := sx_last_in.mask
   io.vecstout.bits.vaddr       := sx_last_in.vaddr
+  io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)
