@@ -175,91 +175,91 @@ object FuType extends OHEnumeration {
   def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll ++ Seq(vsetiwi, vsetiwf))
 
   /** is Arithmetic Logic Unit operation */
-  def isAlu(implicit fuType: UInt): Bool = FuTypeOrR(alu) // TODO
+  def isAlu(fuType: UInt): Bool = FuTypeOrR(fuType, alu)
 
   /** is Branch operation */
-  def isBrh(implicit fuType: UInt): Bool = FuTypeOrR(brh) // TODO
+  def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, brh)
 
   /** is vset{i}vl{i} type operation */
-  def isVset(implicit fuType: UInt): Bool = FuTypeOrR(vecVSET) // TODO
+  def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
 
   /** is Jump operation */
-  def isJump(implicit fuType: UInt): Bool = FuTypeOrR(jmp) // TODO
+  def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 
   /** is Jump operation */
-  def isBrhJump(implicit fuType: UInt): Bool = FuTypeOrR(brh, jmp) // TODO
+  def isBrhJump(fuType: UInt): Bool = FuTypeOrR(fuType, brh, jmp)
 
   /** is Float-point Arithmetic operation */
-  def isFArith(implicit fuType: UInt): Bool = FuTypeOrR(fpArithAll) // TODO
+  def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
   /** is Memory operation */
-  def isMem(implicit fuType: UInt): Bool = FuTypeOrR(scalaMemAll) // TODO
+  def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
 
   /** is Load/Store operation */
-  def isLoadStore(implicit fuType: UInt): Bool = FuTypeOrR(ldu, stu) // TODO
+  def isLoadStore(fuType: UInt): Bool = FuTypeOrR(fuType, ldu, stu) // TODO
 
   /** is Load operation */
-  def isLoad(implicit fuType: UInt): Bool = FuTypeOrR(ldu) // TODO
+  def isLoad(fuType: UInt): Bool = FuTypeOrR(fuType, ldu) // TODO
 
   /** is Store operation */
-  def isStore(implicit fuType: UInt): Bool = FuTypeOrR(stu) // TODO
+  def isStore(fuType: UInt): Bool = FuTypeOrR(fuType, stu) // TODO
 
   /** is AMO atomic operation */
-  def isAMO(implicit fuType: UInt): Bool = FuTypeOrR(mou) // TODO
+  def isAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou) // TODO
 
   /** is Fence operation */
-  def isFence(implicit fuType: UInt): Bool = FuTypeOrR(fence) // TODO
+  def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence) // TODO
 
   /** is CSR operation */
-  def isCsr(implicit fuType: UInt): Bool = FuTypeOrR(csr) // TODO
+  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr) // TODO
 
-  def isVsetRvfWvf(implicit fuType: UInt): Bool = FuTypeOrR(vsetfwf) // TODO
+  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf) // TODO
 
   /** is Vector Arithmetic operation */
-  def isVArith(implicit fuType: UInt): Bool = FuTypeOrR(vecArith) // TODO
+  def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith) // TODO
 
   /** is Vector Load/Store operation */
-  def isVls(implicit fuType: UInt): Bool = FuTypeOrR(vldu, vstu, vsegldu, vsegstu) // TODO
+  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu) // TODO
 
   /** is Vector Non-segment Load/Store operation */
-  def isVNonsegls(implicit fuType: UInt): Bool = FuTypeOrR(vldu, vstu)
+  def isVNonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
 
   /** is Vector Segment Load/Store operation */
-  def isVSegls(implicit futype: UInt): Bool = FuTypeOrR(vsegldu, vsegstu) // TODO
+  def isVSegls(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu, vsegstu) // TODO
 
   /** is Vector Load operation */
-  def isVLoad(implicit fuType: UInt): Bool = FuTypeOrR(vldu, vsegldu) // TODO
+  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu) // TODO
 
   /** is Vector Store operation */
-  def isVStore(implicit fuType: UInt): Bool = FuTypeOrR(vstu, vsegstu) // TODO
+  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu) // TODO
 
   /** is Vector Segment Load operation */
-  def isVSegLoad(implicit fuType: UInt): Bool = FuTypeOrR(vsegldu)
+  def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
 
   /** is Vector Segment Store operation */
-  def isVSegStore(implicit fuType: UInt): Bool = FuTypeOrR(vsegstu)
+  def isVSegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vsegstu)
 
   /** is Vector Non-segment Load operation */
-  def isVNonsegLoad(implicit fuType: UInt): Bool = FuTypeOrR(vldu)
+  def isVNonsegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
 
   /** is Vector Non-segment Store operation */
-  def isVNonsegStore(implicit fuType: UInt): Bool = FuTypeOrR(vstu)
+  def isVNonsegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
 
-  def isVecOPF(implicit fuType: UInt): Bool = FuTypeOrR(vecOPF)
+  def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
-  def isVArithMem(implicit fuType: UInt): Bool = FuTypeOrR(vecArithOrMem) // except vset // TODO
+  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset // TODO
 
-  def isVAll(implicit fuType: UInt): Bool = FuTypeOrR(vecAll)
+  def isVAll(fuType: UInt): Bool = FuTypeOrR(fuType, vecAll)
 
-  def isDivSqrt(implicit fuType: UInt): Bool = FuTypeOrR(div, fDivSqrt) // TODO
+  def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt) // TODO
 
-  def storeIsAMO(implicit fuType: UInt): Bool = FuTypeOrR(mou) // TODO
+  def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou) // TODO
 
-  def isVppu(implicit fuType: UInt): Bool = FuTypeOrR(vppu)
+  def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
 
-  def isScalaNeedFrm(implicit fuType: UInt): Bool = FuTypeOrR(scalaNeedFrm)
+  def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
 
-  def isVectorNeedFrm(implicit fuType: UInt): Bool = FuTypeOrR(vectorNeedFrm)
+  def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
 
   object FuTypeOrR {
     def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
@@ -273,10 +273,6 @@ object FuType extends OHEnumeration {
     // Overload with argument list of function units
     def apply(fuType: UInt, fu0: OHType, fus: OHType*)  : Bool    = apply(fuType, fu0 +: fus)
     def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = apply(fuType, fu0 +: fus)
-
-    // Overload, passing fuType implicitly
-    def apply(fus: Seq[OHType])(implicit fuType: UInt): Bool = apply(fuType, fus)
-    def apply(fu0: OHType, fus: OHType*)(implicit fuType: UInt): Bool = apply(fuType, fu0 +: fus)
   }
 
   val functionNameMap: Map[OHType, String] = Map(

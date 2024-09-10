@@ -799,12 +799,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // output
   val decodedInst: DecodedInst = Wire(new DecodedInst()).decode(ctrl_flow.instr, decode_table)
 
-  /**
-   * Value for decodedInst.fuType to pass implicit argument fuType.
-   * Will be used in FuType.isXXX.
-   */
-  implicit val fuType: UInt = decodedInst.fuType
-
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   decodedInst.fpu := fpDecoder.io.fpCtrl
@@ -830,8 +824,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fnmsub- b1001011
   // fnmadd- b1001111
   private val isFMA = inst.OPCODE === BitPat("b100??11")
-  private val isVppu = FuType.isVppu
-  private val isVecOPF = FuType.isVecOPF
+  private val isVppu = FuType.isVppu(decodedInst.fuType)
+  private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
@@ -858,28 +852,28 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val exceptionII =
     decodedInst.selImm === SelImm.INVALID_INSTR ||
     vecException.io.illegalInst ||
-    io.fromCSR.illegalInst.sfenceVMA  && FuType.isFence && decodedInst.fuOpType === FenceOpType.sfence  ||
-    io.fromCSR.illegalInst.sfencePart && FuType.isFence && decodedInst.fuOpType === FenceOpType.nofence ||
-    io.fromCSR.illegalInst.hfenceGVMA && FuType.isFence && decodedInst.fuOpType === FenceOpType.hfence_g ||
-    io.fromCSR.illegalInst.hfenceVVMA && FuType.isFence && decodedInst.fuOpType === FenceOpType.hfence_v ||
-    io.fromCSR.illegalInst.hlsv       && FuType.isLoad && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
-    io.fromCSR.illegalInst.hlsv       && FuType.isStore && LSUOpType.isHsv(decodedInst.fuOpType) ||
-    io.fromCSR.illegalInst.fsIsOff    && (FuType.FuTypeOrR(FuType.fpOP ++ Seq(FuType.f2v)) ||
-                                          (FuType.isLoad && (decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
-                                           FuType.isStore && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
+    io.fromCSR.illegalInst.sfenceVMA  && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.sfence  ||
+    io.fromCSR.illegalInst.sfencePart && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.illegalInst.hfenceGVMA && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.hfence_g ||
+    io.fromCSR.illegalInst.hfenceVVMA && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.hfence_v ||
+    io.fromCSR.illegalInst.hlsv       && FuType.isLoad(decodedInst.fuType) && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.illegalInst.hlsv       && FuType.isStore(decodedInst.fuType) && LSUOpType.isHsv(decodedInst.fuOpType) ||
+    io.fromCSR.illegalInst.fsIsOff    && (FuType.FuTypeOrR(decodedInst.fuType, FuType.fpOP :+ FuType.f2v) ||
+                                          (FuType.isLoad(decodedInst.fuType) && (decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
+                                           FuType.isStore(decodedInst.fuType) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
                                           isVecOPF) ||
-    io.fromCSR.illegalInst.vsIsOff    && FuType.isVAll ||
-    io.fromCSR.illegalInst.wfi        && FuType.isCsr && CSROpType.isWfi(decodedInst.fuOpType) ||
-    (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
-    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm) && io.fromCSR.illegalInst.frm
+    io.fromCSR.illegalInst.vsIsOff    && FuType.isVAll(decodedInst.fuType) ||
+    io.fromCSR.illegalInst.wfi        && FuType.isCsr(decodedInst.fuType) && CSROpType.isWfi(decodedInst.fuOpType) ||
+    (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
+    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm
 
   private val exceptionVI =
-    io.fromCSR.virtualInst.sfenceVMA  && FuType.isFence && decodedInst.fuOpType === FenceOpType.sfence ||
-    io.fromCSR.virtualInst.sfencePart && FuType.isFence && decodedInst.fuOpType === FenceOpType.nofence ||
-    io.fromCSR.virtualInst.hfence     && FuType.isFence && (decodedInst.fuOpType === FenceOpType.hfence_g || decodedInst.fuOpType === FenceOpType.hfence_v) ||
-    io.fromCSR.virtualInst.hlsv       && FuType.isLoad && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
-    io.fromCSR.virtualInst.hlsv       && FuType.isStore && LSUOpType.isHsv(decodedInst.fuOpType) ||
-    io.fromCSR.virtualInst.wfi        && FuType.isCsr && CSROpType.isWfi(decodedInst.fuOpType)
+    io.fromCSR.virtualInst.sfenceVMA  && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.sfence ||
+    io.fromCSR.virtualInst.sfencePart && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.virtualInst.hfence     && FuType.isFence(decodedInst.fuType) && (decodedInst.fuOpType === FenceOpType.hfence_g || decodedInst.fuOpType === FenceOpType.hfence_v) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.isLoad(decodedInst.fuType) && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.isStore(decodedInst.fuType) && LSUOpType.isHsv(decodedInst.fuOpType) ||
+    io.fromCSR.virtualInst.wfi        && FuType.isCsr(decodedInst.fuType) && CSROpType.isWfi(decodedInst.fuOpType)
 
   decodedInst.exceptionVec(illegalInstr) := exceptionII || io.enq.ctrlFlow.exceptionVec(EX_II)
   decodedInst.exceptionVec(virtualInstr) := exceptionVI
@@ -895,16 +889,19 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  private val isLs     = FuType.isLoadStore // Load/Store
-  private val isVls    = FuType.isVls       // Vector Load/Store
-  private val isStore  = FuType.isStore     // Store
-  private val isAMO    = FuType.isAMO       // AMO instructions
-  private val isVStore = FuType.isVStore    // Vector Store
-  private val isBranch = FuType.isJump || !decodedInst.preDecodeInfo.notCFI
+  private val isLs     = FuType.isLoadStore(decodedInst.fuType) // Load/Store
+  private val isVls    = FuType.isVls(decodedInst.fuType)       // Vector Load/Store
+  private val isStore  = FuType.isStore(decodedInst.fuType)     // Store
+  private val isAMO    = FuType.isAMO(decodedInst.fuType)       // AMO instructions
+  private val isVStore = FuType.isVStore(decodedInst.fuType)    // Vector Store
+  private val isBranch = FuType.isJump(decodedInst.fuType) || !decodedInst.preDecodeInfo.notCFI
 
-  decodedInst.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch)
+  decodedInst.commitType := Cat(
+    isLs | isVls,
+    (isStore && !isAMO) | isVStore | isBranch
+  )
 
-  decodedInst.isVset := FuType.isVset
+  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 
   private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VFRDIV_VF, VFRSUB_VF, VFMV_F_S)
   private val vextInsts = Seq(VZEXT_VF2, VZEXT_VF4, VZEXT_VF8, VSEXT_VF2, VSEXT_VF4, VSEXT_VF8)
@@ -1110,20 +1107,20 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
   io.deq.decodedInst.fuType := Mux1H(Seq(
     // keep condition
-    (!FuType.isVNonsegls    && !isCsrrVl && !isCsrrVlenb) -> fuType,
+    (!FuType.isVNonsegls(decodedInst.fuType)    && !isCsrrVl && !isCsrrVlenb) -> decodedInst.fuType,
     (isCsrrVl) -> FuType.vsetfwf.U,
     (isCsrrVlenb) -> FuType.alu.U,
 
     // change vlsu to vseglsu when NF =/= 0.U
-    ( FuType.isVNonsegls    && inst.NF === 0.U ||
-      (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> fuType,
+    ( FuType.isVNonsegls(decodedInst.fuType)    && inst.NF === 0.U ||
+      (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
     // MOP === b00 && SUMOP === b01000: unit-stride whole register store
     // MOP =/= b00                    : strided and indexed store
-    ( FuType.isVNonsegStore && inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP =/= "b01000".U ||
+    ( FuType.isVNonsegStore(decodedInst.fuType) && inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP =/= "b01000".U ||
                                                    inst.MOP =/= "b00".U)) -> FuType.vsegstu.U,
     // MOP === b00 && LUMOP === b01000: unit-stride whole register load
     // MOP =/= b00                    : strided and indexed load
-    ( FuType.isVNonsegLoad  && inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U ||
+    ( FuType.isVNonsegLoad(decodedInst.fuType)  && inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U ||
                                                    inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
   ))
   io.deq.decodedInst.imm := MuxCase(decodedInst.imm, Seq(

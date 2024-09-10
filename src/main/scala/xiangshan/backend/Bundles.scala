@@ -83,7 +83,7 @@ object Bundles {
     val srcType         = Vec(numSrc, SrcType())
     val lsrc            = Vec(numSrc, UInt(LogicRegsWidth.W))
     val ldest           = UInt(LogicRegsWidth.W)
-    implicit val fuType = FuType()
+    val fuType          = FuType()
     val fuOpType        = FuOpType()
     val rfWen           = Bool()
     val fpWen           = Bool()
@@ -128,7 +128,7 @@ object Bundles {
     }
 
     def isSoftPrefetch: Bool = {
-      FuType.isAlu && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
+      FuType.isAlu(fuType) && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
     }
 
     def connectStaticInst(source: StaticInst): Unit = {
@@ -176,7 +176,7 @@ object Bundles {
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
-    implicit val fuType = FuType()
+    val fuType          = FuType()
     val fuOpType        = FuOpType()
     val rfWen           = Bool()
     val fpWen           = Bool()
@@ -243,19 +243,19 @@ object Bundles {
 
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
-    def isLUI: Bool = FuType.isAlu && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
+    def isLUI: Bool = FuType.isAlu(fuType) && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def isLUI32: Bool = this.selImm === SelImm.IMM_LUI32
-    def isWFI: Bool = FuType.isCsr && fuOpType === CSROpType.wfi
+    def isWFI: Bool = FuType.isCsr(fuType) && fuOpType === CSROpType.wfi
 
-    def isSvinvalBegin(flush: Bool) = FuType.isFence && fuOpType === FenceOpType.nofence && !flush
-    def isSvinval(flush: Bool) = FuType.isFence && Cat(
+    def isSvinvalBegin(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && !flush
+    def isSvinval(flush: Bool) = FuType.isFence(fuType) && Cat(
       Seq(FenceOpType.sfence, FenceOpType.hfence_v, FenceOpType.hfence_g).map(_ === fuOpType)
     ).orR && !flush
-    def isSvinvalEnd(flush: Bool) = FuType.isFence && fuOpType === FenceOpType.nofence && flush
-    def isNotSvinval = !FuType.isFence
+    def isSvinvalEnd(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && flush
+    def isNotSvinval = !FuType.isFence(fuType)
 
     def isHls: Bool = {
-      FuType.isLoad && LSUOpType.isHlv(fuOpType) || FuType.isStore && LSUOpType.isHsv(fuOpType)
+      FuType.isLoad(fuType) && LSUOpType.isHlv(fuOpType) || FuType.isStore(fuType) && LSUOpType.isHsv(fuOpType)
     }
 
     def srcIsReady: Vec[Bool] = {
