@@ -125,7 +125,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 10000
+  val timeOutThreshold = 100000
 
   def noS2xlate = "b00".U
   def allStage = "b11".U
