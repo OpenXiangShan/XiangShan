@@ -96,6 +96,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
+      val hartIsInReset = Output(Bool())
       val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
       val chi = new PortIO
       val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
@@ -134,6 +135,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
+    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
     EnableClintAsyncBridge match {
