@@ -69,7 +69,7 @@ trait HasXSDts {
 
     def nextLevelCacheProperty: PropertyOption = {
       if(coreParams.dcacheParametersOpt.nonEmpty){
-        val outer = memBlock.dcache.clientNode.edges.out.flatMap(_.manager.managers)
+        val outer = memBlock.inner.dcache.clientNode.edges.out.flatMap(_.manager.managers)
           .filter(_.supportsAcquireB)
           .flatMap(_.resources.headOption)
           .map(_.owner.label)
@@ -98,9 +98,9 @@ trait HasXSDts {
   ResourceBinding {
     Resource(device, "reg").bind(ResourceAddress(coreParams.HartId))
     val int_resources = (
-      memBlock.clint_int_sink.edges.in.flatMap(_.source.sources) ++
-      memBlock.plic_int_sink.edges.in.flatMap(_.source.sources) ++
-      memBlock.debug_int_sink.edges.in.flatMap(_.source.sources)
+      memBlock.inner.clint_int_sink.edges.in.flatMap(_.source.sources) ++
+      memBlock.inner.plic_int_sink.edges.in.flatMap(_.source.sources) ++
+      memBlock.inner.debug_int_sink.edges.in.flatMap(_.source.sources)
       ).flatMap {
       s =>
         println(s.resources.map(_.key), s.range)

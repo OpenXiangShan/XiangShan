@@ -26,18 +26,32 @@ import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
-
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
+  val inner = LazyModule(new FrontendInlined)
+  lazy val module = new FrontendImp(this)
+}
+
+class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
+  val io = IO(wrapper.inner.module.io.cloneType)
+  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  io <> wrapper.inner.module.io
+  io_perf <> wrapper.inner.module.io_perf
+  if (p(DebugOptionsKey).ResetGen) {
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+  }
+}
+
+class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = true
 
   val instrUncache  = LazyModule(new InstrUncache())
   val icache        = LazyModule(new ICache())
 
-  lazy val module = new FrontendImp(this)
+  lazy val module = new FrontendInlinedImp(this)
 }
 
-
-class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
 {

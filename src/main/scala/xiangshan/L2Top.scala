@@ -54,10 +54,12 @@ class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
 /**
   *   L2Top contains everything between Core and XSTile-IO
   */
-class L2Top()(implicit p: Parameters) extends LazyModule
+class L2TopInlined()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
+  override def shouldBeInlined: Boolean = true
+
   def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
     val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
     buffers.zipWithIndex.foreach{ case (b, i) => {
@@ -134,97 +136,118 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
   mmio_port := TLBuffer() := mmio_xbar
 
-  class L2TopImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
-    val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
-    val reset_vector = IO(new Bundle {
-      val fromTile = Input(UInt(PAddrBits.W))
-      val toCore = Output(UInt(PAddrBits.W))
+  class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
+    val io = IO(new Bundle {
+      val beu_errors = Input(chiselTypeOf(beu.module.io.errors))
+      val reset_vector = new Bundle {
+        val fromTile = Input(UInt(PAddrBits.W))
+        val toCore = Output(UInt(PAddrBits.W))
+      }
+      val hartId = new Bundle() {
+        val fromTile = Input(UInt(64.W))
+        val toCore = Output(UInt(64.W))
+      }
+      val cpu_halt = new Bundle() {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
+      }
+      val debugTopDown = new Bundle() {
+        val robTrueCommit = Input(UInt(64.W))
+        val robHeadPaddr = Flipped(Valid(UInt(36.W)))
+        val l2MissMatch = Output(Bool())
+      }
+      val chi = if (enableCHI) Some(new PortIO) else None
+      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
+      val l2_pmp_resp = Flipped(new PMPRespBundle)
+      val l2_hint = ValidIO(new L2ToL1Hint())
+      // val reset_core = IO(Output(Reset()))
     })
-    val hartId = IO(new Bundle() {
-      val fromTile = Input(UInt(64.W))
-      val toCore = Output(UInt(64.W))
-    })
-    val cpu_halt = IO(new Bundle() {
-      val fromCore = Input(Bool())
-      val toTile = Output(Bool())
-    })
-    val debugTopDown = IO(new Bundle() {
-      val robTrueCommit = Input(UInt(64.W))
-      val robHeadPaddr = Flipped(Valid(UInt(36.W)))
-      val l2MissMatch = Output(Bool())
-    })
-    val chi = if (enableCHI) Some(IO(new PortIO)) else None
-    val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
-    val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
-    val l2_pmp_resp = IO(Flipped(new PMPRespBundle))
-    val l2_hint = IO(ValidIO(new L2ToL1Hint()))
-    val reset_core = IO(Output(Reset()))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
-    beu.module.io.errors <> beu_errors
-    resetDelayN.io.in := reset_vector.fromTile
-    reset_vector.toCore := resetDelayN.io.out
-    hartId.toCore := hartId.fromTile
-    cpu_halt.toTile := cpu_halt.fromCore
-    dontTouch(hartId)
-    dontTouch(cpu_halt)
-    if (!chi.isEmpty) { dontTouch(chi.get) }
+    beu.module.io.errors <> io.beu_errors
+    resetDelayN.io.in := io.reset_vector.fromTile
+    io.reset_vector.toCore := resetDelayN.io.out
+    io.hartId.toCore := io.hartId.fromTile
+    io.cpu_halt.toTile := io.cpu_halt.fromCore
+    dontTouch(io.hartId)
+    dontTouch(io.cpu_halt)
+    if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module
-      l2_hint := l2.io.l2_hint
+      io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
-      l2.io.hartId := hartId.fromTile
-      l2.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
-      l2.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
-      debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
+      l2.io.hartId := io.hartId.fromTile
+      l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
+      l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
+      io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
 
       /* l2 tlb */
-      l2_tlb_req.req.bits := DontCare
-      l2_tlb_req.req.valid := l2.io.l2_tlb_req.req.valid
-      l2_tlb_req.resp.ready := l2.io.l2_tlb_req.resp.ready
-      l2_tlb_req.req.bits.vaddr := l2.io.l2_tlb_req.req.bits.vaddr
-      l2_tlb_req.req.bits.cmd := l2.io.l2_tlb_req.req.bits.cmd
-      l2_tlb_req.req.bits.size := l2.io.l2_tlb_req.req.bits.size
-      l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
-      l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
-      l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
-      l2.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
-      l2.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
-      l2.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
-      l2.io.l2_tlb_req.resp.bits.pbmt := l2_tlb_req.resp.bits.pbmt.head
-      l2.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
-      l2.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
-      l2.io.l2_tlb_req.pmp_resp.ld := l2_pmp_resp.ld
-      l2.io.l2_tlb_req.pmp_resp.st := l2_pmp_resp.st
-      l2.io.l2_tlb_req.pmp_resp.instr := l2_pmp_resp.instr
-      l2.io.l2_tlb_req.pmp_resp.mmio := l2_pmp_resp.mmio
-      l2.io.l2_tlb_req.pmp_resp.atomic := l2_pmp_resp.atomic
+      io.l2_tlb_req.req.bits := DontCare
+      io.l2_tlb_req.req.valid := l2.io.l2_tlb_req.req.valid
+      io.l2_tlb_req.resp.ready := l2.io.l2_tlb_req.resp.ready
+      io.l2_tlb_req.req.bits.vaddr := l2.io.l2_tlb_req.req.bits.vaddr
+      io.l2_tlb_req.req.bits.cmd := l2.io.l2_tlb_req.req.bits.cmd
+      io.l2_tlb_req.req.bits.size := l2.io.l2_tlb_req.req.bits.size
+      io.l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
+      io.l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
+      io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
+      l2.io.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid
+      l2.io.l2_tlb_req.req.ready := io.l2_tlb_req.req.ready
+      l2.io.l2_tlb_req.resp.bits.paddr.head := io.l2_tlb_req.resp.bits.paddr.head
+      l2.io.l2_tlb_req.resp.bits.pbmt := io.l2_tlb_req.resp.bits.pbmt.head
+      l2.io.l2_tlb_req.resp.bits.miss := io.l2_tlb_req.resp.bits.miss
+      l2.io.l2_tlb_req.resp.bits.excp.head <> io.l2_tlb_req.resp.bits.excp.head
+      l2.io.l2_tlb_req.pmp_resp.ld := io.l2_pmp_resp.ld
+      l2.io.l2_tlb_req.pmp_resp.st := io.l2_pmp_resp.st
+      l2.io.l2_tlb_req.pmp_resp.instr := io.l2_pmp_resp.instr
+      l2.io.l2_tlb_req.pmp_resp.mmio := io.l2_pmp_resp.mmio
+      l2.io.l2_tlb_req.pmp_resp.atomic := io.l2_pmp_resp.atomic
       l2cache.get match {
         case l2cache: TL2CHICoupledL2 =>
           val l2 = l2cache.module
-          l2.io_nodeID := nodeID.get
-          chi.get <> l2.io_chi
+          l2.io_nodeID := io.nodeID.get
+          io.chi.get <> l2.io_chi
         case l2cache: TL2TLCoupledL2 =>
       }
     } else {
-      l2_hint := 0.U.asTypeOf(l2_hint)
-      debugTopDown <> DontCare
+      io.l2_hint := 0.U.asTypeOf(io.l2_hint)
+      io.debugTopDown <> DontCare
 
-      l2_tlb_req.req.valid := false.B
-      l2_tlb_req.req.bits := DontCare
-      l2_tlb_req.req_kill := DontCare
-      l2_tlb_req.resp.ready := true.B
+      io.l2_tlb_req.req.valid := false.B
+      io.l2_tlb_req.req.bits := DontCare
+      io.l2_tlb_req.req_kill := DontCare
+      io.l2_tlb_req.resp.ready := true.B
     }
+  }
+
+  lazy val module = new Imp(this)
+}
+
+class L2Top()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasSoCParameter {
+
+  override def shouldBeInlined: Boolean = false
+
+  val inner = LazyModule(new L2TopInlined())
+
+  class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
+    val io = IO(inner.module.io.cloneType)
+    val reset_core = IO(Output(Reset()))
+    io <> inner.module.io
 
     if (debugOpts.ResetGen) {
-      val resetTree = ResetGenNode(Seq(CellNode(reset_core)))
-      ResetGen(resetTree, reset, sim = false)
+      ResetGen(ResetGenNode(Seq(
+        CellNode(reset_core),
+        ModuleNode(inner.module)
+      )), reset, sim = false)
     } else {
       reset_core := DontCare
     }
   }
 
-  lazy val module = new L2TopImp(this)
+  lazy val module = new Imp(this)
 }

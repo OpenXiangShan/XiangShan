@@ -221,9 +221,9 @@ class FrontendBridge()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class MemBlock()(implicit p: Parameters) extends LazyModule
+class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
-  override def shouldBeInlined: Boolean = false
+  override def shouldBeInlined: Boolean = true
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
@@ -249,11 +249,10 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
     ptw_to_l2_buffer.node := ptw.node
   }
 
-  lazy val module = new MemBlockImp(this)
-
+  lazy val module = new MemBlockInlinedImp(this)
 }
 
-class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
+class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasFPUParameters
   with HasPerfEvents
@@ -306,10 +305,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val outer_l2_pf_enable = Output(Bool())
     // val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     // val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
-  })
 
-  // reset signals of frontend & backend are generated in memblock
-  val reset_backend = IO(Output(Reset()))
+    // reset signals of frontend & backend are generated in memblock
+    val reset_backend = Output(Reset())
+  })
 
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
@@ -1743,13 +1742,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         ModuleNode(dtlb_ld_tlb_ld),
         ModuleNode(dcache),
         ModuleNode(l1d_to_l2_buffer),
-        CellNode(reset_backend)
+        CellNode(io.reset_backend)
       )
     )
     ResetGen(leftResetTree, reset, sim = false)
     ResetGen(rightResetTree, reset, sim = false)
   } else {
-    reset_backend := DontCare
+    io.reset_backend := DontCare
   }
 
   // top-down info
@@ -1800,4 +1799,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
+}
+
+class MemBlock()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
+
+  val inner = LazyModule(new MemBlockInlined())
+
+  lazy val module = new MemBlockImp(this)
+}
+
+class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
+  val io = IO(wrapper.inner.module.io.cloneType)
+  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  io <> wrapper.inner.module.io
+  io_perf <> wrapper.inner.module.io_perf
+
+  if (p(DebugOptionsKey).ResetGen) {
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+  }
 }

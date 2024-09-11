@@ -46,8 +46,23 @@ import scala.collection.mutable
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
-
   override def shouldBeInlined: Boolean = false
+  val inner = LazyModule(new BackendInlined(params))
+  lazy val module = new BackendImp(this)
+}
+
+class BackendImp(wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
+  val io = IO(new BackendIO()(p, wrapper.params))
+  io <> wrapper.inner.module.io
+  if (p(DebugOptionsKey).ResetGen) {
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+  }
+}
+
+class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends LazyModule
+  with HasXSParameter {
+
+  override def shouldBeInlined: Boolean = true
 
   // check read & write port config
   params.configChecks
@@ -164,10 +179,10 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
   val wbFuBusyTable = LazyModule(new WbFuBusyTable(params))
 
-  lazy val module = new BackendImp(this)
+  lazy val module = new BackendInlinedImp(this)
 }
 
-class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper)
+class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter
   with HasPerfEvents {
   implicit private val params: BackendParams = wrapper.params
@@ -717,9 +732,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       ModuleNode(wbFuBusyTable),
       ResetGenNode(Seq(
         ModuleNode(ctrlBlock),
-        ResetGenNode(Seq(
+        // ResetGenNode(Seq(
           CellNode(io.frontendReset)
-        ))
+        // ))
       ))
     ))
     ResetGen(leftResetTree, reset, sim = false)

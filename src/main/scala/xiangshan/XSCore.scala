@@ -63,8 +63,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock)
 
-  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
-  memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
+  memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
+  memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -163,8 +163,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
-  backend.io.perf.perfEventsFrontend := frontend.getPerf
-  backend.io.perf.perfEventsLsu := memBlock.getPerf
+  backend.io.perf.perfEventsFrontend := frontend.io_perf
+  backend.io.perf.perfEventsLsu := memBlock.io_perf
   backend.io.perf.perfEventsHc := io.perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
@@ -241,7 +241,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
 
   if (debugOpts.ResetGen) {
-    backend.reset := memBlock.reset_backend
+    backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
   }
 }
