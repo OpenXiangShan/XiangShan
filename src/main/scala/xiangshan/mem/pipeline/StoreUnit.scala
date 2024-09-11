@@ -337,7 +337,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   storeTrigger.io.fromLoadStore.vaddr                 := s1_in.vaddr
-
+  storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
+    
   val s1_trigger_action = storeTrigger.io.toLoadStore.triggerAction
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
   val s1_trigger_breakpoint = TriggerAction.isExp(s1_trigger_action)
@@ -546,6 +548,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.isvec := true.B
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
+  io.vecstout.bits.trigger    := sx_last_in.output.uop.trigger
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv

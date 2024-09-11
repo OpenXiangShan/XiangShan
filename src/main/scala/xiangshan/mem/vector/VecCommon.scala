@@ -227,6 +227,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
+  val trigger = TriggerAction()
   // val uopQueuePtr = new VluopPtr
   // val flowPtr = new VlflowPtr
 }

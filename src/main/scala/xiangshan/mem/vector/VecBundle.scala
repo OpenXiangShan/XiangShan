@@ -104,6 +104,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val isvec                = Bool()
   val flushState           = Bool()
   val sourceType           = VSFQFeedbackType()
+  val trigger              = TriggerAction()
   //val dataInvalidSqIdx = new SqPtr
   //val paddr                = UInt(PAddrBits.W)
   val mmio                 = Bool()
