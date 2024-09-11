@@ -40,6 +40,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val sourceType       = VSFQFeedbackType()
   val flushState       = Bool()
   val vdIdx            = UInt(3.W)
+  val elemIdx          = UInt(elemIdxBits.W) // element index
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val vl               = UInt(elemIdxBits.W)
@@ -76,9 +77,11 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.sourceType   := 0.U.asTypeOf(VSFQFeedbackType())
     sink.flushState   := false.B
     sink.vdIdx        := source.vdIdx
+    sink.elemIdx      := Fill(elemIdxBits, 1.U)
     sink.fof          := source.fof
     sink.vlmax        := source.vlmax
     sink.vl           := source.uop.vpu.vl
+    sink.vaddr        := source.vaddr
     sink.vstart       := 0.U
   }
   def DeqConnect(source: MBufferBundle): MemExuOutput = {
@@ -225,34 +228,42 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entry               = entries(wbMbIndex(i))
     val entryVeew           = entry.uop.vpu.veew
     val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
-    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR || TriggerAction.isDmode(entry.uop.trigger)
+    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR
     val entryExcp           = entryHasException && entry.mask.orR
+    val entryVaddr          = entry.vaddr
+    val entryVstart         = entry.vstart
+    val entryElemIdx        = entry.elemIdx
 
     val sel                    = selectOldest(mergePortMatrix(i), pipeBits, wbElemIdxInField)
     val selPort                = sel._2
     val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
+    val selVaddr               = selPort(0).vaddr
+    val selElemIdx             = selPort(0).elemIdx
 
     val isUSFirstUop           = !selPort(0).elemIdx.orR
     // Only the first unaligned uop of unit-stride needs to be offset.
     // When unaligned, the lowest bit of mask is 0.
     //  example: 16'b1111_1111_1111_0000
-    val vaddrOffset            = Mux(entryIsUS && isUSFirstUop, genVFirstUnmask(selPort(0).mask).asUInt, 0.U)
-    val vaddr                  = selPort(0).vaddr +  vaddrOffset
+    val firstUnmask            = genVFirstUnmask(selPort(0).mask).asUInt
+    val vaddrOffset            = Mux(entryIsUS, firstUnmask, 0.U)
+    val vaddr                  = selVaddr + vaddrOffset
+    val vstart                 = Mux(entryIsUS, (selPort(0).vecVaddrOffset >> entryVeew).asUInt, selElemInfield)
 
     // select oldest port to raise exception
-    when((((entries(wbMbIndex(i)).vstart >= selElemInfield) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)){
-      entries(wbMbIndex(i)).uop.trigger := selPort(0).trigger
-      when(!entries(wbMbIndex(i)).fof || selElemInfield === 0.U){
+    when((((entryElemIdx >= selElemIdx) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)) {
+      entry.uop.trigger     := selPort(0).trigger
+      entry.elemIdx         := selElemIdx
+      when(!entry.fof || vstart === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
-        entries(wbMbIndex(i)).vstart       := selElemInfield
-        entries(wbMbIndex(i)).exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
-        entries(wbMbIndex(i)).vaddr        := vaddr
-        entries(wbMbIndex(i)).vaNeedExt    := selPort(0).vaNeedExt
-        entries(wbMbIndex(i)).gpaddr       := selPort(0).gpaddr
-        entries(wbMbIndex(i)).isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
+        entry.vstart       := vstart
+        entry.exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
+        entry.vaddr        := vaddr
+        entry.vaNeedExt    := selPort(0).vaNeedExt
+        entry.gpaddr       := selPort(0).gpaddr
+        entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{
-        entries(wbMbIndex(i)).vl           := selElemInfield
+        entry.vl           := Mux(entries(wbMbIndex(i)).vl > vstart, vstart, entries(wbMbIndex(i)).vl)
       }
     }
   }

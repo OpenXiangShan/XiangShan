@@ -531,7 +531,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException
-  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe
+  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && (!deqPtrEntry.isVls || RegNext(RegNext(deqPtrEntry.commit_w)))
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
   val deqIsVlsException = deqHasException && deqPtrEntry.isVls
   // delay 2 cycle wait exceptionGen out
@@ -569,7 +569,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException) && !lastCycleFlush
+  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit)) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
@@ -1110,6 +1110,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.trigger := io.enq.req(i).bits.trigger
     exceptionGen.io.enq(i).bits.vstartEn := false.B //DontCare
     exceptionGen.io.enq(i).bits.vstart := 0.U //DontCare
+    exceptionGen.io.enq(i).bits.vuopIdx := 0.U
   }
 
   println(s"ExceptionGen:")
@@ -1134,8 +1135,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // TODO: make trigger configurable
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := false.B //wb.bits.vstartEn.getOrElse(false.B) // todo need add vstart in ExuOutput
+    exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.get.asUInt.orR else 0.U)
     exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
+    exc_wb.bits.vuopIdx := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vuopIdx else 0.U)
     //    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
     //      s"flushPipe ${configs.exists(_.flushPipe)}, " +
     //      s"replayInst ${configs.exists(_.replayInst)}")

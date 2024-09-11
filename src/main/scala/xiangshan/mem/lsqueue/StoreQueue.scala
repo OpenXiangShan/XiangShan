@@ -536,7 +536,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     // enter exceptionbuffer again
     when (storeAddrInFireReg) {
-      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).af
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).af && !io.storeAddrInRe(i).isvec
       exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := RegEnable(io.storeAddrIn(i).bits, io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss)
       exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec(storeAccessFault) := io.storeAddrInRe(i).af
     }
@@ -1046,8 +1046,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr                   = rdataPtrExt(i).value
     val mmioStall             = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
-    val vecLastUopCommit      = uop(ptr).lastUop && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
-                                allocated(ptr) && committed(ptr) && vecMbCommit(ptr) && !mmioStall && isVec(ptr) && vecDataValid(ptr)
+    val vecLastUopCommit      = uop(ptr).lastUop && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) && dataBuffer.io.enq(i).fire
     vecLastUopCommit
   }.reduce(_ || _)
 

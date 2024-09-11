@@ -294,6 +294,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val vaNeedExt   = Bool()
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
+  val vecVaddrOffset = UInt(VAddrBits.W)
 }
 
 object MulNum {
