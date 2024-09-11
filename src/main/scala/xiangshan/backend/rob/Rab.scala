@@ -8,7 +8,7 @@ import utils._
 import utility._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.decode.VectorConstants
-import xiangshan.backend.rename.SnapshotGenerator
+import xiangshan.backend.rename.{DiffRenameTable, SnapshotGenerator}
 
 class RenameBufferPtr(size: Int) extends CircularQueuePtr[RenameBufferPtr](size) {
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RabSize)
@@ -46,7 +46,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
-    val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
 
     val status = Output(new Bundle {
       val walkEnd = Bool()
@@ -246,12 +245,17 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.status.walkEnd := walkEndNext
 
   // for difftest
-  io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
-  io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
+  val diffCommits = Option.when(backendParams.basicDebugEn)(Wire(new DiffCommitIO))
+  diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
+  diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
   for(i <- 0 until RabCommitWidth * MaxUopSize) {
-    io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
-    io.diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
+    diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
+    diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
   }
+  val diffRenameTable = Option.when(backendParams.basicDebugEn)(Module(new DiffRenameTable))
+  diffRenameTable.foreach(_.io.diffCommits := diffCommits.get)
+
+  println(s"[Rab] has diffRenameTable: ${diffRenameTable.nonEmpty}" )
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 

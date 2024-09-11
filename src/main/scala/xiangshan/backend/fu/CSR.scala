@@ -45,8 +45,6 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(UInt(XLEN.W))
   val vxrm = Input(UInt(2.W))
 
-  val vl = Output(UInt(XLEN.W))
-
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
   val set_vxsat = Output(Valid(UInt(1.W)))

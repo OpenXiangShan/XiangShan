@@ -38,6 +38,7 @@ import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PFEvent, PerfCounterIO}
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
+import xiangshan.backend.regfile.DiffRegState
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -344,11 +345,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
   dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
   dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
-  dataPath.io.diffIntRat.foreach(_ := ctrlBlock.io.diff_int_rat.get)
-  dataPath.io.diffFpRat .foreach(_ := ctrlBlock.io.diff_fp_rat.get)
-  dataPath.io.diffVecRat.foreach(_ := ctrlBlock.io.diff_vec_rat.get)
-  dataPath.io.diffV0Rat .foreach(_ := ctrlBlock.io.diff_v0_rat.get)
-  dataPath.io.diffVlRat .foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
@@ -440,11 +436,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
 
-  // csr not store the value of vl, so when using difftest we assign the value of vl to debugVl
-  val debugVl_s0 = WireInit(UInt(VlData().dataWidth.W), 0.U)
-  val debugVl_s1 = WireInit(UInt(VlData().dataWidth.W), 0.U)
-  debugVl_s0 := dataPath.io.diffVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
-  debugVl_s1 := RegNext(debugVl_s0)
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
@@ -452,7 +443,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   //Todo here need change design
   csrio.vpu.set_vtype.valid := commitVType.valid
   csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
-  csrio.vpu.vl := ZeroExt(debugVl_s1, XLEN)
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
@@ -690,6 +680,37 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
 
   io.debugRolling := ctrlBlock.io.debugRolling
+
+  // difftest
+  val diffRegState = Option.when(backendParams.basicDebugEn)(Module(new DiffRegState))
+  diffRegState.foreach { mod =>
+    import utils.HierarchicalXMR.tapAndRead
+    import xiangshan.backend.fu.wrapper.CSR
+
+    val diffRAT = wrapper.ctrlBlock.rob.module.rab.diffRenameTable.get
+    val csr = intExuBlock.exuWithCSR.get.funcUnits.find(_.cfg == FuConfig.CsrCfg).get.asInstanceOf[CSR].csrMod
+
+    mod.io.hartId := io.fromTop.hartId
+
+    mod.io.intPRF := tapAndRead(dataPath.intRegFile.memForRead)
+    mod.io.fpPRF  := tapAndRead(dataPath.fpRegFile.memForRead)
+    mod.io.vfPRF  := dataPath.vfRegFile.map(x => tapAndRead(x.memForRead))
+    mod.io.v0PRF  := dataPath.v0RegFile.map(x => tapAndRead(x.memForRead))
+    mod.io.vlPRF  := tapAndRead(dataPath.vlRegFile.memForRead)
+
+    mod.io.intDiffTable := tapAndRead(diffRAT.int_table)
+    mod.io.fpDiffTable  := tapAndRead(diffRAT.fp_table)
+    mod.io.vecDiffTable := tapAndRead(diffRAT.vec_table)
+    mod.io.v0DiffTable  := tapAndRead(diffRAT.v0_table)
+    mod.io.vlDiffTable  := tapAndRead(diffRAT.vl_table)
+
+    mod.io.vecCSRState.vstart := tapAndRead(csr.vstart.rdata)
+    mod.io.vecCSRState.vxsat  := tapAndRead(csr.vcsr.vxsat)
+    mod.io.vecCSRState.vxrm   := tapAndRead(csr.vcsr.vxrm)
+    mod.io.vecCSRState.vcsr   := tapAndRead(csr.vcsr.rdata)
+    mod.io.vecCSRState.vtype  := tapAndRead(csr.vtype.rdata)
+    mod.io.vecCSRState.vlenb  := tapAndRead(csr.vlenb.rdata)
+  }
 
   if(backendParams.debugEn) {
     dontTouch(memScheduler.io)

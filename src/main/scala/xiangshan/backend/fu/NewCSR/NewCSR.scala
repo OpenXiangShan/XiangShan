@@ -487,7 +487,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
         m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
-        m.robCommit.vl      := RegNext          (io.fromRob.commit.vl)
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
         m.writeFCSR         := writeFpLegal
         m.writeVCSR         := writeVecLegal
@@ -1251,16 +1250,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffTriggerCSRState.tdata1    := tdata1.rdata
     diffTriggerCSRState.tinfo     := tinfo.rdata
     diffTriggerCSRState.tcontrol  := tcontrol.rdata
-
-    val diffVecCSRState = DifftestModule(new DiffVecCSRState)
-    diffVecCSRState.coreid := hartId
-    diffVecCSRState.vstart := vstart.rdata.asUInt
-    diffVecCSRState.vxsat := vcsr.vxsat.asUInt
-    diffVecCSRState.vxrm := vcsr.vxrm.asUInt
-    diffVecCSRState.vcsr := vcsr.rdata.asUInt
-    diffVecCSRState.vl := RegNext(io.fromRob.commit.vl)
-    diffVecCSRState.vtype := vtype.rdata.asUInt
-    diffVecCSRState.vlenb := vlenb.rdata.asUInt
 
     val diffFpCSRState = DifftestModule(new DiffFpCSRState)
     diffFpCSRState.coreid := hartId

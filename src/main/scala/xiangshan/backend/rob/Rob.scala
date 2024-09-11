@@ -63,7 +63,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
     val commits = Output(new RobCommitIO)
     val rabCommits = Output(new RabCommitIO)
-    val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
     val isVsetFlushPipe = Output(Bool())
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
@@ -308,7 +307,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.io.snpt.snptEnq := snptEnq
 
   io.rabCommits := rab.io.commits
-  io.diffCommits.foreach(_ := rab.io.diffCommits.get)
 
   /**
    * connection of [[vtypeBuffer]]
