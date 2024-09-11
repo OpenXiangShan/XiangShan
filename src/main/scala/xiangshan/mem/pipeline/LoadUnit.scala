@@ -697,7 +697,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.is128bit        := s0_sel_src.is128bit
   s0_out.isFrmMisAlignBuf    := s0_sel_src.frm_mabuf
   s0_out.uop_unit_stride_fof := s0_sel_src.uop_unit_stride_fof
-  s0_out.paddr         := Mux(s0_src_valid_vec(fast_rep_idx), io.fast_rep_in.bits.paddr, io.prefetch_req.bits.paddr) // only for prefetch and fast_rep
+  s0_out.paddr         := Mux(s0_src_valid_vec(fast_rep_idx), io.fast_rep_in.bits.paddr,
+    Mux(s0_src_select_vec(int_iss_idx) && s0_sel_src.prf_i, 0.U, io.prefetch_req.bits.paddr)) // only for prefetch and fast_rep
   s0_out.tlbNoQuery    := s0_tlb_no_query
   // s0_out.rob_idx_valid   := s0_rob_idx_valid
   // s0_out.inner_idx       := s0_inner_idx
