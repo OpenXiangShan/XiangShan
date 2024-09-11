@@ -517,7 +517,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   s2_flush := io.flush
 
-  val s2_finish  = (0 until PortNumber).map(i => has_send(i) || !s2_miss(i) || toMSHRArbiter.io.in(i).fire).reduce(_&&_)
+  // toMSHRArbiter.io.in(i).fire is not used here for timing consideration
+  // val s2_finish  = (0 until PortNumber).map(i => has_send(i) || !s2_miss(i) || toMSHRArbiter.io.in(i).fire).reduce(_&&_)
+  val s2_finish  = (0 until PortNumber).map(i => has_send(i) || !s2_miss(i)).reduce(_&&_)
   s2_ready      := s2_finish || !s2_valid
   s2_fire       := s2_valid && s2_finish && !s2_flush
 
