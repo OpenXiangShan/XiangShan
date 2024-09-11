@@ -26,7 +26,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -293,6 +293,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val trigger = TriggerAction()
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
+  val vuopIdx = UopIdx()
 
   def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
   def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)
