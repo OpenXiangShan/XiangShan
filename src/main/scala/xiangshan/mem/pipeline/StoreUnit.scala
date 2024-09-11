@@ -123,6 +123,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_elemIdx      = s0_vecstin.elemIdx
   val s0_alignedType  = s0_vecstin.alignedType
   val s0_mBIndex      = s0_vecstin.mBIndex
+  val s0_vecBaseVaddr = s0_vecstin.basevaddr
 
   // generate addr
   val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
@@ -214,6 +215,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.elemIdx      := s0_elemIdx
   s0_out.alignedType  := s0_alignedType
   s0_out.mbIndex      := s0_mBIndex
+  s0_out.vecBaseVaddr := s0_vecBaseVaddr
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -347,7 +349,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.flushPipe                := false.B
   s1_out.uop.trigger                  := s1_trigger_action
   s1_out.uop.exceptionVec(breakPoint) := s1_trigger_breakpoint
-
+  s1_out.vecVaddrOffset := Mux(
+    s1_trigger_debug_mode || s1_trigger_breakpoint,
+    storeTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
+    Mux(
+      s1_in.elemIdx =/= 0.U,
+      s1_in.vaddr - s1_in.vecBaseVaddr + genVFirstUnmask(s1_in.mask).asUInt,
+      genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr(3, 0)
+    )
+  )
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf
   io.lsq.bits      := s1_out
@@ -399,7 +409,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
-  s2_out.af     := s2_pmp.st && !s2_in.isvec
+  s2_out.af     := s2_out.uop.exceptionVec(storeAccessFault)
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
@@ -419,7 +429,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
   io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
-  val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
+  val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit && s1_feedback.valid) && s2_in.isvec
 
   val s2_misalign_stout = WireInit(0.U.asTypeOf(io.misalign_stout))
   s2_misalign_stout.valid := s2_valid && s2_can_go && s2_frm_mabuf
@@ -519,6 +529,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).vaNeedExt   := s3_in.vaNeedExt
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
+      sx_in(i).vecVaddrOffset := s3_in.vecVaddrOffset
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -560,6 +571,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.vaNeedExt   := sx_last_in.vaNeedExt
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
+  io.vecstout.bits.vecVaddrOffset := sx_last_in.vecVaddrOffset
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)
