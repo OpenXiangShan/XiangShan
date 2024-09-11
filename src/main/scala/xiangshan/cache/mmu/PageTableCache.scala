@@ -696,7 +696,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l3GoodToRefill := !memPte(2).isAf()
       }
       is (onlyStage2) {
-        l3GoodToRefill := !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
+        l3GoodToRefill := !memPte(2).isAf() && !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
       }
       is (noS2xlate) {
         l3GoodToRefill := !memPte(2).isAf()
@@ -748,7 +748,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       l2GoodToRefill := !memPte(2).isAf()
     }
     is (onlyStage2) {
-      l2GoodToRefill := !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
+      l2GoodToRefill := !memPte(2).isAf() && !memPte(2).isGpf(refill.level_dup(2), mPBMTE)
     }
     is (noS2xlate) {
       l2GoodToRefill := !memPte(2).isAf()
