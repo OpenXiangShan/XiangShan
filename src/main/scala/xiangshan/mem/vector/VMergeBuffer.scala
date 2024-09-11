@@ -209,15 +209,15 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   }
 
   val pipeValid        = io.fromPipeline.map(_.valid)
-  val pipeBits         = io.fromPipeline.map(x => x.bits)
+  val pipeBits         = io.fromPipeline.map(_.bits)
   val wbElemIdx        = pipeBits.map(_.elemIdx)
   val wbMbIndex        = pipeBits.map(_.mBIndex)
   val wbElemIdxInField = wbElemIdx.zip(wbMbIndex).map(x => x._1 & (entries(x._2).vlmax - 1.U))
 
   val portHasExcp       = pipeBits.zip(mergePortMatrix).map{case (port, v) =>
     (0 until pipeWidth).map{case i =>
-      val pipeHasExcep = ExceptionNO.selectByFu(io.fromPipeline(i).bits.exceptionVec, fuCfg).asUInt.orR
-      (v(i) && pipeHasExcep && io.fromPipeline(i).bits.mask.orR) // this port have exception or merged port have exception
+      val pipeHasExcep = ExceptionNO.selectByFu(port.exceptionVec, fuCfg).asUInt.orR
+      (v(i) && ((pipeHasExcep && io.fromPipeline(i).bits.mask.orR) || TriggerAction.isDmode(port.trigger))) // this port have exception or merged port have exception
     }.reduce(_ || _)
   }
 
@@ -225,7 +225,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entry               = entries(wbMbIndex(i))
     val entryVeew           = entry.uop.vpu.veew
     val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
-    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR
+    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR || TriggerAction.isDmode(entry.uop.trigger)
     val entryExcp           = entryHasException && entry.mask.orR
 
     val sel                    = selectOldest(mergePortMatrix(i), pipeBits, wbElemIdxInField)
@@ -242,6 +242,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
     // select oldest port to raise exception
     when((((entries(wbMbIndex(i)).vstart >= selElemInfield) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)){
+      entries(wbMbIndex(i)).uop.trigger := selPort(0).trigger
       when(!entries(wbMbIndex(i)).fof || selElemInfield === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entries(wbMbIndex(i)).vstart       := selElemInfield

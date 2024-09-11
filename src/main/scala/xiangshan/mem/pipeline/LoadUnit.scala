@@ -1000,6 +1000,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+  loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   val s1_trigger_action = loadTrigger.io.toLoadStore.triggerAction
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
@@ -1414,6 +1416,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3_vecout.flowPtr           := s3_in.flowPtr
   s3_vecout.elemIdx           := s3_in.elemIdx // elemIdx is already saved in flow queue // TODO:
   s3_vecout.elemIdxInsideVd   := s3_in.elemIdxInsideVd
+  s3_vecout.trigger           := s3_in.uop.trigger
   val s3_usSecondInv          = s3_in.usSecondInv
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
@@ -1575,6 +1578,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.mBIndex := s3_vec_mBIndex
   io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
+  io.vecldout.bits.trigger := s3_vecout.trigger
   io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.fullva
