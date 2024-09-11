@@ -141,8 +141,9 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * read
     ******************************************************************************
     */
-  io.read.valid := !empty || io.write.valid
-  when (empty && io.write.valid) {  // bypass
+  private val bypass = if (WayLookupEnableBypass) { empty && io.write.valid } else { false.B }
+  io.read.valid := !empty || bypass
+  when (bypass) {
     io.read.bits := io.write.bits
   }.otherwise {
     io.read.bits.entry := entries(readPtr.value)

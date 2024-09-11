@@ -44,6 +44,7 @@ case class ICacheParameters(
     nFetchMshr: Int = 4,
     nPrefetchMshr: Int = 10,
     nWayLookupSize: Int = 32,
+    WayLookupEnableBypass: Boolean = false,
     DataCodeUnit: Int = 64,
     ICacheDataBanks: Int = 8,
     ICacheDataSRAMWidth: Int = 66,
@@ -75,6 +76,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def nFetchMshr            = cacheParams.nFetchMshr
   def nPrefetchMshr         = cacheParams.nPrefetchMshr
   def nWayLookupSize        = cacheParams.nWayLookupSize
+  def WayLookupEnableBypass = cacheParams.WayLookupEnableBypass
   def DataCodeUnit          = cacheParams.DataCodeUnit
   def ICacheDataBanks       = cacheParams.ICacheDataBanks
   def ICacheDataSRAMWidth   = cacheParams.ICacheDataSRAMWidth
