@@ -51,6 +51,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val hartIsInReset = Output(Bool())
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
@@ -73,6 +74,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
     io.cpu_halt := tile.module.io.cpu_halt 
+    io.hartIsInReset := tile.module.io.hartIsInReset
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
 

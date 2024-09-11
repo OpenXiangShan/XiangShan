@@ -108,6 +108,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val hartIsInReset = Output(Bool())
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
@@ -131,6 +132,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.reset_vector.fromTile := io.reset_vector
     l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.cpu_halt.toTile
+    val hartIsInReset = RegInit(true.B)
+    hartIsInReset := core.module.io.resetIsInFrontend || reset.asBool
+    io.hartIsInReset := hartIsInReset
 
     core.module.io.perfEvents <> DontCare
 
