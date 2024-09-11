@@ -216,9 +216,10 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   * s_cache_resp: wait cache resp
   * s_latch_and_merge_data: for read data
   * s_send_data: for send write data
+  * s_wait_to_sbuffer: Wait for data from the sbufferOut pipelayer to be sent to the sbuffer
   * s_finish:
   * */
-  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_send_data :: s_finish :: Nil = Enum(11)
+  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_send_data :: s_wait_to_sbuffer :: s_finish :: Nil = Enum(12)
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
@@ -281,11 +282,17 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
     when(!sbufferOut.fire && segmentActive) {
       stateNext := s_send_data
-    }.elsewhen((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields || !segmentActive)) {
+    }.elsewhen(segmentIdx === maxSegIdx && (fieldIdx === maxNfields && sbufferOut.fire || !segmentActive && io.sbuffer.valid && !io.sbuffer.ready)) {
+      stateNext := s_wait_to_sbuffer
+    }.elsewhen(segmentIdx === maxSegIdx && !segmentActive){
       stateNext := s_finish // segment instruction finish
     }.otherwise {
       stateNext := s_tlb_req // need continue
     }
+
+  }.elsewhen(state === s_wait_to_sbuffer){
+    stateNext := Mux(io.sbuffer.fire, s_finish, s_wait_to_sbuffer)
+
   }.elsewhen(state === s_finish){ // writeback uop
     stateNext := Mux(distanceBetween(enqPtr, deqPtr) === 0.U, s_idle, s_finish)
 
