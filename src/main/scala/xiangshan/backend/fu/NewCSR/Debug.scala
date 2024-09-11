@@ -192,10 +192,13 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
 
     val fromLoadStore = Input(new Bundle {
       val vaddr = UInt(VAddrBits.W)
+      val isVectorUnitStride = Bool()
+      val mask = UInt((VLEN/8).W)
     })
 
     val toLoadStore = Output(new Bundle{
       val triggerAction = TriggerAction()
+      val triggerVaddr  = UInt(VAddrBits.W)
     })
   })
   val tdataVec      = io.fromCsrTrigger.tdataVec
@@ -219,11 +222,31 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
       tEnableVec(i) && (if(memType == MemType.LOAD) tdataVec(i).load else tdataVec(i).store)
     )
   }
-  TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+  
+  // for vector unit-stride, match Type only support equal
+  val lowBitWidth = log2Up(VLEN/8)
+  val isVectorStride = io.fromLoadStore.isVectorUnitStride
+  val mask = io.fromLoadStore.mask
+  
+  val highEq = VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+    !tdata.select && !debugMode && en && 
+      (if(memType == MemType.LOAD) tdata.load else tdata.store) &&
+      (vaddr >> lowBitWidth) === (tdata.tdata2 >> lowBitWidth)
+  })
+  
+  val lowMatch = tdataVec.map(tdata => UIntToOH(tdata.tdata2(lowBitWidth-1, 0)) & mask)
+  val lowEq  = VecInit(lowMatch.map(lm => lm.orR))
+  
+  val hitVecVectorStride  = VecInit(highEq.zip(lowEq).map{case(hi, lo) => hi && lo})
+  
+  TriggerCheckCanFire(TriggerNum, triggerCanFireVec, Mux(isVectorStride, hitVecVectorStride, triggerHitVec), triggerTimingVec, triggerChainVec)
+  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
+  val triggerVaddr  = PriorityMux(triggerFireOH, VecInit(tdataVec.map(_.tdata2))).asUInt
 
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
   TriggerUtil.triggerActionGen(triggerAction, triggerCanFireVec, actionVec, triggerCanRaiseBpExp)
 
   io.toLoadStore.triggerAction := triggerAction
+  io.toLoadStore.triggerVaddr  := triggerVaddr
 }
