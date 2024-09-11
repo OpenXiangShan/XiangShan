@@ -1554,6 +1554,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.vaddr
+  io.vecldout.bits.gpaddr := s3_in.gpaddr
   io.vecldout.bits.mmio := DontCare
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
