@@ -61,6 +61,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val satp = DelayN(io.csr.satp, q.fenceDelay)
   val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
   val hgatp = DelayN(io.csr.hgatp, q.fenceDelay)
+  val mPBMTE = DelayN(io.csr.mPBMTE, q.fenceDelay)
+  val hPBMTE = DelayN(io.csr.hPBMTE, q.fenceDelay)
 
   val flush_mmu = DelayN(sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed, q.fenceDelay)
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
@@ -261,11 +263,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
     val onlyS1 = s2xlate === onlyStage1 || s2xlate === noS2xlate
+    val pbmtRes = Mux(hPBMTE, pbmt, 0.U)
+    val gpbmtRes = Mux(mPBMTE, g_pbmt, 0.U)
     val res = MuxLookup(s2xlate, 0.U)(Seq(
-      onlyStage1 -> pbmt,
-      onlyStage2 -> g_pbmt,
-      allStage -> Mux(pbmt =/= 0.U, pbmt, g_pbmt),
-      noS2xlate -> pbmt
+      onlyStage1 -> pbmtRes,
+      onlyStage2 -> gpbmtRes,
+      allStage -> Mux(pbmtRes =/= 0.U, pbmtRes, gpbmtRes),
+      noS2xlate -> pbmtRes
     ))
     resp(idx).bits.pbmt(d) := Mux(portTranslateEnable(idx), res, 0.U)
   }
