@@ -295,7 +295,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
-    val s1_valid = portTranslateEnable(idx) && !onlyS2
+    val isFakePte = !perm.v && !pf
+    val s1_valid = portTranslateEnable(idx) && !onlyS2 && !isFakePte
 
     // Stage 2 perm check
     val gpf = g_perm.pf

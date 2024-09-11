@@ -384,6 +384,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.ppn(d) := p.bits.ppn(d)
       rp.bits.perm(d).pf := p.bits.perm(d).pf
       rp.bits.perm(d).af := p.bits.perm(d).af
+      rp.bits.perm(d).v := p.bits.perm(d).v
       rp.bits.perm(d).d := p.bits.perm(d).d
       rp.bits.perm(d).a := p.bits.perm(d).a
       rp.bits.perm(d).g := p.bits.perm(d).g

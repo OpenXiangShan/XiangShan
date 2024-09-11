@@ -186,6 +186,7 @@ trait HasTlbConst extends HasXSParameter {
     val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := hptwResp.gpf
     tp.af := hptwResp.gaf
+    tp.v := DontCare
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g
@@ -201,6 +202,7 @@ trait HasTlbConst extends HasXSParameter {
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
     tp.af := ptwResp.af
+    tp.v := ptwResp.entry.v
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g
