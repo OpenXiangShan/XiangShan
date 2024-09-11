@@ -83,41 +83,63 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   private val inValid = VecInit(inValids).asUInt.orR
   private val outValids = io.out.map(_.valid)
   private val outValid = VecInit(outValids).asUInt.orR
-  //readyFromRename Counter
-  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
-  val decoderComp = Module(new DecodeUnitComp)
-  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-  val vtypeGen = Module(new VTypeGen)
+  /** readyFromRename Counter */
+  val readyCounter: UInt = Mux(outReadys.head, RenameWidth.U, 0.U)
 
-  val debug_globalCounter = RegInit(0.U(XLEN.W))
+  /** A decoder of complex instructions */
+  private val decoderComp = Module(new DecodeUnitComp)
 
-  val canAccept = Wire(Bool())
+  /** Decoders of simple instructions, in number of DecodeWidth */
+  private val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
-  //Simple 6
+  /** VTypeGen module, to generate vector type */
+  private val vtypeGen = Module(new VTypeGen)
+
+  private val debug_globalCounter = RegInit(0.U(XLEN.W))
+
+  val canAccept: Bool = Wire(Bool())
+
+  /**
+   * Connect inputs of simple decoders.
+   */
   decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
-  decoders.foreach { case dst => dst.io.csrCtrl := io.csrCtrl }
-  decoders.foreach { case dst => dst.io.fromCSR := io.fromCSR }
-  decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
-  decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
-  val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
-  val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
-  val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
+  decoders.foreach { _.io.csrCtrl := io.csrCtrl }
+  decoders.foreach { _.io.fromCSR := io.fromCSR }
+  decoders.foreach { _.io.enq.vtype := vtypeGen.io.vtype }
+  decoders.foreach { _.io.enq.vstart := io.vstart }
 
-  val isIllegalInstVec = VecInit((outValids lazyZip outReadys lazyZip io.out.map(_.bits)).map {
+  /** Whether an instruction is a complex one in input vector */
+  private val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map {
+    case (valid, isComplex) => valid && isComplex })
+  /** Whether an instruction is a simple one in input vector */
+  private val isSimpleVec  = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map {
+    case (valid, isComplex) => valid && !isComplex })
+  /** Instructions decoded by simple decoders */
+  val simpleDecodedInst: Vec[DecodedInst] = VecInit(decoders.map(_.io.deq.decodedInst))
+
+  /** Whether an instruction is illegal in input vector */
+  private val isIllegalInstVec = VecInit((outValids lazyZip outReadys lazyZip io.out.map(_.bits)).map {
     case (valid, ready, decodedInst) =>
       valid && ready && (decodedInst.exceptionVec(ExceptionNO.EX_II) || decodedInst.exceptionVec(ExceptionNO.EX_VI))
   })
-  val hasIllegalInst = Cat(isIllegalInstVec).orR
-  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(io.out.map(_.bits)), 0.U.asTypeOf(new DecodedInst))
+  /** Whether the number of illegal instruction from input >= 1 */
+  private val hasIllegalInst = Cat(isIllegalInstVec).orR
+  /** Get the first illegal instruction. If all instructions are legal, get 0 */
+  val illegalInst: DecodedInst = PriorityMuxDefault(
+    isIllegalInstVec zip io.out.map(_.bits), 0.U.asTypeOf(new DecodedInst))
 
-  val complexNum = Wire(UInt(3.W))
+  /** Get the first illegal instruction. If all instructions are legal, get 0 */
+  val complexNum: UInt = Wire(UInt(3.W))
   // (0, 1, 2, 3, 4, 5) + complexNum
-  val complexNumAddLocation: Vec[UInt] = VecInit((0 until DecodeWidth).map(x => (x.U +& complexNum)))
-  val noMoreThanRenameReady: Vec[Bool] = VecInit(complexNumAddLocation.map(x => x <= readyCounter))
-  val complexValid = VecInit((isComplexVec zip noMoreThanRenameReady).map(x => x._1 & x._2)).asUInt.orR
-  val complexInst = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.decodedInst)), 0.U.asTypeOf(new DecodedInst))
-  val complexUopInfo = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
+  private val complexNumAddLocation: Vec[UInt] = VecInit((0 until DecodeWidth).map(_.U +& complexNum))
+  private val noMoreThanRenameReady: Vec[Bool] = VecInit(complexNumAddLocation.map(_ <= readyCounter))
+  private val complexValid = VecInit((isComplexVec zip noMoreThanRenameReady).map{
+    case (comp, noMore) => comp & noMore }).asUInt.orR
+  private val complexInst = PriorityMuxDefault(
+    isComplexVec.zip(decoders.map(_.io.deq.decodedInst)), 0.U.asTypeOf(new DecodedInst))
+  private val complexUopInfo = PriorityMuxDefault(
+    isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
 
   vtypeGen.io.insts.zipWithIndex.foreach { case (inst, i) =>
     inst.valid := io.in(i).valid
@@ -153,6 +175,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
 
+  /** No redirection, no resume of VType, >=1 ready output of decodeState or complex decoder input's ready */
   canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.isResumeVType
 
   io.canAccept := canAccept

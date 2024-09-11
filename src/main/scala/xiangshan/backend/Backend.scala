@@ -63,6 +63,9 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   println(params.iqWakeUpParams)
 
+  /**
+   *
+   */
   for ((schdCfg, i) <- params.allSchdParams.zipWithIndex) {
     schdCfg.bindBackendParam(params)
   }
@@ -152,17 +155,17 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   params.updateCopyPdestInfo
   println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
   params.allExuParams.map(_.copyNum)
-  val ctrlBlock = LazyModule(new CtrlBlock(params))
-  val pcTargetMem = LazyModule(new PcTargetMem(params))
-  val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
-  val fpScheduler = params.fpSchdParams.map(x => LazyModule(new Scheduler(x)))
-  val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
-  val memScheduler = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
-  val dataPath = LazyModule(new DataPath(params))
-  val intExuBlock = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
-  val fpExuBlock = params.fpSchdParams.map(x => LazyModule(new ExuBlock(x)))
-  val vfExuBlock = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
-  val wbFuBusyTable = LazyModule(new WbFuBusyTable(params))
+  val ctrlBlock    : CtrlBlock         = LazyModule(new CtrlBlock(params))
+  val pcTargetMem  : PcTargetMem       = LazyModule(new PcTargetMem(params))
+  val intScheduler : Option[Scheduler] = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val fpScheduler  : Option[Scheduler] = params.fpSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val vfScheduler  : Option[Scheduler] = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val memScheduler : Option[Scheduler] = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
+  val dataPath     : DataPath          = LazyModule(new DataPath(params))
+  val intExuBlock  : Option[ExuBlock]  = params.intSchdParams.map(x => LazyModule(new ExuBlock(x)))
+  val fpExuBlock   : Option[ExuBlock]  = params.fpSchdParams.map(x => LazyModule(new ExuBlock(x)))
+  val vfExuBlock   : Option[ExuBlock]  = params.vfSchdParams.map(x => LazyModule(new ExuBlock(x)))
+  val wbFuBusyTable: WbFuBusyTable     = LazyModule(new WbFuBusyTable(params))
 
   lazy val module = new BackendImp(this)
 }

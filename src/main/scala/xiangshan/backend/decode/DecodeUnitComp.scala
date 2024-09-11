@@ -115,7 +115,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   private val outDecodedInsts = io.out.complexDecodedInsts.map(_.bits)
   private val outComplexNum = io.complexNum
 
-  val maxUopSize = MaxUopSize
+  /** max micro operation size, defined in coreParameters */
+  private val maxUopSize = MaxUopSize
   when (io.in.fire && io.in.bits.simpleDecodedInst.isVset) {
     when(inInstFields.RD === 0.U && inInstFields.RS1 === 0.U) {
       inDecodedInst.fuOpType := VSETOpType.keepVl(io.in.bits.simpleDecodedInst.fuOpType)
@@ -124,26 +125,26 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
   }
 
-  val latchedInst = RegEnable(inDecodedInst, inValid && inReady)
-  val latchedUopInfo = RegEnable(inUopInfo, inValid && inReady)
+  private val latchedInst = RegEnable(inDecodedInst, inValid && inReady)
+  private val latchedUopInfo = RegEnable(inUopInfo, inValid && inReady)
   //input bits
   private val instFields: XSInstBitFields = latchedInst.instr.asTypeOf(new XSInstBitFields)
 
-  val src1 = Cat(0.U(1.W), instFields.RS1)
-  val src2 = Cat(0.U(1.W), instFields.RS2)
-  val dest = Cat(0.U(1.W), instFields.RD)
+  val src1: UInt = Cat(0.U(1.W), instFields.RS1)
+  val src2: UInt = Cat(0.U(1.W), instFields.RS2)
+  val dest: UInt = Cat(0.U(1.W), instFields.RD)
 
-  val nf    = instFields.NF
-  val width = instFields.WIDTH(1, 0)
+  val nf   : UInt = instFields.NF
+  val width: UInt = instFields.WIDTH(1, 0)
 
   //output of DecodeUnit
-  val numOfUop = Wire(UInt(log2Up(maxUopSize).W))
-  val numOfWB = Wire(UInt(log2Up(maxUopSize).W))
-  val lmul = Wire(UInt(4.W))
-  val isVsetSimple = Wire(Bool())
+  val numOfUop: UInt = Wire(UInt(log2Up(maxUopSize).W))
+  val numOfWB : UInt = Wire(UInt(log2Up(maxUopSize).W))
+  val lmul    : UInt = Wire(UInt(4.W))
+  private val isVsetSimple = Wire(Bool())
 
-  val indexedLSRegOffset = Seq.tabulate(MAX_VLMUL)(i => Module(new indexedLSUopTable(i)))
-  indexedLSRegOffset.map(_.src := 0.U)
+  private val indexedLSRegOffset = Seq.tabulate(MAX_VLMUL)(i => Module(new indexedLSUopTable(i)))
+  indexedLSRegOffset.foreach(_.src := 0.U)
 
   //pre decode
   lmul := latchedUopInfo.lmul
@@ -168,7 +169,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val state = RegInit(s_idle)
   val stateNext = WireDefault(state)
   val numDecodedUop = RegInit(0.U(log2Up(maxUopSize).W))
-  val uopRes = RegInit(0.U(log2Up(maxUopSize).W))
+  val uopRes = RegInit(0.U(log2Up(maxUopSize).W)) /** micro operation result */
   val uopResNext = WireInit(uopRes)
   val e64 = 3.U(2.W)
   val isUsSegment = instFields.MOP === 0.U && nf =/= 0.U && (instFields.LUMOP === 0.U || instFields.LUMOP === "b10000".U)
@@ -1872,11 +1873,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   //readyFromRename Counter
-  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
+  val readyCounter: UInt = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
-  val thisAllOut = uopRes <= readyCounter
+  private val thisAllOut = uopRes <= readyCounter
 
+  /**
+   * IDLE   : next_state is ACTIVE, micro_operation_rest is updated by input
+   * ACTIVE : 
+   */
   switch(state) {
     is(s_idle) {
       when (inValid) {
@@ -1900,10 +1905,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
   }
 
+  /** if redirect is set, reset state/uopRes, or use Next logic */
   state := Mux(io.redirect, s_idle, stateNext)
   uopRes := Mux(io.redirect, 0.U, uopResNext)
 
-  val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
+  /** Get the min(uopRes, readyCounter) */
+  val complexNum: UInt = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
   fixedDecodedInst := csBundle
 

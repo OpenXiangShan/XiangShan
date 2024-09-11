@@ -71,7 +71,7 @@ object FuType extends OHEnumeration {
   val vsegldu: OHType = addType(name = "vsegldu")
   val vsegstu: OHType = addType(name = "vsegstu")
 
-  val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  private val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
