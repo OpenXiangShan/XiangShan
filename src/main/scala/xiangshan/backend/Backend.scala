@@ -683,6 +683,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.flowNum.foreach(_  := source.bits.numLsElem.get)
 
     sink.bits.uop.traceInfo      := source.bits.traceInfo
+    sink.bits.simDebugPC         := source.bits.simDebugPC
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
