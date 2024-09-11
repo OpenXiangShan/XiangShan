@@ -639,6 +639,7 @@ object Bundles {
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
+    val simDebugPC = UInt(VAddrBits.W)
     val perfDebugInfo = new PerfDebugInfo()
     val traceInfo = new TraceInstrBundle()
 
@@ -695,6 +696,7 @@ object Bundles {
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
 
+      this.simDebugPC    := source.common.simDebugPC
       this.traceInfo     := source.common.traceInfo
     }
   }
@@ -914,6 +916,8 @@ object Bundles {
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
     val flowNum      = OptionWrapper(isVector, NumLsElem())
+
+    val simDebugPC = UInt(VAddrBits.W)
 
     def src_rs1 = src(0)
     def src_stride = src(1)

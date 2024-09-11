@@ -47,6 +47,7 @@ import xiangshan.backend.datapath.NewPipelineConnect
 import system.SoCParamsKey
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.ExceptionNO._
+import utility.ChiselMapWithSpecDivide
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -1768,6 +1769,33 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSPerfAccumulate("store_iq_deq_count", stDeqCount)
   XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StAddrCnt + 1)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
+
+  // ChiselMap but divided by spec path(wrong or arch)
+  val issueUopsAddr = io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya
+  val issueUopsValid = issueUopsAddr.map(x => x.valid && x.bits.isFirstIssue)
+  val issueUopsPC = issueUopsAddr.map(_.bits.simDebugPC)
+  val issueUopsRobIdx = issueUopsAddr.map(_.bits.uop.robIdx)
+  val issueUopsValue = WireInit(VecInit(Seq.fill(issueUopsAddr.length)(1.U)))
+  val redirectRobIdx = Wire(Valid(new RobPtr))
+  val commitRobIdx = Wire(Valid(new RobPtr))
+  redirectRobIdx.valid := io.redirect.valid
+  redirectRobIdx.bits := io.redirect.bits.robIdx
+  commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
+  commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtr
+  ChiselMapWithSpecDivide(
+    "MemoryInstr",
+    "Memory",
+    RobSize,
+    VecInit(issueUopsPC),
+    issueUopsValue,
+    VecInit(issueUopsValid),
+    VecInit(issueUopsRobIdx),
+    redirectRobIdx,
+    commitRobIdx,
+    clock,
+    reset,
+    basicDB = true
+  )
 
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr

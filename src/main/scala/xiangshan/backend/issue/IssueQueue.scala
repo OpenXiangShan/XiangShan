@@ -764,6 +764,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
 
+    deq.bits.common.simDebugPC := deqEntryVec(i).bits.payload.pc
     deq.bits.common.traceInfo := deqEntryVec(i).bits.payload.traceInfo
   }
 
