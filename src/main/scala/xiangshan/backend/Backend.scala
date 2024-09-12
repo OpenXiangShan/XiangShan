@@ -692,11 +692,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
     mod.io.hartId := io.fromTop.hartId
 
-    mod.io.intPRF := tapAndRead(dataPath.intRegFile.memForRead)
-    mod.io.fpPRF  := tapAndRead(dataPath.fpRegFile.memForRead)
-    mod.io.vfPRF  := dataPath.vfRegFile.map(x => tapAndRead(x.memForRead))
-    mod.io.v0PRF  := dataPath.v0RegFile.map(x => tapAndRead(x.memForRead))
-    mod.io.vlPRF  := tapAndRead(dataPath.vlRegFile.memForRead)
+    mod.io.fromIntWb := wbDataPath.io.toIntPreg
+    mod.io.fromFpWb  := wbDataPath.io.toFpPreg
+    mod.io.fromVfWb  := wbDataPath.io.toVfPreg
+    mod.io.fromV0Wb  := wbDataPath.io.toV0Preg
+    mod.io.fromVlWb  := wbDataPath.io.toVlPreg
 
     mod.io.intDiffTable := tapAndRead(diffRAT.int_table)
     mod.io.fpDiffTable  := tapAndRead(diffRAT.fp_table)
