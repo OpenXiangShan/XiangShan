@@ -398,6 +398,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.bits.mmio := s2_out.mmio
   s2_misalign_stout.bits.vaddr := s2_out.vaddr
   s2_misalign_stout.bits.paddr := s2_out.paddr
+  s2_misalign_stout.bits.gpaddr := s2_out.gpaddr
   s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
   s2_misalign_stout.bits.uop.exceptionVec := s2_out.uop.exceptionVec
   io.misalign_stout := s2_misalign_stout
