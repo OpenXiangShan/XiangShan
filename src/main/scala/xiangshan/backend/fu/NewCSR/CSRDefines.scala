@@ -182,6 +182,8 @@ object CSRDefines {
     val Off   = Value("b00".U)
     val Flush = Value("b01".U)
     val Inval = Value("b11".U)
+
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Off, Flush, Inval)
   }
 
   object ReflectHelper {
