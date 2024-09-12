@@ -23,6 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -547,6 +548,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
+  io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(exceptionVecSelect, LduCfg) // TODO: is this ok?
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B

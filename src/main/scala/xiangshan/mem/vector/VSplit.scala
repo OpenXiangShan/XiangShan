@@ -28,6 +28,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 
 
 class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
@@ -452,6 +453,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   vstd.valid := issueValid && (vecActive || !issuePreIsSplit)
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
+  vstd.bits.uop.fuType := FuType.vstu.U
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
   vstd.bits.debug := DontCare
   vstd.bits.vdIdx.get := DontCare
@@ -463,6 +465,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){
   io.out.bits.uop.lqIdx := issueUop.lqIdx + splitIdx
   io.out.bits.uop.exceptionVec(loadAddrMisaligned) := !addrAligned && !issuePreIsSplit && io.out.bits.mask.orR
+  io.out.bits.uop.fuType := FuType.vldu.U
 }
 
 class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
