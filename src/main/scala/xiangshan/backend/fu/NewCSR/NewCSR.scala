@@ -1160,8 +1160,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     mstatus.regOut.MPV.asUInt,
     V.asUInt
   )
-  io.tlb.mPBMTE := menvcfg.regOut.PBMTE.asBool
-  io.tlb.hPBMTE := henvcfg.regOut.PBMTE.asBool
+  io.tlb.mPBMTE := RegNext(menvcfg.regOut.PBMTE.asBool)
+  io.tlb.hPBMTE := RegNext(henvcfg.regOut.PBMTE.asBool)
 
   io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU

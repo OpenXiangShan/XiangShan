@@ -621,8 +621,7 @@ class MEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }
-  // Always enable PBMT
-  this.PBMTE.setRO().withReset(1.U)
+  this.PBMTE.setRW().withReset(0.U)
 }
 
 object MarchidField extends CSREnum with ROApply {
