@@ -511,6 +511,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
   val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
   val sx_in    = Wire(Vec(TotalDelayCycles + 1, new VecMemExuOutput(isVector = true)))
+  val sx_in_vec = Wire(Vec(TotalDelayCycles +1, Bool()))
 
   // backward ready signal
   s3_ready := sx_ready.head
@@ -530,6 +531,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
+      sx_in_vec(i)         := s3_in.isvec          
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -541,18 +543,20 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
+      sx_in_vec(i) := RegEnable(sx_in_vec(i-1), prev_fire)
     }
   }
   val sx_last_valid = sx_valid.takeRight(1).head
   val sx_last_ready = sx_ready.takeRight(1).head
   val sx_last_in    = sx_in.takeRight(1).head
+  val sx_last_in_vec = sx_in_vec.takeRight(1).head
   sx_last_ready := !sx_last_valid || sx_last_in.output.uop.robIdx.needFlush(io.redirect) || io.stout.ready
 
-  io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
+  io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && !sx_last_in_vec //isStore(sx_last_in.output.uop.fuType)
   io.stout.bits := sx_last_in.output
   io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
 
-  io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
+  io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && sx_last_in_vec //isVStore(sx_last_in.output.uop.fuType)
   // TODO: implement it!
   io.vecstout.bits.mBIndex := sx_last_in.mbIndex
   io.vecstout.bits.hit := sx_last_in.vecFeedback
