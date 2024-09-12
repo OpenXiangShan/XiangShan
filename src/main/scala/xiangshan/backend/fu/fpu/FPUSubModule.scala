@@ -45,6 +45,10 @@ abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val rm = Mux(io.in.fpCtrl.rm === "b111".U, io.in.rm, io.in.fpCtrl.rm)
 }
 
+/**
+ * Float-Point Unit Subtraction Module
+ * @param cfg Function unit Configuration
+ */
 abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasUIntToSIntHelper
 {
@@ -58,11 +62,14 @@ abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncU
     io.out.bits.res.data := dataModule.io.out.data
     io.out.bits.res.fflags.get := dataModule.io.out.fflags
   }
-  def invert_sign(x: UInt, len: Int) = {
-    Cat(
-      !x(len-1), x(len-2, 0)
-    )
-  }
+
+  /**
+   * Invert sign of a float-point number
+   * @param x a float-point number
+   * @param len length of this number
+   * @return opposite number
+   */
+  def invertSign(x: UInt, len: Int): UInt = Cat(!x(len - 1), x(len - 2, 0))
 }
 
 abstract class FPUPipelineModule(cfg: FuConfig)(implicit p: Parameters)

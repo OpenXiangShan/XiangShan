@@ -68,8 +68,8 @@ class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
     val s2 = Module(new FMUL_s2(t.expWidth, t.precision))
     val s3 = Module(new FMUL_s3(t.expWidth, t.precision))
 
-    val in1 = src1
-    val in2 = Mux(fpCtrl.fmaCmd(1), invert_sign(src2, t.len), src2)
+    val in1 = src1 // input1 := source1
+    val in2 = Mux(fpCtrl.fmaCmd(1), invertSign(src2, t.len), src2) // input2 := fmaCmd(1) ? -source2 : src2
     s1.io.a := in1
     s1.io.b := in2
     s1.io.rm := rm
@@ -139,11 +139,11 @@ class FADD_pipe(cfg: FuConfig, val addLat: Int = 2)(implicit p: Parameters) exte
       val in1 = Mux(fma,
         mulProd(i).fp_prod.asUInt,
         Cat(src1(t.len - 1, 0), 0.U(t.precision.W))
-      )
+      ) // input1 := fma ? product : source1
       val in2 = Cat(
-        Mux(fpCtrl.fmaCmd(0), invert_sign(src2, t.len), src2(t.len - 1, 0)),
+        Mux(fpCtrl.fmaCmd(0), invertSign(src2, t.len), src2(t.len - 1, 0)),
         0.U(t.precision.W)
-      )
+      ) // input2 := fmaCmd(0) ? -source2 : source2
       s1.io.a := in1
       s1.io.b := in2
       s1.io.b_inter_valid := fma

@@ -29,12 +29,12 @@ import xiangshan.{FPUCtrlSignals, XSModule}
 
 class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val instr = Input(UInt(32.W))
-    val vpuCtrl = Output(new VPUCtrlSignals)
+    val instr  : UInt           = Input(UInt(32.W))
+    val vpuCtrl: VPUCtrlSignals = Output(new VPUCtrlSignals)
   })
 
-  val inst = io.instr.asTypeOf(new XSInstBitFields)
-  val fpToVecInsts = Seq(
+  private val inst = io.instr.asTypeOf(new XSInstBitFields)
+  private val fpToVecInsts = Seq(
     FADD_S, FSUB_S, FADD_D, FSUB_D,
     FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
     FMIN_S, FMAX_S, FMIN_D, FMAX_D,
@@ -52,14 +52,14 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
     FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D, FCVTMOD_W_D,
   )
-  val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
-  val isFP16Instrs = Seq(
+  private val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
+  private val isFP16Instrs = Seq(
     // zfa inst
     FLEQ_H, FLTQ_H, FMINM_H, FMAXM_H,
     FROUND_H, FROUNDNX_H,
   )
-  val isFP16Instr = isFP16Instrs.map(io.instr === _).reduce(_ || _)
-  val isFP32Instrs = Seq(
+  private val isFP16Instr = isFP16Instrs.map(io.instr === _).reduce(_ || _)
+  private val isFP32Instrs = Seq(
     FADD_S, FSUB_S, FEQ_S, FLT_S, FLE_S, FMIN_S, FMAX_S,
     FMUL_S, FDIV_S, FSQRT_S,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S,
@@ -68,16 +68,16 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FLEQ_S, FLTQ_S, FMINM_S, FMAXM_S,
     FROUND_S, FROUNDNX_S,
   )
-  val isFP32Instr = isFP32Instrs.map(io.instr === _).reduce(_ || _)
-  val isFP64Instrs = Seq(
+  private val isFP32Instr  = isFP32Instrs.map(io.instr === _).reduce(_ || _)
+  private val isFP64Instrs = Seq(
     FADD_D, FSUB_D, FEQ_D, FLT_D, FLE_D, FMIN_D, FMAX_D,
     FMUL_D, FDIV_D, FSQRT_D,
     FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
     FCLASS_D, FSGNJ_D, FSGNJX_D, FSGNJN_D,
   )
-  val isFP64Instr = isFP64Instrs.map(io.instr === _).reduce(_ || _)
+  private val isFP64Instr  = isFP64Instrs.map(io.instr === _).reduce(_ || _)
   // scalar cvt inst
-  val isSew2Cvts = Seq(
+  private val isSew2Cvts = Seq(
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
     FMV_X_W,
@@ -90,18 +90,18 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   FCVT_H_D:VSew.e64
   FCVT_D_H:VSew.e16
    */
-  val isSew2Cvth = Seq(
+  private val isSew2Cvth   = Seq(
     FCVT_S_H, FCVT_H_S, FCVT_D_H,
     FMV_X_H,
   )
-  val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
-  val isSew2Cvt16 = isSew2Cvth.map(io.instr === _).reduce(_ || _)
-  val isLmulMf4Cvts = Seq(
+  private val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
+  private val isSew2Cvt16  = isSew2Cvth.map(io.instr === _).reduce(_ || _)
+  private val isLmulMf4Cvts = Seq(
     FCVT_W_S, FCVT_WU_S,
     FMV_X_W,
   )
-  val isLmulMf4Cvt = isLmulMf4Cvts.map(io.instr === _).reduce(_ || _)
-  val needReverseInsts = Seq(
+  private val isLmulMf4Cvt = isLmulMf4Cvts.map(io.instr === _).reduce(_ || _)
+  private val needReverseInsts = Seq(
     FADD_S, FSUB_S, FADD_D, FSUB_D,
     FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
     FMIN_S, FMAX_S, FMIN_D, FMAX_D,
@@ -112,8 +112,12 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     // zfa inst
     FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
   )
-  val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  private val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+
+  /** Give vpuCtrl a default value 0 */
   io.vpuCtrl := 0.U.asTypeOf(io.vpuCtrl)
+
+  /** Pass signals to vpuCtrl as output */
   io.vpuCtrl.fpu.isFpToVecInst := isFpToVecInst
   io.vpuCtrl.fpu.isFP32Instr   := isFP32Instr
   io.vpuCtrl.fpu.isFP64Instr   := isFP64Instr
@@ -124,139 +128,180 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vlmul := Mux(isFP32Instr || isLmulMf4Cvt, VLmul.mf4, VLmul.mf2)
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
-  io.vpuCtrl.veew := inst.WIDTH
-  io.vpuCtrl.isReverse := needReverseInst
-  io.vpuCtrl.isExt     := false.B
-  io.vpuCtrl.isNarrow  := false.B
-  io.vpuCtrl.isDstMask := false.B
-  io.vpuCtrl.isOpMask  := false.B
+  io.vpuCtrl.veew  := inst.WIDTH
+  io.vpuCtrl.isReverse     := needReverseInst
+  io.vpuCtrl.isExt         := false.B
+  io.vpuCtrl.isNarrow      := false.B
+  io.vpuCtrl.isDstMask     := false.B
+  io.vpuCtrl.isOpMask      := false.B
   io.vpuCtrl.isDependOldvd := false.B
   io.vpuCtrl.isWritePartVd := false.B
 }
 
-
+/**
+ * Float-Point instruction decoder
+ */
 class FPDecoder(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle() {
-    val instr = Input(UInt(32.W))
-    val fpCtrl = Output(new FPUCtrlSignals)
+    val instr : UInt           = Input(UInt(32.W))
+    val fpCtrl: FPUCtrlSignals = Output(new FPUCtrlSignals)
   })
 
+  /** Input instruction to decode */
   private val inst: XSInstBitFields = io.instr.asTypeOf(new XSInstBitFields)
 
-  def X = BitPat("b?")
-  def N = BitPat("b0")
-  def Y = BitPat("b1")
-  val s = BitPat(FPU.S(0))
-  val d = BitPat(FPU.D(0))
-  val i = BitPat(FPU.D(0))
+  /* Abbreviation of different bit pattern */
+  private def X = BitPat("b?")
+  private def N = BitPat("b0")
+  private def Y = BitPat("b1")
+  private val s = BitPat(FPU.S(0)) // single
+  private val d = BitPat(FPU.D(0)) // double
+  private val i = BitPat(FPU.D(0)) // immediate
 
-  val default = List(X,X,X,N,N,N,X,X,X)
+  /**
+   * Default decode pattern for part of float-point instruction control signals.
+   * Pattern: [isAddSub, tagIn, tagOut, fromInt, wflags, fpWen, div, sqrt, fcvt]
+   * i.e. [is add or subtract, tag of input, tag of output, from integer, ?, float-point write enable,
+   * divide, square root, float-point convert]
+   */
+  //                       isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
+  //                           |      |     |      |      |      |     |   |    |
+  private val fdDefault = List(X,     X,    X,     N,     N,     N,    X,  X,   X   )
 
-  // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
-  val single: Array[(BitPat, List[BitPat])] = Array(
+  /** decode table for single float-point instruction */
+  // [isAddSub, tagIn, tagOut, fromInt, wflags, fpWen, div, sqrt, fcvt]
+  private val single = Array(
     // IntToFP
-    FMV_W_X  -> List(N,i,s,Y,N,Y,N,N,N),
-    FCVT_S_W -> List(N,i,s,Y,Y,Y,N,N,Y),
-    FCVT_S_WU-> List(N,i,s,Y,Y,Y,N,N,Y),
-    FCVT_S_L -> List(N,i,s,Y,Y,Y,N,N,Y),
-    FCVT_S_LU-> List(N,i,s,Y,Y,Y,N,N,Y),
+    FMV_W_X   -> List(N,i,s,Y,N,Y,N,N,N),
+    FCVT_S_W  -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_WU -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_L  -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_LU -> List(N,i,s,Y,Y,Y,N,N,Y),
     // FPToInt
-    FMV_X_W  -> List(N,d,i,N,N,N,N,N,N), // dont box result of fmv.fp.int
-    FCLASS_S -> List(N,s,i,N,N,N,N,N,N),
-    FCVT_W_S -> List(N,s,i,N,Y,N,N,N,Y),
-    FCVT_WU_S-> List(N,s,i,N,Y,N,N,N,Y),
-    FCVT_L_S -> List(N,s,i,N,Y,N,N,N,Y),
-    FCVT_LU_S-> List(N,s,i,N,Y,N,N,N,Y),
-    FEQ_S    -> List(N,s,i,N,Y,N,N,N,N),
-    FLT_S    -> List(N,s,i,N,Y,N,N,N,N),
-    FLE_S    -> List(N,s,i,N,Y,N,N,N,N),
+    FMV_X_W   -> List(N,d,i,N,N,N,N,N,N), // dont box result of fmv.fp.int
+    FCLASS_S  -> List(N,s,i,N,N,N,N,N,N),
+    FCVT_W_S  -> List(N,s,i,N,Y,N,N,N,Y),
+    FCVT_WU_S -> List(N,s,i,N,Y,N,N,N,Y),
+    FCVT_L_S  -> List(N,s,i,N,Y,N,N,N,Y),
+    FCVT_LU_S -> List(N,s,i,N,Y,N,N,N,Y),
+    FEQ_S     -> List(N,s,i,N,Y,N,N,N,N),
+    FLT_S     -> List(N,s,i,N,Y,N,N,N,N),
+    FLE_S     -> List(N,s,i,N,Y,N,N,N,N),
     // FPToFP
-    FSGNJ_S  -> List(N,s,s,N,N,Y,N,N,N),
-    FSGNJN_S -> List(N,s,s,N,N,Y,N,N,N),
-    FSGNJX_S -> List(N,s,s,N,N,Y,N,N,N),
-    FMIN_S   -> List(N,s,s,N,Y,Y,N,N,N),
-    FMAX_S   -> List(N,s,s,N,Y,Y,N,N,N),
-    FADD_S   -> List(Y,s,s,N,Y,Y,N,N,N),
-    FSUB_S   -> List(Y,s,s,N,Y,Y,N,N,N),
-    FMUL_S   -> List(N,s,s,N,Y,Y,N,N,N),
-    FMADD_S  -> List(N,s,s,N,Y,Y,N,N,N),
-    FMSUB_S  -> List(N,s,s,N,Y,Y,N,N,N),
-    FNMADD_S -> List(N,s,s,N,Y,Y,N,N,N),
-    FNMSUB_S -> List(N,s,s,N,Y,Y,N,N,N),
-    FDIV_S   -> List(N,s,s,N,Y,Y,Y,N,N),
-    FSQRT_S  -> List(N,s,s,N,Y,Y,N,Y,N)
+    FSGNJ_S   -> List(N,s,s,N,N,Y,N,N,N),
+    FSGNJN_S  -> List(N,s,s,N,N,Y,N,N,N),
+    FSGNJX_S  -> List(N,s,s,N,N,Y,N,N,N),
+    FMIN_S    -> List(N,s,s,N,Y,Y,N,N,N),
+    FMAX_S    -> List(N,s,s,N,Y,Y,N,N,N),
+    FADD_S    -> List(Y,s,s,N,Y,Y,N,N,N),
+    FSUB_S    -> List(Y,s,s,N,Y,Y,N,N,N),
+    FMUL_S    -> List(N,s,s,N,Y,Y,N,N,N),
+    FMADD_S   -> List(N,s,s,N,Y,Y,N,N,N),
+    FMSUB_S   -> List(N,s,s,N,Y,Y,N,N,N),
+    FNMADD_S  -> List(N,s,s,N,Y,Y,N,N,N),
+    FNMSUB_S  -> List(N,s,s,N,Y,Y,N,N,N),
+    FDIV_S    -> List(N,s,s,N,Y,Y,Y,N,N),
+    FSQRT_S   -> List(N,s,s,N,Y,Y,N,Y,N)
   )
 
-
-  // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
-  val double: Array[(BitPat, List[BitPat])] = Array(
-    FMV_D_X  -> List(N,i,d,Y,N,Y,N,N,N),
-    FCVT_D_W -> List(N,i,d,Y,Y,Y,N,N,Y),
-    FCVT_D_WU-> List(N,i,d,Y,Y,Y,N,N,Y),
-    FCVT_D_L -> List(N,i,d,Y,Y,Y,N,N,Y),
-    FCVT_D_LU-> List(N,i,d,Y,Y,Y,N,N,Y),
-    FMV_X_D  -> List(N,d,i,N,N,N,N,N,N),
-    FCLASS_D -> List(N,d,i,N,N,N,N,N,N),
-    FCVT_W_D -> List(N,d,i,N,Y,N,N,N,Y),
-    FCVT_WU_D-> List(N,d,i,N,Y,N,N,N,Y),
-    FCVT_L_D -> List(N,d,i,N,Y,N,N,N,Y),
-    FCVT_LU_D-> List(N,d,i,N,Y,N,N,N,Y),
-    FCVT_S_D -> List(N,d,s,N,Y,Y,N,N,Y),
-    FCVT_D_S -> List(N,s,d,N,Y,Y,N,N,Y),
-    FEQ_D    -> List(N,d,i,N,Y,N,N,N,N),
-    FLT_D    -> List(N,d,i,N,Y,N,N,N,N),
-    FLE_D    -> List(N,d,i,N,Y,N,N,N,N),
-    FSGNJ_D  -> List(N,d,d,N,N,Y,N,N,N),
-    FSGNJN_D -> List(N,d,d,N,N,Y,N,N,N),
-    FSGNJX_D -> List(N,d,d,N,N,Y,N,N,N),
-    FMIN_D   -> List(N,d,d,N,Y,Y,N,N,N),
-    FMAX_D   -> List(N,d,d,N,Y,Y,N,N,N),
-    FADD_D   -> List(Y,d,d,N,Y,Y,N,N,N),
-    FSUB_D   -> List(Y,d,d,N,Y,Y,N,N,N),
-    FMUL_D   -> List(N,d,d,N,Y,Y,N,N,N),
-    FMADD_D  -> List(N,d,d,N,Y,Y,N,N,N),
-    FMSUB_D  -> List(N,d,d,N,Y,Y,N,N,N),
-    FNMADD_D -> List(N,d,d,N,Y,Y,N,N,N),
-    FNMSUB_D -> List(N,d,d,N,Y,Y,N,N,N),
-    FDIV_D   -> List(N,d,d,N,Y,Y,Y,N,N),
-    FSQRT_D  -> List(N,d,d,N,Y,Y,N,Y,N)
+  /** decode table for double float-point instruction */
+  // [isAddSub, tagIn, tagOut, fromInt, wflags, fpWen, div, sqrt, fcvt]
+  private val double = Array(
+    FMV_D_X   -> List(N,i,d,Y,N,Y,N,N,N),
+    FCVT_D_W  -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_WU -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_L  -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_LU -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FMV_X_D   -> List(N,d,i,N,N,N,N,N,N),
+    FCLASS_D  -> List(N,d,i,N,N,N,N,N,N),
+    FCVT_W_D  -> List(N,d,i,N,Y,N,N,N,Y),
+    FCVT_WU_D -> List(N,d,i,N,Y,N,N,N,Y),
+    FCVT_L_D  -> List(N,d,i,N,Y,N,N,N,Y),
+    FCVT_LU_D -> List(N,d,i,N,Y,N,N,N,Y),
+    FCVT_S_D  -> List(N,d,s,N,Y,Y,N,N,Y),
+    FCVT_D_S  -> List(N,s,d,N,Y,Y,N,N,Y),
+    FEQ_D     -> List(N,d,i,N,Y,N,N,N,N),
+    FLT_D     -> List(N,d,i,N,Y,N,N,N,N),
+    FLE_D     -> List(N,d,i,N,Y,N,N,N,N),
+    FSGNJ_D   -> List(N,d,d,N,N,Y,N,N,N),
+    FSGNJN_D  -> List(N,d,d,N,N,Y,N,N,N),
+    FSGNJX_D  -> List(N,d,d,N,N,Y,N,N,N),
+    FMIN_D    -> List(N,d,d,N,Y,Y,N,N,N),
+    FMAX_D    -> List(N,d,d,N,Y,Y,N,N,N),
+    FADD_D    -> List(Y,d,d,N,Y,Y,N,N,N),
+    FSUB_D    -> List(Y,d,d,N,Y,Y,N,N,N),
+    FMUL_D    -> List(N,d,d,N,Y,Y,N,N,N),
+    FMADD_D   -> List(N,d,d,N,Y,Y,N,N,N),
+    FMSUB_D   -> List(N,d,d,N,Y,Y,N,N,N),
+    FNMADD_D  -> List(N,d,d,N,Y,Y,N,N,N),
+    FNMSUB_D  -> List(N,d,d,N,Y,Y,N,N,N),
+    FDIV_D    -> List(N,d,d,N,Y,Y,Y,N,N),
+    FSQRT_D   -> List(N,d,d,N,Y,Y,N,Y,N)
   )
 
-  val table = single ++ double
+  /** Float-point control signals in output */
+  private val ctrl = io.fpCtrl
 
-  val decoder = DecodeLogic(io.instr, default, table)
+  /** Decode table: for single and double float-point instructions */
+  private val fdTable = single ++ double
 
-  val ctrl = io.fpCtrl
-  val sigs = Seq(
+  /** Generate a decoder */
+  private val fdDecoder = DecodeLogic(io.instr, fdDefault, fdTable)
+
+  /** Arrange certain signals as a sequence, to be connected to decoder */
+  private val fdSigs = Seq(
     ctrl.isAddSub, ctrl.typeTagIn, ctrl.typeTagOut,
     ctrl.fromInt, ctrl.wflags, ctrl.fpWen,
     ctrl.div, ctrl.sqrt, ctrl.fcvt
   )
-  sigs.zip(decoder).foreach({case (s, d) => s := d})
+
+  /** Pass decode results to output */
+  (fdSigs zip fdDecoder).foreach { case (sig, res) => sig := res }
+
+  /** Assign some control signals directly from instruction fields */
   ctrl.typ := inst.TYP
   ctrl.fmt := inst.FMT
   ctrl.rm := inst.RM
 
-  val fmaTable: Array[(BitPat, List[BitPat])] = Array(
-    FADD_S  -> List(BitPat("b00"),N),
-    FADD_D  -> List(BitPat("b00"),N),
-    FSUB_S  -> List(BitPat("b01"),N),
-    FSUB_D  -> List(BitPat("b01"),N),
-    FMUL_S  -> List(BitPat("b00"),N),
-    FMUL_D  -> List(BitPat("b00"),N),
-    FMADD_S -> List(BitPat("b00"),Y),
-    FMADD_D -> List(BitPat("b00"),Y),
-    FMSUB_S -> List(BitPat("b01"),Y),
-    FMSUB_D -> List(BitPat("b01"),Y),
-    FNMADD_S-> List(BitPat("b11"),Y),
-    FNMADD_D-> List(BitPat("b11"),Y),
-    FNMSUB_S-> List(BitPat("b10"),Y),
-    FNMSUB_D-> List(BitPat("b10"),Y)
+  /* Abbreviation of different bit pattern */
+  private val mn = BitPat("b10")
+  private val na = BitPat("b01")
+  private val ma = BitPat("b11")
+  private val nn = BitPat("b00")
+
+  /**
+   * Default decode pattern for float-point multiplication/addition instruction to generate some control signals.
+   * Pattern: [fmaCmd, ren3]
+   * i.e. [float-point multiply/add command, read enable 3 ports]
+   */
+  //                                 fmaCmd   ren3
+  //                                    |      |
+  private val fmaDefault = List(BitPat("b??"), N)
+
+  /** decode table for float-point mul/add instruction */
+  private val fmaTable: Array[(BitPat, List[BitPat])] = Array(
+    FADD_S  -> List(nn,N),
+    FADD_D  -> List(nn,N),
+    FSUB_S  -> List(na,N),
+    FSUB_D  -> List(na,N),
+    FMUL_S  -> List(nn,N),
+    FMUL_D  -> List(nn,N),
+    FMADD_S -> List(nn,Y),
+    FMADD_D -> List(nn,Y),
+    FMSUB_S -> List(na,Y),
+    FMSUB_D -> List(na,Y),
+    FNMADD_S-> List(ma,Y),
+    FNMADD_D-> List(ma,Y),
+    FNMSUB_S-> List(mn,Y),
+    FNMSUB_D-> List(mn,Y)
   )
-  val fmaDefault = List(BitPat("b??"), N)
-  Seq(ctrl.fmaCmd, ctrl.ren3).zip(
-    DecodeLogic(io.instr, fmaDefault, fmaTable)
-  ).foreach({
-    case (s, d) => s := d
-  })
+
+  /** Generate a decoder */
+  private val fmaDecoder: Seq[UInt] = DecodeLogic(io.instr, fmaDefault, fmaTable)
+
+  /** Arrange certain signals as a sequence, to be connected to decoder */
+  private val fmaSigs = Seq(ctrl.fmaCmd, ctrl.ren3)
+
+  /** Pass decode results to output */
+  (fmaSigs zip fmaDecoder).foreach { case (sig, res) => sig := res }
 }

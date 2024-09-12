@@ -747,50 +747,65 @@ case class Imm_LUI_LOAD() {
 }
 
 /**
- * IO bundle for the Decode unit
+ * Enqueue IO bundle for Decode unit
  */
-class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
-  val decodedInst = Output(new DecodedInst)
-  val isComplex = Output(Bool())
-  val uopInfo = Output(new UopInfo)
-}
-class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle {
-    val ctrlFlow = Input(new StaticInst)
-    val vtype = Input(new VType)
-    val vstart = Input(Vl())
-  }
-//  val vconfig = Input(UInt(XLEN.W))
-  val deq = new DecodeUnitDeqIO
-  val csrCtrl = Input(new CustomCSRCtrlIO)
-  val fromCSR = Input(new CSRToDecode)
+class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
+  val ctrlFlow: StaticInst = new StaticInst // instruction
+  val vtype   : VType      = new VType      // vector operation type
+  val vstart  : UInt       = Vl()           // vector length
 }
 
 /**
- * Decode unit that takes in a single CtrlFlow and generates a CfCtrl.
+ * Dequeue IO bundle for Decode unit
+ */
+class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
+  val decodedInst: DecodedInst = new DecodedInst // decoded instruction
+  val isComplex  : Bool        = Bool()          // is complex instruction
+  val uopInfo    : UopInfo     = new UopInfo     // micro operation infomation
+}
+
+/**
+ * IO bundle for Decode unit
+ */
+class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
+  val enq    : DecodeUnitEnqIO = Input(new DecodeUnitEnqIO)  // enqueue instruction
+  val deq    : DecodeUnitDeqIO = Output(new DecodeUnitDeqIO) // dequeue instruction
+  val csrCtrl: CustomCSRCtrlIO = Input(new CustomCSRCtrlIO)  // CSR control signal
+  val fromCSR: CSRToDecode     = Input(new CSRToDecode)      // from CSR module
+  // val vconfig = Input(UInt(XLEN.W))
+}
+
+/**
+ * Decode unit that takes in a single CtrlFlow and generates a CfCtrl (Configuration Control).
  */
 class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
-  val io = IO(new DecodeUnitIO)
 
-  val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
+  /** Initializing IO of decode unit */
+  val io: DecodeUnitIO = IO(new DecodeUnitIO)
 
-  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields)
+  private val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
 
-  val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
-    FpDecode.table ++
-//    FDivSqrtDecode.table ++
-    BitmanipDecode.table ++
-    ScalarCryptoDecode.table ++
+  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields) // instructions to be decoded
+
+  /** decode table inside a decode unit. C extension is handled before Backend (in Frontend) */
+  private val decode_table: Array[(BitPat, List[BitPat])] =
+    XDecode.table ++            // I/M/A etension
+    FpDecode.table ++           // F/D extension
+    // FDivSqrtDecode.table ++
+    BitmanipDecode.table ++     // Zba/Zbb/Zbc/Zbs/Zbkb/Zbkc/Zbkx extensions
+    ScalarCryptoDecode.table ++ // Zknd/Zkne/Zknh/Zksed/Zksh extensions
     XSTrapDecode.table ++
-    CBODecode.table ++
-    SvinvalDecode.table ++
-    HypervisorDecode.table ++
-    VecDecoder.table ++
-    ZicondDecode.table ++
-    ZimopDecode.table ++
-    ZfaDecode.table
+    CBODecode.table ++          // Zicbom/Zicboz extension
+    SvinvalDecode.table ++      // Svinval extension
+    HypervisorDecode.table ++   // H extension
+    VecDecoder.table ++         // F/V/Zvbb extension
+    ZicondDecode.table ++       // Zicond extension
+    ZimopDecode.table ++        // Zimop extension
+    ZfaDecode.table             // Zfa extension
 
+  /** make sure decode table have the same column size */
   require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
+
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.ohid && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
@@ -799,7 +814,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // output
   val decodedInst: DecodedInst = Wire(new DecodedInst()).decode(ctrl_flow.instr, decode_table)
 
-  val fpDecoder = Module(new FPDecoder)
+  /** Seperatively decode float-point instructions */
+  private val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   decodedInst.fpu := fpDecoder.io.fpCtrl
   decodedInst.fpu.wflags := fpDecoder.io.fpCtrl.wflags || decodedInst.wfflags
