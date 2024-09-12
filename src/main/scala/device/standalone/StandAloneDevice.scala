@@ -143,7 +143,7 @@ abstract class StandAloneDevice (
 
 }
 
-class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class StandAloneDeviceImp(outer: StandAloneDevice)(implicit p: Parameters) extends LazyModuleImp(outer) with RequireAsyncReset {
   p(SoCParamsKey).XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(new ChiselAnnotation {

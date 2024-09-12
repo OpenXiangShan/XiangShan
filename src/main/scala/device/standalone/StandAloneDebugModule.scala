@@ -53,9 +53,12 @@ class StandAloneDebugModule (
   class StandAloneDebugModuleImp(val outer: StandAloneDebugModule)(implicit p: Parameters) extends StandAloneDeviceRawImp(outer) {
     val io = IO(new outer.debugModule.DebugModuleIO)
     childClock := io.clock.asClock
-    childReset := io.reset
+    childReset := io.reset.asAsyncReset
     io <> outer.debugModule.module.io
-    withClockAndReset(io.clock.asClock, io.reset) {
+    outer.debugModule.module.io.reset := io.reset.asAsyncReset
+    outer.debugModule.module.io.debugIO.reset := io.debugIO.reset.asAsyncReset
+    outer.debugModule.module.io.debugIO.systemjtag.foreach(_.reset := io.debugIO.systemjtag.get.reset.asAsyncReset)
+    withClockAndReset(io.clock.asClock, io.reset.asAsyncReset) {
       outer.debugModule.module.io.resetCtrl.hartIsInReset :=
         RegNextN(io.resetCtrl.hartIsInReset, 2, Some(0.U.asTypeOf(io.resetCtrl.hartIsInReset)))
       io.resetCtrl.hartResetReq.foreach(req =>
