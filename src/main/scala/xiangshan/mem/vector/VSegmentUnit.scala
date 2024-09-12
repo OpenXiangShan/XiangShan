@@ -46,6 +46,8 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val vl               = UInt(elemIdxBits.W)
   val uopFlowNum       = UInt(elemIdxBits.W)
   val uopFlowNumMask   = UInt(elemIdxBits.W)
+  val isVsegld         = Bool()
+  val isVsegst         = Bool()
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val exceptionVaddr   = UInt(VAddrBits.W)
@@ -189,6 +191,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val baseVaddr                       = instMicroOp.baseVaddr
   val alignedType                     = instMicroOp.alignedType
   val fuType                          = instMicroOp.uop.fuType
+  val isVsegld                        = instMicroOp.isVsegld
+  val isVsegst                        = instMicroOp.isVsegst
   val mask                            = instMicroOp.mask
   val exceptionVec                    = instMicroOp.uop.exceptionVec
   val issueEew                        = instMicroOp.uop.vpu.veew
@@ -245,7 +249,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(sbufferEmpty, s_tlb_req, s_wait_flush_sbuffer_resp)
 
   }.elsewhen(state === s_tlb_req){
-    stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data))
+    stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(instMicroOp.isVsegld, s_latch_and_merge_data, s_send_data))
 
   }.elsewhen(state === s_wait_tlb_resp){
     stateNext := Mux(io.dtlb.resp.fire,
@@ -258,7 +262,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     /* if is vStore, send data to sbuffer, so don't need query dcache */
     stateNext := Mux(exception_pa || exception_va || exception_gpa,
                      s_finish,
-                     Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_cache_req, s_send_data))
+                     Mux(instMicroOp.isVsegld, s_cache_req, s_send_data))
 
   }.elsewhen(state === s_cache_req){
     stateNext := Mux(io.rdcache.req.fire, s_cache_resp, s_cache_req)
@@ -268,7 +272,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-        stateNext := Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data)
+        stateNext := Mux(instMicroOp.isVsegld, s_latch_and_merge_data, s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
@@ -336,7 +340,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.uopFlowNumMask        := GenVlMaxMask(uopFlowNum, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
-    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && isVsegld //FuType.isVLoad(fuType)
+    instMicroOp.isVsegld              := FuType.isVSegLoad(io.in.bits.uop.fuType)
+    instMicroOp.isVsegst              := FuType.isVSegStore(io.in.bits.uop.fuType)
   }
   // latch data
   when(io.in.fire){
@@ -376,11 +382,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req                         := DontCare
   io.dtlb.resp.ready                  := true.B
   io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
-  io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad(fuType), TlbCmd.read, TlbCmd.write)
+  io.dtlb.req.bits.cmd                := Mux(isVsegld, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.vaddr              := vaddr
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
-  io.dtlb.req.bits.memidx.is_ld       := FuType.isVLoad(fuType)
-  io.dtlb.req.bits.memidx.is_st       := FuType.isVStore(fuType)
+  io.dtlb.req.bits.memidx.is_ld       := isVsegld
+  io.dtlb.req.bits.memidx.is_st       := isVsegst
   io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
@@ -413,8 +419,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
     val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVLoad(fuType)  && canTriggerException
-    exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore(fuType) && canTriggerException
+    exceptionVec(loadAddrMisaligned)  := missAligned && isVsegld  && canTriggerException
+    exceptionVec(storeAddrMisaligned) := missAligned && isVsegst && canTriggerException
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
@@ -492,7 +498,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
-  io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
+  io.rdcache.req.valid              := state === s_cache_req && isVsegld
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := latchVaddr
   io.rdcache.req.bits.mask          := mask
