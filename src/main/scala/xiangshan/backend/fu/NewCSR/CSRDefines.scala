@@ -257,6 +257,8 @@ object CSRDefines {
     val U = Value(0.U)
     val S = Value(1.U)
     val M = Value(3.U)
+
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(U, S, M)
   }
 
   object VirtMode extends CSREnum with RWApply {
