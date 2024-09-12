@@ -687,7 +687,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     import utils.HierarchicalXMR.tapAndRead
     import xiangshan.backend.fu.wrapper.CSR
 
-    val diffRAT = wrapper.ctrlBlock.rob.module.rab.diffRenameTable.get
     val csr = intExuBlock.exuWithCSR.get.funcUnits.find(_.cfg == FuConfig.CsrCfg).get.asInstanceOf[CSR].csrMod
 
     mod.io.hartId := io.fromTop.hartId
@@ -698,11 +697,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     mod.io.v0PRF  := dataPath.v0RegFile.map(x => tapAndRead(x.memForRead))
     mod.io.vlPRF  := tapAndRead(dataPath.vlRegFile.memForRead)
 
-    mod.io.intDiffTable := tapAndRead(diffRAT.int_table)
-    mod.io.fpDiffTable  := tapAndRead(diffRAT.fp_table)
-    mod.io.vecDiffTable := tapAndRead(diffRAT.vec_table)
-    mod.io.v0DiffTable  := tapAndRead(diffRAT.v0_table)
-    mod.io.vlDiffTable  := tapAndRead(diffRAT.vl_table)
+    mod.io.intDiffTable := ctrlBlock.io.diff_int_rat.get
+    mod.io.fpDiffTable  := ctrlBlock.io.diff_fp_rat.get
+    mod.io.vecDiffTable := ctrlBlock.io.diff_vec_rat.get
+    mod.io.v0DiffTable  := ctrlBlock.io.diff_v0_rat.get
+    mod.io.vlDiffTable  := ctrlBlock.io.diff_vl_rat.get
 
     mod.io.vecCSRState.vstart := tapAndRead(csr.vstart.rdata)
     mod.io.vecCSRState.vxsat  := tapAndRead(csr.vcsr.vxsat)

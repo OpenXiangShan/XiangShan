@@ -484,6 +484,7 @@ class CtrlBlockImp(
 
   rat.io.redirect := s1_s3_redirect.valid
   rat.io.rabCommits := rob.io.rabCommits
+  rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
@@ -606,6 +607,12 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
+  io.diff_int_rat.foreach(_ := rat.io.diff_int_rat.get)
+  io.diff_fp_rat .foreach(_ := rat.io.diff_fp_rat.get)
+  io.diff_vec_rat.foreach(_ := rat.io.diff_vec_rat.get)
+  io.diff_v0_rat .foreach(_ := rat.io.diff_v0_rat.get)
+  io.diff_vl_rat .foreach(_ := rat.io.diff_vl_rat.get)
+
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
@@ -708,6 +715,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
+  val diff_int_rat = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_fp_rat  = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vec_rat = if (params.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_v0_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())

@@ -41,11 +41,11 @@ class DiffRegState(implicit p: Parameters, params: BackendParams) extends XSModu
     val v0PRF  = Input(Vec(VLEN / XLEN, Vec(V0PhyRegs, UInt(XLEN.W))))
     val vlPRF  = Input(Vec(VlPhyRegs, UInt(VlData().dataWidth.W)))
 
-    val intDiffTable = Input(Vec(IntLogicRegs, UInt(PhyRegIdxWidth.W)))
-    val fpDiffTable  = Input(Vec(FpLogicRegs,  UInt(PhyRegIdxWidth.W)))
-    val vecDiffTable = Input(Vec(VecLogicRegs, UInt(PhyRegIdxWidth.W)))
-    val v0DiffTable  = Input(Vec(V0LogicRegs,  UInt(PhyRegIdxWidth.W)))
-    val vlDiffTable  = Input(Vec(VlLogicRegs,  UInt(PhyRegIdxWidth.W)))
+    val intDiffTable = Input(Vec(32, UInt(PhyRegIdxWidth.W)))
+    val fpDiffTable  = Input(Vec(32, UInt(PhyRegIdxWidth.W)))
+    val vecDiffTable = Input(Vec(31, UInt(PhyRegIdxWidth.W)))
+    val v0DiffTable  = Input(Vec(1,  UInt(PhyRegIdxWidth.W)))
+    val vlDiffTable  = Input(Vec(1,  UInt(PhyRegIdxWidth.W)))
 
     val vecCSRState = Input(new Bundle {
       val vstart = UInt(64.W)
@@ -60,10 +60,10 @@ class DiffRegState(implicit p: Parameters, params: BackendParams) extends XSModu
   private val v0PRFTrans = VecInit(io.v0PRF.transpose.map(x => VecInit(x)))
   private val v1to32PRFTrans = VecInit(io.vfPRF.transpose.map(x => VecInit(x)))
   private val v0DiffRegState = io.v0DiffTable.map(x => v0PRFTrans(x)).flatten
-  private val v1to32DiffRegState = io.vecDiffTable.slice(1, 32).map(x => v1to32PRFTrans(x)).flatten
+  private val v1to32DiffRegState = io.vecDiffTable.map(x => v1to32PRFTrans(x)).flatten
 
   private val intDiffRegState = io.intDiffTable.map(x => io.intPRF(x))
-  private val fpDiffRegState  = io.fpDiffTable.slice(0, 32).map(x => io.fpPRF(x))
+  private val fpDiffRegState  = io.fpDiffTable.map(x => io.fpPRF(x))
   private val vecDiffRegState = v0DiffRegState ++ v1to32DiffRegState
   private val vlDiffRegState  = io.vlDiffTable.map(x => io.vlPRF(x))
 
