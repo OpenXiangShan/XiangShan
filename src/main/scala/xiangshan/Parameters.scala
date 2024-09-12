@@ -606,7 +606,6 @@ trait HasXSParameter {
         coreParams.VAddrBitsSv39
     }
   } // VAddrBits is Virtual Memory addr bits
-  require(PAddrBits == 48 || !EnableSv48) // Paddr bits should be 48 when Sv48 enable
 
   def VAddrMaxBits = {
     if(EnableSv48) {
