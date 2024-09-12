@@ -607,8 +607,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val resp_s2 = io.out.s2
 
   // Update logic
-  val u_valid = io.update.valid
-  val update = io.update.bits
+  val u_valid = RegNext(io.update.valid, init = false.B)
+  val update = RegEnable(io.update.bits, io.update.valid)
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)))
@@ -837,7 +837,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
       tables(i).io.update.pc := RegEnable(update.pc, realWen)
-      tables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
+      tables(i).io.update.ghist := RegEnable(update.ghist, realWen)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)

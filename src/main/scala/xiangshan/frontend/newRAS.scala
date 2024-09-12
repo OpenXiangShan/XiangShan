@@ -646,9 +646,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.redirect_meta_NOS := recover_cfi.NOS
   stack.redirect_callAddr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  val update = io.update.bits
-  val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
-  val updateValid = io.update.valid
+  val updateValid = RegNext(io.update.valid, init = false.B)
+  val update = RegEnable(io.update.bits, io.update.valid)
+  val updateMeta = update.meta.asTypeOf(new RASMeta)
 
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken

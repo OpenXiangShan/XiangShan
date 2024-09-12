@@ -684,10 +684,13 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s0_close_ftb_req := true.B
   }
 
+  val update_valid = RegNext(io.update.valid, init = false.B)
+  val update = RegEnable(io.update.bits, io.update.valid)
+
   //Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
   val needReopen = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
-  ftb_false_hit := io.update.valid && io.update.bits.false_hit
+  ftb_false_hit := update_valid && update.false_hit
   when(needReopen){
     fauftb_ftb_entry_consistent_counter := 0.U
     s0_close_ftb_req := false.B
@@ -751,10 +754,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   }
 
   // Update logic
-  val update = io.update.bits
-
   val u_meta = update.meta.asTypeOf(new FTBMeta)
-  val u_valid = io.update.valid && !io.update.bits.old_entry
+  val u_valid = update_valid && !update.old_entry
 
   val (_, delay2_pc) = DelayNWithValid(update.pc, u_valid, 2)
   val (_, delay2_entry) = DelayNWithValid(update.ftb_entry, u_valid, 2)
@@ -801,16 +802,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire(0)) && s1_hit)
   XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire(0)) && !s1_hit)
 
-  XSPerfAccumulate("ftb_commit_hits", io.update.valid && u_meta.hit)
-  XSPerfAccumulate("ftb_commit_misses", io.update.valid && !u_meta.hit)
+  XSPerfAccumulate("ftb_commit_hits", update_valid && u_meta.hit)
+  XSPerfAccumulate("ftb_commit_misses", update_valid && !u_meta.hit)
 
-  XSPerfAccumulate("ftb_update_req", io.update.valid)
-  XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
+  XSPerfAccumulate("ftb_update_req", update_valid)
+  XSPerfAccumulate("ftb_update_ignored", update_valid && update.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
 
   override val perfEvents = Seq(
-    ("ftb_commit_hits            ", io.update.valid  &&  u_meta.hit),
-    ("ftb_commit_misses          ", io.update.valid  && !u_meta.hit),
+    ("ftb_commit_hits            ", update_valid  &&  u_meta.hit),
+    ("ftb_commit_misses          ", update_valid  && !u_meta.hit),
   )
   generatePerfEvent()
 }

@@ -412,8 +412,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   io.out.last_stage_meta := resp_meta.asUInt
 
   // Update logic
-  val u_valid = io.update.valid
-  val update = io.update.bits
+  val u_valid = RegNext(io.update.valid, init = false.B)
+  val update = RegEnable(io.update.bits, io.update.valid)
   val updateValid =
     update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
     update.jmp_taken && update.cfi_idx.valid && update.cfi_idx.bits === update.ftb_entry.tailSlot.offset
