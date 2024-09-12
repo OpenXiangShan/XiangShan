@@ -1114,7 +1114,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
   }
 
   def isFakePte() = {
-    !pf && !entry.v
+    !pf && !entry.v && !af
   }
 
   def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
