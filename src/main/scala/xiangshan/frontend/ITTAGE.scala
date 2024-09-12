@@ -541,7 +541,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       updateMask(provider)   := true.B
       updateUMask(provider)  := true.B
 
-      updateU(provider) := Mux(!updateMeta.altDiffers, updateMeta.providerU, !updateMisPred)
+      updateU(provider) := Mux(!updateMeta.altDiffers, updateMeta.providerU,
+                                updateMeta.providerTarget === updateRealTarget)
       updateCorrect(provider)  := updateMeta.providerTarget === updateRealTarget
       updateTarget(provider) := updateRealTarget
       updateOldTarget(provider) := updateMeta.providerTarget
