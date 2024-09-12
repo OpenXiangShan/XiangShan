@@ -108,7 +108,6 @@ object XSDebugModuleParams {
       baseAddress = BigInt(0x38020000),
       nScratch = 2,
       crossingHasSafeReset = false,
-      hasHartResets = true,
     )
   }
 }
