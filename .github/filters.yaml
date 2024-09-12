@@ -2,6 +2,8 @@ core:
   - "!.github/ISSUE_TEMPLATE/**"
   - "!.github/CODEOWNERS"
   - "!.github/filters.yaml"
+  - "!.github/workflows/nightly.yml"
+  - "!.github/workflows/perf.yml"
   - "!**/*.md"
   - "!LICENSE"
   - "!images/**"

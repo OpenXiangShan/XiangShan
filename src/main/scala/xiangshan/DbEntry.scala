@@ -26,21 +26,29 @@ class LoadAccessEntry(implicit p: Parameters) extends LoadMissEntry{
 }
 
 class InstInfoEntry(implicit p: Parameters) extends XSBundle{
-  val globalID = UInt(XLEN.W)
+  /*
+   * The annotated signals are discarded in New Backend.
+   * But it can be used as a signal reference for instinfo
+   */
   val robIdx = UInt(log2Ceil(RobSize).W)
-  val instType = FuType()
-  val exceptType = UInt(ExceptionVec.ExceptionVecSize.W)
-  val ivaddr = UInt(VAddrBits.W)
+  // val globalID = UInt(XLEN.W)
+  // val instType = FuType()
+  // val mdpInfo = new DebugMdpInfo
+  // val ivaddr = UInt(VAddrBits.W)
   val dvaddr = UInt(VAddrBits.W) // the l/s access address
   val dpaddr = UInt(VAddrBits.W) // need the physical address when the TLB is valid
-  val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
-  val accessLatency = UInt(XLEN.W)  // RS out time --> write back time
-  val executeLatency = UInt(XLEN.W)
-  val issueLatency = UInt(XLEN.W)
-  val lsInfo = new DebugLsInfo
-  val mdpInfo = new DebugMdpInfo
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
+  val dispatchLatency = UInt(XLEN.W)
+  val enqRsLatency = UInt(XLEN.W)
+  val selectLatency = UInt(XLEN.W)
+  val issueLatency = UInt(XLEN.W)
+  val executeLatency = UInt(XLEN.W)
+  val rsFuLatency = UInt(XLEN.W)
+  // val commitLatency = UInt(XLEN.W) // can not record when writing back
+  val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
+  val lsInfo = new DebugLsInfo
+  val exceptType = UInt(ExceptionVec.ExceptionVecSize.W)
 }
 
 class LoadInfoEntry(implicit p: Parameters) extends XSBundle{

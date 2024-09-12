@@ -65,6 +65,9 @@ trait HypervisorLevel { self: NewCSR =>
     when (!menvcfg.STCE.asBool) {
       regOut.STCE := 0.U
     }
+    when (!menvcfg.PBMTE) {
+      regOut.PBMTE := 0.U
+    }
   })
     .setAddr(CSRs.henvcfg)
 
@@ -335,6 +338,8 @@ class HEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }
+  // Always enable PBMT
+  this.PBMTE.setRO().withReset(1.U)
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

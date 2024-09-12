@@ -82,6 +82,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
+    val resetIsInFrontend = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -233,6 +234,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.resetIsInFrontend := frontend.reset.asBool
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare

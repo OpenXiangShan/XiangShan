@@ -94,6 +94,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
       val vaddr = UInt(VAddrBits.W)
+      val gpaddr = UInt(GPAddrBits.W)
     })
     val sqControl       = new StoreMaBufToSqControlIO
   })
@@ -591,9 +592,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   // if exception happens in the higher page address part, overwrite the storeExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
   val overwriteAddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
+  val overwriteGpaddr = GatedRegNext(splitStoreResp(curPtr).gpaddr)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteAddr
+  io.overwriteExpBuf.gpaddr := overwriteGpaddr
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)
   XSPerfAccumulate("flush",                  flush)

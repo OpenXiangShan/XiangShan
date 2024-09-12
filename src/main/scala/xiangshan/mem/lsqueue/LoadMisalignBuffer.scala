@@ -34,7 +34,7 @@ import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
-  with HasLoadHelper 
+  with HasLoadHelper
 {
   private val enqPortNum = LoadPipelineWidth
   private val maxSplitNum = 2
@@ -117,8 +117,9 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
     val writeBack       = Decoupled(new MemExuOutput)
     val overwriteExpBuf = Output(new XSBundle {
-      val valid = Bool()
-      val vaddr = UInt(VAddrBits.W)
+      val valid  = Bool()
+      val vaddr  = UInt(VAddrBits.W)
+      val gpaddr = UInt(GPAddrBits.W)
     })
     val flushLdExpBuff  = Output(Bool())
   })
@@ -250,7 +251,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     LB -> 0.U,
     LH -> 1.U,
     LW -> 3.U,
-    LD -> 7.U 
+    LD -> 7.U
   )) + req.vaddr(4, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
@@ -549,7 +550,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
-  
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush && (bufferState =/= s_idle)) {
@@ -564,10 +565,12 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteAddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
-  io.overwriteExpBuf.vaddr := overwriteAddr
+  io.overwriteExpBuf.vaddr := overwriteVaddr
+  io.overwriteExpBuf.gpaddr := overwriteGpaddr
 
   // when no exception or mmio, flush loadExceptionBuffer at s_wb
   val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))

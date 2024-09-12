@@ -110,6 +110,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()
   val vaddr                = UInt(VAddrBits.W)
+  val gpaddr               = UInt(GPAddrBits.W)
   //val vec                  = new OnlyVecExuOutput
    // feedback
   val vecFeedback          = Bool()
@@ -191,6 +192,7 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val robidx = new RobPtr
   val uopidx = UopIdx()
   val vaddr = UInt(VAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
     // for exception
   val vstart           = UInt(elemIdxBits.W)

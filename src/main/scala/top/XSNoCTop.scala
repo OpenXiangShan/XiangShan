@@ -61,7 +61,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   })))
 
   // imsic bus top
-  val u_imsic_bus_top = LazyModule(new imsic_bus_top(soc.IMSICUseTL))
+  val u_imsic_bus_top = LazyModule(new imsic_bus_top(
+    useTL = soc.IMSICUseTL,
+    baseAddress = (0x3A800000, 0x3B000000)
+  ))
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
@@ -96,14 +99,14 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
+      val hartIsInReset = Output(Bool())
       val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
       val chi = new PortIO
       val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
     // imsic axi4lite io
-    val imsic_m_s = wrapper.u_imsic_bus_top.module.m_s.map(x => IO(chiselTypeOf(x)))
-    val imsic_s_s = wrapper.u_imsic_bus_top.module.s_s.map(x => IO(chiselTypeOf(x)))
+    val imsic_axi4lite = wrapper.u_imsic_bus_top.module.axi4lite.map(x => IO(chiselTypeOf(x)))
     // imsic tl io
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
@@ -121,8 +124,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
 
     // imsic axi4lite io connection
-    wrapper.u_imsic_bus_top.module.m_s.foreach(_ <> imsic_m_s.get)
-    wrapper.u_imsic_bus_top.module.s_s.foreach(_ <> imsic_s_s.get)
+    wrapper.u_imsic_bus_top.module.axi4lite.foreach(_ <> imsic_axi4lite.get)
 
     // imsic tl io connection
     wrapper.u_imsic_bus_top.tl_m.foreach(_ <> imsic_m_tl.get)
@@ -134,6 +136,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
+    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
     EnableClintAsyncBridge match {

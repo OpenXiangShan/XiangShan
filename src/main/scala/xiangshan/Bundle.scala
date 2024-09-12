@@ -183,7 +183,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  val debug_globalID = UInt(XLEN.W)
+  // val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
   val lsrc = Vec(4, UInt(LogicRegsWidth.W))
   val ldest = UInt(LogicRegsWidth.W)
@@ -229,7 +229,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
-  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+  def needWriteRf: Bool = rfWen || fpWen || vecWen
   def isHyperInst: Bool = {
     fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
   }
@@ -530,6 +530,8 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
+  val mPBMTE = Bool()
+  val hPBMTE = Bool()
 
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
