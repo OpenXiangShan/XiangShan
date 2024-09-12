@@ -890,12 +890,12 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
   // NOTE: vs is used for different usage:
-  // for l3, which store the leaf(leaves), vs is page fault or not.
-  // for l2, which shoule not store leaf, vs is valid or not, that will anticipate in hit check
-  // Because, l2 should not store leaf(no perm), it doesn't store perm.
-  // If l2 hit a leaf, the perm is still unavailble. Should still page walk. Complex but nothing helpful.
+  // for l0, which store the leaf(leaves), vs is page fault or not.
+  // for l1, which shoule not store leaf, vs is valid or not, that will anticipate in hit check
+  // Because, l1 should not store leaf(no perm), it doesn't store perm.
+  // If l1 hit a leaf, the perm is still unavailble. Should still page walk. Complex but nothing helpful.
   // TODO: divide vs into validVec and pfVec
-  // for l2: may valid but pf, so no need for page walk, return random pte with pf.
+  // for l1: may valid but pf, so no need for page walk, return random pte with pf.
 
   def tagClip(vpn: UInt) = {
     require(vpn.getWidth == vpnLen)
@@ -926,7 +926,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.ppn
-      ps.vs(i)   := !pte.isPf(levelUInt, pbmte) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.vs(i)   := Mux(s2xlate === onlyStage2, !pte.isGpf(levelUInt, pbmte), !pte.isPf(levelUInt, pbmte)) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.af(i)   := Mux(s2xlate === allStage, false.B, pte.isAf()) // if allstage, this refill is from ptw or llptw, so the af is invalid
       ps.perms.map(_(i) := pte.perm)
     }
@@ -1156,8 +1156,9 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   val entry = Vec(tlbcontiguous, new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
   val pteidx = Vec(tlbcontiguous, Bool())
   val not_super = Bool()
+  val not_merge = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true) = {
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true, not_merge: Boolean = false) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val resp_pte = pte
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
@@ -1175,7 +1176,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.vmid.map(_ := vmid)
     this.pteidx := UIntToOH(addr_low).asBools
     this.not_super := not_super.B
-
+    this.not_merge := not_merge.B
 
     for (i <- 0 until tlbcontiguous) {
       this.entry(i) := ptw_resp
