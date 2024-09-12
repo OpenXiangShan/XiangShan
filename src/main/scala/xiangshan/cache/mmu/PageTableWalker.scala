@@ -898,7 +898,15 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   io.req.ready := idle
   val resp = Wire(new HptwResp())
-  resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level, level), pte, vpn, hgatp.vmid)
+  // accessFault > pageFault > ppn_af
+  resp.apply(
+    gpf = pageFault && !accessFault,
+    gaf = accessFault || (ppn_af && !pageFault),
+    level = Mux(accessFault, af_level, level),
+    pte = pte, 
+    vpn = vpn, 
+    vmid = hgatp.vmid
+  )
   io.resp.valid := resp_valid
   io.resp.bits.id := id
   io.resp.bits.resp := resp
