@@ -301,7 +301,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when(io.hptw.resp.fire && w_hptw_resp === false.B) {
     w_hptw_resp := true.B
-    val g_perm_fail = !io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x)
+    val g_perm_fail = !io.hptw.resp.bits.h_resp.gaf && (!io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x))
     hptw_pageFault := io.hptw.resp.bits.h_resp.gpf || g_perm_fail
     hptw_accessFault := io.hptw.resp.bits.h_resp.gaf
     hptw_resp := io.hptw.resp.bits.h_resp
@@ -684,7 +684,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
-        val check_g_perm_fail = !io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x)
+        val check_g_perm_fail = !io.hptw.resp.bits.h_resp.gaf && (!io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x))
         when (check_g_perm_fail || io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
