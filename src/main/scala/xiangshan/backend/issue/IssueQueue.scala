@@ -587,6 +587,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val bt = busyTable.get
       val dq = deqResp.get
       btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.deqResp.valid := toBusyTableDeqResp(i).valid && deqBeforeDly(i).bits.common.rfWen.getOrElse(false.B)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
@@ -600,6 +601,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val bt = busyTable.get
       val dq = deqResp.get
       btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.deqResp.valid := toBusyTableDeqResp(i).valid && deqBeforeDly(i).bits.common.fpWen.getOrElse(false.B)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
@@ -613,6 +615,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val bt = busyTable.get
       val dq = deqResp.get
       btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.deqResp.valid := toBusyTableDeqResp(i).valid && deqBeforeDly(i).bits.common.vecWen.getOrElse(false.B)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
@@ -626,6 +629,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val bt = busyTable.get
       val dq = deqResp.get
       btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.deqResp.valid := toBusyTableDeqResp(i).valid && deqBeforeDly(i).bits.common.v0Wen.getOrElse(false.B)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
@@ -639,6 +643,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val bt = busyTable.get
       val dq = deqResp.get
       btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.deqResp.valid := toBusyTableDeqResp(i).valid && deqBeforeDly(i).bits.common.vlWen.getOrElse(false.B)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
