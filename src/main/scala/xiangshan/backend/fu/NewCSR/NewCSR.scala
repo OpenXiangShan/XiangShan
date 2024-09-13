@@ -427,12 +427,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   sstcIRGen.i.henvcfgSTCE := henvcfg.regOut.STCE.asBool
 
   miregiprios.foreach { mod =>
-    mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wen := wen && (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
   }
 
   siregiprios.foreach { mod =>
-    mod.w.wen := (addr === sireg.addr.U) && (siselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wen := wen && (addr === sireg.addr.U) && (siselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
   }
 
