@@ -557,7 +557,7 @@ class PMPChecker
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   
-  def keyid_check(addr: UInt) = {
+  def keyid_check(leaveHitMux: Boolean = false, valid: Bool = true.B, addr: UInt) = {
     val resp = Wire(new PMPRespBundle)
     val keyid_nz = addr(PMPAddrBits-1, PMPAddrBits-PMPKeyIDBits) =/= 0.U
     resp.ld := keyid_nz && !io.check_env.cmode && (io.check_env.mode < 3.U)
@@ -565,10 +565,14 @@ class PMPChecker
     resp.instr := keyid_nz && !io.check_env.cmode && (io.check_env.mode < 3.U)
     resp.mmio := false.B
     resp.atomic := false.B
-    resp
+    if (leaveHitMux) {
+      RegEnable(resp, valid)
+    } else {
+      resp
+    }
   }
 
-  val resp_keyid = keyid_check(req.addr)
+  val resp_keyid = keyid_check(leaveHitMux, io.req.valid, req.addr)
 
   val resp = if (pmpUsed) (resp_pmp | resp_pma | resp_keyid) else (resp_pma | resp_keyid)
 
