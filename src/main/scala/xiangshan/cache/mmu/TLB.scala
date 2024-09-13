@@ -149,7 +149,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
       perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
     }
-    hasGpf(i) := resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr
+    hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
 
   // handle block or non-block io
@@ -309,7 +309,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stGpf = (g_stPermFail || gpf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrGpf = (g_instrPermFail || gpf) && TlbCmd.isExec(cmd)
-    val s2_valid = hasS2xlate && !onlyS1 && portTranslateEnable(idx)
+    val s2_valid =  portTranslateEnable(idx) && hasS2xlate && !onlyS1
 
     val fault_valid = s1_valid || s2_valid
 
