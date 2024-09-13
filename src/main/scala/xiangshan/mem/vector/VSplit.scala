@@ -142,6 +142,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   s0_out := DontCare
   s0_out match {case x =>
     x.uop := io.in.bits.uop
+    x.uop.imm := 0.U
     x.uop.vpu.vl := evl
     x.uop.uopIdx := uopIdx
     x.uop.numUops := numUops
@@ -368,6 +369,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   // data
   io.out.bits match { case x =>
     x.uop                   := issueUop
+    x.uop.imm               := 0.U
     x.uop.exceptionVec      := ExceptionNO.selectByFu(issueUop.exceptionVec, fuCfg)
     x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
     x.basevaddr             := issueBaseAddr
