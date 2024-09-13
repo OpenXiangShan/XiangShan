@@ -115,7 +115,7 @@ class imsic_bus_top(
     val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         "tl",
-        sourceId = IdRange(0, 1)
+        sourceId = IdRange(0, 16)
       ))
     ))))
     axi4nodes zip tlnodes foreach { case (axi4node, tlnode) =>
