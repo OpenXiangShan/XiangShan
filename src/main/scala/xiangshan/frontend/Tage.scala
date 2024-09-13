@@ -608,7 +608,27 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   // Update logic
   val u_valid = RegNext(io.update.valid, init = false.B)
-  val update = RegEnable(io.update.bits, io.update.valid)
+  val update = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+
+  // To improve Clock Gating Efficiency
+  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("tage_update_pc")).getAddr()
+  val u_valids_for_cge = VecInit((0 until TageBanks).map(w => io.update.bits.ftb_entry.brValids(w) && io.update.valid)) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
+  val u_meta = io.update.bits.meta.asTypeOf(new TageMeta)
+  for(i <- 0 until numBr){
+    update.meta.asTypeOf(new TageMeta).providers(i).bits := RegEnable(u_meta.providers(i).bits, u_meta.providers(i).valid && u_valids_for_cge(i))
+    update.meta.asTypeOf(new TageMeta).providerResps(i)  := RegEnable(u_meta.providerResps(i), u_meta.providers(i).valid && u_valids_for_cge(i))
+    update.meta.asTypeOf(new TageMeta).altUsed(i)        := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
+    update.meta.asTypeOf(new TageMeta).allocates(i)      := RegEnable(u_meta.allocates(i), io.update.valid && io.update.bits.mispred_mask(i))
+  }
+  if(EnableSC){
+    for(w <- 0 until TageBanks){
+      update.meta.asTypeOf(new TageMeta).scMeta.get.scPreds(w) := RegEnable(u_meta.scMeta.get.scPreds(w), u_valids_for_cge(w) && u_meta.providers(w).valid)
+      update.meta.asTypeOf(new TageMeta).scMeta.get.ctrs(w)    := RegEnable(u_meta.scMeta.get.ctrs(w), u_valids_for_cge(w) && u_meta.providers(w).valid)
+    }
+  }
+  update.ghist := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
+
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)))

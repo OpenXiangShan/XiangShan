@@ -647,7 +647,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.redirect_callAddr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
   val updateValid = RegNext(io.update.valid, init = false.B)
-  val update = RegEnable(io.update.bits, io.update.valid)
+  val update = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+
+  // To improve Clock Gating Efficiency
+  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("ras_update_pc")).getAddr()
+  update.meta := RegEnable(io.update.bits.meta, io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))
+
   val updateMeta = update.meta.asTypeOf(new RASMeta)
 
   stack.commit_push_valid := updateValid && update.is_call_taken

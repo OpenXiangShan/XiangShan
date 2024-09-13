@@ -413,7 +413,23 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Update logic
   val u_valid = RegNext(io.update.valid, init = false.B)
-  val update = RegEnable(io.update.bits, io.update.valid)
+
+  val update = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+
+  // To improve Clock Gating Efficiency
+  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("ittage_update_pc")).getAddr()
+  val u_meta = io.update.bits.meta.asTypeOf(new ITTageMeta)
+  update.meta.asTypeOf(new ITTageMeta).provider.bits     := RegEnable(u_meta.provider.bits    , io.update.valid && u_meta.provider.valid   )
+  update.meta.asTypeOf(new ITTageMeta).providerTarget    := RegEnable(u_meta.providerTarget   , io.update.valid && u_meta.provider.valid   )
+  update.meta.asTypeOf(new ITTageMeta).allocate.bits     := RegEnable(u_meta.allocate.bits    , io.update.valid && u_meta.allocate.valid   )
+  update.meta.asTypeOf(new ITTageMeta).altProvider.bits  := RegEnable(u_meta.altProvider.bits , io.update.valid && u_meta.altProvider.valid)
+  update.meta.asTypeOf(new ITTageMeta).altProviderTarget := RegEnable(u_meta.altProviderTarget, 
+    io.update.valid && u_meta.provider.valid && u_meta.altProvider.valid && u_meta.providerCtr === 0.U)
+  update.full_target := RegEnable(io.update.bits.full_target, io.update.valid && (u_meta.provider.valid || io.update.bits.mispred_mask(numBr)))
+  update.cfi_idx.bits := RegEnable(io.update.bits.cfi_idx.bits, io.update.valid && io.update.bits.cfi_idx.valid)
+  update.ghist := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
+
   val updateValid =
     update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
     update.jmp_taken && update.cfi_idx.valid && update.cfi_idx.bits === update.ftb_entry.tailSlot.offset
