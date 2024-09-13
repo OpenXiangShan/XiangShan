@@ -19,14 +19,6 @@ class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val hstatus = ValidIO((new HstatusBundle).addInEvent(_.SPV))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP))
   val targetPc = ValidIO(new TargetPCBundle)
-
-  override def getBundleByName(name: String): ValidIO[CSRBundle] = {
-    name match {
-      case "mstatus" => this.mstatus
-      case "hstatus" => this.hstatus
-      case "vsstatus" => this.vsstatus
-    }
-  }
 }
 
 class SretEventInput extends Bundle {
@@ -111,16 +103,10 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   dontTouch(sretInVS)
 }
 
-trait SretEventSinkBundle { self: CSRModule[_] =>
+trait SretEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val retFromS = IO(Flipped(new SretEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = retFromS.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(retFromS.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

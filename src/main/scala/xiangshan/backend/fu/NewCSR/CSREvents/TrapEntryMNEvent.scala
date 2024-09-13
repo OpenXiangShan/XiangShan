@@ -15,14 +15,6 @@ class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val mnepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val targetPc = ValidIO(new TargetPCBundle)
-
-  def getBundleByName(name: String): Valid[CSRBundle] = {
-    name match {
-      case "mnstatus"  => this.mnstatus
-      case "mnepc"     => this.mnepc
-      case "mncause"   => this.mncause
-    }
-  }
 }
 
 class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -69,16 +61,10 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
 
 }
 
-trait TrapEntryMNEventSinkBundle { self: CSRModule[_] =>
+trait TrapEntryMNEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val trapToMN = IO(Flipped(new TrapEntryMNEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = trapToMN.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(trapToMN.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

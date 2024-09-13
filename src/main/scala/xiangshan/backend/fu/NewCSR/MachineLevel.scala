@@ -478,9 +478,15 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   val sstatusRdata = IO(Output(UInt(64.W)))
 
   val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
+  for ((name, field) <- wAliasSstatus.wdataFields.elements) {
+    reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+      wAliasSstatus.wen && field.asInstanceOf[CSREnumType].isLegal,
+      field.asInstanceOf[CSREnumType]
+    )
+  }
 
   // write connection
-  this.wfn(reg)(Seq(wAliasSstatus))
+  reconnectReg()
 
   when (robCommit.fsDirty || writeFCSR) {
     assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
@@ -498,6 +504,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
 }
+
 class MnstatusBundle extends CSRBundle {
 
   val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
@@ -505,6 +512,7 @@ class MnstatusBundle extends CSRBundle {
   val MNPELP = CSRRWField  (9).withReset(0.U)
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
 }
+
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
   val A = RO( 0).withReset(1.U) // Atomic extension
