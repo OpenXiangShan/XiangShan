@@ -1108,7 +1108,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
     // TODO: make trigger configurable
-    val trigger = wb.bits.trigger.getOrElse(0.U).asTypeOf(exc_wb.bits.trigger)
+    val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
     exc_wb.bits.vstartEn := false.B //wb.bits.vstartEn.getOrElse(false.B) // todo need add vstart in ExuOutput
     exc_wb.bits.vstart := 0.U //wb.bits.vstart.getOrElse(0.U)
