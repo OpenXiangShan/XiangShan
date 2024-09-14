@@ -859,9 +859,9 @@ class NewCSR(implicit val p: Parameters) extends Module
    * Asynchronous read operation of CSR. Check whether a read is asynchronous when read-enable is high.
    * AIA registers are designed to be read asynchronously, so newCSR will wait for response.
    **/
-  private val asyncRead = ren && (
+  private val asyncRead = ren && !(permitMod.io.out.EX_II || permitMod.io.out.EX_VI) && (
     mireg.addr.U === addr && miselect.inIMSICRange ||
-    sireg.addr.U === addr && siselect.inIMSICRange ||
+    sireg.addr.U === addr && ((!V.asUInt.asBool && siselect.inIMSICRange) || (V.asUInt.asBool && vsiselect.inIMSICRange)) ||
     vsireg.addr.U === addr && vsiselect.inIMSICRange
   )
 
