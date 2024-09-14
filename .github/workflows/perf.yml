@@ -10,7 +10,7 @@ on:
 
 jobs:
   run:
-    runs-on: node
+    runs-on: perf
     continue-on-error: false
     #At most 2 days to finish
     timeout-minutes: 2880
@@ -28,6 +28,8 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
           echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
+          echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+          echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
       - name: Clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -41,23 +43,17 @@ jobs:
       - name: Run SPEC CPU2006 checkpoints
         run: |
           cd $PERF_HOME
-          python3 xs_autorun_multiServer.py \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json \
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
             -L "node033 node034 node036 node037 node038 node039 node040 node041 node042"
-          mv $NOOP_HOME/*.vcd $SPEC_DIR
+          find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
       - name: Report SPEC CPU2006 score
         run: |
           cd $PERF_HOME
-          python3 xs_autorun_multiServer.py \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json \
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
             --check --dump-json-path $SPEC_DIR/err_ckps.json
-          python3 xs_autorun_multiServer.py \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0 \
-            /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json \
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
             > $SPEC_DIR/score.txt
           mkdir $GITHUB_WORKSPACE/result
