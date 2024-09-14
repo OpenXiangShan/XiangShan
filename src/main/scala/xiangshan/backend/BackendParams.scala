@@ -38,7 +38,9 @@ case class BackendParams(
   iqWakeUpParams : Seq[WakeUpConfig],
 ) {
 
-  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || p(DebugOptionsKey).EnableDifftest
+  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
+
+  def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
 

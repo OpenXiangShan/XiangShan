@@ -266,69 +266,69 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.fromPcTargetMem.fromDataPathFtqPtr := pcReadFtqPtr
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
-  private val intDebugRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
-  private val fpDebugRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, (Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
-  private val vfDebugRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, (Wire(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
-  private val v0DebugRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, (Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
-  private val vlDebugRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
+  private val intDiffRead: Option[(Vec[UInt], Vec[UInt])] =
+    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+  private val fpDiffRead: Option[(Vec[UInt], Vec[UInt])] =
+    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+  private val vfDiffRead: Option[(Vec[UInt], Vec[UInt])] =
+    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
+  private val v0DiffRead: Option[(Vec[UInt], Vec[UInt])] =
+    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
+  private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
+    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
-  private val fpDebugReadData: Option[Vec[UInt]] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, Wire(Vec(32, UInt(XLEN.W))))
-  private val vecDebugReadData: Option[Vec[UInt]] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
-  private val vlDebugReadData: Option[UInt] =
-    OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, Wire(UInt(VlData().dataWidth.W)))
+  private val fpDiffReadData: Option[Vec[UInt]] =
+    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(32, UInt(XLEN.W))))
+  private val vecDiffReadData: Option[Vec[UInt]] =
+    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
+  private val vlDiffReadData: Option[UInt] =
+    OptionWrapper(backendParams.basicDebugEn, Wire(UInt(VlData().dataWidth.W)))
 
 
-  fpDebugReadData.foreach(_ := fpDebugRead
+  fpDiffReadData.foreach(_ := fpDiffRead
     .get._2
     .slice(0, 32)
     .map(_(63, 0))
   ) // fp only used [63, 0]
-  vecDebugReadData.foreach(_ := 
-    v0DebugRead
+  vecDiffReadData.foreach(_ := 
+    v0DiffRead
     .get._2
     .slice(0, 1)
     .map(x => Seq(x(63, 0), x(127, 64))).flatten ++ 
-    vfDebugRead
+    vfDiffRead
     .get._2
     .slice(0, 31)
     .map(x => Seq(x(63, 0), x(127, 64))).flatten
   )
-  vlDebugReadData.foreach(_ := vlDebugRead
+  vlDiffReadData.foreach(_ := vlDiffRead
     .get._2(0)
   )
 
-  io.debugVl.foreach(_ := vlDebugReadData.get)
+  io.diffVl.foreach(_ := vlDiffReadData.get)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     bankNum = 1,
-    debugReadAddr = intDebugRead.map(_._1),
-    debugReadData = intDebugRead.map(_._2)
+    debugReadAddr = intDiffRead.map(_._1),
+    debugReadData = intDiffRead.map(_._2)
   )
   FpRegFile("FpRegFile", fpSchdParams.numPregs, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
     bankNum = 1,
-    debugReadAddr = fpDebugRead.map(_._1),
-    debugReadData = fpDebugRead.map(_._2)
+    debugReadAddr = fpDiffRead.map(_._1),
+    debugReadData = fpDiffRead.map(_._2)
   )
   VfRegFile("VfRegFile", vfSchdParams.numPregs, vfRfSplitNum, vfRfRaddr, vfRfRdata, vfRfWen, vfRfWaddr, vfRfWdata,
-    debugReadAddr = vfDebugRead.map(_._1),
-    debugReadData = vfDebugRead.map(_._2)
+    debugReadAddr = vfDiffRead.map(_._1),
+    debugReadData = vfDiffRead.map(_._2)
   )
   VfRegFile("V0RegFile", V0PhyRegs, v0RfSplitNum, v0RfRaddr, v0RfRdata, v0RfWen, v0RfWaddr, v0RfWdata,
-    debugReadAddr = v0DebugRead.map(_._1),
-    debugReadData = v0DebugRead.map(_._2)
+    debugReadAddr = v0DiffRead.map(_._1),
+    debugReadData = v0DiffRead.map(_._2)
   )
   FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata, vlRfWen, vlRfWaddr, vlRfWdata,
     bankNum = 1,
     isVlRegfile = true,
-    debugReadAddr = vlDebugRead.map(_._1),
-    debugReadData = vlDebugRead.map(_._2)
+    debugReadAddr = vlDiffRead.map(_._1),
+    debugReadData = vlDiffRead.map(_._2)
   )
 
   intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
@@ -387,30 +387,30 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
 
-  intDebugRead.foreach { case (addr, _) =>
-    addr := io.debugIntRat.get
+  intDiffRead.foreach { case (addr, _) =>
+    addr := io.diffIntRat.get
   }
 
-  fpDebugRead.foreach { case (addr, _) =>
-    addr := io.debugFpRat.get
+  fpDiffRead.foreach { case (addr, _) =>
+    addr := io.diffFpRat.get
   }
 
-  vfDebugRead.foreach { case (addr, _) =>
-    addr := io.debugVecRat.get
+  vfDiffRead.foreach { case (addr, _) =>
+    addr := io.diffVecRat.get
   }
-  v0DebugRead.foreach { case (addr, _) =>
-    addr := io.debugV0Rat.get
+  v0DiffRead.foreach { case (addr, _) =>
+    addr := io.diffV0Rat.get
   }
-  vlDebugRead.foreach { case (addr, _) =>
-    addr := io.debugVlRat.get
+  vlDiffRead.foreach { case (addr, _) =>
+    addr := io.diffVlRat.get
   }
 
   println(s"[DataPath] " +
-    s"has intDebugRead: ${intDebugRead.nonEmpty}, " +
-    s"has fpDebugRead: ${fpDebugRead.nonEmpty}, " +
-    s"has vecDebugRead: ${vfDebugRead.nonEmpty}, " +
-    s"has v0DebugRead: ${v0DebugRead.nonEmpty}, " +
-    s"has vlDebugRead: ${vlDebugRead.nonEmpty}")
+    s"has intDiffRead: ${intDiffRead.nonEmpty}, " +
+    s"has fpDiffRead: ${fpDiffRead.nonEmpty}, " +
+    s"has vecDiffRead: ${vfDiffRead.nonEmpty}, " +
+    s"has v0DiffRead: ${v0DiffRead.nonEmpty}, " +
+    s"has vlDiffRead: ${vlDiffRead.nonEmpty}")
 
   // regcache
   private val regCache = Module(new RegCache())
@@ -694,15 +694,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     val delayedCnt = 2
     val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
     difftestArchIntRegState.coreid := io.hartId
-    difftestArchIntRegState.value := intDebugRead.get._2
+    difftestArchIntRegState.value := intDiffRead.get._2
 
     val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
     difftestArchFpRegState.coreid := io.hartId
-    difftestArchFpRegState.value := fpDebugReadData.get
+    difftestArchFpRegState.value := fpDiffReadData.get
 
     val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
     difftestArchVecRegState.coreid := io.hartId
-    difftestArchVecRegState.value := vecDebugReadData.get
+    difftestArchVecRegState.value := vecDiffReadData.get
   }
 
   val int_regcache_size = 48
@@ -871,10 +871,10 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
     Output(UInt(RegCacheIdxWidth.W))
   )
 
-  val debugIntRat  = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
-  val debugFpRat   = if (params.debugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
-  val debugVecRat  = if (params.debugEn) Some(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W)))) else None
-  val debugV0Rat   = if (params.debugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
-  val debugVlRat   = if (params.debugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
-  val debugVl      = if (params.debugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
+  val diffIntRat = if (params.basicDebugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
+  val diffFpRat  = if (params.basicDebugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
+  val diffVecRat = if (params.basicDebugEn) Some(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W)))) else None
+  val diffV0Rat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
+  val diffVlRat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
+  val diffVl     = if (params.basicDebugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
 }
