@@ -9,7 +9,7 @@ import top.{ArgParser, Generator}
 import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt}
 import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, HgatpMode, PrivMode, SatpMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -315,7 +315,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   when(nonMaskableIRP.NMI) {
     nmip.NMI := true.B
   }
-  
+
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
 
@@ -634,7 +634,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
-  
+
   trapEntryMEvent.valid  := hasTrap && entryPrivState.isModeM && !entryDebugMode  && !debugMode && !nmi
   trapEntryMNEvent.valid := hasTrap && nmi && !debugMode
   trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode
@@ -1177,6 +1177,29 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
   io.toDecode.illegalInst.frm        := frmIsReserved
+  // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
+  io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
+  io.toDecode.virtualInst.cboZ       := menvcfg.regOut.CBZE && (
+    isModeVS && !henvcfg.regOut.CBZE ||
+    isModeVU && !(henvcfg.regOut.CBZE && senvcfg.regOut.CBZE)
+  )
+  io.toDecode.illegalInst.cboCF      := !isModeM && !menvcfg.regOut.CBCFE || isModeHU && !senvcfg.regOut.CBCFE
+  io.toDecode.virtualInst.cboCF      := menvcfg.regOut.CBCFE && (
+    isModeVS && !henvcfg.regOut.CBCFE ||
+    isModeVU && !(henvcfg.regOut.CBCFE && senvcfg.regOut.CBCFE)
+  )
+  io.toDecode.illegalInst.cboI       :=
+    !isModeM && menvcfg.regOut.CBIE === EnvCBIE.Off ||
+    isModeHU && senvcfg.regOut.CBIE === EnvCBIE.Off
+  io.toDecode.virtualInst.cboI       := menvcfg.regOut.CBIE =/= EnvCBIE.Off && (
+    isModeVS && henvcfg.regOut.CBIE === EnvCBIE.Off ||
+    isModeVU &&(henvcfg.regOut.CBIE === EnvCBIE.Off || senvcfg.regOut.CBIE === EnvCBIE.Off)
+  )
+  io.toDecode.special.cboI2F := !io.toDecode.illegalInst.cboI && !io.toDecode.virtualInst.cboI && (
+    menvcfg.regOut.CBIE === EnvCBIE.Flush && !isModeM ||
+    senvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeHU || isModeVU) ||
+    henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
+  )
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

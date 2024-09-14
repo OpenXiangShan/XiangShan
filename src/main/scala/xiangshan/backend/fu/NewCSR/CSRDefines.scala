@@ -178,6 +178,14 @@ object CSRDefines {
     override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39x4, Sv48x4)
   }
 
+  object EnvCBIE extends CSREnum with WARLApply {
+    val Off   = Value("b00".U)
+    val Flush = Value("b01".U)
+    val Inval = Value("b11".U)
+
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Off, Flush, Inval)
+  }
+
   object ReflectHelper {
     val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
 
