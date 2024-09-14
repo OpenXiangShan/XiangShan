@@ -112,7 +112,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
 
     val reset_sync = withClockAndReset(clock, reset) { ResetGen() }
-    val noc_reset_sync = withClockAndReset(noc_clock, noc_reset) { ResetGen() }
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen() })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
 
     // override LazyRawModuleImp's clock and reset
