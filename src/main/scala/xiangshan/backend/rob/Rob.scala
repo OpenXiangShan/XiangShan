@@ -1284,7 +1284,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   if (!env.FPGAPlatform) {
     val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
     val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry, basicDB = true)
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
     for (wb <- exuWBs) {
       when(wb.valid) {
         val debug_instData = Wire(new InstInfoEntry)
