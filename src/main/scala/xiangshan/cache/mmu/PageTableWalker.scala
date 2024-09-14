@@ -303,6 +303,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     hptw_resp.gpf := io.hptw.resp.bits.h_resp.gpf || g_perm_fail
     when(!(g_perm_fail || io.hptw.resp.bits.h_resp.gpf || io.hptw.resp.bits.h_resp.gaf)) {
       s_pmp_check := false.B
+    }.otherwise {
+      mem_addr_update := true.B
+      last_s2xlate := false.B
     }
   }
   
