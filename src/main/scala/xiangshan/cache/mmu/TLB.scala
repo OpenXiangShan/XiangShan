@@ -181,7 +181,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := false.B
       need_gpa_robidx := req_out(i).debug.robIdx
     }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
-      resp_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genPPN(need_gpa_vpn))
+      resp_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genGVPN(need_gpa_vpn))
       resp_s1_level := ptw.resp.bits.s1.entry.level.get
       resp_s1_isLeaf := ptw.resp.bits.s1.isLeaf()
       resp_s1_isFakePte := ptw.resp.bits.s1.isFakePte()
@@ -295,8 +295,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
-    val isFakePte = !perm.v && !pf && !perm.af
-    val s1_valid = portTranslateEnable(idx) && !onlyS2 && !isFakePte
+    val isFakePte = !perm.v && !perm.pf && !perm.af
+    val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
+    val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // Stage 2 perm check
     val gpf = g_perm.pf
@@ -314,10 +315,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val fault_valid = s1_valid || s2_valid
 
     // when pf and gpf can't happens simultaneously
-    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af
-    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af
-    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af
-    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af
+    val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
@@ -460,7 +461,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val p_ppn = RegEnable(Mux(s2xlate === onlyStage2 || s2xlate === allStage, ppn_s2, ppn_s1), io.ptw.resp.fire)
     val p_pbmt = RegEnable(ptw.resp.bits.s1.entry.pbmt,io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits.s1), io.ptw.resp.fire)
-    val p_gvpn = RegEnable(Mux(onlyS2, ptw.resp.bits.s2.entry.tag, ppn_s1), io.ptw.resp.fire)
+    val p_gvpn = RegEnable(Mux(onlyS2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genGVPN(vpn)), io.ptw.resp.fire)
     val p_g_pbmt = RegEnable(ptw.resp.bits.s2.entry.pbmt,io.ptw.resp.fire)
     val p_g_perm = RegEnable(hptwresp_to_tlbperm(ptw.resp.bits.s2), io.ptw.resp.fire)
     val p_s2xlate = RegEnable(ptw.resp.bits.s2xlate, io.ptw.resp.fire)

@@ -1109,6 +1109,11 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     )
   }
 
+   def genGVPN(vpn: UInt): UInt = {
+    val isNonLeaf = !(entry.perm.get.r || entry.perm.get.x || entry.perm.get.w) && entry.v && !pf && !af
+    Mux(isNonLeaf, Cat(entry.ppn(entry.ppn.getWidth - 1, 0), ppn_low(vpn(sectortlbwidth - 1, 0))), genPPN(vpn))
+  }
+
   def isLeaf() = {
     (entry.perm.get.r || entry.perm.get.x || entry.perm.get.w) && entry.v
   }
