@@ -31,6 +31,8 @@ import freechips.rocketchip.tilelink._
 import coupledL2.tl2chi.{PortIO, CHIAsyncBridgeSink}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
+import chisel3.experimental.{annotate, ChiselAnnotation}
+import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
@@ -85,6 +87,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   core_with_l2.tile.core_reset_sink := core_rst_node
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper) {
+    soc.XSTopPrefix.foreach { prefix =>
+      val mod = this.toNamed
+      annotate(new ChiselAnnotation {
+        def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
+      })
+    }
     FileRegisters.add("dts", dts)
     FileRegisters.add("graphml", graphML)
     FileRegisters.add("json", json)
