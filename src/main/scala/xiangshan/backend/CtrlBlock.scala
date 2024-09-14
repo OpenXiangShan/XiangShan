@@ -37,6 +37,7 @@ import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.rename.predictor._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -89,6 +90,8 @@ class CtrlBlockImp(
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
   val rename = Module(new Rename)
+  val stridePredictor = Module(new StridePredictor)
+  val spPCMem = Module(new StridePredictorPCMem)
   val dispatch = Module(new Dispatch)
   val intDq0 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 0))
   val intDq1 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 1))
@@ -533,8 +536,42 @@ class CtrlBlockImp(
     Cat(rename.io.out.map(out => out.valid && out.bits.snapshot)).orR
   )
 
+  // Stride Predictor
+  // only set valid when first cycle in dispatch
+  val dispatchFirstValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val dispatchNeedPf = Reg(Vec(RenameWidth, Bool()))
+  val dispatchPredAddr = Reg(Vec(RenameWidth, UInt(VAddrBits.W)))
+  dispatchFirstValid.zipWithIndex.foreach{ case (v, i) =>
+    v := renameOut(i).valid && dispatch.io.toRenameAllFire && ~s1_s3_redirect.valid
+    when (v) {
+      dispatchNeedPf(i) := stridePredictor.io.spReadPort(i).needPf
+      dispatchPredAddr(i) := stridePredictor.io.spReadPort(i).predAddr
+    }
+  }
+
+  spPCMem.io.fromFrontendFtq := io.frontend.fromFtq
+  spPCMem.io.toStridePredictor.take(RenameWidth).zipWithIndex.foreach{ case (toSP, i) =>
+    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire
+    toSP.ftqPtr := renameOut(i).bits.ftqPtr
+    toSP.ftqOffset := renameOut(i).bits.ftqOffset
+    stridePredictor.io.spReadPort(i).ren := dispatchFirstValid(i)
+    stridePredictor.io.spReadPort(i).pc := toSP.pc
+  }
+  stridePredictor.io.fromSPPcMem <> spPCMem.io.toStridePredictor.takeRight(stridePredictor.io.fromSPPcMem.size)
+  stridePredictor.io.spCommitPort.zipWithIndex.foreach{ case (commit, i) =>
+    commit.wen := rob.io.commits.isCommit && rob.io.commits.commitValid(i) && rob.io.commits.info(i).commitType === CommitType.LOAD
+    commit.ftqPtr := rob.io.commits.info(i).ftqIdx
+    commit.ftqOffset := rob.io.commits.info(i).ftqOffset
+    commit.pfHit := rob.io.commits.info(i).pfHit
+    commit.currAddr := rob.io.commits.info(i).currAddr
+  }
+
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
+  dispatch.io.fromRename.zipWithIndex.foreach{ case (fromRename, i) =>
+    fromRename.bits.needPf := Mux(dispatchFirstValid(i), stridePredictor.io.spReadPort(i).needPf, dispatchNeedPf(i))
+    fromRename.bits.predAddr := Mux(dispatchFirstValid(i), stridePredictor.io.spReadPort(i).predAddr, dispatchPredAddr(i))
+  }
   dispatch.io.intIQValidNumVec := io.intIQValidNumVec
   dispatch.io.fpIQValidNumVec := io.fpIQValidNumVec
   dispatch.io.fromIntDQ.intDQ0ValidDeq0Num := intDq0.io.validDeq0Num

@@ -80,6 +80,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needFlush = Bool()
     // status end
 
+    // regfile prefetch
+    val pfHit = Bool()
+    val currAddr = UInt(VAddrBits.W)
+
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -117,6 +121,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needFlush = Bool()
     // trace
     val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
+    // regfile prefetch
+    val pfHit = Bool()
+    val currAddr = UInt(VAddrBits.W)
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -178,6 +185,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
+    robCommitEntry.pfHit := robEntry.pfHit
+    robCommitEntry.currAddr := robEntry.currAddr
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)

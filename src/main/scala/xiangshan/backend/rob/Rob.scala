@@ -121,6 +121,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
+  val loadWBs = io.exuWriteback.filter(x => x.bits.params.hasLoadFu).toSeq
 
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
@@ -1054,6 +1055,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }.elsewhen(Itype.isBranchType(robEntries(i).traceBlockInPipe.itype)){
       // BranchType code(itype = 5) must be correctly replaced!
       robEntries(i).traceBlockInPipe.itype := Mux(taken, Itype.Taken, Itype.NonTaken)
+    }
+
+    // regfile prefetch
+    val loadWbOH = loadWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    when (loadWbOH.reduce(_ || _) && robEntries(i).commitType === CommitType.LOAD) {
+      robEntries(i).pfHit := Mux1H(loadWbOH, loadWBs.map(_.bits.pfHit.getOrElse(false.B)))
+      robEntries(i).currAddr := Mux1H(loadWbOH, loadWBs.map(_.bits.currAddr.getOrElse(0.U)))
     }
   }
 
