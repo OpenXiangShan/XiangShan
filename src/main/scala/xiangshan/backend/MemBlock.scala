@@ -1908,31 +1908,28 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
 
   // ChiselMap but divided by spec path(wrong or arch)
-  val issueUopsAddr = io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya
-  val issueUopsValid = issueUopsAddr.map(x => x.valid && x.bits.isFirstIssue)
-  val issueUopsPC = issueUopsAddr.map(_.bits.simDebugPC)
-  val issueUopsRobIdx = issueUopsAddr.map(_.bits.uop.robIdx)
-  val issueUopsValue = WireInit(VecInit(Seq.fill(issueUopsAddr.length)(1.U)))
-  val redirectRobIdx = Wire(Valid(new RobPtr))
-  val commitRobIdx = Wire(Valid(new RobPtr))
-  redirectRobIdx.valid := io.redirect.valid
-  redirectRobIdx.bits := io.redirect.bits.robIdx
-  commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
-  commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtr
-  ChiselMapWithSpecDivide(
-    "MemoryInstr",
-    "Memory",
-    RobSize,
-    VecInit(issueUopsPC),
-    issueUopsValue,
-    VecInit(issueUopsValid),
-    VecInit(issueUopsRobIdx),
-    redirectRobIdx,
-    commitRobIdx,
-    clock,
-    reset,
-    basicDB = true
-  )
+  genSpecPathChiselMap("MemLoadInstr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya, x => FuType.isLoad(x.bits.uop.fuType))
+  genSpecPathChiselMap("MemStoreInstr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya, x => FuType.isStore(x.bits.uop.fuType))
+
+  def genSpecPathChiselMap(name: String, uops: Seq[DecoupledIO[MemExuInput]], typeF: DecoupledIO[MemExuInput] => Bool) = {
+    val issueUopsValid = uops.map(x => x.fire && typeF(x))
+    val issueUopsPC = uops.map(_.bits.simDebugPC)
+    val issueUopsRobIdx = uops.map(_.bits.uop.robIdx)
+    val issueUopsValue = WireInit(VecInit(Seq.fill(uops.length)(1.U)))
+    val redirectRobIdx = Wire(Valid(new RobPtr))
+    val commitRobIdx = Wire(Valid(new RobPtr))
+    redirectRobIdx.valid := io.redirect.valid
+    redirectRobIdx.bits := io.redirect.bits.robIdx
+    commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
+    commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtr
+    ChiselMapWithSpecDivide(
+      name, "MemoryBlock", RobSize,
+      VecInit(issueUopsPC), issueUopsValue,
+      VecInit(issueUopsValid), VecInit(issueUopsRobIdx),
+      redirectRobIdx, commitRobIdx,
+      clock, reset, basicDB = true
+    )
+  }
 
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr
