@@ -70,6 +70,31 @@ object CSRConfig {
   final val PPNLength = 44
 }
 
+class NewCSRInput(implicit p: Parameters) extends Bundle {
+  val wen = Bool()
+  val ren = Bool()
+  val op = UInt(2.W)
+  val addr = UInt(12.W)
+  val src = UInt(64.W)
+  val wdata = UInt(64.W)
+  val mnret = Input(Bool())
+  val mret = Input(Bool())
+  val sret = Input(Bool())
+  val dret = Input(Bool())
+}
+
+class NewCSROutput(implicit p: Parameters) extends Bundle {
+  val EX_II = Bool()
+  val EX_VI = Bool()
+  val flushPipe = Bool()
+  val rData = UInt(64.W)
+  val targetPcUpdate = Bool()
+  val targetPc = new TargetPCBundle
+  val regOut = UInt(64.W)
+  // perf
+  val isPerfCnt = Bool()
+}
+
 class NewCSR(implicit val p: Parameters) extends Module
   with HasXSParameter
   with MachineLevel
@@ -94,18 +119,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
-    val in = Input(ValidIO(new Bundle {
-      val wen = Bool()
-      val ren = Bool()
-      val op = UInt(2.W)
-      val addr = UInt(12.W)
-      val src = UInt(64.W)
-      val wdata = UInt(64.W)
-      val mnret = Input(Bool())
-      val mret = Input(Bool())
-      val sret = Input(Bool())
-      val dret = Input(Bool())
-    }))
+    val in = Flipped(DecoupledIO(new NewCSRInput))
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
@@ -130,17 +144,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
     val perf = Input(new PerfCounterIO)
 
-    val out = Output(ValidIO(new Bundle {
-      val EX_II = Bool()
-      val EX_VI = Bool()
-      val flushPipe = Bool()
-      val rData = UInt(64.W)
-      val targetPcUpdate = Bool()
-      val targetPc = new TargetPCBundle
-      val regOut = UInt(64.W)
-      // perf
-      val isPerfCnt = Bool()
-    }))
+    /** Output should be a DecoupledIO, since now CSR writing to integer register file might be blocked (by arbiter) */
+    val out = DecoupledIO(new NewCSROutput)
     val status = Output(new Bundle {
       val privState = new PrivState
       val interrupt = Bool()
@@ -204,8 +209,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   dontTouch(fromAIA)
   dontTouch(io.fromTop.clintTime)
 
+  /* Alias of input valid/ready */
   val valid = io.in.valid
 
+  /* Alias of input signals */
   val wen   = io.in.bits.wen && valid
   val addr  = io.in.bits.addr
   val wdata = io.in.bits.wdata
@@ -840,29 +847,54 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
 
-  private val s_idle :: s_waitIMSIC :: Nil = Enum(2)
+  private val s_idle :: s_waitIMSIC :: s_finish :: Nil = Enum(3)
 
+  /** the state machine of newCSR module */
   private val state = RegInit(s_idle)
+  /** the mext state of newCSR */
   private val stateNext = WireInit(state)
   state := stateNext
 
+  /**
+   * Asynchronous read operation of CSR. Check whether a read is asynchronous when read-enable is high.
+   * AIA registers are designed to be read asynchronously, so newCSR will wait for response.
+   **/
   private val asyncRead = ren && (
     mireg.addr.U === addr && miselect.inIMSICRange ||
-      sireg.addr.U === addr && siselect.inIMSICRange ||
-      vsireg.addr.U === addr && vsiselect.inIMSICRange
-    )
+    sireg.addr.U === addr && siselect.inIMSICRange ||
+    vsireg.addr.U === addr && vsiselect.inIMSICRange
+  )
 
+  /** State machine of newCSR */
   switch(state) {
     is(s_idle) {
-      when(asyncRead) {
+      when(valid && asyncRead) {
         stateNext := s_waitIMSIC
+      }.elsewhen(valid && !io.out.ready) {
+        stateNext := s_finish
       }
     }
     is(s_waitIMSIC) {
       when(fromAIA.rdata.valid) {
+        when(io.out.ready) {
+          stateNext := s_idle
+        }.otherwise {
+          stateNext := s_finish
+        }
+      }
+    }
+    is(s_finish) {
+      when(io.out.ready) {
         stateNext := s_idle
       }
     }
+  }
+
+  /** Data that have been read before,and should be stored because output not fired */
+  val rdataReg = RegInit(UInt(64.W), 0.U)
+
+  when(valid && !asyncRead) {
+    rdataReg := rdata
   }
 
   // Todo: check IMSIC EX_II and EX_VI
@@ -870,17 +902,27 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val imsic_EX_II = imsicIllegal && !V.asUInt.asBool
   private val imsic_EX_VI = imsicIllegal && V.asUInt.asBool
 
-  io.out.valid :=
-    io.in.valid && stateNext === s_idle ||
-    state === s_waitIMSIC && stateNext === s_idle
+  /** Set io.in.ready when state machine is ready to receive a new request synchronously */
+  io.in.ready := (state === s_idle)
+
+  /**
+   * Valid signal of newCSR output.
+   * When in IDLE state, when input_valid is high, we set it.
+   * When in waitIMSIC state, and the next state is IDLE, we set it.
+   **/
+  io.out.valid := (state === s_idle) && valid && !(asyncRead && fromAIA.rdata.valid) ||
+                  (state === s_waitIMSIC) && fromAIA.rdata.valid ||
+                  (state === s_finish)
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
 
   io.out.bits.flushPipe := flushPipe
 
+  /** Prepare read data for output */
   io.out.bits.rData := MuxCase(0.U, Seq(
-    (state === s_waitIMSIC && stateNext === s_idle) -> fromAIA.rdata.bits.data,
-    ren -> rdata,
+    ((state === s_idle) && valid) -> rdata,
+    (state === s_waitIMSIC && fromAIA.rdata.valid) -> fromAIA.rdata.bits.data,
+    (state === s_finish) -> rdataReg,
   ))
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(

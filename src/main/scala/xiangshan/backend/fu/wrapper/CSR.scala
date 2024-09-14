@@ -36,6 +36,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val flushPipe = Wire(Bool())
   val flush = io.flush.valid
 
+  /** Alias of input signals */
   val (valid, src1, imm, func) = (
     io.in.valid,
     io.in.bits.data.src(0),
@@ -254,11 +255,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE
   tlb.hPBMTE := csrMod.io.tlb.hPBMTE
 
-  io.in.ready := true.B // Todo: Async read imsic may block CSR
+  /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
+  io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.out.valid := csrModOutValid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
   io.out.bits.ctrl.flushPipe.get := flushPipe
   io.out.bits.res.data := csrMod.io.out.bits.rData
+
+  /** initialize NewCSR's io_out_ready from wrapper's io */
+  csrMod.io.out.ready := io.out.ready
 
   io.out.bits.res.redirect.get.valid := isXRet
   val redirect = io.out.bits.res.redirect.get.bits
