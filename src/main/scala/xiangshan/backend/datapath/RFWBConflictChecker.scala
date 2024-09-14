@@ -3,7 +3,6 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.OptionWrapper
 import utils.SeqUtils.MixedVec2
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
@@ -144,8 +143,7 @@ abstract class RFWBCollideCheckerBase(params: RFWBCollideCheckerParams)(implicit
     .map(x => (x._1, x._2.sortBy(_.bits.wbCfg.get.priority)))
 
   protected val arbiters: Seq[Option[WBArbiter[RFWBCollideCheckerBundle]]] = portRange.map { portIdx =>
-    OptionWrapper(
-      inGroup.isDefinedAt(portIdx),
+    Option.when(inGroup.isDefinedAt(portIdx))(
       Module(new WBArbiter(
         new RFWBCollideCheckerBundle(pregWidth),
         inGroup(portIdx).size

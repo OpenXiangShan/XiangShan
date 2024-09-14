@@ -122,9 +122,9 @@ class TageMeta(implicit p: Parameters)
   val altUsed = Vec(numBr, Bool())
   val basecnts = Vec(numBr, UInt(2.W))
   val allocates = Vec(numBr, UInt(TageNTables.W))
-  val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
-  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
-  val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+  val scMeta = Option.when(EnableSC)(new SCMeta(SCNTables))
+  val pred_cycle = Option.when(!env.FPGAPlatform)(UInt(64.W))
+  val use_alt_on_na = Option.when(!env.FPGAPlatform)(Vec(numBr, Bool()))
 
   def altPreds = basecnts.map(_(1))
   def allocateValid = allocates.map(_.orR)

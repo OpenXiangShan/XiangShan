@@ -149,7 +149,7 @@ class PrefetchPtrDB(implicit p: Parameters) extends Bundle {
 }
 
 class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {
-  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+  val sc_disagree = Option.when(!env.FPGAPlatform)(Vec(numBr, Bool()))
 }
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
@@ -635,7 +635,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
   val pred_stage = Reg(Vec(FtqSize, UInt(2.W)))
-  val pred_s1_cycle = if (!env.FPGAPlatform) Some(Reg(Vec(FtqSize, UInt(64.W)))) else None
+  val pred_s1_cycle = Option.when(!env.FPGAPlatform)(Reg(Vec(FtqSize, UInt(64.W))))
 
   val c_empty :: c_toCommit :: c_committed :: c_flushed :: Nil = Enum(4)
   val commitStateQueueReg = RegInit(VecInit(Seq.fill(FtqSize) {

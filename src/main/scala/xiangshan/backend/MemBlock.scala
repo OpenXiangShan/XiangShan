@@ -237,8 +237,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
-  val cmo_sender  = if (HasCMO) Some(BundleBridgeSource(() => DecoupledIO(new CMOReq))) else None
-  val cmo_reciver = if (HasCMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new CMOResp)))) else None
+  val cmo_sender  = Option.when(HasCMO)(BundleBridgeSource(() => DecoupledIO(new CMOReq)))
+  val cmo_reciver = Option.when(HasCMO)(BundleBridgeSink(Some(() => DecoupledIO(new CMOResp))))
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))

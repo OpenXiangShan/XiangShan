@@ -226,7 +226,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ))
   vaddrModule.io := DontCare
   val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
-  val difftestBuffer = if (env.EnableDifftest) Some(Module(new DatamoduleResultBuffer(new DynInst))) else None
+  val difftestBuffer = Option.when(env.EnableDifftest)(Module(new DatamoduleResultBuffer(new DynInst)))
   val exceptionBuffer = Module(new StoreExceptionBuffer)
   exceptionBuffer.io.redirect := io.brqRedirect
   exceptionBuffer.io.exceptionAddr.isStore := DontCare

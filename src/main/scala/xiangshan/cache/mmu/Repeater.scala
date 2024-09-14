@@ -133,7 +133,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
 class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
-  val hint = if (hasHint) Some(new TlbHintIO) else None
+  val hint = Option.when(hasHint)(new TlbHintIO)
   val rob_head_miss_in_tlb = Output(Bool())
   val debugTopDown = new Bundle {
     val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))

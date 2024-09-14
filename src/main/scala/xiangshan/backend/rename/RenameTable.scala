@@ -80,25 +80,13 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = if (backendParams.basicDebugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth)))) else None
-    val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_rdata = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0 = if (backendParams.debugEn) reg_t match {
-      case Reg_V0 => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _ => None
-    } else None
-    val diff_v0 = if (backendParams.debugEn) reg_t match {
-      case Reg_V0 => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _ => None
-    } else None
-    val debug_vl = if (backendParams.debugEn) reg_t match {
-      case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _ => None
-    } else None
-    val diff_vl = if (backendParams.debugEn) reg_t match {
-      case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _ => None
-    } else None
+    val diffWritePorts = Option.when(backendParams.basicDebugEn)(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth))))
+    val debug_rdata = Option.when(backendParams.debugEn)(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W))))
+    val diff_rdata = Option.when(backendParams.basicDebugEn)(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_v0 = Option.when(backendParams.debugEn && reg_t == Reg_V0)(Output(UInt(PhyRegIdxWidth.W)))
+    val diff_v0 = Option.when(backendParams.debugEn && reg_t == Reg_V0)(Output(UInt(PhyRegIdxWidth.W)))
+    val debug_vl = Option.when(backendParams.debugEn && reg_t == Reg_Vl)(Output(UInt(PhyRegIdxWidth.W)))
+    val diff_vl = Option.when(backendParams.debugEn && reg_t == Reg_Vl)(Output(UInt(PhyRegIdxWidth.W)))
   })
 
   // speculative rename table
@@ -215,7 +203,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
-    val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
+    val diffCommits = Option.when(backendParams.basicDebugEn)(Input(new DiffCommitIO))
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(IntLogicRegs)))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(IntLogicRegs)))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(FpLogicRegs)))
@@ -236,18 +224,18 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val snpt = Input(new SnapshotPort)
 
     // for debug assertions
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_int_rat = Option.when(backendParams.debugEn)(Vec(32, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_fp_rat  = Option.when(backendParams.debugEn)(Vec(32, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vec_rat = Option.when(backendParams.debugEn)(Vec(31, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_v0_rat  = Option.when(backendParams.debugEn)(Vec(1,Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(1,Output(UInt(PhyRegIdxWidth.W))))
 
     // for difftest
-    val diff_int_rat = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_fp_rat  = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_vec_rat = if (backendParams.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_v0_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_vl_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_int_rat = Option.when(backendParams.basicDebugEn)(Vec(32, Output(UInt(PhyRegIdxWidth.W))))
+    val diff_fp_rat  = Option.when(backendParams.basicDebugEn)(Vec(32, Output(UInt(PhyRegIdxWidth.W))))
+    val diff_vec_rat = Option.when(backendParams.basicDebugEn)(Vec(31, Output(UInt(PhyRegIdxWidth.W))))
+    val diff_v0_rat  = Option.when(backendParams.basicDebugEn)(Vec(1,Output(UInt(PhyRegIdxWidth.W))))
+    val diff_vl_rat  = Option.when(backendParams.basicDebugEn)(Vec(1,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I))

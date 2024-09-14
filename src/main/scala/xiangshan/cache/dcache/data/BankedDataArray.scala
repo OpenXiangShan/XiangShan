@@ -229,7 +229,7 @@ case object HasDataEccParam
 // -----------------------------------------------------------------
 abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
-  val DataEccParam = if(EnableDataEcc) Some(HasDataEccParam) else None
+  val DataEccParam = Option.when(EnableDataEcc)(HasDataEccParam)
   val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
     // load pipeline read word req

@@ -43,7 +43,7 @@ abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parame
 
     val snpt = Input(new SnapshotPort)
 
-    val debug_rat = if(backendParams.debugEn) Some(Vec(numLogicRegs, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_rat = Option.when(backendParams.debugEn)(Vec(numLogicRegs, Input(UInt(PhyRegIdxWidth.W))))
   })
 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)

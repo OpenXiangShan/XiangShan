@@ -117,7 +117,7 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   val altProviderTarget = UInt(VAddrBits.W)
   // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
-  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+  val pred_cycle = Option.when(!env.FPGAPlatform)(UInt(64.W))
 
   override def toPrintable = {
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +

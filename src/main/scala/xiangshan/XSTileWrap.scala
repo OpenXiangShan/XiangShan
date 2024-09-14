@@ -60,7 +60,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case Some(param) => Some(new AsyncPortIO(param))
         case None => Some(new PortIO)
       }
-      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val nodeID = Option.when(enableCHI)(Input(UInt(NodeIDWidth.W)))
       val clintTime = EnableClintAsyncBridge match {
         case Some(param) => Some(Flipped(new AsyncBundle(UInt(64.W), param)))
         case None => Some(Input(ValidIO(UInt(64.W))))

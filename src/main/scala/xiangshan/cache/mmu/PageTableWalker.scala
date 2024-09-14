@@ -41,7 +41,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
-    val l3Hit = if (EnableSv48) Some(new Bool()) else None
+    val l3Hit = Option.when(EnableSv48)(new Bool())
     val l2Hit = Bool()
     val ppn = UInt(ptePPNLen.W)
     val stage1Hit = Bool()
@@ -803,7 +803,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val gvpn = UInt(gvpnLen.W)
     val ppn = UInt(ppnLen.W)
-    val l3Hit = if (EnableSv48) Some(new Bool()) else None
+    val l3Hit = Option.when(EnableSv48)(new Bool())
     val l2Hit = Bool()
     val l1Hit = Bool()
     val bypassed = Bool() // if bypass, don't refill

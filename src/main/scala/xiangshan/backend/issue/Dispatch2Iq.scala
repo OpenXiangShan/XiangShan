@@ -107,19 +107,19 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val in = Flipped(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-    val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
-    val readFpState = if (numFpStateRead > 0) Some(Vec(numFpStateRead, Flipped(new BusyTableReadIO))) else None
-    val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
-    val readV0State = if (numV0StateRead > 0) Some(Vec(numV0StateRead, Flipped(new BusyTableReadIO))) else None
-    val readVlState = if (numVlStateRead > 0) Some(Vec(numVlStateRead, Flipped(new BusyTableReadIO))) else None
+    val readIntState = Option.when(numIntStateRead > 0)(Vec(numIntStateRead, Flipped(new BusyTableReadIO)))
+    val readFpState = Option.when(numFpStateRead > 0)(Vec(numFpStateRead, Flipped(new BusyTableReadIO)))
+    val readVfState = Option.when(numVfStateRead > 0)(Vec(numVfStateRead, Flipped(new BusyTableReadIO)))
+    val readV0State = Option.when(numV0StateRead > 0)(Vec(numV0StateRead, Flipped(new BusyTableReadIO)))
+    val readVlState = Option.when(numVlStateRead > 0)(Vec(numVlStateRead, Flipped(new BusyTableReadIO)))
     val readRCTagTableState = Option.when(numRCTagTableStateRead > 0)(Vec(numRCTagTableStateRead, Flipped(new RCTagTableReadPort(RegCacheIdxWidth, params.pregIdxWidth))))
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
-    val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
+    val enqLsqIO = Option.when(wrapper.isMem)(Flipped(new LsqEnqIO))
     val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
-    val intIQValidNumVec = if (params.isIntSchd) Some(Input(MixedVec(backendParams.genIntIQValidNumBundle))) else None
-    val fpIQValidNumVec = if (params.isFpSchd) Some(Input(MixedVec(backendParams.genFpIQValidNumBundle))) else None
-    val lqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))) else None
-    val sqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(StoreQueueSize + 1).W))) else None
+    val intIQValidNumVec = Option.when(params.isIntSchd)(Input(MixedVec(backendParams.genIntIQValidNumBundle)))
+    val fpIQValidNumVec = Option.when(params.isFpSchd)(Input(MixedVec(backendParams.genFpIQValidNumBundle)))
+    val lqFreeCount = Option.when(wrapper.isMem)(Input(UInt(log2Up(VirtualLoadQueueSize + 1).W)))
+    val sqFreeCount = Option.when(wrapper.isMem)(Input(UInt(log2Up(StoreQueueSize + 1).W)))
   })
 
   val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))

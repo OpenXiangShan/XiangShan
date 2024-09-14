@@ -95,8 +95,7 @@ trait HasSoCParameter {
 
   val NumIRSrc = soc.NumIRSrc
 
-  val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
-    soc.EnableCHIAsyncBridge else None
+  val EnableCHIAsyncBridge = Option.when(enableCHI && soc.EnableCHIAsyncBridge.isDefined)(soc.EnableCHIAsyncBridge.get)
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
 }
 

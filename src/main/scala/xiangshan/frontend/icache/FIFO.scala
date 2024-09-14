@@ -43,7 +43,7 @@ class FIFOReg[T <: Data](
   val io = IO(new Bundle {
     val enq     = Flipped(DecoupledIO(gen))
     val deq     = DecoupledIO(gen)
-    val flush   = if (hasFlush) Some(Input(Bool())) else None
+    val flush   = Option.when(hasFlush)(Input(Bool()))
   })
   val flush = io.flush.getOrElse(false.B)
 

@@ -429,7 +429,7 @@ class RabCommitIO(implicit p: Parameters) extends XSBundle {
   val walkValid = Vec(RabCommitWidth, Bool())
 
   val info = Vec(RabCommitWidth, new RabCommitInfo)
-  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(RabCommitWidth, new RobPtr))
+  val robIdx = Option.when(!env.FPGAPlatform)(Vec(RabCommitWidth, new RobPtr))
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR

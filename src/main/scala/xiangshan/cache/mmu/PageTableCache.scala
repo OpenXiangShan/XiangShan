@@ -87,7 +87,7 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
 }
 
 class PageCacheRespBundle(implicit p: Parameters) extends PtwBundle {
-  val l3 = if (EnableSv48) Some(new PageCachePerPespBundle) else None
+  val l3 = Option.when(EnableSv48)(new PageCachePerPespBundle)
   val l2 = new PageCachePerPespBundle
   val l1 = new PageCachePerPespBundle
   val l0 = new PageCacheMergePespBundle
@@ -111,7 +111,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
     val prefetch = Bool() // is the entry fetched by prefetch
     val bypassed = Bool()
     val toFsm = new Bundle {
-      val l3Hit = if (EnableSv48) Some(Bool()) else None
+      val l3Hit = Option.when(EnableSv48)(Bool())
       val l2Hit = Bool()
       val l1Hit = Bool()
       val ppn = UInt(gvpnLen.W)
@@ -120,7 +120,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
     val stage1 = new PtwMergeResp()
     val isHptwReq = Bool()
     val toHptw = new Bundle {
-      val l3Hit = if (EnableSv48) Some(Bool()) else None
+      val l3Hit = Option.when(EnableSv48)(Bool())
       val l2Hit = Bool()
       val l1Hit = Bool()
       val ppn = UInt(ppnLen.W)
@@ -137,7 +137,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l0 = Bool()
       val l1 = Bool()
       val l2 = Bool()
-      val l3 = if (EnableSv48) Some(Bool()) else None
+      val l3 = Option.when(EnableSv48)(Bool())
       def apply(levelUInt: UInt, valid: Bool) = {
         sp := GatedValidRegNext((levelUInt === 1.U || levelUInt === 2.U || levelUInt === 3.U) && valid, false.B)
         l0 := GatedValidRegNext((levelUInt === 0.U) & valid, false.B)
@@ -194,12 +194,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   stageResp.ready := !stageResp.valid || io.resp.ready
 
   // l3: level 3 non-leaf pte
-  val l3 = if (EnableSv48) Some(Reg(Vec(l2tlbParams.l3Size, new PtwEntry(tagLen = PtwL3TagLen)))) else None
-  val l3v = if (EnableSv48) Some(RegInit(0.U(l2tlbParams.l3Size.W))) else None
-  val l3g = if (EnableSv48) Some(Reg(UInt(l2tlbParams.l3Size.W))) else None
-  val l3asids = if (EnableSv48) Some(l3.get.map(_.asid)) else None
-  val l3vmids = if (EnableSv48) Some(l3.get.map(_.vmid)) else None
-  val l3h = if (EnableSv48) Some(Reg(Vec(l2tlbParams.l3Size, UInt(2.W)))) else None
+  val l3 = Option.when(EnableSv48)(Reg(Vec(l2tlbParams.l3Size, new PtwEntry(tagLen = PtwL3TagLen))))
+  val l3v = Option.when(EnableSv48)(RegInit(0.U(l2tlbParams.l3Size.W)))
+  val l3g = Option.when(EnableSv48)(Reg(UInt(l2tlbParams.l3Size.W)))
+  val l3asids = Option.when(EnableSv48)(l3.get.map(_.asid))
+  val l3vmids = Option.when(EnableSv48)(l3.get.map(_.vmid))
+  val l3h = Option.when(EnableSv48)(Reg(Vec(l2tlbParams.l3Size, UInt(2.W))))
 
   // l2: level 2 non-leaf pte
   val l2 = Reg(Vec(l2tlbParams.l2Size, new PtwEntry(tagLen = PtwL2TagLen)))
@@ -272,7 +272,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val sph = Reg(Vec(l2tlbParams.spSize, UInt(2.W)))
 
   // Access Perf
-  val l3AccessPerf = if(EnableSv48) Some(Wire(Vec(l2tlbParams.l3Size, Bool()))) else None
+  val l3AccessPerf = Option.when(EnableSv48)(Wire(Vec(l2tlbParams.l3Size, Bool())))
   val l2AccessPerf = Wire(Vec(l2tlbParams.l2Size, Bool()))
   val l1AccessPerf = Wire(Vec(l2tlbParams.l1nWays, Bool()))
   val l0AccessPerf = Wire(Vec(l2tlbParams.l0nWays, Bool()))
@@ -312,11 +312,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   ))
 
   // l3
-  val l3Hit = if(EnableSv48) Some(Wire(Bool())) else None
-  val l3HitPPN = if(EnableSv48) Some(Wire(UInt(ppnLen.W))) else None
-  val l3HitPbmt = if(EnableSv48) Some(Wire(UInt(ptePbmtLen.W))) else None
-  val l3Pre = if(EnableSv48) Some(Wire(Bool())) else None
-  val ptwl3replace = if(EnableSv48) Some(ReplacementPolicy.fromString(l2tlbParams.l3Replacer, l2tlbParams.l3Size)) else None
+  val l3Hit = Option.when(EnableSv48)(Wire(Bool()))
+  val l3HitPPN = Option.when(EnableSv48)(Wire(UInt(ppnLen.W)))
+  val l3HitPbmt = Option.when(EnableSv48)(Wire(UInt(ptePbmtLen.W)))
+  val l3Pre = Option.when(EnableSv48)(Wire(Bool()))
+  val ptwl3replace = Option.when(EnableSv48)(ReplacementPolicy.fromString(l2tlbParams.l3Replacer, l2tlbParams.l3Size))
   if (EnableSv48) {
     val hitVecT = l3.get.zipWithIndex.map {
         case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search =/= noS2xlate)
@@ -659,7 +659,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(0), "page cache, bypassed but hit")
 
   // refill Perf
-  val l3RefillPerf = if (EnableSv48) Some(Wire(Vec(l2tlbParams.l3Size, Bool()))) else None
+  val l3RefillPerf = Option.when(EnableSv48)(Wire(Vec(l2tlbParams.l3Size, Bool())))
   val l2RefillPerf = Wire(Vec(l2tlbParams.l2Size, Bool()))
   val l1RefillPerf = Wire(Vec(l2tlbParams.l1nWays, Bool()))
   val l0RefillPerf = Wire(Vec(l2tlbParams.l0nWays, Bool()))
@@ -1190,7 +1190,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // Perf Count
   val resp_l0 = resp_res.l0.hit
   val resp_sp = resp_res.sp.hit
-  val resp_l3_pre = if (EnableSv48) Some(resp_res.l3.get.pre) else None
+  val resp_l3_pre = Option.when(EnableSv48)(resp_res.l3.get.pre)
   val resp_l2_pre = resp_res.l2.pre
   val resp_l1_pre = resp_res.l1.pre
   val resp_l0_pre = resp_res.l0.pre

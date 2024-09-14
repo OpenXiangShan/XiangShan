@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utils.BundleUtils.makeValid
-import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
@@ -115,7 +114,7 @@ object Bundles {
     val commitType      = CommitType() // Todo: remove it
     val needFrm         = new NeedFrmBundle
 
-    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fuType    = Option.when(backendParams.debugEn)(FuType())
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -241,7 +240,7 @@ object Bundles {
     // schedule
     val replayInst      = Bool()
 
-    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fuType    = Option.when(backendParams.debugEn)(FuType())
 
     val numLsElem       = NumLsElem()
 
@@ -379,14 +378,14 @@ object Bundles {
     val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
-    val rcDest = OptionWrapper(params.needWriteRegCache, UInt(RegCacheIdxWidth.W))
-    val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
-    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
-    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
-    val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
-    val v0WenCopy = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
-    val vlWenCopy = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
-    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+    val rcDest = Option.when(params.needWriteRegCache)(UInt(RegCacheIdxWidth.W))
+    val pdestCopy  = Option.when(copyWakeupOut)(Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
+    val rfWenCopy  = Option.when(copyWakeupOut && params.needIntWen)(Vec(copyNum, Bool()))
+    val fpWenCopy  = Option.when(copyWakeupOut && params.needFpWen)(Vec(copyNum, Bool()))
+    val vecWenCopy = Option.when(copyWakeupOut && params.needVecWen)(Vec(copyNum, Bool()))
+    val v0WenCopy = Option.when(copyWakeupOut && params.needV0Wen)(Vec(copyNum, Bool()))
+    val vlWenCopy = Option.when(copyWakeupOut && params.needVlWen)(Vec(copyNum, Bool()))
+    val loadDependencyCopy = Option.when(copyWakeupOut && params.isIQWakeUpSink)(Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
     def fromExuInput(exuInput: ExuInput): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
@@ -500,7 +499,7 @@ object Bundles {
     ))
 
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
-    val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
+    val rcIdx = Option.when(exuParams.needReadRegCache)(Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
     val addrOH = UInt(iqParams.numEntries.W)
@@ -534,16 +533,16 @@ object Bundles {
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
-    val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
-    val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
-    val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
-    val v0WbBusyTable = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
-    val vlWbBusyTable = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
-    val intDeqRespSet = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
-    val fpDeqRespSet = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
-    val vfDeqRespSet = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
-    val v0DeqRespSet = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
-    val vlDeqRespSet = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
+    val intWbBusyTable = Option.when(intCertainLat)(UInt((intLat + 1).W))
+    val fpWbBusyTable = Option.when(fpCertainLat)(UInt((fpLat + 1).W))
+    val vfWbBusyTable = Option.when(vfCertainLat)(UInt((vfLat + 1).W))
+    val v0WbBusyTable = Option.when(v0CertainLat)(UInt((v0Lat + 1).W))
+    val vlWbBusyTable = Option.when(vlCertainLat)(UInt((vlLat + 1).W))
+    val intDeqRespSet = Option.when(intCertainLat)(UInt((intLat + 1).W))
+    val fpDeqRespSet = Option.when(fpCertainLat)(UInt((fpLat + 1).W))
+    val vfDeqRespSet = Option.when(vfCertainLat)(UInt((vfLat + 1).W))
+    val v0DeqRespSet = Option.when(v0CertainLat)(UInt((v0Lat + 1).W))
+    val vlDeqRespSet = Option.when(vlCertainLat)(UInt((vlLat + 1).W))
   }
 
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -558,11 +557,11 @@ object Bundles {
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
-    val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
-    val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
-    val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
-    val v0WbBusyTable = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
-    val vlWbBusyTable = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
+    val intWbBusyTable = Option.when(intCertainLat)(UInt((intLat + 1).W))
+    val fpWbBusyTable = Option.when(fpCertainLat)(UInt((fpLat + 1).W))
+    val vfWbBusyTable = Option.when(vfCertainLat)(UInt((vfLat + 1).W))
+    val v0WbBusyTable = Option.when(v0CertainLat)(UInt((v0Lat + 1).W))
+    val vlWbBusyTable = Option.when(vlCertainLat)(UInt((vlLat + 1).W))
   }
 
   class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -572,11 +571,11 @@ object Bundles {
     private val v0CertainLat = params.v0LatencyCertain
     private val vlCertainLat = params.vlLatencyCertain
 
-    val intConflict = OptionWrapper(intCertainLat, Bool())
-    val fpConflict = OptionWrapper(fpCertainLat, Bool())
-    val vfConflict = OptionWrapper(vfCertainLat, Bool())
-    val v0Conflict = OptionWrapper(v0CertainLat, Bool())
-    val vlConflict = OptionWrapper(vlCertainLat, Bool())
+    val intConflict = Option.when(intCertainLat)(Bool())
+    val fpConflict = Option.when(fpCertainLat)(Bool())
+    val vfConflict = Option.when(vfCertainLat)(Bool())
+    val v0Conflict = Option.when(v0CertainLat)(Bool())
+    val vlConflict = Option.when(vlCertainLat)(Bool())
   }
 
   class ImmInfo extends Bundle {
@@ -593,46 +592,44 @@ object Bundles {
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
-    val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
-    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
-    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
-    val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
-    val v0WenCopy  = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
-    val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
-    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+    val pdestCopy  = Option.when(copyWakeupOut)(Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
+    val rfWenCopy  = Option.when(copyWakeupOut && params.needIntWen)(Vec(copyNum, Bool()))
+    val fpWenCopy  = Option.when(copyWakeupOut && params.needFpWen)(Vec(copyNum, Bool()))
+    val vecWenCopy = Option.when(copyWakeupOut && params.needVecWen)(Vec(copyNum, Bool()))
+    val v0WenCopy  = Option.when(copyWakeupOut && params.needV0Wen)(Vec(copyNum, Bool()))
+    val vlWenCopy  = Option.when(copyWakeupOut && params.needVlWen)(Vec(copyNum, Bool()))
+    val loadDependencyCopy = Option.when(copyWakeupOut && params.isIQWakeUpSink)(Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
-    val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
-    val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
-    val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
-    val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
-    val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
-    val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
-    val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
-    val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
-    val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
-    val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
-                                                  Some(new FtqPtr)                    else None
-    val ftqOffset     = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
-                                                  Some(UInt(log2Up(PredictWidth).W))  else None
-    val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
+    val rfWen         = Option.when(params.needIntWen)  (Bool())
+    val fpWen         = Option.when(params.needFpWen)   (Bool())
+    val vecWen        = Option.when(params.needVecWen)  (Bool())
+    val v0Wen         = Option.when(params.needV0Wen)   (Bool())
+    val vlWen         = Option.when(params.needVlWen)   (Bool())
+    val fpu           = Option.when(params.writeFflags) (new FPUCtrlSignals)
+    val vpu           = Option.when(params.needVPUCtrl) (new VPUCtrlSignals)
+    val flushPipe     = Option.when(params.flushPipe)   (Bool())
+    val pc            = Option.when(params.needPc)      (UInt(VAddrData().dataWidth.W))
+    val preDecode     = Option.when(params.hasPredecode)(new PreDecodeInfo)
+    val ftqIdx        = Option.when(params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)(new FtqPtr)
+    val ftqOffset     = Option.when(params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)(UInt(log2Up(PredictWidth).W))
+    val predictInfo   = Option.when(params.needPdInfo)(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
-    }) else None
-    val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
-    val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
-    val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
-    val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
-    val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
+    })
+    val loadWaitBit    = Option.when(params.hasLoadExu)(Bool())
+    val waitForRobIdx  = Option.when(params.hasLoadExu)(new RobPtr) // store set predicted previous store robIdx
+    val storeSetHit    = Option.when(params.hasLoadExu)(Bool()) // inst has been allocated an store set
+    val loadWaitStrict = Option.when(params.hasLoadExu)(Bool()) // load inst will not be executed until ALL former store addr calcuated
+    val ssid           = Option.when(params.hasLoadExu)(UInt(SSIDWidth.W))
     // only vector load store need
-    val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
+    val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
 
-    val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
-    val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
+    val sqIdx = Option.when(params.hasMemAddrFu || params.hasStdFu)(new SqPtr)
+    val lqIdx = Option.when(params.hasMemAddrFu)(new LqPtr)
     val dataSources = Vec(params.numRegSrc, DataSource())
-    val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
-    val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
-    val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val l1ExuOH = Option.when(params.isIQWakeUpSink)(Vec(params.numRegSrc, ExuVec()))
+    val srcTimer = Option.when(params.isIQWakeUpSink)(Vec(params.numRegSrc, UInt(3.W)))
+    val loadDependency = Option.when(params.needLoadDependency)(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -700,26 +697,25 @@ object Bundles {
     val data         = Vec(params.wbPathNum, UInt(params.destDataBitsMax.W))
     val pdest        = UInt(params.wbPregIdxWidth.W)
     val robIdx       = new RobPtr
-    val intWen       = if (params.needIntWen)   Some(Bool())                  else None
-    val fpWen        = if (params.needFpWen)    Some(Bool())                  else None
-    val vecWen       = if (params.needVecWen)   Some(Bool())                  else None
-    val v0Wen        = if (params.needV0Wen)    Some(Bool())                  else None
-    val vlWen        = if (params.needVlWen)    Some(Bool())                  else None
-    val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
-    val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
-    val wflags       = if (params.writeFflags)  Some(Bool())                  else None
-    val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
-    val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
-    val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
-    val replay       = if (params.replayInst)   Some(Bool())                  else None
-    val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
-    val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
-                                                Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
+    val intWen       = Option.when(params.needIntWen) (Bool())
+    val fpWen        = Option.when(params.needFpWen)  (Bool())
+    val vecWen       = Option.when(params.needVecWen) (Bool())
+    val v0Wen        = Option.when(params.needV0Wen)  (Bool())
+    val vlWen        = Option.when(params.needVlWen)  (Bool())
+    val redirect     = Option.when(params.hasRedirect)(ValidIO(new Redirect))
+    val fflags       = Option.when(params.writeFflags)(UInt(5.W))
+    val wflags       = Option.when(params.writeFflags)(Bool())
+    val vxsat        = Option.when(params.writeVxsat) (Bool())
+    val exceptionVec = Option.when(params.exceptionOut.nonEmpty)(ExceptionVec())
+    val flushPipe    = Option.when(params.flushPipe)  (Bool())
+    val replay       = Option.when(params.replayInst) (Bool())
+    val lqIdx        = Option.when(params.hasLoadFu)  (new LqPtr())
+    val sqIdx        = Option.when(params.hasStoreAddrFu || params.hasStdFu)(new SqPtr())
+    val trigger      = Option.when(params.trigger)    (TriggerAction())
     // uop info
-    val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
+    val predecodeInfo = Option.when(params.hasPredecode) (new PreDecodeInfo)
     // vldu used only
-    val vls = OptionWrapper(params.hasVLoadFu, new Bundle {
+    val vls = Option.when(params.hasVLoadFu)(new Bundle {
       val vpu = new VPUCtrlSignals
       val oldVdPsrc = UInt(PhyRegIdxWidth.W)
       val vdIdx = UInt(3.W)
@@ -904,7 +900,7 @@ object Bundles {
     val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
-    val flowNum      = OptionWrapper(isVector, NumLsElem())
+    val flowNum      = Option.when(isVector)(NumLsElem())
 
     def src_rs1 = src(0)
     def src_stride = src(1)
@@ -916,9 +912,9 @@ object Bundles {
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
-    val mask = if (isVector) Some(UInt(VLEN.W)) else None
-    val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
-    val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
+    val mask = Option.when(isVector)(UInt(VLEN.W))
+    val vdIdx = Option.when(isVector)(UInt(3.W)) // TODO: parameterize width
+    val vdIdxInField = Option.when(isVector)(UInt(3.W))
     val debug = new DebugBundle
 
     def isVls = FuType.isVls(uop.fuType)

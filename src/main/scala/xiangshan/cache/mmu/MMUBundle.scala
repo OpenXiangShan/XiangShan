@@ -770,11 +770,11 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
-  val vmid = if (HasHExtension) Some(UInt(vmidLen.W)) else None
+  val vmid = Option.when(HasHExtension)(UInt(vmidLen.W))
   val pbmt = UInt(ptePbmtLen.W)
   val ppn = UInt(gvpnLen.W)
-  val perm = if (hasPerm) Some(new PtePermBundle) else None
-  val level = if (hasLevel) Some(UInt(log2Up(Level + 1).W)) else None
+  val perm = Option.when(hasPerm)(new PtePermBundle)
+  val level = Option.when(hasLevel)(UInt(log2Up(Level + 1).W))
   val prefetch = Bool()
   val v = Bool()
 
@@ -890,9 +890,9 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   val ppns = Vec(num, UInt(gvpnLen.W))
   val vs   = Vec(num, Bool())
   val af   = Vec(num, Bool())
-  val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
+  val perms = Option.when(hasPerm)(Vec(num, new PtePermBundle))
   val prefetch = Bool()
-  val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
+  val reservedBits = Option.when(ReservedBits > 0)(UInt(ReservedBits.W))
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
   // NOTE: vs is used for different usage:
   // for l0, which store the leaf(leaves), vs is page fault or not.
@@ -953,7 +953,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
   val ecc_block = XLEN
   val ecc_info = get_ecc_info()
-  val ecc = if (l2tlbParams.enablePTWECC) Some(UInt(ecc_info._1.W)) else None
+  val ecc = Option.when(l2tlbParams.enablePTWECC)(UInt(ecc_info._1.W))
 
   def get_ecc_info(): (Int, Int, Int, Int) = {
     val eccBits_per = eccCode.width(ecc_block) - ecc_block
