@@ -763,10 +763,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map {case (hr, r) => hr := r}
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
-  predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
-  predictors.io.update.bits.ghist := RegEnable(
-    getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr), io.ftq_to_bpu.update.valid)
+
+  predictors.io.update := io.ftq_to_bpu.update
+  predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)
+  // Move the update pc registers out of predictors.
+  predictors.io.update.bits.pc := SegmentedAddrNext(io.ftq_to_bpu.update.bits.pc, pcSegments, io.ftq_to_bpu.update.valid, Some("predictors_io_update_pc")).getAddr()
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
