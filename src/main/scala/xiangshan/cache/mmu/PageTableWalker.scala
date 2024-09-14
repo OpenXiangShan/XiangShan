@@ -185,11 +185,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
   val fake_pte = 0.U.asTypeOf(new PteBundle())
   fake_pte.perm.v := false.B // tell L1TLB this is fake pte
-  fake_pte.perm.r := true.B
-  fake_pte.perm.w := true.B
-  fake_pte.perm.x := true.B
-  fake_pte.perm.a := true.B
-  fake_pte.perm.d := true.B
   fake_pte.ppn := ppn(ppnLen - 1, 0)
   fake_pte.ppn_high := ppn(ptePPNLen - 1, ppnLen)
 

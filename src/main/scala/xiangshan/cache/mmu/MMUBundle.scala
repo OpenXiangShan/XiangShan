@@ -69,6 +69,7 @@ class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
+  val v = Bool() // if stage1 pte is fake_pte, v is false
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -82,6 +83,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
+    this.v := item.v
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -97,6 +99,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.gpf
     this.af := item.gaf
+    this.v := DontCare
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -116,6 +119,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
 class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
+  val v = Bool() // if stage1 pte is fake_pte, v is false
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -129,6 +133,7 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
+    this.v := item.v
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -1109,7 +1114,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
   }
 
   def isFakePte() = {
-    !pf && !entry.v
+    !pf && !entry.v && !af
   }
 
   def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
