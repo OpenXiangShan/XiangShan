@@ -281,12 +281,12 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = RO(33, 32)
-    val SSEED = RO(     9)
-    val USEED = RO(     8)
-    val RLB   = RO(     2)
-    val MMWP  = RO(     1)
-    val MML   = RO(     0)
+    val MLPE  = RO(10) // Landing pand, Zicfilp extension
+    val SSEED = RO( 9) // Zkr extension
+    val USEED = RO( 8) // Zkr extension
+    val RLB   = RO( 2) // Smepmp
+    val MMWP  = RO( 1) // Smepmp
+    val MML   = RO( 0) // Smepmp
   })).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
@@ -506,10 +506,9 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
 }
 
 class MnstatusBundle extends CSRBundle {
-
   val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
   val MNPV   = VirtMode    (7).withReset(0.U)
-  val MNPELP = CSRRWField  (9).withReset(0.U)
+  val MNPELP = RO          (9).withReset(0.U)
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
 }
 
