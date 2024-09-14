@@ -416,9 +416,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   val update = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
+  val update_pc = io.update.bits.pc // Move the update pc registers out of predictors.
 
   // To improve Clock Gating Efficiency
-  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("ittage_update_pc")).getAddr()
   val u_meta = io.update.bits.meta.asTypeOf(new ITTageMeta)
   update.meta.asTypeOf(new ITTageMeta).provider.bits     := RegEnable(u_meta.provider.bits    , io.update.valid && u_meta.provider.valid   )
   update.meta.asTypeOf(new ITTageMeta).providerTarget    := RegEnable(u_meta.providerTarget   , io.update.valid && u_meta.provider.valid   )
@@ -600,7 +600,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
     tables(i).io.update.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
     tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
-    tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
+    tables(i).io.update.pc := RegEnable(update_pc, updateMask(i))
     // use fetch pc instead of instruction pc
     tables(i).io.update.ghist := RegEnable(update.ghist, updateMask(i))
   }
@@ -675,7 +675,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         s2_resps_regs(i).bits.u, s2_resps_regs(i).bits.target)
     }
   }
-  XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
+  XSDebug(updateValid, p"pc: ${Hexadecimal(update_pc)}, target: ${Hexadecimal(update.full_target)}\n")
   XSDebug(updateValid, updateMeta.toPrintable+p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
 

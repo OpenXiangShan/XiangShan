@@ -144,8 +144,9 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   // s0
   val u_valid = RegNext(io.update.valid, init = false.B)
   val u_bits = RegEnable(io.update.bits, io.update.valid)
+  val u_pc = io.update.bits.pc // Move the update pc registers out of predictors.
   val u_meta = u_bits.meta.asTypeOf(new FauFTBMeta)
-  val u_s0_tag = getTag(u_bits.pc)
+  val u_s0_tag = getTag(u_pc)
   ways.foreach(_.io.update_req_tag := u_s0_tag)
   val u_s0_hit_oh = VecInit(ways.map(_.io.update_hit)).asUInt
   val u_s0_hit = u_s0_hit_oh.orR
@@ -170,7 +171,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   // Illegal check for FTB entry writing
-  val uftb_write_pc = RegEnable(u_bits.pc, u_valid)
+  val uftb_write_pc = RegEnable(u_pc, u_valid)
   val uftb_write_fallThrough = u_s1_ftb_entry.getFallThrough(uftb_write_pc)
   when(u_s1_valid && u_s1_hit){
     assert(uftb_write_pc + (FetchWidth * 4).U >= uftb_write_fallThrough, s"FauFTB write entry fallThrough address error!")

@@ -610,9 +610,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val u_valid = RegNext(io.update.valid, init = false.B)
   val update = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
+  val update_pc = io.update.bits.pc // Move the update pc registers out of predictors.
 
   // To improve Clock Gating Efficiency
-  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("tage_update_pc")).getAddr()
   val u_valids_for_cge = VecInit((0 until TageBanks).map(w => io.update.bits.ftb_entry.brValids(w) && io.update.valid)) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
   val u_meta = io.update.bits.meta.asTypeOf(new TageMeta)
   for(i <- 0 until numBr){
@@ -734,7 +734,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val updateProviderCorrect = updateProviderResp.ctr(TageCtrBits-1) === updateTaken
     val updateUseAlt = updateMeta.altUsed(i)
     val updateAltDiffers = updateMeta.altDiffers(i)
-    val updateAltIdx = use_alt_idx(update.pc)
+    val updateAltIdx = use_alt_idx(update_pc)
     val updateUseAltCtr = Mux1H(UIntToOH(updateAltIdx, NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val updateAltPred = updateMeta.altPreds(i)
     val updateAltCorrect = updateAltPred === updateTaken
@@ -856,13 +856,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
       tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
-      tables(i).io.update.pc := RegEnable(update.pc, realWen)
+      tables(i).io.update.pc := RegEnable(update_pc, realWen)
       tables(i).io.update.ghist := RegEnable(update.ghist, realWen)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)
   bt.io.update_cnt := RegEnable(updatebcnt, baseupdate.reduce(_ | _))
-  bt.io.update_pc := RegEnable(update.pc, baseupdate.reduce(_ | _))
+  bt.io.update_pc := RegEnable(update_pc, baseupdate.reduce(_ | _))
   bt.io.update_takens := RegEnable(bUpdateTakens, baseupdate.reduce(_ | _))
 
   // all should be ready for req
@@ -914,7 +914,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val m = updateMeta
     // val bri = u.metas(b)
     XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
-      b.U, update.pc, 0.U, update.br_taken_mask(b), update.mispred_mask(b),
+      b.U, update_pc, 0.U, update.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.providers(b).valid, m.providers(b).bits, m.altDiffers(b), m.providerResps(b).u,
       m.providerResps(b).ctr, m.allocates(b)
     )

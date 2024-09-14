@@ -687,9 +687,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val update_valid = RegNext(io.update.valid, init = false.B)
   val update = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
+  val update_pc = io.update.bits.pc // Move the update pc registers out of predictors.
 
   // To improve Clock Gating Efficiency
-  update.pc := SegmentedAddrNext(io.update.bits.pc, pcSegments, io.update.valid, Some("ftb_update_pc")).getAddr()
   update.meta := RegEnable(io.update.bits.meta, io.update.valid && !io.update.bits.old_entry)
 
   //Clear counter during false_hit or ifuRedirect
@@ -762,7 +762,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val u_meta = update.meta.asTypeOf(new FTBMeta)
   val u_valid = update_valid && !update.old_entry
 
-  val (_, delay2_pc) = DelayNWithValid(update.pc, u_valid, 2)
+  val (_, delay2_pc) = DelayNWithValid(update_pc, u_valid, 2)
   val (_, delay2_entry) = DelayNWithValid(update.ftb_entry, u_valid, 2)
 
 
@@ -772,16 +772,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.s1_ready := ftbBank.io.req_pc.ready && !(update_need_read) && !RegNext(update_need_read)
 
   ftbBank.io.u_req_pc.valid := update_need_read
-  ftbBank.io.u_req_pc.bits := update.pc
+  ftbBank.io.u_req_pc.bits := update_pc
 
 
 
   val ftb_write = Wire(new FTBEntryWithTag)
   ftb_write.entry := Mux(update_now, update.ftb_entry, delay2_entry)
-  ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update.pc, delay2_pc))(tagSize-1, 0)
+  ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update_pc, delay2_pc))(tagSize-1, 0)
 
   val write_valid = update_now || DelayN(u_valid && !u_meta.hit, 2)
-  val write_pc    = Mux(update_now, update.pc, delay2_pc)
+  val write_pc    = Mux(update_now, update_pc, delay2_pc)
 
   ftbBank.io.update_write_data.valid := write_valid
   ftbBank.io.update_write_data.bits := ftb_write
