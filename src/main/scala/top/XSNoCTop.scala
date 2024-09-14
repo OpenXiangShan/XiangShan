@@ -153,7 +153,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     EnableCHIAsyncBridge match {
       case Some(param) =>
-        val sink = withClockAndReset(noc_clock.get, noc_reset_sync) {
+        val sink = withClockAndReset(noc_clock.get, noc_reset_sync.get) {
           Module(new CHIAsyncBridgeSink(param))
         }
         sink.io.async <> core_with_l2.module.io.chi.get
