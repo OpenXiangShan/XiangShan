@@ -1068,7 +1068,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     for (i <- 0 until EnsbufferWidth) {
       val ptr = rdataPtrExt(i).value
       val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
-      difftestBuffer.get.io.enq(i).valid := allocated(ptr) && committed(ptr) && (!isVec(ptr) || vecMbCommit(ptr)) && !mmioStall
+      difftestBuffer.get.io.enq(i).valid := dataBuffer.io.enq(i).valid
       difftestBuffer.get.io.enq(i).bits := uop(ptr)
     }
     for (i <- 0 until EnsbufferWidth) {
