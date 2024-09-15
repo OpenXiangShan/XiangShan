@@ -895,10 +895,18 @@ package object xiangshan {
       select.foreach(i => new_vec(i) := vec(i))
       new_vec
     }
+    def partialSelect(vec: Vec[Bool], select: Seq[Int], unSelect: Seq[Int]): Vec[Bool] = {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.foreach(_ := false.B)
+      select.diff(unSelect).foreach(i => new_vec(i) := vec(i))
+      new_vec
+    }
     def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
     def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
     def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
       partialSelect(vec, fuConfig.exceptionOut)
+    def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
+      partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
 
   object TopDownCounters extends Enumeration {
