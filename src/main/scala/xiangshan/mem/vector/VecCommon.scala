@@ -731,8 +731,8 @@ object genVWdata {
 }
 
 object genUSSplitAddr{
-  def apply(addr: UInt, index: UInt): UInt = {
-    val tmpAddr = Cat(addr(38, 4), 0.U(4.W))
+  def apply(addr: UInt, index: UInt, width: Int): UInt = {
+    val tmpAddr = Cat(addr(width - 1, 4), 0.U(4.W))
     val nextCacheline = tmpAddr + 16.U
     LookupTree(index, List(
       0.U -> tmpAddr,
