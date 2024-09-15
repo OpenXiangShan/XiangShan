@@ -199,6 +199,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
     val toLoadStore = Output(new Bundle{
       val triggerAction = TriggerAction()
       val triggerVaddr  = UInt(VAddrBits.W)
+      val triggerMask  = UInt((VLEN/8).W)
     })
   })
   val tdataVec      = io.fromCsrTrigger.tdataVec
@@ -242,6 +243,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
   TriggerCheckCanFire(TriggerNum, triggerCanFireVec, Mux(isVectorStride, hitVecVectorStride, triggerHitVec), triggerTimingVec, triggerChainVec)
   val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
   val triggerVaddr  = PriorityMux(triggerFireOH, VecInit(tdataVec.map(_.tdata2))).asUInt
+  val triggerMask   = PriorityMux(triggerFireOH, VecInit(tdataVec.map(x => UIntToOH(x.tdata2(lowBitWidth-1, 0))))).asUInt
 
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
@@ -249,4 +251,5 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
 
   io.toLoadStore.triggerAction := triggerAction
   io.toLoadStore.triggerVaddr  := triggerVaddr
+  io.toLoadStore.triggerMask   := triggerMask
 }
