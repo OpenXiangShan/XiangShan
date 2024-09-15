@@ -228,6 +228,8 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
   val trigger = TriggerAction()
+  val vecVaddrOffset = UInt(VAddrBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
   // val uopQueuePtr = new VluopPtr
   // val flowPtr = new VlflowPtr
 }
@@ -295,6 +297,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
   val vecVaddrOffset = UInt(VAddrBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
 }
 
 object MulNum {

@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
+import xiangshan.ExceptionNO._
 import xiangshan.mem._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.FuConfig._
@@ -375,6 +376,14 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   val wbIndexReg        = Wire(Vec(pipeWidth, UInt(vlmBindexBits.W)))
   val mergeDataReg      = Wire(Vec(pipeWidth, UInt(VLEN.W)))
 
+  val maskWithexceptionMask = io.fromPipeline.map{ x=>
+    Mux(
+      TriggerAction.isExp(x.bits.trigger) || TriggerAction.isDmode(x.bits.trigger),
+      ~x.bits.vecTriggerMask,
+      Fill(x.bits.mask.getWidth, !ExceptionNO.selectByFuAndUnSelect(x.bits.exceptionVec, fuCfg, Seq(breakPoint)).asUInt.orR)
+    ).asUInt & x.bits.mask
+  }
+
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     /** step0 **/
     val wbIndex = pipewb.bits.mBIndex
@@ -402,7 +411,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
      */
     val (brodenMergeData, brodenMergeMask)     = mergeDataByIndex(
       data    = io.fromPipeline.map(_.bits.vecdata.get).drop(i),
-      mask    = io.fromPipeline.map(_.bits.mask).drop(i),
+      mask    = maskWithexceptionMask.drop(i),
       index   = io.fromPipeline(i).bits.elemIdxInsideVd.get,
       valids  = mergePortMatrix(i).drop(i)
     )
