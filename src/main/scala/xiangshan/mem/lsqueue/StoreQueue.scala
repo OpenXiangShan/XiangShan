@@ -294,7 +294,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr) && !isVec(deqPtr))
   val finishMisalignSt = GatedValidRegNext(doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException)
   val misalignBlock = doMisalignSt && !finishMisalignSt
-  
+
   // store miss align info
   io.maControl.storeInfo.data := dataModule.io.rdata(0).data
   io.maControl.storeInfo.dataReady := doMisalignSt
@@ -604,13 +604,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
     val forwardMask = io.forward(i).sqIdxMask
-    // all addrvalid terms need to be checked
-    // Real Vaild: all scalar stores, and vector store with (!inactive && !secondInvalid)
-    val addrRealValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => addrvalid(j) && allocated(j))))
-    // vector store will consider all inactive || secondInvalid flows as valid
-    val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => addrvalid(j) && allocated(j))))
-    val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => datavalid(j))))
-    val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j => addrvalid(j) && datavalid(j) && allocated(j))))
+    val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => ((addrvalid(j) && !isVec(j)) || (vecMbCommit(j) && isVec(j) && vecDataValid(j))) && allocated(j))))
+    val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => (datavalid(j) && !isVec(j)) || (vecMbCommit(j) && isVec(j) && vecDataValid(j)))))
+    val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j => ((addrvalid(j) && datavalid(j) && !isVec(j)) || (vecMbCommit(j) && isVec(j) && vecDataValid(j))) && allocated(j))))
 
     val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
     val storeSetHitVec = Mux(lfstEnable,
@@ -644,7 +640,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vpmaskNotEqual = (
       (RegEnable(paddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid) ^ RegEnable(vaddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid)) &
       RegNext(needForward) &
-      GatedRegNext(addrRealValidVec.asUInt)
+      GatedRegNext(addrValidVec.asUInt)
     ) =/= 0.U
     val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
