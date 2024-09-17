@@ -134,8 +134,8 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
   // from mem
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
   val virtualInterruptIsHvictlInject = Input(Bool())
   val hvictlIID = Input(UInt(HIIDWidth.W))
 }

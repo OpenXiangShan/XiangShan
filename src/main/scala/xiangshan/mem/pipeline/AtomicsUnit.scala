@@ -47,8 +47,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val exceptionAddr = ValidIO(new Bundle {
-      val vaddr = UInt(VAddrBits.W)
-      val gpaddr = UInt(GPAddrBits.W)
+      val vaddr = UInt(XLEN.W)
+      val gpaddr = UInt(XLEN.W)
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
@@ -141,6 +141,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
+    io.dtlb.req.bits.fullva := in.src(0)
+    io.dtlb.req.bits.checkfullva := true.B
     io.dtlb.resp.ready      := true.B
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.pc

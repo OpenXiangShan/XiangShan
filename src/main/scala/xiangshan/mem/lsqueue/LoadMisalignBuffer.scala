@@ -118,8 +118,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val writeBack       = Decoupled(new MemExuOutput)
     val overwriteExpBuf = Output(new XSBundle {
       val valid  = Bool()
-      val vaddr  = UInt(VAddrBits.W)
-      val gpaddr = UInt(GPAddrBits.W)
+      val vaddr  = UInt(XLEN.W)
+      val gpaddr = UInt(XLEN.W)
     })
     val flushLdExpBuff  = Output(Bool())
   })

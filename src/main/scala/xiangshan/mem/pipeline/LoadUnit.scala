@@ -215,6 +215,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_hlv       = Wire(Bool())
   val s0_tlb_hlvx      = Wire(Bool())
   val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
+  val s0_tlb_fullva    = Wire(UInt(XLEN.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
 
   // flow source bundle
@@ -345,6 +346,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := s0_tlb_vaddr
+  io.tlb.req.bits.fullva             := s0_tlb_fullva
+  io.tlb.req.bits.checkfullva        := s0_src_select_vec(vec_iss_idx) || s0_src_select_vec(int_iss_idx)
   io.tlb.req.bits.hyperinst          := s0_tlb_hlv
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
@@ -623,7 +626,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast replay and hardware prefetch don't need to query tlb
   val int_issue_vaddr = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
-  val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr, int_issue_vaddr)
+  val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr(VAddrBits - 1, 0), int_issue_vaddr)
   s0_tlb_vaddr := Mux(
     s0_src_valid_vec(mab_idx),
     io.misalign_ldin.bits.vaddr,
@@ -633,6 +636,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       int_vec_vaddr
     )
   )
+
+  // only first issue of int / vec load intructions need to check full vaddr
+  s0_tlb_fullva := Mux(s0_src_select_vec(vec_iss_idx),
+    io.vecldin.bits.vaddr,
+    Mux(
+      s0_src_select_vec(int_iss_idx),
+      io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), XLEN),
+      s0_dcache_vaddr
+    )
+  )
+
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx),
     io.fast_rep_in.bits.vaddr,
@@ -683,6 +697,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
   s0_out.vaddr         := s0_dcache_vaddr
+  s0_out.fullva        := s0_tlb_fullva
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
@@ -887,6 +902,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
+    when (!s1_out.isFrmMisAlignBuf && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(loadPageFault) || s1_out.uop.exceptionVec(loadGuestPageFault) || s1_out.uop.exceptionVec(loadAccessFault))) {
+      s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
+    }
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
@@ -1553,7 +1571,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
   io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
-  io.vecldout.bits.vaddr := s3_in.vaddr
+  io.vecldout.bits.vaddr := s3_in.fullva
   io.vecldout.bits.gpaddr := s3_in.gpaddr
   io.vecldout.bits.mmio := DontCare
 

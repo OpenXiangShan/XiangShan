@@ -81,8 +81,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasVLSUParameters {
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
+  val fullva = UInt(XLEN.W)
   val paddr = UInt(PAddrBits.W)
-  val gpaddr = UInt(GPAddrBits.W)
+  val gpaddr = UInt(XLEN.W)
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
   val data = UInt((VLEN+1).W)
@@ -160,6 +161,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
 
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
+    if (latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
     if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if (latch) mask := RegEnable(input.mask, enable) else mask := input.mask
@@ -238,6 +240,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if(latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
+    if(latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
     if(latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if(latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if(latch) mask := RegEnable(input.mask, enable) else mask := input.mask

@@ -855,7 +855,7 @@ object Bundles {
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
     val isFetchMalAddr = Bool()
-    val gpaddr = UInt(GPAddrBits.W)
+    val gpaddr = UInt(XLEN.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()

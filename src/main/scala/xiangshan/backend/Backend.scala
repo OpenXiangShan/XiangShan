@@ -787,8 +787,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionAddr = Input(new Bundle {
-    val vaddr = UInt(VAddrBits.W)
-    val gpaddr = UInt(GPAddrBits.W)
+    val vaddr = UInt(XLEN.W)
+    val gpaddr = UInt(XLEN.W)
   })
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
