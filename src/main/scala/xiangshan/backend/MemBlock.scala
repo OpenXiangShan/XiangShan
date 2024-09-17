@@ -1807,6 +1807,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
   vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict
+  // -------------------------
+  // Vector Segment Triggers
+  // -------------------------
+  vSegmentUnit.io.fromCsrTrigger.tdataVec := tdata
+  vSegmentUnit.io.fromCsrTrigger.tEnableVec := tEnable
+  vSegmentUnit.io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+  vSegmentUnit.io.fromCsrTrigger.debugMode := debugMode
 
   // reset tree of MemBlock
   if (p(DebugOptionsKey).ResetGen) {
