@@ -36,6 +36,7 @@ import xiangshan.backend.rename.SnapshotGenerator
 import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
+import chisel3.experimental.BundleLiterals._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -120,7 +121,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
   val bankNum = 8
   assert(RobSize % bankNum == 0, "RobSize % bankNum must be 0")
-  val robEntries = Reg(Vec(RobSize, new RobEntryBundle))
+  val robEntries = RegInit(VecInit.fill(RobSize)((new RobEntryBundle).Lit(_.valid -> false.B)))
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
@@ -845,9 +846,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
     )
-    when(reset.asBool) {
-      robEntries(i).valid := false.B
-    }.elsewhen(commitCond) {
+    when(commitCond) {
       robEntries(i).valid := false.B
     }.elsewhen(enqOH.asUInt.orR && !io.redirect.valid) {
       robEntries(i).valid := true.B
