@@ -434,27 +434,66 @@ class FtqPcMemWrapper(numOtherReads: Int)(implicit p: Parameters) extends XSModu
     val wdata = Input(new Ftq_RF_Components)
   })
 
-  val num_pc_read = numOtherReads + 5
-  val mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize,
-    num_pc_read, 1, "FtqPC"))
-  mem.io.wen(0)   := io.wen
-  mem.io.waddr(0) := io.waddr
-  mem.io.wdata(0) := io.wdata
+  override def desiredName: String = s"FtqPcMemWrapper_ftq_pc_mem"
+  private val data: Vec[Ftq_RF_Components] = RegInit(VecInit.fill(FtqSize)(0.U.asTypeOf(new Ftq_RF_Components)))
 
-  // read one cycle ahead for ftq local reads
-  val raddr_vec = VecInit(Seq(io.ifuPtr_w.value, io.ifuPtrPlus1_w.value, io.ifuPtrPlus2_w.value,
-                              io.pfPtr_w.value, io.pfPtrPlus1_w.value,
-                              io.commPtrPlus1_w.value, io.commPtr_w.value))
+  // write
+  data.zipWithIndex.foreach {
+    case (reg, idx) =>
+      when(io.wen && io.waddr === idx.asUInt) {
+        reg := io.wdata
+      }
+  }
 
-  mem.io.raddr := raddr_vec
+  private def readWithBypass(readPtr: UInt): Ftq_RF_Components = {
+    RegNext(Mux(io.wen && io.waddr === readPtr, io.wdata, data(readPtr)))
+  }
 
-  io.ifuPtr_rdata       := mem.io.rdata.dropRight(6).last
-  io.ifuPtrPlus1_rdata  := mem.io.rdata.dropRight(5).last
-  io.ifuPtrPlus2_rdata  := mem.io.rdata.dropRight(4).last
-  io.pfPtr_rdata        := mem.io.rdata.dropRight(3).last
-  io.pfPtrPlus1_rdata   := mem.io.rdata.dropRight(2).last
-  io.commPtrPlus1_rdata := mem.io.rdata.dropRight(1).last
-  io.commPtr_rdata      := mem.io.rdata.last
+  io.ifuPtr_rdata       := readWithBypass(io.ifuPtr_w.value)
+  io.ifuPtrPlus1_rdata  := readWithBypass(io.ifuPtrPlus1_w.value)
+  io.ifuPtrPlus2_rdata  := readWithBypass(io.ifuPtrPlus2_w.value)
+  io.pfPtr_rdata        := readWithBypass(io.pfPtr_w.value)
+  io.pfPtrPlus1_rdata   := readWithBypass(io.pfPtrPlus1_w.value)
+  io.commPtr_rdata      := readWithBypass(io.commPtr_w.value)
+  io.commPtrPlus1_rdata := readWithBypass(io.commPtrPlus1_w.value)
+
+}
+
+class FtqRegFileWrapper[T <: Data](
+                                    gen: T,
+                                    numEntries: Int,
+                                    numReads: Int,
+                                    parentModule: String = "")
+                                  (implicit p: Parameters)
+  extends XSModule with HasBackendRedirectInfo {
+  val io = IO(new Bundle {
+    val ren = Vec(numReads, Input(Bool()))
+    val raddr = Vec(numReads, Input(UInt(log2Ceil(numEntries).W)))
+    val rdata = Vec(numReads, Output(gen))
+
+
+    val wen = Input(Bool())
+    val waddr = Input(UInt(log2Ceil(numEntries).W))
+    val wdata = Input(gen)
+  })
+
+  override def desiredName: String = s"FtqRegFileWrapper_${parentModule}"
+  private val data: Vec[T] = RegInit(VecInit.fill(FtqSize)(0.U.asTypeOf(gen)))
+
+  // write
+  data.zipWithIndex.foreach {
+    case (reg, idx) =>
+      when(io.wen && io.waddr === idx.asUInt) {
+        reg := io.wdata
+      }
+  }
+
+  // No bypass, wdata can be read after 1 cycle
+  // rdata is 2 cycle late then wdata at the same addr
+  io.ren zip io.raddr zip io.rdata foreach {
+    case((ren, raddr), rdata) => rdata := RegEnable(data(raddr), ren)
+  }
+
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
@@ -603,14 +642,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.waddr := bpu_in_resp_idx
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
 
-  //                                                            ifuRedirect + backendRedirect + commit
-  val ftq_redirect_mem = Module(new SyncDataModuleTemplate(new Ftq_Redirect_SRAMEntry,
-    FtqSize, IfuRedirectNum+FtqRedirectAheadNum+1, 1, hasRen = true))
+  // read ports:  ifuRedirect + backendRedirect + commit
+  val ftq_redirect_mem = Module(new FtqRegFileWrapper(new Ftq_Redirect_SRAMEntry,
+    FtqSize, IfuRedirectNum+FtqRedirectAheadNum+1, "ftq_redirect_mem"))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(3)
-  ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_spec_info
-  println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
+  ftq_redirect_mem.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_redirect_mem.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
+  ftq_redirect_mem.io.wdata := io.fromBpu.resp.bits.last_stage_spec_info
+  println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata.getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
@@ -618,12 +657,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
-  //                                                            ifuRedirect + backendRedirect (commit moved to ftq_meta_1r_sram)
-  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry_FtqMem,
-    FtqSize, IfuRedirectNum+FtqRedirectAheadNum, 1, hasRen = true))
-  ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(3)
-  ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
+  // read ports: ifuRedirect + backendRedirect (commit moved to ftq_meta_1r_sram)
+  val ftb_entry_mem = Module(new FtqRegFileWrapper(new FTBEntry_FtqMem,
+    FtqSize, IfuRedirectNum+FtqRedirectAheadNum, "ftq_entry_mem"))
+  ftb_entry_mem.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftb_entry_mem.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
+  ftb_entry_mem.io.wdata := io.fromBpu.resp.bits.last_stage_ftb_entry
 
 
   // multi-write
@@ -932,10 +971,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifu_wb_valid = pdWb.valid
   val ifu_wb_idx = pdWb.bits.ftqIdx.value
   // read ports:                                                         commit update
-  val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, FtqRedirectAheadNum+1, 1, hasRen = true))
-  ftq_pd_mem.io.wen(0) := ifu_wb_valid
-  ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
-  ftq_pd_mem.io.wdata(0).fromPdWb(pdWb.bits)
+  val ftq_pd_mem = Module(new FtqRegFileWrapper(new Ftq_pd_Entry, FtqSize, FtqRedirectAheadNum+1, "ftq_pd_mem"))
+  ftq_pd_mem.io.wen := ifu_wb_valid
+  ftq_pd_mem.io.waddr := pdWb.bits.ftqIdx.value
+  ftq_pd_mem.io.wdata.fromPdWb(pdWb.bits)
 
   val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit && ifu_wb_valid
   val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
@@ -962,7 +1001,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   XSError(ifu_wb_valid && isAfter(pdWb.bits.ftqIdx, ifuPtr), "IFU returned a predecode before its req, check IFU")
 
-  ftb_entry_mem.io.ren.get.head := ifu_wb_valid
+  ftb_entry_mem.io.ren.head := ifu_wb_valid
   ftb_entry_mem.io.raddr.head := ifu_wb_idx
   val has_false_hit = WireInit(false.B)
   when (RegNext(hit_pd_valid)) {
@@ -1010,20 +1049,20 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val ftq_pd_rdata = Wire(Vec(FtqRedirectAheadNum, new Ftq_pd_Entry))
   for (i <- 1 until FtqRedirectAheadNum) {
-    ftq_redirect_mem.io.ren.get(i + IfuRedirectNum) := ftqIdxAhead(i).valid
+    ftq_redirect_mem.io.ren(i + IfuRedirectNum) := ftqIdxAhead(i).valid
     ftq_redirect_mem.io.raddr(i + IfuRedirectNum) := ftqIdxAhead(i).bits.value
-    ftb_entry_mem.io.ren.get(i + IfuRedirectNum) := ftqIdxAhead(i).valid
+    ftb_entry_mem.io.ren(i + IfuRedirectNum) := ftqIdxAhead(i).valid
     ftb_entry_mem.io.raddr(i + IfuRedirectNum) := ftqIdxAhead(i).bits.value
 
-    ftq_pd_mem.io.ren.get(i)  := ftqIdxAhead(i).valid
+    ftq_pd_mem.io.ren(i)  := ftqIdxAhead(i).valid
     ftq_pd_mem.io.raddr(i)    := ftqIdxAhead(i).bits.value 
   }
-  ftq_redirect_mem.io.ren.get(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
+  ftq_redirect_mem.io.ren(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
   ftq_redirect_mem.io.raddr(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
-  ftb_entry_mem.io.ren.get(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
+  ftb_entry_mem.io.ren(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
   ftb_entry_mem.io.raddr(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
 
-  ftq_pd_mem.io.ren.get(0)  := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
+  ftq_pd_mem.io.ren(0)  := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
   ftq_pd_mem.io.raddr(0)    := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
 
   for (i <- 0 until FtqRedirectAheadNum) {
@@ -1086,7 +1125,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifuRedirectToBpu = WireInit(ifuRedirectReg)
   ifuFlush := fromIfuRedirect.valid || ifuRedirectToBpu.valid
 
-  ftq_redirect_mem.io.ren.get.head := fromIfuRedirect.valid
+  ftq_redirect_mem.io.ren.head := fromIfuRedirect.valid
   ftq_redirect_mem.io.raddr.head := fromIfuRedirect.bits.ftqIdx.value
 
   val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
@@ -1328,10 +1367,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     Mux(RegNext(commPtr === newest_entry_ptr),
       RegEnable(newest_entry_target, newest_entry_target_modified),
       RegNext(ftq_pc_mem.io.commPtrPlus1_rdata.startAddr))
-  ftq_pd_mem.io.ren.get.last := canCommit
+  ftq_pd_mem.io.ren.last := canCommit
   ftq_pd_mem.io.raddr.last := commPtr.value
   val commit_pd = ftq_pd_mem.io.rdata.last
-  ftq_redirect_mem.io.ren.get.last := canCommit
+  ftq_redirect_mem.io.ren.last := canCommit
   ftq_redirect_mem.io.raddr.last := commPtr.value
   val commit_spec_meta = ftq_redirect_mem.io.rdata.last
   ftq_meta_1r_sram.io.ren(0) := canCommit
