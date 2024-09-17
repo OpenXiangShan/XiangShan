@@ -111,6 +111,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val trigger              = TriggerAction()
   //val dataInvalidSqIdx = new SqPtr
   //val paddr                = UInt(PAddrBits.W)
+  val nc                   = Bool()
   val mmio                 = Bool()
   //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()

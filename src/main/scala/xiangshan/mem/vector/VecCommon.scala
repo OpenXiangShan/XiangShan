@@ -290,6 +290,7 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
 class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle{
   val output = new MemExuOutput(isVector)
   val vecFeedback = Bool()
+  val nc = Bool()
   val mmio = Bool()
   val usSecondInv = Bool()
   val elemIdx = UInt(elemIdxBits.W)
