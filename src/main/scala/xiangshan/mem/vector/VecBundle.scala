@@ -23,6 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.vector.Bundles.VEew
@@ -257,4 +258,6 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val feedback            = ValidIO(new RSFeedback(isVector = true))
   val redirect            = Flipped(ValidIO(new Redirect))
   val exceptionInfo       = ValidIO(new FeedbackToLsqIO)
+  //trigger
+  val fromCsrTrigger      = Input(new CsrTriggerBundle)
 }

@@ -34,6 +34,7 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
@@ -227,6 +228,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
+  val isVSegLoad        = FuType.isVSegLoad(instMicroOp.uop.fuType)
 
   /**
    * state update
@@ -245,7 +247,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(sbufferEmpty, s_tlb_req, s_wait_flush_sbuffer_resp)
 
   }.elsewhen(state === s_tlb_req){
-    stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data))
+    stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(isVSegLoad, s_latch_and_merge_data, s_send_data))
 
   }.elsewhen(state === s_wait_tlb_resp){
     stateNext := Mux(io.dtlb.resp.fire,
@@ -258,7 +260,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     /* if is vStore, send data to sbuffer, so don't need query dcache */
     stateNext := Mux(exception_pa || exception_va || exception_gpa,
                      s_finish,
-                     Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_cache_req, s_send_data))
+                     Mux(isVSegLoad, s_cache_req, s_send_data))
 
   }.elsewhen(state === s_cache_req){
     stateNext := Mux(io.rdcache.req.fire, s_cache_resp, s_cache_req)
@@ -268,7 +270,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-        stateNext := Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data)
+        stateNext := Mux(isVSegLoad, s_latch_and_merge_data, s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
@@ -390,6 +392,21 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req_kill                    := false.B
 
   val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger
+
+  val segmentTrigger = Module(new VSegmentTrigger)
+  segmentTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  segmentTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  segmentTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  segmentTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
+  segmentTrigger.io.memType                             := isVSegLoad
+  segmentTrigger.io.fromLoadStore.vaddr                 := vaddr
+  segmentTrigger.io.fromLoadStore.isVectorUnitStride    := false.B
+  segmentTrigger.io.fromLoadStore.mask                  := 0.U
+
+  val triggerAction = segmentTrigger.io.toLoadStore.triggerAction
+  val triggerDebugMode = TriggerAction.isDmode(triggerAction)
+  val triggerBreakpoint = TriggerAction.isExp(triggerAction)
+
   // tlb resp
   when(io.dtlb.resp.fire && state === s_wait_tlb_resp){
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp(0).pf.st && canTriggerException
@@ -419,7 +436,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVStore(fuType) && canTriggerException
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
+                     exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
+                     exceptionVec(breakPoint) || triggerDebugMode || (missAligned && canTriggerException)
     exception_gpa := exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
     exception_pa  := (pmp.st || pmp.ld || pmp.mmio) && canTriggerException
 
@@ -429,6 +447,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     // update storeAccessFault bit. Currently, we don't support vector MMIO
     exceptionVec(loadAccessFault)  := (exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio) && canTriggerException
     exceptionVec(storeAccessFault) := (exceptionVec(storeAccessFault) || pmp.st || pmp.mmio) && canTriggerException
+    exceptionVec(breakPoint)       := triggerBreakpoint && canTriggerException
 
     when(exception_va || exception_gpa || exception_pa) {
       when(canTriggerException) {
@@ -438,6 +457,10 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       }.otherwise {
         instMicroOp.exceptionVl     := segmentIdx
       }
+    }
+
+    when(exceptionVec(breakPoint) || triggerDebugMode) {
+      instMicroOp.uop.trigger := triggerAction
     }
   }
 
