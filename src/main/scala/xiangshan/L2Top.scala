@@ -151,6 +151,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
+      val hartIsInReset = new Bundle() {
+        val resetInFrontend = Input(Bool())
+        val toTile = Output(Bool())
+      }
       val debugTopDown = new Bundle() {
         val robTrueCommit = Input(UInt(64.W))
         val robHeadPaddr = Flipped(Valid(UInt(36.W)))
@@ -174,6 +178,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
+
+    val hartIsInReset = RegInit(true.B)
+    hartIsInReset := io.hartIsInReset.resetInFrontend || reset.asBool
+    io.hartIsInReset.toTile := hartIsInReset
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module

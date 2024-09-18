@@ -133,9 +133,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.reset_vector.fromTile := io.reset_vector
     l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
-    val hartIsInReset = RegInit(true.B)
-    hartIsInReset := core.module.io.resetIsInFrontend || reset.asBool
-    io.hartIsInReset := hartIsInReset
+
+    l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
+    io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
 
     core.module.io.perfEvents <> DontCare
 

@@ -308,6 +308,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
+    // Reset singal from frontend.
+    val resetInFrontendBypass = new Bundle{
+      val fromFrontend = Input(Bool())
+      val toL2Top      = Output(Bool())
+    }
   })
 
   dontTouch(io.inner_hartId)
@@ -1750,6 +1755,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   } else {
     io.reset_backend := DontCare
   }
+  io.resetInFrontendBypass.toL2Top := io.resetInFrontendBypass.fromFrontend
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
