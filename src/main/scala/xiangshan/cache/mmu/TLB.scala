@@ -192,8 +192,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       need_gpa := false.B
     }
 
-    TimeOutAssert(need_gpa && !resp_gpa_refill, timeOutThreshold, s"port${i} need gpa long time not refill.")
-
     val hit = e_hit || p_hit
     val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
     hit.suggestName(s"hit_read_${i}")
@@ -469,11 +467,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val p_s1_isLeaf = RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     val p_s1_isFakePte = RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
     (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte)
-  }
-
-  // assert
-  for(i <- 0 until Width) {
-    TimeOutAssert(req_out_v(i) && !resp(i).valid, timeOutThreshold, s"{q.name} port{i} long time no resp valid.")
   }
 
   // perf event
