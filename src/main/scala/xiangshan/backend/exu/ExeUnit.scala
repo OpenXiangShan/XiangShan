@@ -117,7 +117,9 @@ class ExeUnitImp(
         clk_en := true.B
       }
 
-      fu.clock := ClockGate(false.B, clk_en, clock)
+      if (latReal != 0 || uncerLat) {
+        fu.clock := ClockGate(false.B, clk_en, clock)
+      }
       XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     }
   }
