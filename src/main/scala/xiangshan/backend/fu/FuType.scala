@@ -122,18 +122,18 @@ object FuType extends OHEnumeration {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v)
-  val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
-  val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
+  private val fpArithAll  = Seq(falu, fcvt, fmac, fDivSqrt, f2v)
+  private val scalaMemAll = Seq(ldu, stu, mou)
+  private val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
+  private val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
-  val vecArith = vecOPI ++ vecOPF
-  val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
-  val vecArithOrMem = vecArith ++ vecMem
-  val vecAll = vecVSET ++ vecArithOrMem
-  val fpOP = fpArithAll ++ Seq(i2f, i2v)
-  val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
-  val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
+  private val vecArith = vecOPI ++ vecOPF
+  val vecMem       : Seq[OHType] = Seq(vldu, vstu, vsegldu, vsegstu)
+  val vecArithOrMem: Seq[OHType] = vecArith ++ vecMem
+  private val vecAll = vecVSET ++ vecArithOrMem
+  val fpOP        : Seq[OHType] = fpArithAll ++ Seq(i2f, i2v)
+  val scalaNeedFrm: Seq[OHType] = Seq(i2f, fmac, fDivSqrt)
+  val vectorNeedFrm: Seq[OHType] = Seq(vfalu, vfma, vfdiv, vfcvt)
 
   /**
    * Different type of an operation request
@@ -196,42 +196,42 @@ object FuType extends OHEnumeration {
   def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
 
   /** is Load/Store operation */
-  def isLoadStore(fuType: UInt): Bool = FuTypeOrR(fuType, ldu, stu) // TODO
+  def isLoadStore(fuType: UInt): Bool = FuTypeOrR(fuType, ldu, stu)
 
   /** is Load operation */
-  def isLoad(fuType: UInt): Bool = FuTypeOrR(fuType, ldu) // TODO
+  def isLoad(fuType: UInt): Bool = FuTypeOrR(fuType, ldu)
 
   /** is Store operation */
-  def isStore(fuType: UInt): Bool = FuTypeOrR(fuType, stu) // TODO
+  def isStore(fuType: UInt): Bool = FuTypeOrR(fuType, stu)
 
   /** is AMO atomic operation */
-  def isAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou) // TODO
+  def isAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
   /** is Fence operation */
-  def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence) // TODO
+  def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
 
   /** is CSR operation */
-  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr) // TODO
+  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
-  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf) // TODO
+  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
 
   /** is Vector Arithmetic operation */
-  def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith) // TODO
+  def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
   /** is Vector Load/Store operation */
-  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu) // TODO
+  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vecMem)
 
   /** is Vector Non-segment Load/Store operation */
   def isVNonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
 
   /** is Vector Segment Load/Store operation */
-  def isVSegls(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu, vsegstu) // TODO
+  def isVSegls(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu, vsegstu)
 
   /** is Vector Load operation */
-  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu) // TODO
+  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu)
 
   /** is Vector Store operation */
-  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu) // TODO
+  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu)
 
   /** is Vector Segment Load operation */
   def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
@@ -247,13 +247,13 @@ object FuType extends OHEnumeration {
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
-  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset // TODO
+  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
 
   def isVAll(fuType: UInt): Bool = FuTypeOrR(fuType, vecAll)
 
-  def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt) // TODO
+  def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
-  def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou) // TODO
+  def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
   def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
 

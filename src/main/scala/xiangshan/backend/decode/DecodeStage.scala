@@ -173,7 +173,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val firstComplexOH: Vec[Bool] = VecInit(PriorityEncoderOH(isComplexVec))
 
   // block vector inst when vtype is resuming
-  val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
+  val hasVectorInst = VecInit(decoders.map(x => FuType.isVAll(x.io.deq.decodedInst.fuType))).asUInt.orR
 
   /** No redirection, no resume of VType, >=1 ready output of decodeState or complex decoder input's ready */
   canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.isResumeVType
