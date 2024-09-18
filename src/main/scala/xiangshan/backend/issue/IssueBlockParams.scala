@@ -350,6 +350,10 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
   }
 
+  def genIssueValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIssueBundle]] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new IssueQueueIssueBundle(this, x))))
+  }
+
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
       case IntScheduler() | MemScheduler() => needWakeupFromIntWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq

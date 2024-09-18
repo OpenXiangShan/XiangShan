@@ -770,12 +770,21 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
   }
 
-  io.deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>
-    deqDly.valid := RegNext(deq.valid)
-    deqDly.bits := RegNext(deq.bits)
+  val deqDelay = Reg(params.genIssueValidBundle)
+  deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>
+    deqDly.valid := deq.valid
+    when(validVec.asUInt.orR) {
+      deqDly.bits := deq.bits
+    }
+    // deqBeforeDly.ready is always true
     deq.ready := true.B
   }
+  io.deqDelay.zip(deqDelay).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits
+  }
   if(backendParams.debugEn) {
+    dontTouch(deqDelay)
     dontTouch(io.deqDelay)
     dontTouch(deqBeforeDly)
   }
