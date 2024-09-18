@@ -61,6 +61,9 @@ trait HasSbufferConst extends HasXSParameter {
   val VWordsWidth: Int = log2Up(CacheLineVWords)
   val VWordWidth: Int = log2Up(VDataBytes)
   val VWordOffsetWidth: Int = PAddrBits - VWordWidth
+
+  val FullWriteMaxWaitCycles = CacheLineBytes / EnsbufferWidth
+  val FullWriteMaxWaitBits = log2Up(FullWriteMaxWaitCycles) + 1
 }
 
 class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
@@ -206,6 +209,9 @@ class Sbuffer(implicit p: Parameters)
     val force_write = Input(Bool())
   })
 
+  println("Sbuffer FullWriteMaxWaitBits: " + FullWriteMaxWaitBits)
+  println("Sbuffer FullWriteMaxWaitCycles: " + FullWriteMaxWaitCycles)
+  
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
   val prefetcher = Module(new StorePfWrapper())
@@ -220,6 +226,7 @@ class Sbuffer(implicit p: Parameters)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
+  val waitCntBeforeFull = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(FullWriteMaxWaitBits.W))))
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -312,7 +319,7 @@ class Sbuffer(implicit p: Parameters)
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
   val validMask  = VecInit(stateVec.map(s => s.isValid()))
-  val drainIdx = PriorityEncoder(activeMask)
+  val drainIdx = Wire(UInt(SbufferIndexWidth.W))
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
 
@@ -437,6 +444,7 @@ class Sbuffer(implicit p: Parameters)
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
         vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
+        waitCntBeforeFull(entryIdx) := FullWriteMaxWaitCycles.U
       }
     })
   }
@@ -467,6 +475,8 @@ class Sbuffer(implicit p: Parameters)
       }
     })
   }
+
+  waitCntBeforeFull.foreach(x => x := Mux(x.orR, x - 1.U, x))
 
   for(((in, vwordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
     writeReq(i).valid := in.fire && in.bits.vecValid
@@ -607,10 +617,21 @@ class Sbuffer(implicit p: Parameters)
   val sbuffer_out_s1_ready = Wire(Bool())
 
   // ---------------------------------------------------------------------------
+  // Memset Case
+  // ---------------------------------------------------------------------------
+
+  val memSet_needDrain = io.memSetPattenDetected
+  val memSetActiveMask = VecInit(stateVec.zipWithIndex.map{case (s, idx) => {
+    s.isDcacheReqCandidate() && Mux(waitCntBeforeFull(idx).orR, mask(idx).asUInt.andR, true.B)
+  }})
+
+  drainIdx := Mux(memSet_needDrain, PriorityEncoder(memSetActiveMask), PriorityEncoder(activeMask))
+
+  // ---------------------------------------------------------------------------
   // sbuffer_out_s0
   // ---------------------------------------------------------------------------
 
-  val need_drain = needDrain(sbuffer_state)
+  val need_drain = needDrain(sbuffer_state) || memSet_needDrain
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
     missqReplayTimeOutIdx,
@@ -620,14 +641,18 @@ class Sbuffer(implicit p: Parameters)
     )
   )
 
+  val sbuffer_out_s0_can_evict = Mux(
+    memSet_needDrain,
+    memSetActiveMask(sbuffer_out_s0_evictionIdx),
+    candidateVec(sbuffer_out_s0_evictionIdx)
+  )
+
   // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
   // current eviction should be blocked.
   val sbuffer_out_s0_valid = missqReplayHasTimeOut ||
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
-    (need_drain || cohHasTimeOut || need_replace)
+    sbuffer_out_s0_can_evict && (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
-    !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
+    sbuffer_out_s0_can_evict && !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready
   sbuffer_out_s0_fire := sbuffer_out_s0_valid && sbuffer_out_s0_cango
