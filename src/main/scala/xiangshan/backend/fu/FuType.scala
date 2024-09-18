@@ -170,7 +170,7 @@ object FuType extends OHEnumeration {
    * @param fuType function unit type to check
    * @return true if fuType is in fus, false otherwise
    */
-  private def fuTypeCheckLogic(fus: Seq[OHType])(fuType: OHType): Boolean = FuTypeOrR(fuType, fus)
+  private def fuTypeCheckLogicSeq(fus: Seq[OHType])(fuType: OHType): Boolean = FuTypeOrR(fuType, fus)
 
   /**
    * Check whether fuType argument equals to a type in given sequence
@@ -186,15 +186,16 @@ object FuType extends OHEnumeration {
    * @param fuType wire with function unit type to check
    * @return true.B if fuType is in fus, false.B otherwise
    */
-  private def fuTypeCheck(fus: Seq[OHType])(fuType: UInt): Bool = FuTypeOrR(fuType, fus)
+  private def fuTypeCheckSeq(fus: Seq[OHType])(fuType: UInt): Bool = FuTypeOrR(fuType, fus)
 
   /**
    * Check whether fuType argument equals to a type in given arg list
+   * @param fu0 the first function unit type argument
    * @param fus argument list of function unit types
    * @param fuType wire with function unit type to check
    * @return true.B if fuType is in fus, false.B otherwise
    */
-  private def fuTypeCheck(fus: OHType*)(fuType: UInt): Bool = FuTypeOrR(fuType, fus)
+  private def fuTypeCheck(fu0: OHType, fus: OHType*)(fuType: UInt): Bool = FuTypeOrR(fuType, fu0 +: fus)
 
   /** is Integer operation to Dispatch Queue 0 */
   def isIntDq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0All)
@@ -225,7 +226,7 @@ object FuType extends OHEnumeration {
   type FuTChkLogic = OHType => Boolean
 
   /** is Integer operation */
-  val isInt: FuTChk = fuTypeCheck(intArithAll ++ Seq(vsetiwi, vsetiwf))
+  val isInt: FuTChk = fuTypeCheckSeq(intArithAll ++ Seq(vsetiwi, vsetiwf))
 
   /** is Arithmetic Logic Unit operation */
   val isAlu: FuTChk = fuTypeCheck(alu)
@@ -234,7 +235,7 @@ object FuType extends OHEnumeration {
   val isBrh: FuTChk = fuTypeCheck(brh)
 
   /** is vset{i}vl{i} type operation */
-  val isVset: FuTChk = fuTypeCheck(vecVSET)
+  val isVset: FuTChk = fuTypeCheckSeq(vecVSET)
 
   /** is Jump operation */
   val isJump: FuTChk = fuTypeCheck(jmp)
@@ -243,13 +244,13 @@ object FuType extends OHEnumeration {
   val isBrhJump: FuTChk = fuTypeCheck(brh, jmp)
 
   /** is Float-point Arithmetic operation */
-  val isFArith: FuTChk = fuTypeCheck(fpArithAll)
+  val isFArith: FuTChk = fuTypeCheckSeq(fpArithAll)
 
   /** is Float-point related operation */
-  val isFp: FuTChk = fuTypeCheck(fpOP)
+  val isFp: FuTChk = fuTypeCheckSeq(fpOP)
 
   /** is Memory operation */
-  val isMem: FuTChk = fuTypeCheck(scalaMemAll)
+  val isMem: FuTChk = fuTypeCheckSeq(scalaMemAll)
 
   /** is Load/Store operation */
   val isLoadStore: FuTChk = fuTypeCheck(ldu, stu)
@@ -272,15 +273,15 @@ object FuType extends OHEnumeration {
   val isVsetRvfWvf: FuTChk = fuTypeCheck(vsetfwf)
 
   /** is Vector Arithmetic operation */
-  val isVArith: FuTChk = fuTypeCheck(vecArith)
+  val isVArith: FuTChk = fuTypeCheckSeq(vecArith)
 
   /** is Vector Load/Store operation */
-  val isVls: FuTChk = fuTypeCheck(vecMem)
-  val isVlsLogic: FuTChkLogic = fuTypeCheckLogic(vecMem)
+  val isVls: FuTChk = fuTypeCheckSeq(vecMem)
+  val isVlsLogic: FuTChkLogic = fuTypeCheckLogicSeq(vecMem)
 
   /** is Vector Non-segment Load/Store operation */
   val isVNonsegls: FuTChk = fuTypeCheck(vldu, vstu)
-  val isVNonseglsLogic: FuTChkLogic = fuTypeCheck(vldu, vstu)
+  val isVNonseglsLogic: FuTChkLogic = fuTypeCheckLogic(vldu, vstu)
 
   /** is Vector Segment Load/Store operation */
   val isVSegls: FuTChk = fuTypeCheck(vsegldu, vsegstu)
@@ -303,22 +304,22 @@ object FuType extends OHEnumeration {
   /** is Vector Non-segment Store operation */
   val isVNonsegStore: FuTChk = fuTypeCheck(vstu)
 
-  val isVecOPF: FuTChk = fuTypeCheck(vecOPF)
+  val isVecOPF: FuTChk = fuTypeCheckSeq(vecOPF)
 
   /** is Vector Arithmetic or Memory operation */
-  val isVArithMem: FuTChk = fuTypeCheck(vecArithOrMem) // except vset
+  val isVArithMem: FuTChk = fuTypeCheckSeq(vecArithOrMem) // except vset
 
   /** is Vector operation */
-  val isVAll: FuTChk = fuTypeCheck(vecAll)
+  val isVAll: FuTChk = fuTypeCheckSeq(vecAll)
 
   /** is Divide/Square-root operation */
   val isDivSqrt: FuTChk = fuTypeCheck(div, fDivSqrt)
 
   val isVppu: FuTChk = fuTypeCheck(vppu)
 
-  val isScalaNeedFrm: FuTChk = fuTypeCheck(scalaNeedFrm)
+  val isScalaNeedFrm: FuTChk = fuTypeCheckSeq(scalaNeedFrm)
 
-  val isVectorNeedFrm: FuTChk = fuTypeCheck(vectorNeedFrm)
+  val isVectorNeedFrm: FuTChk = fuTypeCheckSeq(vectorNeedFrm)
 
   /**
    * Perform OR operation on 1 or more function unit types.
