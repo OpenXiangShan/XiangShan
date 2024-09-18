@@ -122,6 +122,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val flushSbuffer = new SbufferFlushBundle
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
+    val seqStoreDetected = Output(Bool())
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -177,16 +178,17 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.vecmmioStout <> io.vecmmioStout
   storeQueue.io.rob         <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
-  storeQueue.io.sqCancelCnt  <> io.sqCancelCnt
-  storeQueue.io.sqDeq        <> io.sqDeq
-  storeQueue.io.sqEmpty      <> io.sqEmpty
-  storeQueue.io.sqFull       <> io.sqFull
-  storeQueue.io.forward      <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
-  storeQueue.io.force_write  <> io.force_write
-  storeQueue.io.cmoOpReq     <> io.cmoOpReq
-  storeQueue.io.cmoOpResp    <> io.cmoOpResp
-  storeQueue.io.flushSbuffer <> io.flushSbuffer
-  storeQueue.io.maControl    <> io.maControl
+  storeQueue.io.sqCancelCnt      <> io.sqCancelCnt
+  storeQueue.io.sqDeq            <> io.sqDeq
+  storeQueue.io.sqEmpty          <> io.sqEmpty
+  storeQueue.io.sqFull           <> io.sqFull
+  storeQueue.io.forward          <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+  storeQueue.io.force_write      <> io.force_write
+  storeQueue.io.cmoOpReq         <> io.cmoOpReq
+  storeQueue.io.cmoOpResp        <> io.cmoOpResp
+  storeQueue.io.flushSbuffer     <> io.flushSbuffer
+  storeQueue.io.maControl        <> io.maControl
+  storeQueue.io.seqStoreDetected <> io.seqStoreDetected
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

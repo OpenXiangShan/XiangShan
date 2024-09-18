@@ -196,6 +196,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
+    val seqStoreDetected = Output(Bool())
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -1018,6 +1019,59 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
+
+  // sequential store detection:
+  // store D, (A); store D, (A + K), store D, (A + 2K) ...
+  val DATAHASHBITS = 16
+  val SEQTHRESHOLD = 64
+  val seqStoreDetected = WireInit(false.B)
+  val prevCycleVaddr = RegInit(0.U(VAddrBits.W))
+  val prevCycleDataHash = RegInit(0.U(DATAHASHBITS.W))
+  val seqKStride = RegInit(0.U(6.W))
+  val seqPatternVec = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
+  val seqPatternCnt = RegInit(0.U(log2Up(SEQTHRESHOLD+1).W))
+  val sbufferFire = Cat(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire))).orR
+  val validKStride = (seqKStride === 1.U || seqKStride === 2.U || seqKStride === 4.U || seqKStride === 8.U)
+
+  for (i <- 0 until EnsbufferWidth) {
+    when(io.sbuffer(i).fire) {
+      val thisCycleVaddr    = io.sbuffer(i).bits.vaddr
+      val thisCycleDataHash = io.sbuffer(i).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+      prevCycleVaddr    := thisCycleVaddr
+      prevCycleDataHash := thisCycleDataHash
+
+      if(i == 0) {
+        seqKStride := thisCycleVaddr - prevCycleVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - prevCycleVaddr) === seqKStride) &&
+                            (prevCycleDataHash === thisCycleDataHash)
+      }else {
+        val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
+        val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+        seqKStride := thisCycleVaddr - lastLoopVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
+                            (lastLoopDataHash === thisCycleDataHash)
+      }
+    }.otherwise {
+      seqPatternVec(i) := true.B
+    }
+  }
+
+  when(sbufferFire) {
+    when(Cat(seqPatternVec).andR) {
+      seqPatternCnt := Mux(seqPatternCnt === SEQTHRESHOLD.U, seqPatternCnt, seqPatternCnt + 1.U)
+    }.otherwise {
+      seqPatternCnt := 0.U
+    }
+  }
+  when(seqPatternCnt === SEQTHRESHOLD.U && validKStride) {
+    seqStoreDetected := true.B
+  }.otherwise {
+    seqStoreDetected := false.B
+  }
+  when(io.sqEmpty) {
+    seqStoreDetected := false.B
+  }
+  io.seqStoreDetected := seqStoreDetected
 
   // All vector instruction uop normally dequeue, but the Uop after the exception is raised does not write to the 'sbuffer'.
   // Flags are used to record whether there are any exceptions when the queue is displayed.
