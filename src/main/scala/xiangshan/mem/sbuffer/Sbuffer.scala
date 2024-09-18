@@ -385,8 +385,8 @@ class Sbuffer(implicit p: Parameters)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
-  io.in(0).ready := firstCanInsert
-  io.in(1).ready := secondCanInsert && io.in(0).ready
+  io.in(0).ready := firstCanInsert || mergeVec(0).orR
+  io.in(1).ready := (secondCanInsert || mergeVec(1).orR) && io.in(0).ready
 
   for (i <- 0 until EnsbufferWidth) {
     // train
