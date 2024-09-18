@@ -86,7 +86,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val load_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(_.fuType == FuType.ldu)).map(_._1)
   val store_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(t => t.isSta || t.fuType == FuType.mou)).map(_._1)
   val varith_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(_.isVecArith)).map(_._1)
-  val vls_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.FuTypeOrR(x.fuType, FuType.vecMem))).map(_._1)
+  val vls_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.isVlsLogic(x.fuType))).map(_._1)
 
   val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))

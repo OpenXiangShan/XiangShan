@@ -12,7 +12,6 @@ import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.Bundles.{DynInst, ExuOH}
 import xiangshan.backend.datapath.DataSource
-import xiangshan.backend.fu.FuType.{FuTypeOrR, falu}
 import xiangshan.backend.issue._
 
 import scala.collection._

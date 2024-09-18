@@ -874,7 +874,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.illegalInst.hfenceVVMA && FuType.isFence(decodedInst.fuType) && decodedInst.fuOpType === FenceOpType.hfence_v ||
     io.fromCSR.illegalInst.hlsv       && FuType.isLoad(decodedInst.fuType) && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
     io.fromCSR.illegalInst.hlsv       && FuType.isStore(decodedInst.fuType) && LSUOpType.isHsv(decodedInst.fuOpType) ||
-    io.fromCSR.illegalInst.fsIsOff    && (FuType.FuTypeOrR(decodedInst.fuType, FuType.fpOP :+ FuType.f2v) ||
+    io.fromCSR.illegalInst.fsIsOff    && (FuType.isFp(decodedInst.fuType) ||
                                           (FuType.isLoad(decodedInst.fuType) && (decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
                                            FuType.isStore(decodedInst.fuType) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
                                           isVecOPF) ||

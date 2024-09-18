@@ -18,15 +18,22 @@ object FuType extends OHEnumeration {
     def U(width: Width): UInt = x.ohid.U(width)
   }
 
+  /** The initial value for function unit type encoding. */
   private var initVal = 0
 
+  /**
+   * Add a new function unit type, record its name and return the function unit type.
+   * Also increment the initial value for function unit type encoding.
+   * @param name name of the function unit type
+   * @return the function unit type
+   */
   private def addType(name: String): OHType = {
-    val ohval = OHType(initVal, name)
+    val oHVal = OHType(initVal, name)
     initVal += 1
-    ohval
+    oHVal
   }
 
-  // int
+  /* Add Integer operation one-hot types into FuType */
   val jmp  : OHType = addType(name = "jmp")
   val brh  : OHType = addType(name = "brh")
   val i2f  : OHType = addType(name = "i2f")
@@ -39,18 +46,18 @@ object FuType extends OHEnumeration {
   val fence: OHType = addType(name = "fence")
   val bku  : OHType = addType(name = "bku")
 
-  // fp
+  /* Add Float-Point operation one-hot types into FuType */
   val falu    : OHType = addType(name = "falu")
   val fmac    : OHType = addType(name = "fmac")
   val fcvt    : OHType = addType(name = "fcvt")
   val fDivSqrt: OHType = addType(name = "fDivSqrt")
 
-  // ls
+  /* Add Load/Store operation one-hot types into FuType */
   val ldu: OHType = addType(name = "ldu")
   val stu: OHType = addType(name = "stu")
   val mou: OHType = addType(name = "mou") // AMO Unit (?)
 
-  // vec
+  /* Add Vector operation one-hot types into FuType */
   val vipu   : OHType = addType(name = "vipu")
   val vialuF : OHType = addType(name = "vialuF")
   val vppu   : OHType = addType(name = "vppu")
@@ -65,13 +72,12 @@ object FuType extends OHEnumeration {
   val vsetiwf: OHType = addType(name = "vsetiwf") // vset read rs write vconfig
   val vsetfwf: OHType = addType(name = "vsetfwf") // vset read old vl write vconfig
 
-  // vec ls
+  /* Add Vector Load/Store operation one-hot types into FuType */
   val vldu   : OHType = addType(name = "vldu")
   val vstu   : OHType = addType(name = "vstu")
   val vsegldu: OHType = addType(name = "vsegldu")
   val vsegstu: OHType = addType(name = "vsegstu")
 
-  private val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -122,30 +128,73 @@ object FuType extends OHEnumeration {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  private val fpArithAll  = Seq(falu, fcvt, fmac, fDivSqrt, f2v)
-  private val scalaMemAll = Seq(ldu, stu, mou)
-  private val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
-  private val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
-  val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
-  private val vecArith = vecOPI ++ vecOPF
-  val vecMem       : Seq[OHType] = Seq(vldu, vstu, vsegldu, vsegstu)
-  val vecArithOrMem: Seq[OHType] = vecArith ++ vecMem
-  private val vecAll = vecVSET ++ vecArithOrMem
-  val fpOP        : Seq[OHType] = fpArithAll ++ Seq(i2f, i2v)
-  val scalaNeedFrm: Seq[OHType] = Seq(i2f, fmac, fDivSqrt)
-  val vectorNeedFrm: Seq[OHType] = Seq(vfalu, vfma, vfdiv, vfcvt)
+
+  private val intArithAll   = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  private val fpArithAll    = Seq(falu, fcvt, fmac, fDivSqrt, f2v)
+  private val scalaMemAll   = Seq(ldu, stu, mou)
+  private val vecOPI        = Seq(vipu, vialuF, vppu, vimac, vidiv)
+  private val vecOPF        = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
+  private val vecVSET       = Seq(vsetiwi, vsetiwf, vsetfwf)
+  private val vecArith      = vecOPI ++ vecOPF
+  private val vecMem        = Seq(vldu, vstu, vsegldu, vsegstu)
+  private val vecArithOrMem = vecArith ++ vecMem
+  private val vecAll        = vecVSET ++ vecArithOrMem
+  private val fpOP          = fpArithAll ++ Seq(i2f, i2v)
+  private val scalaNeedFrm  = Seq(i2f, fmac, fDivSqrt)
+  private val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
+
 
   /**
-   * Different type of an operation request
+   * BitPat for a function unit type that is not known at compile time.
    */
+  def X: BitPat = BitPat.N(num)
 
-  def X: BitPat = BitPat.N(num) // Todo: Don't Care
+  /**
+   * Number of function unit types.
+   */
+  val num: Int = this.values.size
 
-  def num: Int = this.values.size
+  /**
+   * Width of function unit type encoding.
+   */
+  val width: Int = num
 
-  def width: Int = num
+  /**
+   * Apply function for creating a UInt for a function unit type.
+   */
+  def apply(): UInt = UInt(num.W)
 
-  def apply() = UInt(num.W)
+  /**
+   * Check whether fuType argument equals to a type in given sequence
+   * @param fus sequence of function unit types
+   * @param fuType function unit type to check
+   * @return true if fuType is in fus, false otherwise
+   */
+  private def fuTypeCheckLogic(fus: Seq[OHType])(fuType: OHType): Boolean = FuTypeOrR(fuType, fus)
+
+  /**
+   * Check whether fuType argument equals to a type in given sequence
+   * @param fus argument list of function unit types
+   * @param fuType function unit type to check
+   * @return true if fuType is in fus, false otherwise
+   */
+  private def fuTypeCheckLogic(fus: OHType*)(fuType: OHType): Boolean = FuTypeOrR(fuType, fus)
+
+  /**
+   * Check whether fuType argument equals to a type in given arg list
+   * @param fus sequence of function unit types
+   * @param fuType wire with function unit type to check
+   * @return true.B if fuType is in fus, false.B otherwise
+   */
+  private def fuTypeCheck(fus: Seq[OHType])(fuType: UInt): Bool = FuTypeOrR(fuType, fus)
+
+  /**
+   * Check whether fuType argument equals to a type in given arg list
+   * @param fus argument list of function unit types
+   * @param fuType wire with function unit type to check
+   * @return true.B if fuType is in fus, false.B otherwise
+   */
+  private def fuTypeCheck(fus: OHType*)(fuType: UInt): Bool = FuTypeOrR(fuType, fus)
 
   /** is Integer operation to Dispatch Queue 0 */
   def isIntDq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0All)
@@ -171,110 +220,153 @@ object FuType extends OHEnumeration {
   /** is Integer operation to Both Issue Queue's Dequeue 1 (IQ1/3) */
   def isBothDeq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intBothDeq1)
 
+  /** Definition of following FuType-checking functions' type */
+  type FuTChk = UInt => Bool
+  type FuTChkLogic = OHType => Boolean
+
   /** is Integer operation */
-  def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll ++ Seq(vsetiwi, vsetiwf))
+  val isInt: FuTChk = fuTypeCheck(intArithAll ++ Seq(vsetiwi, vsetiwf))
 
   /** is Arithmetic Logic Unit operation */
-  def isAlu(fuType: UInt): Bool = FuTypeOrR(fuType, alu)
+  val isAlu: FuTChk = fuTypeCheck(alu)
 
   /** is Branch operation */
-  def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, brh)
+  val isBrh: FuTChk = fuTypeCheck(brh)
 
   /** is vset{i}vl{i} type operation */
-  def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
+  val isVset: FuTChk = fuTypeCheck(vecVSET)
 
   /** is Jump operation */
-  def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
+  val isJump: FuTChk = fuTypeCheck(jmp)
 
   /** is Jump operation */
-  def isBrhJump(fuType: UInt): Bool = FuTypeOrR(fuType, brh, jmp)
+  val isBrhJump: FuTChk = fuTypeCheck(brh, jmp)
 
   /** is Float-point Arithmetic operation */
-  def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
+  val isFArith: FuTChk = fuTypeCheck(fpArithAll)
+
+  /** is Float-point related operation */
+  val isFp: FuTChk = fuTypeCheck(fpOP)
 
   /** is Memory operation */
-  def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
+  val isMem: FuTChk = fuTypeCheck(scalaMemAll)
 
   /** is Load/Store operation */
-  def isLoadStore(fuType: UInt): Bool = FuTypeOrR(fuType, ldu, stu)
+  val isLoadStore: FuTChk = fuTypeCheck(ldu, stu)
 
   /** is Load operation */
-  def isLoad(fuType: UInt): Bool = FuTypeOrR(fuType, ldu)
+  val isLoad: FuTChk = fuTypeCheck(ldu)
 
   /** is Store operation */
-  def isStore(fuType: UInt): Bool = FuTypeOrR(fuType, stu)
+  val isStore: FuTChk = fuTypeCheck(stu)
 
   /** is AMO atomic operation */
-  def isAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
+  val isAMO: FuTChk = fuTypeCheck(mou)
 
   /** is Fence operation */
-  def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
+  val isFence: FuTChk = fuTypeCheck(fence)
 
   /** is CSR operation */
-  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
+  val isCsr: FuTChk = fuTypeCheck(csr)
 
-  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
+  val isVsetRvfWvf: FuTChk = fuTypeCheck(vsetfwf)
 
   /** is Vector Arithmetic operation */
-  def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
+  val isVArith: FuTChk = fuTypeCheck(vecArith)
 
   /** is Vector Load/Store operation */
-  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vecMem)
+  val isVls: FuTChk = fuTypeCheck(vecMem)
+  val isVlsLogic: FuTChkLogic = fuTypeCheckLogic(vecMem)
 
   /** is Vector Non-segment Load/Store operation */
-  def isVNonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
+  val isVNonsegls: FuTChk = fuTypeCheck(vldu, vstu)
+  val isVNonseglsLogic: FuTChkLogic = fuTypeCheck(vldu, vstu)
 
   /** is Vector Segment Load/Store operation */
-  def isVSegls(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu, vsegstu)
+  val isVSegls: FuTChk = fuTypeCheck(vsegldu, vsegstu)
 
   /** is Vector Load operation */
-  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu)
+  val isVLoad: FuTChk = fuTypeCheck(vldu, vsegldu)
 
   /** is Vector Store operation */
-  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu)
+  val isVStore: FuTChk = fuTypeCheck(vstu, vsegstu)
 
   /** is Vector Segment Load operation */
-  def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
+  val isVSegLoad: FuTChk = fuTypeCheck(vsegldu)
 
   /** is Vector Segment Store operation */
-  def isVSegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vsegstu)
+  val isVSegStore: FuTChk = fuTypeCheck(vsegstu)
 
   /** is Vector Non-segment Load operation */
-  def isVNonsegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
+  val isVNonsegLoad: FuTChk = fuTypeCheck(vldu)
 
   /** is Vector Non-segment Store operation */
-  def isVNonsegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
+  val isVNonsegStore: FuTChk = fuTypeCheck(vstu)
 
-  def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
+  val isVecOPF: FuTChk = fuTypeCheck(vecOPF)
 
-  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
+  /** is Vector Arithmetic or Memory operation */
+  val isVArithMem: FuTChk = fuTypeCheck(vecArithOrMem) // except vset
 
-  def isVAll(fuType: UInt): Bool = FuTypeOrR(fuType, vecAll)
+  /** is Vector operation */
+  val isVAll: FuTChk = fuTypeCheck(vecAll)
 
-  def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
+  /** is Divide/Square-root operation */
+  val isDivSqrt: FuTChk = fuTypeCheck(div, fDivSqrt)
 
-  def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
+  val isVppu: FuTChk = fuTypeCheck(vppu)
 
-  def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
+  val isScalaNeedFrm: FuTChk = fuTypeCheck(scalaNeedFrm)
 
-  def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
+  val isVectorNeedFrm: FuTChk = fuTypeCheck(vectorNeedFrm)
 
-  def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
-
+  /**
+   * Perform OR operation on 1 or more function unit types.
+   * Check whether fuType argument equals to a given type.
+   */
   object FuTypeOrR {
+    /**
+     * Perform OR operation on 1 or more function unit types.
+     * Check whether fuType argument equals to a given type.
+     * @param fuType function unit type wire to check
+     * @param fus sequence of function unit types
+     * @return true.B if fuType is in fus, false.B otherwise
+     */
     def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
       fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
     }
 
+    /**
+     * Perform OR operation on 1 or more function unit types.
+     * Check whether fuType argument equals to a given type.
+     * @param fuType function unit type to check
+     * @param fus sequence of function unit types
+     * @return true if fuType is in fus, false otherwise
+     */
     def apply(fuType: OHType, fus: Seq[OHType]): Boolean = {
       fus.map(fu => fu == fuType).fold(false)(_ || _)
     }
 
-    // Overload with argument list of function units
-    def apply(fuType: UInt, fu0: OHType, fus: OHType*)  : Bool    = apply(fuType, fu0 +: fus)
+    /**
+     * Perform OR operation on 1 or more function unit types.
+     * Check whether fuType argument equals to a given type.
+     * @param fuType function unit type wire to check
+     * @param fus argument list of function unit types
+     * @return true if fuType is in fus, false otherwise
+     */
+    def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = apply(fuType, fu0 +: fus)
+
+    /**
+     * Perform OR operation on 1 or more function unit types.
+     * Check whether fuType argument equals to a given type.
+     * @param fuType function unit type to check
+     * @param fus argument list of function unit types
+     * @return true if fuType is in fus, false otherwise
+     */
     def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = apply(fuType, fu0 +: fus)
   }
 
+  /** A map from each function unit type to its name. Generated by the addType() function. */
   val functionNameMap: Map[OHType, String] = Map(
     jmp -> "jmp",
     brh -> "brh",
@@ -287,26 +379,34 @@ object FuType extends OHEnumeration {
     div -> "div",
     fence -> "fence",
     bku -> "bku",
+
+    falu -> "falu",
     fmac -> "fmac",
+    fcvt -> "fcvt",
     fDivSqrt -> "fdiv_fsqrt",
+
     ldu -> "load",
     stu -> "store",
     mou -> "mou",
-    vsetiwi -> "vsetiwi",
-    vsetiwf -> "vsetiwf",
-    vsetfwf -> "vsetfwf",
+
     vipu -> "vipu",
     vialuF -> "vialuF",
-    vfpu -> "vfpu",
-    vldu -> "vldu",
-    vstu -> "vstu",
     vppu -> "vppu",
     vimac -> "vimac",
     vidiv -> "vidiv",
+    vfpu -> "vfpu",
     vfalu -> "vfalu",
     vfma -> "vfma",
     vfdiv -> "vfdiv",
-    vfcvt -> "vfcvt"
+    vfcvt -> "vfcvt",
+    vsetiwi -> "vsetiwi",
+    vsetiwf -> "vsetiwf",
+    vsetfwf -> "vsetfwf",
+
+    vldu -> "vldu",
+    vstu -> "vstu",
+    vsegldu -> "vsegldu",
+    vsegstu -> "vsegstu",
   )
 }
 

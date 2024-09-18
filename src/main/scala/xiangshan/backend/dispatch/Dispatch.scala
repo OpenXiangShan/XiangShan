@@ -477,7 +477,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val firedVec = io.fromRename.map(_.fire)
   io.stallReason.backReason.valid := !canAccept
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
-  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.map { case (((update, in), fire), idx) =>
+  stallReason.zip(io.stallReason.reason).zip(firedVec).zipWithIndex.foreach { case (((update, in), fire), idx) =>
     val headIsInt = FuType.isInt(io.robHead.getDebugFuType)  && io.robHeadNotReady
     val headIsFp  = FuType.isFArith(io.robHead.getDebugFuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHead.getDebugFuType) && io.robHeadNotReady
@@ -509,10 +509,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     ))
   }
 
-  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString, PopCount(stallReason.map(_ === ctr.id.U))))
 
   val robTrueCommit = io.debugTopDown.fromRob.robTrueCommit
-  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
+  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_" + ctr.toString, PopCount(stallReason.map(_ === ctr.id.U)),
                                                       robTrueCommit, 1000, clock, reset))
 
   XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
