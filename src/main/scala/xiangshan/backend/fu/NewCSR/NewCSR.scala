@@ -851,7 +851,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /** the state machine of newCSR module */
   private val state = RegInit(s_idle)
-  /** the mext state of newCSR */
+  /** the next state of newCSR */
   private val stateNext = WireInit(state)
   state := stateNext
 
