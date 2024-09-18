@@ -478,6 +478,7 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest
         }
@@ -504,6 +505,7 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest
         }
