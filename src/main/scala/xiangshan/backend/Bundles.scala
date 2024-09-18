@@ -171,6 +171,7 @@ object Bundles {
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
+    val isForVS         = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
@@ -710,6 +711,7 @@ object Bundles {
     val wflags       = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
     val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
+    val isForVS      = if (params.exceptionOut.nonEmpty) Some(Bool())         else None
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
@@ -862,6 +864,7 @@ object Bundles {
     val isHls = Bool()
     val vls = Bool()
     val trigger = TriggerAction()
+    val isForVS = Bool()
   }
 
   object UopIdx {

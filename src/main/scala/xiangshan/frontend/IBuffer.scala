@@ -66,6 +66,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val exceptionType = IBufferExceptionType()
   val exceptionFromBackend = Bool()
   val triggered = TriggerAction()
+  val isForVS = Bool() 
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
@@ -75,6 +76,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
     ftqOffset := fetch.ftqOffset(i).bits
+    isForVS := fetch.isForVS(i)
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       fetch.exceptionType(i),
       fetch.crossPageIPFFix(i),
@@ -107,6 +109,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ssid := DontCare
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
+    cf.isForVS := isForVS
     cf
   }
 

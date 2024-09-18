@@ -905,11 +905,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     when (!s1_out.isFrmMisAlignBuf && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(loadPageFault) || s1_out.uop.exceptionVec(loadGuestPageFault) || s1_out.uop.exceptionVec(loadAccessFault))) {
       s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     }
+    s1_out.uop.isForVS := io.tlb.resp.bits.isForVS
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
+    s1_out.uop.isForVS := false.B
   }
 
   // pointer chasing

@@ -66,6 +66,7 @@ case class ExeUnitParams(
   val hasRedirect: Boolean = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasPredecode: Boolean = fuConfigs.map(_.hasPredecode).reduce(_ || _)
   val exceptionOut: Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
+  val isForVS: Boolean = fuConfigs.map(_.isForVS).reduce(_ || _)
   val hasLoadError: Boolean = fuConfigs.map(_.hasLoadError).reduce(_ || _)
   val flushPipe: Boolean = fuConfigs.map(_.flushPipe).reduce(_ || _)
   val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)

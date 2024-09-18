@@ -63,6 +63,7 @@ case class FuConfig (
   latency       : HasFuLatency = CertainLatency(0),// two field (base latency, extra latency(option))
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),
+  isForVS       : Boolean = false,
   hasLoadError  : Boolean = false,
   flushPipe     : Boolean = false,
   replayInst    : Boolean = false,
@@ -425,6 +426,7 @@ object FuConfig {
     hasLoadError = true,
     trigger = true,
     immType = Set(SelImm.IMM_I),
+    isForVS = true,
   )
 
   val StaCfg: FuConfig = FuConfig (
@@ -470,6 +472,7 @@ object FuConfig {
     replayInst = true,
     hasLoadError = true,
     immType = Set(SelImm.IMM_I),
+    isForVS = true,
   )
 
   val HystaCfg = FuConfig (
@@ -768,6 +771,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
+    isForVS = true,
   )
 
   val VstuCfg: FuConfig = FuConfig (

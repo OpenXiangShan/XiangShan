@@ -70,6 +70,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val gpaddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
+  val isForVS = Reg(Bool())
 
   // dcache response data
   val resp_data = Reg(UInt())
@@ -159,8 +160,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     have_sent_first_tlb_req := true.B
 
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
-      paddr := io.dtlb.resp.bits.paddr(0)
-      gpaddr := io.dtlb.resp.bits.gpaddr(0)
+      paddr   := io.dtlb.resp.bits.paddr(0)
+      gpaddr  := io.dtlb.resp.bits.gpaddr(0)
+      isForVS := io.dtlb.resp.bits.isForVS
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -359,6 +361,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits := DontCare
   io.out.bits.uop := in.uop
   io.out.bits.uop.exceptionVec := exceptionVec
+  io.out.bits.uop.isForVS := isForVS
   io.out.bits.data := resp_data
   io.out.bits.debug.isMMIO := is_mmio
   io.out.bits.debug.paddr := paddr

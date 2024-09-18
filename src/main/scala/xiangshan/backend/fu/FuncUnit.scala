@@ -45,6 +45,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
   val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
+  val isForVS       = OptionWrapper(cfg.isForVS,  Bool())
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)

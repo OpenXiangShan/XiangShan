@@ -349,6 +349,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
     // Only lsu need check related to high address truncation
     when (RegNext(prepf || pregpf || preaf)) {
+      resp(idx).bits.isForVS := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
       resp(idx).bits.excp(nDups).pf.st := RegNext(prepf) && isSt
       resp(idx).bits.excp(nDups).pf.instr := false.B
@@ -361,6 +362,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
       resp(idx).bits.excp(nDups).af.instr := false.B
     } .otherwise {
+      val isForVS = isNonLeaf || isFakePte
+      resp(idx).bits.isForVS := isForVS
       resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
       resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
       resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf

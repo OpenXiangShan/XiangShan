@@ -320,6 +320,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
+  s1_out.uop.isForVS := io.tlb.resp.bits.isForVS && s1_vecActive
 
   // trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))

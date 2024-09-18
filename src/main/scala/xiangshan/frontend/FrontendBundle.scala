@@ -259,6 +259,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val illegalInstr = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, TriggerAction())
   val topdown_info = new FrontendTopDownBundle
+  val isForVS = Vec(PredictWidth, Bool())
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {

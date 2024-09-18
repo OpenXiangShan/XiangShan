@@ -40,6 +40,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
   val gpaddr         : UInt      = UInt(GPAddrBits.W)
+  val isForVS        : Bool      = Bool()
 }
 
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
@@ -54,6 +55,7 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   def itlb_pbmt      : Vec[UInt] = entry.itlb_pbmt
   def meta_codes     : Vec[UInt] = entry.meta_codes
   def gpaddr         : UInt      = gpf.gpaddr
+  def isForVS        : Bool      = gpf.isForVS
 }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {

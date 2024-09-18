@@ -381,6 +381,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
+  val f2_isForVS      = VecInit((0 until PortNumber).map(i => fromICache(i).bits.isForVS))
 
   // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
@@ -421,6 +422,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
       (isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine) -> f2_exception(1)
   ))))
   val f2_perf_info    = io.icachePerfInfo
+  val f2_isForVS_vec  = VecInit((0 until PredictWidth).map( i => MuxCase(ExceptionType.none, Seq(
+      !isNextLine(f2_pc(i), f2_ftq_req.startAddr)                   -> f2_isForVS(0),
+      (isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine) -> f2_isForVS(1)
+  ))))
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
     require(HasCExtension)
@@ -520,6 +525,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_jump_offset     = RegEnable(f2_jump_offset,   f2_fire)
   val f3_exception_vec   = RegEnable(f2_exception_vec, f2_fire)
   val f3_crossPage_exception_vec = RegEnable(f2_crossPage_exception_vec, f2_fire)
+  val f3_isForVS_vec     = RegEnable(f2_isForVS_vec, f2_fire)
 
   val f3_pc_lower_result = RegEnable(f2_pc_lower_result, f2_fire)
   val f3_pc_high         = RegEnable(f2_pc_high, f2_fire)
@@ -822,6 +828,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+  io.toIbuffer.bits.isForVS     := f3_isForVS_vec
   // exceptionFromBackend only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.

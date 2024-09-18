@@ -282,6 +282,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   // set 1 if there is 1 exists in exceptionVec
   val hasException = Bool()
   val exceptionVec = ExceptionVec()
+  val isForVS = Bool()
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
   val isVset = Bool()

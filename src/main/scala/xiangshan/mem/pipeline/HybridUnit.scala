@@ -655,6 +655,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       s1_out.uop.exceptionVec(loadPageFault)       := io.tlb.resp.bits.excp(0).pf.ld
       s1_out.uop.exceptionVec(loadGuestPageFault)  := io.tlb.resp.bits.excp(0).gpf.ld
       s1_out.uop.exceptionVec(loadAccessFault)     := io.tlb.resp.bits.excp(0).af.ld
+      s1_out.uop.isForVS := io.tlb.resp.bits.isForVS
     } .otherwise {
       s1_out.uop.exceptionVec(loadAddrMisaligned)  := false.B
       s1_out.uop.exceptionVec(loadAccessFault)     := s1_late_kill
@@ -665,6 +666,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
     s1_out.uop.trigger                             := storeTrigger.io.toLoadStore.triggerAction
     s1_out.uop.exceptionVec(breakPoint)            := TriggerAction.isExp(storeTrigger.io.toLoadStore.triggerAction)
+    s1_out.uop.isForVS := io.tlb.resp.bits.isForVS
   }
 
   // load trigger
