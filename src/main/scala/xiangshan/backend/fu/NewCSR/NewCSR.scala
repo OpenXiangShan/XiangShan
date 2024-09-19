@@ -20,6 +20,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.ExceptionNO._
+import xiangshan.backend.trace._
 
 import scala.collection.immutable.SeqMap
 
@@ -189,6 +190,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       val memTrigger = new MemTdataDistributeIO()
       // Instruction fetch address translation type
       val instrAddrTransType = new AddrTransType
+      // trace
+      val trapTraceInfo = ValidIO(new TraceTrap)
       // custom
       val custom = new CSRCustomState
       val criticalErrorState = Bool()
@@ -1121,6 +1124,17 @@ class NewCSR(implicit val p: Parameters) extends Module
   /**
    * debug_end
    */
+
+  // trace
+  val privState1HForTrace = Seq(privState.isModeM, privState.isModeHS, privState.isModeVS, privState.isModeHU, privState.isModeVU)
+  val privStateForTrace   = Seq(Priv.M,        Priv.HS,        Priv.VS,        Priv.HU,        Priv.VU)
+  io.status.trapTraceInfo.valid := RegNext(io.fromRob.trap.valid)
+  io.status.trapTraceInfo.bits.priv  := Mux(debugMode,
+    Priv.D,
+    Mux1H(privState1HForTrace, privStateForTrace)
+  )
+  io.status.trapTraceInfo.bits.cause := Mux1H(VecInit(privState1HForTrace).asUInt.head(3), Seq(mcause.rdata, scause.rdata, vscause.rdata))
+  io.status.trapTraceInfo.bits.tval  := Mux1H(VecInit(privState1HForTrace).asUInt.head(3), Seq(mtval.rdata,  stval.rdata,  vstval.rdata))
 
   /**
    * perf_begin
