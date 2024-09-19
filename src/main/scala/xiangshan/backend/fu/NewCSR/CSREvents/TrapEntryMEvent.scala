@@ -10,7 +10,7 @@ import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
 
 
-class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
+class TrapEntryMEventOutput(implicit p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
   val mstatus   = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
   val mepc      = ValidIO((new Epc           ).addInEvent(_.epc))

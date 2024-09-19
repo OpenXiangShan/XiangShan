@@ -2,12 +2,13 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRConfig.VaddrMaxWidth
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.fu.NewCSR._
 
 
-class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
+class DretEventOutput(implicit p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
   val debugMode = ValidIO(Bool())
@@ -22,13 +23,13 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   }
 }
 
-class DretEventInput extends Bundle {
+class DretEventInput(implicit p: Parameters) extends Bundle {
   val dcsr = Input(new DcsrBundle)
   val dpc = Input(new Epc)
   val mstatus = Input(new MstatusBundle)
 }
 
-class DretEventModule extends Module with CSREventBase {
+class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new DretEventInput)
   val out = IO(new DretEventOutput)
 

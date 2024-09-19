@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
 import utility.SignExt
 import utils.PerfEvent
+import xiangshan.DebugOptionsKey
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
@@ -434,7 +435,12 @@ trait MachineLevel { self: NewCSR =>
 
 }
 
-class MstatusBundle extends CSRBundle {
+class MstatusBundle(implicit p: Parameters) extends CSRBundle {
+  def initContextStatus = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) ContextStatus.Clean
+    else ContextStatus.Off
+  }
 
   val SIE  = CSRRWField     (1).withReset(0.U)
   val MIE  = CSRRWField     (3).withReset(0.U)
@@ -442,9 +448,9 @@ class MstatusBundle extends CSRBundle {
   val UBE  = CSRROField     (6).withReset(0.U)
   val MPIE = CSRRWField     (7).withReset(0.U)
   val SPP  = CSRRWField     (8).withReset(0.U)
-  val VS   = ContextStatus  (10,  9).withReset(ContextStatus.Off)
+  val VS   = ContextStatus  (10,  9).withReset(initContextStatus)
   val MPP  = PrivMode       (12, 11).withReset(PrivMode.U)
-  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off)
+  val FS   = ContextStatus  (14, 13).withReset(initContextStatus)
   val XS   = ContextStatusRO(16, 15).withReset(0.U)
   val MPRV = CSRRWField     (17).withReset(0.U)
   val SUM  = CSRRWField     (18).withReset(0.U)
@@ -482,12 +488,18 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   this.wfn(reg)(Seq(wAliasSstatus))
 
   when (robCommit.fsDirty || writeFCSR) {
-    assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
+    val env = p(DebugOptionsKey)
+    if (!env.TraceRTLMode) {
+      assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
+    }
     reg.FS := ContextStatus.Dirty
   }
 
   when (robCommit.vsDirty || writeVCSR) {
-    assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
+    val env = p(DebugOptionsKey)
+    if (!env.TraceRTLMode) {
+      assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
+    }
     reg.VS := ContextStatus.Dirty
   }
 

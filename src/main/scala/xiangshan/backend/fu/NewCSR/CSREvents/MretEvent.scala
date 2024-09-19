@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
 import xiangshan.ExceptionNO
 import xiangshan.ExceptionNO._
@@ -11,7 +12,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR._
 
 
-class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
+class MretEventOutput(implicit p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
   val tcontrol = ValidIO((new TcontrolBundle).addInEvent(_.MTE))
   val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
@@ -24,13 +25,13 @@ class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   }
 }
 
-class MretEventInput extends Bundle {
+class MretEventInput(implicit p: Parameters) extends Bundle {
   val mstatus  = Input(new MstatusBundle)
   val mepc     = Input(new Epc())
   val tcontrol = Input(new TcontrolBundle)
 }
 
-class MretEventModule extends Module with CSREventBase {
+class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new MretEventInput)
   val out = IO(new MretEventOutput)
 
