@@ -316,7 +316,7 @@ object TopMain extends App {
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-  val enableDifftest = config(DebugOptionsKey).EnableDifftest
+  val enableDifftest = config(DebugOptionsKey).EnableDifftest || config(DebugOptionsKey).AlwaysBasicDiff
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)
