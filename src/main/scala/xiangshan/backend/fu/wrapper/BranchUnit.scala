@@ -44,7 +44,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid && redirect.bits.cfiUpdate.isMisPred
+      redirect.valid := io.out.valid && redirect.bits.cfiUpdate.isMisPred && TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath)
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.specifyField(
         _.level := RedirectLevel.flushAfter,
@@ -68,7 +68,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)
     XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
-    XSError(io.in.valid && io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= io.in.bits.ctrl.traceInfo.target),
+    XSError(io.in.valid && !io.in.bits.ctrl.traceInfo.isWrongPath &&
+      io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= io.in.bits.ctrl.traceInfo.target),
       "when taken, addMod's target should equal to traceInfo's target")
     // TraceInfo's target is the 'taken' target
   }

@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
 import xiangshan.frontend.tracertl.ChiselRecordForField._
-import xiangshan.frontend.{PreDecodeResp, PredCheckerResp}
+import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, BranchPredictionRedirect}
 
 class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
   val startAddr = UInt(VAddrBits.W)
@@ -53,6 +53,11 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
 
   val fromTraceDriver = Input(new TraceFromDriver())
 
+  val redirect = Input(new Bundle {
+   val fromBackend = Valid(new BranchPredictionRedirect()) // backend -> ftq -> ifu
+   val fromIFUBPU = Bool()
+  })
+
   // Pre-decoder: normal predecoder
   val predecoder = Output(new PreDecodeResp())
   // Predict checker
@@ -62,6 +67,11 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   // trace Inst: one-to-one with preDecoder but contains the traceInfo
   val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceForceJump = Output(Bool())
+
+  val traceWrongPathEmu = Output(Bool())
+  val traceWrongPathEmuInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+  val traceWrongPathRecv = Output(ValidIO(new TraceRecvInfo()))
+  // val traceWrongPathRange = Output(UInt(PredictWidth.W))
 }
 
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
@@ -73,6 +83,33 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   val predChecker = Module(new TracePredictChecker)
   val traceChecker = Module(new TraceChecker)
   val traceAligner = Module(new TraceAlignToIFUCut)
+  // This wrong path aligner is used to to generate the wrong path trace insts
+  // wrong path instr comes from "arch" path
+  val traceAlignerWrongPath = Module(new TraceAlignWrongPath)
+
+  if (TraceEnableWrongPathEmu) {
+    // bpu wrong that can only be checked by backend
+    // 1. branch taken wrong
+    // 2. jump reg target wrong
+    // when these two happpen, turn to wrongPathState
+    // The simple check:
+    //   when stuck for pc-mismatch, and no ifu redirect, then go to wrongPathState
+    val wrongPathStuckIFU = RegInit(false.B)
+    when (io.fromIFU.valid &&
+      !Cat(traceAligner.io.cutInsts.map(_.valid)).orR) {
+      wrongPathStuckIFU := true.B
+    }
+    when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
+      wrongPathStuckIFU := false.B
+    }
+    io.traceWrongPathEmu := wrongPathStuckIFU
+    io.traceWrongPathRecv.valid := io.fromIFU.ibuffer_fire
+    io.traceWrongPathRecv.bits.instNum := PopCount(io.traceWrongPathEmuInsts.map(_.valid))
+  } else {
+    io.traceWrongPathEmu := false.B
+    io.traceWrongPathRecv.valid := false.B
+    io.traceWrongPathRecv.bits := DontCare
+  }
 
   val concede2Bytes = RegEnable(
     !io.fromIFU.redirect &&
@@ -91,6 +128,10 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.instRange := io.predInfo.instRange,
     _.lastHalfValid := concede2Bytes,
     _.icacheData := io.icacheData,
+  )
+  traceAlignerWrongPath.io.specifyField(
+    _.debug_valid := io.fromIFU.valid,
+    _.traceInsts := io.traceInsts,
   )
 
   preDecoder.io.specifyField(
@@ -119,6 +160,8 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.checker := predChecker.io.out,
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
-    _.traceForceJump := traceAligner.io.traceForceJump
+    _.traceForceJump := traceAligner.io.traceForceJump,
+    _.traceWrongPathEmuInsts := traceAlignerWrongPath.io.cutInsts,
+    // _.traceWrongPathEmuRange := traceAlignerWrongPath.io.traceRange,
   )
 }
