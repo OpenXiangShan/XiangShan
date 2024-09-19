@@ -917,8 +917,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
     val instCanEnqSeq = instEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
     val instCanEnqFlag = Cat(instCanEnqSeq).orR
+    val isFirstEnq = !robEntries(i).valid && instCanEnqFlag
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
-    when(!robEntries(i).valid && instCanEnqFlag){
+    when(isFirstEnq){
       robEntries(i).realDestSize := realDestEnqNum
     }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
       robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
@@ -960,11 +961,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
-    robEntries(i).fflags := Mux(!robEntries(i).valid && instCanEnqFlag, 0.U, robEntries(i).fflags | fflagsRes)
+    when(isFirstEnq) {
+      robEntries(i).fflags := 0.U
+    }.elsewhen(fflagsRes.orR) {
+      robEntries(i).fflags := robEntries(i).fflags | fflagsRes
+    }
 
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
-    robEntries(i).vxsat := Mux(!robEntries(i).valid && instCanEnqFlag, 0.U, robEntries(i).vxsat | vxsatRes)
+    when(isFirstEnq) {
+      robEntries(i).vxsat := 0.U
+    }.elsewhen(vxsatRes.orR) {
+      robEntries(i).vxsat := robEntries(i).vxsat | vxsatRes
+    }
 
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
@@ -1119,12 +1128,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
   vxsatDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).vxsat)
 
+  val isCommit = io.commits.isCommit
+  val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
-  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
-  val trueCommitCnt = RegNext(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _)) +& fuseCommitCnt
-  val retireCounter = Mux(RegNext(io.commits.isCommit), trueCommitCnt, 0.U)
+  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
+  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit) +& fuseCommitCnt
+  val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
-  instrCntReg := instrCnt
+  when(isCommitReg){
+    instrCntReg := instrCnt
+  }
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
   io.headNotReady := commit_vDeqGroup.head && !commit_wDeqGroup.head
@@ -1151,9 +1164,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     if (i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
-  def ifCommit(counter: UInt): UInt = Mux(io.commits.isCommit, counter, 0.U)
+  def ifCommit(counter: UInt): UInt = Mux(isCommit, counter, 0.U)
 
-  def ifCommitReg(counter: UInt): UInt = Mux(RegNext(io.commits.isCommit), counter, 0.U)
+  def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
 
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
   XSPerfAccumulate("clock_cycle", 1.U)
@@ -1421,8 +1434,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  val validEntriesBanks = (0 until (RobSize + 31) / 32).map(i => RegNext(PopCount(robEntries.map(_.valid).drop(i * 32).take(32))))
-  val validEntries = RegNext(VecInit(validEntriesBanks).reduceTree(_ +& _))
   val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMove).map { case (v, m) => v && m })
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
@@ -1435,18 +1446,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst),
     ("rob_commitUop          ", ifCommit(commitCnt)),
     ("rob_commitInstr        ", ifCommitReg(trueCommitCnt)),
-    ("rob_commitInstrMove    ", ifCommitReg(PopCount(RegNext(commitMoveVec)))),
+    ("rob_commitInstrMove    ", ifCommitReg(PopCount(RegEnable(commitMoveVec, isCommit)))),
     ("rob_commitInstrFused   ", ifCommitReg(fuseCommitCnt)),
-    ("rob_commitInstrLoad    ", ifCommitReg(PopCount(RegNext(commitLoadVec)))),
-    ("rob_commitInstrBranch  ", ifCommitReg(PopCount(RegNext(commitBranchVec)))),
-    ("rob_commitInstrLoadWait", ifCommitReg(PopCount(RegNext(commitLoadWaitVec)))),
-    ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegNext(commitStoreVec)))),
+    ("rob_commitInstrLoad    ", ifCommitReg(PopCount(RegEnable(commitLoadVec, isCommit)))),
+    ("rob_commitInstrBranch  ", ifCommitReg(PopCount(RegEnable(commitBranchVec, isCommit)))),
+    ("rob_commitInstrLoadWait", ifCommitReg(PopCount(RegEnable(commitLoadWaitVec, isCommit)))),
+    ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegEnable(commitStoreVec, isCommit)))),
     ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)),
     ("rob_walkCycle          ", (state === s_walk)),
-    ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U),
-    ("rob_2_4_valid          ", validEntries > (RobSize / 4).U && validEntries <= (RobSize / 2).U),
-    ("rob_3_4_valid          ", validEntries > (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),
-    ("rob_4_4_valid          ", validEntries > (RobSize * 3 / 4).U),
+    ("rob_1_4_valid          ", numValidEntries <= (RobSize / 4).U),
+    ("rob_2_4_valid          ", numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U),
+    ("rob_3_4_valid          ", numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U),
+    ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
   )
   generatePerfEvent()
 
