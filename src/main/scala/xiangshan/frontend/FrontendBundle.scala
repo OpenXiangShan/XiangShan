@@ -249,15 +249,17 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val valid     = UInt(PredictWidth.W)
   val enqEnable = UInt(PredictWidth.W)
   val pd        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val exceptionFromBackend = Vec(PredictWidth, Bool())
   val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val illegalInstr = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, TriggerAction())
+  val isLastInFtqEntry = Vec(PredictWidth, Bool())
+
+  val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
+  val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
 }
 

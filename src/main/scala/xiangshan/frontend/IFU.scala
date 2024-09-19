@@ -827,6 +827,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pd          := f3_pd
   io.toIbuffer.bits.ftqPtr      := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc          := f3_pc
+  io.toIbuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIbuffer.bits.enqEnable))).asBools
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
