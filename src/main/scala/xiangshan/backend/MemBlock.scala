@@ -1908,12 +1908,24 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
 
   // ChiselMap but divided by spec path(wrong or arch)
-  genSpecPathChiselMap("MemLoadInstr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya, x => FuType.isLoad(x.bits.uop.fuType))
-  genSpecPathChiselMap("MemStoreInstr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya, x => FuType.isStore(x.bits.uop.fuType))
+  def getAddr(x: DecoupledIO[MemExuInput]): UInt = {
+    if (env.TraceRTLMode) x.bits.uop.traceInfo.memoryAddrVA
+    else (x.bits.src(0) + SignExt(x.bits.uop.imm(11, 0), VAddrBits))
+  }
+  def getPC(x: DecoupledIO[MemExuInput]): UInt = x.bits.simDebugPC
 
-  def genSpecPathChiselMap(name: String, uops: Seq[DecoupledIO[MemExuInput]], typeF: DecoupledIO[MemExuInput] => Bool) = {
+  genSpecPathChiselMap("MemLoadInstr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
+    getPC, x => FuType.isLoad(x.bits.uop.fuType))
+  genSpecPathChiselMap("MemStoreInstr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
+    getPC, x => FuType.isStore(x.bits.uop.fuType))
+  genSpecPathChiselMap("MemLoadVAddr", io.ooo_to_mem.issueLda ++ io.ooo_to_mem.issueHya,
+    getAddr, x => FuType.isLoad(x.bits.uop.fuType))
+  genSpecPathChiselMap("MemStoreVAddr", io.ooo_to_mem.issueSta ++ io.ooo_to_mem.issueHya,
+    getAddr, x => FuType.isStore(x.bits.uop.fuType))
+
+  def genSpecPathChiselMap(name: String, uops: Seq[DecoupledIO[MemExuInput]], keyF: DecoupledIO[MemExuInput] => UInt, typeF: DecoupledIO[MemExuInput] => Bool) = {
     val issueUopsValid = uops.map(x => x.fire && typeF(x))
-    val issueUopsPC = uops.map(_.bits.simDebugPC)
+    val issueUopsKey = uops.map(keyF)
     val issueUopsRobIdx = uops.map(_.bits.uop.robIdx)
     val issueUopsValue = WireInit(VecInit(Seq.fill(uops.length)(1.U)))
     val redirectRobIdx = Wire(Valid(new RobPtr))
@@ -1924,7 +1936,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtr
     ChiselMapWithSpecDivide(
       name, "MemoryBlock", RobSize,
-      VecInit(issueUopsPC), issueUopsValue,
+      VecInit(issueUopsKey), issueUopsValue,
       VecInit(issueUopsValid), VecInit(issueUopsRobIdx),
       redirectRobIdx, commitRobIdx,
       clock, reset, basicDB = true
