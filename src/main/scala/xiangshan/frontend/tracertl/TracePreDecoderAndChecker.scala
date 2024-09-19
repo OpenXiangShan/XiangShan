@@ -41,6 +41,11 @@ class TraceFromDriver(implicit p: Parameters) extends TraceBundle {
   val endWithCFI = Bool()
 }
 
+class TracePCMatchBundle(implicit p: Parameters) extends TraceBundle {
+  val pcVA = Output(UInt(VAddrBits.W))
+  val found = Input(Bool())
+}
+
 class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   // IFU info
   val fromIFU = Input(new TraceFromIFU())
@@ -72,6 +77,8 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val traceWrongPathEmuInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceWrongPathRecv = Output(ValidIO(new TraceRecvInfo()))
   // val traceWrongPathRange = Output(UInt(PredictWidth.W))
+
+  val pcMatch = new TracePCMatchBundle()
 }
 
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
@@ -95,8 +102,13 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     // The simple check:
     //   when stuck for pc-mismatch, and no ifu redirect, then go to wrongPathState
     val wrongPathStuckIFU = RegInit(false.B)
+    val convergenceCheck =
+      if (TraceWrongPathEmuWhenConvergence) io.pcMatch.found
+      else true.B
     when (io.fromIFU.valid &&
-      !Cat(traceAligner.io.cutInsts.map(_.valid)).orR) {
+      !Cat(traceAligner.io.cutInsts.map(_.valid)).orR &&
+      convergenceCheck
+      ) {
       wrongPathStuckIFU := true.B
     }
     when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
@@ -162,6 +174,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.traceAlignInsts := traceAligner.io.cutInsts,
     _.traceForceJump := traceAligner.io.traceForceJump,
     _.traceWrongPathEmuInsts := traceAlignerWrongPath.io.cutInsts,
+    _.pcMatch.pcVA := io.predInfo.startAddr,
     // _.traceWrongPathEmuRange := traceAlignerWrongPath.io.traceRange,
   )
 }

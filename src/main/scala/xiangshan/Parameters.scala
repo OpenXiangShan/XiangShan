@@ -861,6 +861,7 @@ trait HasXSParameter {
   def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
   def TraceEnableDuplicateFlush = true
   def TraceEnableWrongPathEmu = true
+  def TraceWrongPathEmuWhenConvergence = true
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25

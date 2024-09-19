@@ -634,6 +634,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.recv := traceRecv,
       _.redirect := fromFtq.redirect,
       _.startSignal := fromFtq.req.ready,
+      _.pcMatch.pcVA := tracePDaC.io.pcMatch.pcVA,
     )
     tracePDaC.io.specifyField(
       _.traceInsts := traceReader.io.traceInsts,
@@ -655,6 +656,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         _.endWithCFI := traceDriver.io.out.endWithCFI,
       ),
       _.icacheData := traceFakeICache.io.resp,
+      _.pcMatch.found := traceReader.io.pcMatch.found,
     )
     traceDriver.io.specifyField(
       _.fire := f3_fire,
