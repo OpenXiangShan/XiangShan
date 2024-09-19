@@ -289,7 +289,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)
   val mask        = UInt(VLENB.W)
-  val vaddr       = UInt(VAddrBits.W)
+  val vaddr       = UInt(XLEN.W)
   val gpaddr      = UInt(GPAddrBits.W)
 }
 

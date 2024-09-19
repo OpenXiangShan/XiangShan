@@ -144,7 +144,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr  := req.vaddr
+  io.exceptionAddr.vaddr  := req.fullva
   io.exceptionAddr.gpaddr := req.gpaddr
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl

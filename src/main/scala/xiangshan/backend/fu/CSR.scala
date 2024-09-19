@@ -99,8 +99,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
   // from LSQ
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
   // from outside cpu,externalInterrupt
   val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB

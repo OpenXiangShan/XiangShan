@@ -133,10 +133,10 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val lsTopdownInfo = Vec(LdExuCnt, Output(new LsTopdownInfo))
 
   val lsqio = new Bundle {
-    val vaddr = Output(UInt(VAddrBits.W))
+    val vaddr = Output(UInt(XLEN.W))
     val vstart = Output(UInt((log2Up(VLEN) + 1).W))
     val vl = Output(UInt((log2Up(VLEN) + 1).W))
-    val gpaddr = Output(UInt(GPAddrBits.W))
+    val gpaddr = Output(UInt(XLEN.W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
     val lqCanAccept = Output(Bool())

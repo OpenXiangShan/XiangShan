@@ -62,15 +62,9 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val trapPCGPA = SignExt(in.trapPcGPA, XLEN)
 
-  private val trapMemVA = genTrapVA(
-    dMode,
-    satp,
-    vsatp,
-    hgatp,
-    in.memExceptionVAddr,
-  )
+  private val trapMemVA = in.memExceptionVAddr
 
-  private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
+  private val trapMemGPA = in.memExceptionGPAddr
 
   private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
 

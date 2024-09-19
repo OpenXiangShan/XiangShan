@@ -122,8 +122,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val in = Flipped(DecoupledIO(new NewCSRInput))
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
-      val excpVA  = UInt(VaddrMaxWidth.W)
-      val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
+      val excpVA  = UInt(XLEN.W)
+      val excpGPA = UInt(XLEN.W) // Todo: use guest physical address width
     })
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {

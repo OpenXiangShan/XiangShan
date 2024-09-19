@@ -126,6 +126,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // generate addr
   val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
+  val s0_fullva = Wire(UInt(XLEN.W))
   val s0_vaddr = Mux(
     s0_use_flow_ma,
     io.misalign_stin.bits.vaddr,
@@ -134,11 +135,21 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       s0_saddr,
       Mux(
         s0_use_flow_vec,
-        s0_vecstin.vaddr,
+        s0_vecstin.vaddr(VAddrBits - 1, 0),
         io.prefetch_req.bits.vaddr
       )
     )
   )
+  s0_fullva := Mux(
+    s0_use_flow_rs,
+    s0_stin.src(0) + SignExt(s0_uop.imm(11,0), XLEN),
+    Mux(
+      s0_use_flow_vec,
+      s0_vecstin.vaddr,
+      s0_vaddr
+    )
+  )
+
   val s0_mask = Mux(
     s0_use_flow_ma,
     io.misalign_stin.bits.mask,
@@ -156,6 +167,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   io.tlb.req.valid                   := s0_valid
   io.tlb.req.bits.vaddr              := s0_vaddr
+  io.tlb.req.bits.fullva             := s0_fullva
+  io.tlb.req.bits.checkfullva        := s0_use_flow_rs || s0_use_flow_vec
   io.tlb.req.bits.cmd                := TlbCmd.write
   io.tlb.req.bits.size               := s0_size
   io.tlb.req.bits.kill               := false.B
@@ -184,6 +197,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   s0_out              := DontCare
   s0_out.vaddr        := s0_vaddr
+  s0_out.fullva       := s0_fullva
   // Now data use its own io
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
   s0_out.data         := s0_stin.src(1)
@@ -300,6 +314,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
   s1_out.atomic  := s1_mmio
+  when (!s1_out.isFrmMisAlignBuf && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(storePageFault) || s1_out.uop.exceptionVec(storeAccessFault) || s1_out.uop.exceptionVec(storeGuestPageFault))) {
+    s1_out.uop.exceptionVec(storeAddrMisaligned) := false.B
+  }
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
@@ -485,7 +502,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).alignedType := s3_in.alignedType
       sx_in(i).mbIndex     := s3_in.mbIndex
       sx_in(i).mask        := s3_in.mask
-      sx_in(i).vaddr       := s3_in.vaddr
+      sx_in(i).vaddr       := s3_in.fullva
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {

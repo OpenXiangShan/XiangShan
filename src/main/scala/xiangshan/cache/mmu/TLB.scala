@@ -116,6 +116,36 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
+  // pre fault: check fault before real do translate
+  val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val preaf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  (0 until Width).foreach{i =>
+    val pf48 = SignExt(req(i).bits.fullva(47, 0), XLEN) =/= req(i).bits.fullva
+    val pf39 = SignExt(req(i).bits.fullva(38, 0), XLEN) =/= req(i).bits.fullva
+    val gpf48 = req(i).bits.fullva(XLEN - 1, 48 + 2) =/= 0.U
+    val gpf39 = req(i).bits.fullva(XLEN - 1, 39 + 2) =/= 0.U
+    val af = req(i).bits.fullva(XLEN - 1, PAddrBits) =/= 0.U
+    when (req(i).valid && req(i).bits.checkfullva) {
+      when (vmEnable(i) || s2xlateEnable(i)) {
+        when (req_in_s2xlate(i) === onlyStage2) {
+          when (Sv48x4Enable) {
+            pregpf(i) := gpf48
+          } .elsewhen (Sv39x4Enable) {
+            pregpf(i) := gpf39
+          }
+        } .otherwise {
+          when (Sv48Enable) {
+            prepf(i) := pf48
+          } .elsewhen (Sv39Enable) {
+            prepf(i) := pf39
+          }
+        }
+      } .otherwise {
+        preaf(i) := af
+      }
+    }
+  }
 
   val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !flush_mmu
   refill_to_mem := DontCare
@@ -147,7 +177,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp_check(addr, req_out(i).size, req_out(i).cmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
-      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
+      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i), pregpf(i), preaf(i))
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
@@ -273,7 +303,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   // for timing optimization, pmp check is divided into dynamic and static
-  def perm_check(perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int, g_perm: TlbPermBundle, hlvx: Bool, s2xlate: UInt) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int, g_perm: TlbPermBundle, hlvx: Bool, s2xlate: UInt, prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B) = {
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val hasS2xlate = s2xlate =/= noS2xlate
@@ -283,53 +313,69 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // Stage 1 perm check
     val pf = perm.pf
-    val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
-    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
-    val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
+    val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
+    val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
+    val isInst = TlbCmd.isExec(cmd)
+    val ldUpdate = !perm.a && isLd // update A/D through exception
+    val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
+    val instrUpdate = !perm.a && isInst // update A/D through exception
     val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifecth))
     val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
-    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
-    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
-    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmd)
+    val ldPf = (ldPermFail || pf) && isLd
+    val stPf = (stPermFail || pf) && isSt
+    val instrPf = (instrPermFail || pf) && isInst
     val isFakePte = !perm.v && !perm.pf && !perm.af
     val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // Stage 2 perm check
     val gpf = g_perm.pf
-    val g_ldUpdate = !g_perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
-    val g_stUpdate = (!g_perm.a || !g_perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
-    val g_instrUpdate = !g_perm.a && TlbCmd.isExec(cmd)
+    val g_ldUpdate = !g_perm.a && isLd
+    val g_stUpdate = (!g_perm.a || !g_perm.d) && isSt
+    val g_instrUpdate = !g_perm.a && isInst
     val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || io.csr.priv.mxr && g_perm.x))
     val g_stPermFail = !g_perm.w
     val g_instrPermFail = !g_perm.x
-    val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
-    val stGpf = (g_stPermFail || gpf) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
-    val instrGpf = (g_instrPermFail || gpf) && TlbCmd.isExec(cmd)
-    val s2_valid =  portTranslateEnable(idx) && hasS2xlate && !onlyS1
+    val ldGpf = (g_ldPermFail || gpf) && isLd
+    val stGpf = (g_stPermFail || gpf) && isSt
+    val instrGpf = (g_instrPermFail || gpf) && isInst
+    val s2_valid = portTranslateEnable(idx) && hasS2xlate && !onlyS1
 
     val fault_valid = s1_valid || s2_valid
 
     // when pf and gpf can't happens simultaneously
     val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    // NOTE: pf need && with !af, page fault has higher priority than access fault
-    // but ptw may also have access fault, then af happens, the translation is wrong.
-    // In this case, pf has lower priority than af
+    // Only lsu need check related to high address truncation
+    when (RegNext(prepf || pregpf || preaf)) {
+      resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
+      resp(idx).bits.excp(nDups).pf.st := RegNext(prepf) && isSt
+      resp(idx).bits.excp(nDups).pf.instr := false.B
 
-    resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
-    resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
-    resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
+      resp(idx).bits.excp(nDups).gpf.ld := RegNext(pregpf) && isLd
+      resp(idx).bits.excp(nDups).gpf.st := RegNext(pregpf) && isSt
+      resp(idx).bits.excp(nDups).gpf.instr := false.B
 
-    resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
+      resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
+      resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
+      resp(idx).bits.excp(nDups).af.instr := false.B
+    } .otherwise {
+      resp(idx).bits.excp(nDups).pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+      resp(idx).bits.excp(nDups).pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+      resp(idx).bits.excp(nDups).pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+      // NOTE: pf need && with !af, page fault has higher priority than access fault
+      // but ptw may also have access fault, then af happens, the translation is wrong.
+      // In this case, pf has lower priority than af
 
+      resp(idx).bits.excp(nDups).gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
+      resp(idx).bits.excp(nDups).gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
+      resp(idx).bits.excp(nDups).gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
 
+      resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
+      resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
+      resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
+    }
   }
 
   def handle_nonblock(idx: Int): Unit = {
@@ -345,7 +391,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.vsatp.mode === 0.U) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-   
+
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, true, false)
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)

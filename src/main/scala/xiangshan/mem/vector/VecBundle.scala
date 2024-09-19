@@ -36,7 +36,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   // val fof            = Bool() // fof is only used for vector loads
   val excp_eew_index      = UInt(elemIdxBits.W)
   // val exceptionVec   = ExceptionVec() // uop has exceptionVec
-  val baseAddr            = UInt(VAddrBits.W)
+  val baseAddr            = UInt(XLEN.W)
   val stride              = UInt(VLEN.W)
   // val flow_counter = UInt(flowIdxBits.W)
 
@@ -109,8 +109,8 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val mmio                 = Bool()
   //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()
-  val vaddr                = UInt(VAddrBits.W)
-  val gpaddr               = UInt(GPAddrBits.W)
+  val vaddr                = UInt(XLEN.W)
+  val gpaddr               = UInt(XLEN.W)
   //val vec                  = new OnlyVecExuOutput
    // feedback
   val vecFeedback          = Bool()
@@ -126,7 +126,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
-  val vaddr               = UInt(VAddrBits.W)
+  val vaddr               = UInt(XLEN.W)
   val mask                = UInt(VLENB.W)
   val isvec               = Bool()
   val uop_unit_stride_fof = Bool()
@@ -191,7 +191,7 @@ class FeedbackToSplitIO(implicit p: Parameters) extends VLSUBundle{
 class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val robidx = new RobPtr
   val uopidx = UopIdx()
-  val vaddr = UInt(VAddrBits.W)
+  val vaddr = UInt(XLEN.W)
   val gpaddr = UInt(GPAddrBits.W)
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
     // for exception
