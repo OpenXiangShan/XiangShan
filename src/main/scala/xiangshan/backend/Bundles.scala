@@ -40,17 +40,18 @@ object Bundles {
   }
   // frontend -> backend
   class StaticInst(implicit p: Parameters) extends XSBundle {
-    val instr           = UInt(32.W)
-    val pc              = UInt(VAddrBits.W)
-    val foldpc          = UInt(MemPredPCWidth.W)
-    val exceptionVec    = ExceptionVec()
-    val isFetchMalAddr  = Bool()
-    val trigger         = TriggerAction()
-    val preDecodeInfo   = new PreDecodeInfo
-    val pred_taken      = Bool()
-    val crossPageIPFFix = Bool()
-    val ftqPtr          = new FtqPtr
-    val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val instr            = UInt(32.W)
+    val pc               = UInt(VAddrBits.W)
+    val foldpc           = UInt(MemPredPCWidth.W)
+    val exceptionVec     = ExceptionVec()
+    val isFetchMalAddr   = Bool()
+    val trigger          = TriggerAction()
+    val preDecodeInfo    = new PreDecodeInfo
+    val pred_taken       = Bool()
+    val crossPageIPFFix  = Bool()
+    val ftqPtr           = new FtqPtr
+    val ftqOffset        = UInt(log2Up(PredictWidth).W)
+    val isLastInFtqEntry = Bool()
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
@@ -64,6 +65,7 @@ object Bundles {
       this.crossPageIPFFix  := source.crossPageIPFFix
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
+      this.isLastInFtqEntry := source.isLastInFtqEntry
     }
   }
 
