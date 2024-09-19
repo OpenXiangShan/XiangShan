@@ -51,16 +51,16 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
-    when (b.fallThruError) {
-      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
-      val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
-      this.nextStartAddr :=
-        Cat(nextBlockHigher,
-          startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
-          startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
-          0.U(instOffsetBits.W)
-        )
-    }
+    // when (b.fallThruError) {
+    //   val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
+    //   val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
+    //   this.nextStartAddr :=
+    //     Cat(nextBlockHigher,
+    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
+    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
+    //       0.U(instOffsetBits.W)
+    //     )
+    // }
     this
   }
   override def toPrintable: Printable = {
