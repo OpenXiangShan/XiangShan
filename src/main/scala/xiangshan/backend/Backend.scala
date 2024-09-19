@@ -38,6 +38,7 @@ import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PFEvent,
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
@@ -244,6 +245,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
+  ctrlBlock.io.robio.csr.traceTrapInfo := intExuBlock.io.csrio.get.trapTraceInfo
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
@@ -738,6 +740,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.toTop.cpuHalted := ctrlBlock.io.toTop.cpuHalt
 
+  io.traceCoreInterface <> ctrlBlock.io.traceCoreInterface
+
   io.debugTopDown.fromRob := ctrlBlock.io.debugTopDown.fromRob
   ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
 
@@ -911,6 +915,8 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val fromTop = Flipped(new TopToBackendBundle)
 
   val toTop = new BackendToTopBundle
+
+  val traceCoreInterface = new TraceCoreInterface
 
   val fenceio = new FenceIO
   // Todo: merge these bundles into BackendFrontendIO

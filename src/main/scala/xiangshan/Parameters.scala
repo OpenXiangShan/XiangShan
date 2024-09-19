@@ -29,6 +29,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
+import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
@@ -539,7 +540,11 @@ case class XSCoreParameters
 
   // Parameters for trace extension.
   // Trace parameters is useful for XSTOP.
-  val TraceGroupNum          = 3 // Width to Encoder
+  val traceParams: TraceParams = new TraceParams(
+    TraceGroupNum          = 3,     // Width to Encoder
+    HasEncoder             = true,
+    TraceEnable            = true,
+  )
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -877,5 +882,15 @@ trait HasXSParameter {
   protected def TriggerChainMaxLength = 2
 
   // Parameters for Trace extension
-  def TraceGroupNum          = coreParams.TraceGroupNum
+  def TraceGroupNum          = coreParams.traceParams.TraceGroupNum
+  def HasEncoder             = coreParams.traceParams.HasEncoder
+  def TraceEnable            = coreParams.traceParams.TraceEnable
+  def CauseWidth             = XLEN
+  def TvalWidth              = XLEN
+  def PrivWidth              = 3
+  def IaddrWidth             = XLEN
+  def ItypeWidth             = 4
+  def IretireWidthInPipe     = log2Up(RenameWidth * 2)
+  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IlastsizeWidth         = 1
 }
