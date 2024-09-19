@@ -1933,7 +1933,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     redirectRobIdx.valid := io.redirect.valid
     redirectRobIdx.bits := io.redirect.bits.robIdx
     commitRobIdx.valid := io.ooo_to_mem.lsqio.commit
-    commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtr
+    commitRobIdx.bits := io.ooo_to_mem.lsqio.pendingPtrNext
     ChiselMapWithSpecDivide(
       name, "MemoryBlock", RobSize,
       VecInit(issueUopsKey), issueUopsValue,
