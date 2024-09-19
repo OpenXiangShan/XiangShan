@@ -63,6 +63,9 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
 
   // traceInst should always be valid
   val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
+
+  // pc match
+  val pcMatch = Flipped(new TracePCMatchBundle())
 }
 
 class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[TraceBufferPtr](Size)
@@ -139,6 +142,8 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
       traceBuffer.map(_ := 0.U.asTypeOf(new TraceInstrBundle))
     }
+
+    io.pcMatch.found  := Cat(traceBuffer.map(_.pcVA === io.pcMatch.pcVA)).orR
 
     // debug check
 
