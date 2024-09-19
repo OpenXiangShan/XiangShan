@@ -23,7 +23,6 @@ import utility.XSError
 
 class TraceCheckerResp(implicit p: Parameters) extends TraceBundle {
   val traceRange = UInt(PredictWidth.W)
-  val traceValid = UInt(PredictWidth.W)
 }
 
 class TraceCheckerIO(implicit p: Parameters) extends TraceBundle {
@@ -46,11 +45,9 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
   val predRange = io.predictInfo.instRange
   val checkRange = io.predChecker.stage1Out.fixedRange.asUInt
   io.out.traceRange := io.traceRange & checkRange
-  io.out.traceValid := VecInit(io.traceInsts.map(_.valid)).asUInt
 
   when (io.traceForceJump) {
     io.out.traceRange := 1.U
-    io.out.traceValid := 1.U
   }
 
   /**

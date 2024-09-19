@@ -59,7 +59,6 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   val recv = Flipped(Valid(new TraceRecvInfo()))
   // BranchPredictionRedirect === Redirect with some traits
   val redirect = Flipped(Valid(new BranchPredictionRedirect()))
-  val startSignal = Input(Bool())
 
   // traceInst should always be valid
   val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
