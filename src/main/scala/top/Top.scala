@@ -217,6 +217,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
+      val traceCoreInterface = Vec(NumCores, new Bundle {
+        val fromEncoder = Input(new Bundle {
+          val enable = Bool()
+          val stall  = Bool()
+        })
+        val toEncoder   = Output(new Bundle {
+          val cause     = UInt(TraceCauseWidth.W)
+          val tval      = UInt(TraceTvalWidth.W)
+          val priv      = UInt(TracePrivWidth.W)
+          val iaddr     = UInt((TraceTraceGroupNum * TraceIaddrWidth).W)
+          val itype     = UInt((TraceTraceGroupNum * TraceItypeWidth).W)
+          val iretire   = UInt((TraceTraceGroupNum * TraceIretireWidthCompressed).W)
+          val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
+        })
+      })
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
@@ -247,6 +262,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.msiInfo := msiInfo
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
+      io.traceCoreInterface(i).toEncoder := core.module.io.traceCoreInterface.toEncoder
+      core.module.io.traceCoreInterface.fromEncoder := io.traceCoreInterface(i).fromEncoder
       core.module.io.reset_vector := io.riscv_rst_vec(i)
       chi_dummyllc_opt.foreach { case llc =>
         llc.module.io.rn(i) <> core.module.io.chi.get

@@ -28,6 +28,7 @@ import utils._
 import utility._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
@@ -83,6 +84,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val resetInFrontend = Output(Bool())
+    val traceCoreInterface = new TraceCoreInterface
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -236,6 +238,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.traceCoreInterface <> backend.io.traceCoreInterface
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
