@@ -8,8 +8,8 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
 
 class TraceTrap(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val cause = UInt(XLEN.W)
-  val tval  = UInt(XLEN.W)
+  val cause = UInt(CauseWidth.W)
+  val tval  = UInt(TvalWidth.W)
   val priv  = Priv()
 }
 
@@ -20,9 +20,9 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
 }
 
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val iaddr     = if (hasIaddr)   Some(UInt(XLEN.W))                      else None
+  val iaddr     = if (hasIaddr)   Some(UInt(IaddrWidth.W))                else None
   val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
-  val ftqOffset = if (!hasIaddr)  Some( UInt(log2Up(PredictWidth).W))     else None
+  val ftqOffset = if (!hasIaddr)  Some(UInt(log2Up(PredictWidth).W))      else None
   val tracePipe = new TracePipe(iretireWidth)
 }
 
@@ -37,17 +37,6 @@ class FromEncoder extends Bundle {
 }
 
 class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  // parameter
-  val CauseWidth             = XLEN
-  val TvalWidth              = XLEN
-  val PrivWidth              = 3
-  val IaddrWidth             = XLEN
-  val ItypeWidth             = 4
-  val IretireWidthInPipe     = log2Up(RenameWidth * 2)
-  val IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
-  val IlastsizeWidth         = 1
-  val GroupNum               = TraceGroupNum
-  
   val fromEncoder = Input(new Bundle {
     val enable = Bool()
     val stall  = Bool()
@@ -56,10 +45,10 @@ class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSPa
     val cause     = UInt(CauseWidth.W)
     val tval      = UInt(TvalWidth.W)
     val priv      = UInt(PrivWidth.W)
-    val iaddr     = UInt((GroupNum * IaddrWidth).W)
-    val itype     = UInt((GroupNum * ItypeWidth).W)
-    val iretire   = UInt((GroupNum * IretireWidthCompressed).W)
-    val ilastsize = UInt((GroupNum * IlastsizeWidth).W)
+    val iaddr     = UInt((TraceGroupNum * IaddrWidth).W)
+    val itype     = UInt((TraceGroupNum * ItypeWidth).W)
+    val iretire   = UInt((TraceGroupNum * IretireWidthCompressed).W)
+    val ilastsize = UInt((TraceGroupNum * IlastsizeWidth).W)
   })
 }
 
