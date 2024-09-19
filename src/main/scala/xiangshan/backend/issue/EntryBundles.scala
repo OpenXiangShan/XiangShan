@@ -420,16 +420,19 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       }
     }
 
-    val srcLoadDependencyForCancel                     = Wire(chiselTypeOf(common.srcLoadDependencyNext))
+    val srcIsLoadCancel                                = Wire(chiselTypeOf(common.srcLoadCancelVec))
     val srcLoadDependencyOut                           = Wire(chiselTypeOf(common.srcLoadDependencyNext))
     if(params.hasIQWakeUp) {
+      val wakeupIsLoadCancelVec                        = hasIQWakeupGet.wakeupLoadDependencyByIQVec.map(x => LoadShouldCancel(Some(x), commonIn.ldCancel))
+      val srcWakeupIsLoadCancel                        = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, wakeupIsLoadCancelVec))
+      val statusIsLoadCancel                           = status.srcStatus.map(x => LoadShouldCancel(Some(x.srcLoadDependency), commonIn.ldCancel))
       val wakeupSrcLoadDependency                      = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.wakeupLoadDependencyByIQVec))
       val wakeupSrcLoadDependencyNext                  = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.shiftedWakeupLoadDependencyByIQVec))
-      srcLoadDependencyForCancel.zipWithIndex.foreach { case (ldOut, srcIdx) =>
-        ldOut                                         := (if (isComp) Mux(hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR,
-                                                                      wakeupSrcLoadDependency(srcIdx),
-                                                                      status.srcStatus(srcIdx).srcLoadDependency)
-                                                          else status.srcStatus(srcIdx).srcLoadDependency)
+      srcIsLoadCancel.zipWithIndex.foreach      { case (ldCancel, srcIdx) =>
+        ldCancel                                      := (if (isComp) Mux(hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR,
+                                                                      srcWakeupIsLoadCancel(srcIdx),
+                                                                      statusIsLoadCancel(srcIdx))
+                                                          else statusIsLoadCancel(srcIdx))
       }
       srcLoadDependencyOut.zipWithIndex.foreach { case (ldOut, srcIdx) =>
         ldOut                                         := (if (isComp) Mux(hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR,
@@ -438,10 +441,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           else common.srcLoadDependencyNext(srcIdx))
       }
     } else {
-      srcLoadDependencyForCancel                      := status.srcStatus.map(_.srcLoadDependency)
+      srcIsLoadCancel                                 := 0.U.asTypeOf(srcIsLoadCancel)
       srcLoadDependencyOut                            := common.srcLoadDependencyNext
     }
-    commonOut.cancelBypass                            := srcLoadDependencyForCancel.map(x => LoadShouldCancel(Some(x), commonIn.ldCancel)).reduce(_ | _)
+    commonOut.cancelBypass                            := srcIsLoadCancel.reduce(_ || _)
     commonOut.entry.bits.status.srcStatus.map(_.srcLoadDependency).zipWithIndex.foreach { case (ldOut, srcIdx) =>
       ldOut                                           := srcLoadDependencyOut(srcIdx)
     }
