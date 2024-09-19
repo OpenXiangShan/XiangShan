@@ -554,7 +554,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException) && !lastCycleFlush
-  io.exception.valid := RegNext(exceptionHappen)
+  val exceptionHappenReg = GatedValidRegNext(exceptionHappen)
+  io.exception.valid := exceptionHappenReg
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
   io.exception.bits.gpaddr := io.readGPAMemData
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
@@ -585,10 +586,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   // T redirect.valid, T+1 use walkPtrVec read robEntries, T+2 start walk, shouldWalkVec used in T+2
   val shouldWalkVec = Wire(Vec(CommitWidth,Bool()))
-  val walkingPtrVec = RegNext(walkPtrVec)
+  // Maybe we can use walkPtrVec - CommitWidth here to save area
+  val walkingPtrVec = RegEnable(walkPtrVec, state === s_walk)
+  val redirectValidReg = RegNext(io.redirect.valid)
   when(io.redirect.valid){
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
-  }.elsewhen(RegNext(io.redirect.valid)){
+  }.elsewhen(redirectValidReg){
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
   }.elsewhen(state === s_walk){
     shouldWalkVec := VecInit(walkingPtrVec.map(_ <= lastWalkPtr).zip(donotNeedWalk).map(x => x._1 && !x._2))
@@ -622,8 +625,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val resetVstart = dirty_vs && !io.vstartIsZero
 
-  io.csr.vstart.valid := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstartEn, resetVstart))
-  io.csr.vstart.bits := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstart, 0.U))
+  io.csr.vstart.valid := GatedValidRegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstartEn, resetVstart))
+  io.csr.vstart.bits := Mux(exceptionHappenReg, RegEnable(exceptionDataRead.bits.vstart, exceptionHappen), 0.U)
 
   val vxsat = Wire(Valid(Bool()))
   vxsat.valid := io.commits.isCommit && vxsat.bits
@@ -735,7 +738,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * (2) walk: when walking comes to the end, switch to s_idle
    */
   val state_next = Mux(
-    io.redirect.valid || RegNext(io.redirect.valid), s_walk,
+    io.redirect.valid || redirectValidReg, s_walk,
     Mux(
       state === s_walk && walkFinished && rab.io.status.walkEnd && vtypeBuffer.io.status.walkEnd, s_idle,
       state
@@ -797,7 +800,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   when(io.redirect.valid) {
     donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
-  }.elsewhen(RegNext(io.redirect.valid)){
+  }.elsewhen(redirectValidReg){
     donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
   }.otherwise{
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
@@ -828,7 +831,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGroup.zipWithIndex.map { case (deq, i) => deq := deqPtrVec(0) + i.U }
   val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
-  val redirectValidReg = RegNext(io.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
   when(io.redirect.valid){
