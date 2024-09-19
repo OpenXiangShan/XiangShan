@@ -70,8 +70,8 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
-  // Assuming the branchType is taken here, it will be correctly modified after writeBack.
-  def Branch = 5.U
+  // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
+  def Branch = NonTaken
 
   def jumpTypeGen(brType: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
@@ -144,9 +144,9 @@ object Priv extends NamedUInt(3) {
 }
 
 class OpRegType extends Bundle {
-  val value = UInt(3.W)
+  val value = UInt(6.W)
   def isX0   = this.value === 0.U
   def isX1   = this.value === 1.U
   def isX5   = this.value === 5.U
-  def isLink = Seq(isX1, isX5).map(_ === this.value).reduce(_ || _)
+  def isLink = Seq(isX1, isX5).reduce(_ || _)
 }
