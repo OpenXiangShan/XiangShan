@@ -53,6 +53,10 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+ifndef NOOP_HOME
+$(error NOOP_HOME not defined)
+endif
+
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
