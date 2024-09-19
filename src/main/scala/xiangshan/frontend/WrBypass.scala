@@ -39,6 +39,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     val write_way_mask = if (multipleWays) Some(Input(Vec(numWays, Bool()))) else None
 
     val conflict_valid = if(extraPort.isDefined) Some(Input(Bool())) else None
+    val conflict_write_data = if(extraPort.isDefined) Some(Input(Vec(numWays, gen))) else None
     val conflict_way_mask = if(extraPort.isDefined) Some(Input(UInt(numBr.W))) else None
 
     val hit = Output(Bool())
@@ -131,7 +132,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
     when (io.wen && io.conflict_valid.getOrElse(false.B)) {
       conflict_flags(Mux(hit, hit_idx, enq_idx)) := true.B
       conflict_way_mask := io.conflict_way_mask.get
-      conflict_data.zipWithIndex.foreach { case (s, i) => s := io.write_data(i)}
+      conflict_data := io.conflict_write_data.get
     }
     when (io.conflict_clean.getOrElse(false.B)) {
       conflict_flags(conflict_idx) := false.B

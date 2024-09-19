@@ -238,6 +238,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val can_write = (wrbypass.io.update_idx.get =/= s0_idx || !s0_fire) && wrbypass.io.has_conflict.get
 
   wrbypass.io.conflict_valid.get := write_conflict || (can_write && (io.update_mask.reduce(_||_) || doing_reset))
+  wrbypass.io.conflict_write_data.get := Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs)
   wrbypass.io.conflict_way_mask.get := Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask.asUInt)
 
   val wrbrpass_idx = wrbypass.io.update_idx.get
