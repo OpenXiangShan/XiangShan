@@ -762,6 +762,30 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
   def getPPN() = {
     Cat(ppn_high, ppn)
   }
+
+  def canRefill(levelUInt: UInt, s2xlate: UInt, pbmte: Bool, mode: UInt) = {
+    val canRefill = WireInit(false.B)
+    switch (s2xlate) {
+      is (allStage) {
+        canRefill := !isStage1Gpf(mode) && !isPf(levelUInt, pbmte)
+      }
+      is (onlyStage1) {
+        canRefill := !isAf() && !isPf(levelUInt, pbmte)
+      }
+      is (onlyStage2) {
+        canRefill := !isAf() && !isGpf(levelUInt, pbmte)
+      }
+      is (noS2xlate) {
+        canRefill := !isAf() && !isPf(levelUInt, pbmte)
+      }
+    }
+    canRefill
+  }
+
+  def onlyPf(levelUInt: UInt, s2xlate: UInt, pbmte: Bool) = {
+    s2xlate === noS2xlate && isPf(levelUInt, pbmte) && !isAf()
+  }
+
   override def toPrintable: Printable = {
     p"ppn:0x${Hexadecimal(ppn)} perm:b${Binary(perm.asUInt)}"
   }
@@ -888,8 +912,10 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   val vmid = Some(UInt(vmidLen.W))
   val pbmts = Vec(num, UInt(ptePbmtLen.W))
   val ppns = Vec(num, UInt(gvpnLen.W))
+  // valid or not, vs = 0 will not hit
   val vs   = Vec(num, Bool())
-  val af   = Vec(num, Bool())
+  // only pf or not, onlypf = 1 means only trigger pf when nox2late
+  val onlypf = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
   val reservedBits = if(ReservedBits > 0) Some(UInt(ReservedBits.W)) else None
@@ -915,10 +941,10 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     val asid_value = Mux(s2xlate, vasid, asid)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
     val vmid_hit = Mux(s2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
-    asid_hit && vmid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
+    asid_hit && vmid_hit && tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level))
   }
 
-  def genEntries(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool) = {
+  def genEntries(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool, mode: UInt) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
@@ -931,8 +957,8 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.ppn
-      ps.vs(i)   := Mux(s2xlate === onlyStage2, !pte.isGpf(levelUInt, pbmte), !pte.isPf(levelUInt, pbmte)) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
-      ps.af(i)   := Mux(s2xlate === allStage, false.B, pte.isAf()) // if allstage, this refill is from ptw or llptw, so the af is invalid
+      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
       ps.perms.map(_(i) := pte.perm)
     }
     ps.reservedBits.map(_ := true.B)
@@ -994,8 +1020,8 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     Cat(res).orR
   }
 
-  def gen(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool) = {
-    this.entries := entries.genEntries(vpn, asid, vmid, data, levelUInt, prefetch, s2xlate, pbmte)
+  def gen(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool, s2xlate: UInt, pbmte: Bool, mode: UInt) = {
+    this.entries := entries.genEntries(vpn, asid, vmid, data, levelUInt, prefetch, s2xlate, pbmte, mode)
     this.encode()
   }
 }
