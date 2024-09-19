@@ -1153,6 +1153,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     (isCboInval && io.fromCSR.special.cboI2F) -> LSUOpType.cbo_flush,
   ))
 
+  // Don't compress in the same Rob entry when crossing Ftq entry boundary
+  io.deq.decodedInst.canRobCompress := decodedInst.canRobCompress && !io.enq.ctrlFlow.isLastInFtqEntry
+
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
