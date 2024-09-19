@@ -6,9 +6,12 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.HasXSParameter
 
 class TraceParams(
- val TraceGroupNum         : Int,
- val HasEncoder            : Boolean,
- val TraceEnable           : Boolean,
+  val HasEncoder     : Boolean,
+  val TraceEnable    : Boolean,
+  val TraceGroupNum  : Int,
+  val PrivWidth      : Int,
+  val ItypeWidth     : Int,
+  val IlastsizeWidth : Int,
 )
 
 class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
