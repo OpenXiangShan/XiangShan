@@ -73,6 +73,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val writebackNums = Flipped(Vec(writeback.size - params.StdCnt, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
     val commits = Output(new RobCommitIO)
+    val trace = new Bundle {
+      val blockCommit = Input(Bool())
+      val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe)
+    }
     val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
     val isVsetFlushPipe = Output(Bool())
@@ -737,8 +741,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(deqNeedFlush && io.flushOut.valid && !io.flushOut.bits.flushItself()){
     deqHasFlushed := true.B
   }
+  val traceBlock = io.trace.blockCommit
   val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid ||
-    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState
+    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState || traceBlock
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -1212,6 +1217,51 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.toVecExcpMod.logicPhyRegMap := rab.io.toVecExcpMod.logicPhyRegMap
   io.toVecExcpMod.excpInfo := vecExcpInfo
+
+  /**
+   * trace
+   */
+  val trapTraceInfoFromCsr = io.csr.traceTrapInfo
+
+  // trace output
+  val traceTrap = io.trace.traceCommitInfo.trap
+  val traceValids = io.trace.traceCommitInfo.blocks.map(_.valid)
+  val traceBlocks = io.trace.traceCommitInfo.blocks
+  val traceBlockInPipe = io.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
+
+  traceTrap := trapTraceInfoFromCsr.bits
+
+  for (i <- 0 until CommitWidth) {
+    traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
+    traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
+    traceBlockInPipe(i).itype :=  rawInfo(i).traceBlockInPipe.itype
+    traceBlockInPipe(i).iretire := Mux(io.commits.isCommit && io.commits.commitValid(i), rawInfo(i).traceBlockInPipe.iretire, 0.U)
+    traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
+  }
+
+  for (i <- 0 until CommitWidth) {
+    val iretire = traceBlocks(i).bits.tracePipe.iretire
+    val itype   = traceBlocks(i).bits.tracePipe.itype
+    traceValids(i) := iretire =/= 0.U
+  }
+
+  val t_idle :: t_waiting :: Nil = Enum(2)
+  val traceState = RegInit(t_idle)
+  when(traceState === t_idle){
+    when(io.exception.valid){
+      traceState := t_waiting
+    }
+  }.elsewhen(traceState === t_waiting){
+    when(trapTraceInfoFromCsr.valid){
+      traceState := t_idle
+
+      traceBlocks(0).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
+        Itype.Interrupt,
+        Itype.Exception
+      )
+      traceValids(0) := true.B
+    }
+  }
 
   /**
    * debug info
