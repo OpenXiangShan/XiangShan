@@ -622,6 +622,8 @@ class CtrlBlockImp(
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
+  io.robio.storeDebugInfo <> rob.io.storeDebugInfo
+
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
   // exu block to decode
@@ -730,6 +732,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val hasVsetvl = Output(Bool())
     }
     val criticalError = Input(Bool())
+
+    // store event difftest information
+    val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+      val robidx = Input(new RobPtr)
+      val pc     = Output(UInt(VAddrBits.W))
+    })
   }
 
   val toDecode = new Bundle {
