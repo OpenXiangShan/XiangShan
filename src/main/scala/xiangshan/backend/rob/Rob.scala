@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -86,7 +87,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ftqPtr = new FtqPtr()
       val ftqOffset = UInt(log2Up(PredictWidth).W)
     })
-    val readGPAMemData = Input(UInt(GPAddrBits.W))
+    val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
 
     val debug_ls = Flipped(new DebugLSIO)
@@ -556,12 +557,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
-  io.exception.bits.gpaddr := io.readGPAMemData
+  io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
+  io.exception.bits.isForVS := io.readGPAMemData.isForVS
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   io.exception.bits.isFetchMalAddr := RegEnable(exceptionDataRead.bits.isFetchMalAddr && deqHasException, exceptionHappen)
-  io.exception.bits.isForVS := RegEnable(exceptionDataRead.bits.isForVS, exceptionHappen)
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
@@ -1085,7 +1086,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
     exceptionGen.io.enq(i).bits.hasException := io.enq.req(i).bits.hasException
-    exceptionGen.io.enq(i).bits.isForVS := io.enq.req(i).bits.isForVS
     exceptionGen.io.enq(i).bits.isFetchMalAddr := io.enq.req(i).bits.isFetchMalAddr
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.flushPipe
     exceptionGen.io.enq(i).bits.isVset := io.enq.req(i).bits.isVset
@@ -1111,7 +1111,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
     exc_wb.bits.exceptionVec    := wb.bits.exceptionVec.get
     exc_wb.bits.hasException    := wb.bits.exceptionVec.get.asUInt.orR // Todo: use io.writebackNeedFlush(i) instead
-    exc_wb.bits.isForVS         := wb.bits.isForVS.get
     exc_wb.bits.isFetchMalAddr  := false.B
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
     exc_wb.bits.isVset          := false.B

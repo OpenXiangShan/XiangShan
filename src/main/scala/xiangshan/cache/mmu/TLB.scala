@@ -326,7 +326,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldPf = (ldPermFail || pf) && isLd
     val stPf = (stPermFail || pf) && isSt
     val instrPf = (instrPermFail || pf) && isInst
-    val isFakePte = !perm.v && !perm.pf && !perm.af
+    val isFakePte = !perm.v && !perm.pf && !perm.af && !onlyS2
     val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v && !perm.pf && !perm.af
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 

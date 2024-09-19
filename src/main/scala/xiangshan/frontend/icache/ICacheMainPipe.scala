@@ -178,7 +178,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_waymasks       = VecInit(fromWayLookup.bits.waymask.map(_.asTypeOf(Vec(nWays, Bool()))))
   val s0_req_ptags      = fromWayLookup.bits.ptag
   val s0_req_gpaddr     = fromWayLookup.bits.gpaddr
-  val s0_req_isForVs    = fromWayLookup.bits.isForVS
+  val s0_req_isForVS    = fromWayLookup.bits.isForVS
   val s0_itlb_exception = fromWayLookup.bits.itlb_exception
   val s0_itlb_pbmt      = fromWayLookup.bits.itlb_pbmt
   val s0_meta_codes     = fromWayLookup.bits.meta_codes
@@ -227,7 +227,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_vaddr        = RegEnable(s0_req_vaddr,        0.U.asTypeOf(s0_req_vaddr),     s0_fire)
   val s1_req_ptags        = RegEnable(s0_req_ptags,        0.U.asTypeOf(s0_req_ptags),     s0_fire)
   val s1_req_gpaddr       = RegEnable(s0_req_gpaddr,       0.U.asTypeOf(s0_req_gpaddr),    s0_fire)
-  val s1_req_isForVs      = RegEnable(s0_req_isForVs,      0.U.asTypeOf(s0_req_isForVs),   s0_fire)
+  val s1_req_isForVS      = RegEnable(s0_req_isForVS,      0.U.asTypeOf(s0_req_isForVS),   s0_fire)
   val s1_doubleline       = RegEnable(s0_doubleline,       0.U.asTypeOf(s0_doubleline),    s0_fire)
   val s1_SRAMhits         = RegEnable(s0_hits,             0.U.asTypeOf(s0_hits),          s0_fire)
   val s1_itlb_exception   = RegEnable(s0_exception_out,    0.U.asTypeOf(s0_exception_out), s0_fire)
@@ -326,7 +326,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_req_vaddr        = RegEnable(s1_req_vaddr,        0.U.asTypeOf(s1_req_vaddr),     s1_fire)
   val s2_req_ptags        = RegEnable(s1_req_ptags,        0.U.asTypeOf(s1_req_ptags),     s1_fire)
   val s2_req_gpaddr       = RegEnable(s1_req_gpaddr,       0.U.asTypeOf(s1_req_gpaddr),    s1_fire)
-  val s2_req_isForVs      = RegEnable(s1_req_isForVs,      0.U.asTypeOf(s1_req_isForVs),   s1_fire)
+  val s2_req_isForVS      = RegEnable(s1_req_isForVS,      0.U.asTypeOf(s1_req_isForVS),   s1_fire)
   val s2_doubleline       = RegEnable(s1_doubleline,       0.U.asTypeOf(s1_doubleline),    s1_fire)
   val s2_exception        = RegEnable(s1_exception_out,    0.U.asTypeOf(s1_exception_out), s1_fire)  // includes itlb/pmp/meta exception
   val s2_excp_fromBackend = RegEnable(s1_excp_fromBackend, false.B,                        s1_fire)
@@ -491,7 +491,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.vaddr       := s2_req_vaddr(i)
     toIFU(i).bits.paddr       := s2_req_paddr(i)
     toIFU(i).bits.gpaddr      := s2_req_gpaddr  // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
-    toIFU(i).bits.isForVS     := s2_req_isForVs
+    toIFU(i).bits.isForVS     := s2_req_isForVS
   }
 
   s2_flush := io.flush

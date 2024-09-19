@@ -459,6 +459,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
+  csrio.memExceptionIsForVS := io.mem.exceptionAddr.isForVS
   csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
   csrio.perf <> io.perf
   csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
@@ -523,7 +524,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.v0Wen.foreach(_ := source.bits.uop.v0Wen)
     sink.bits.vlWen.foreach(_ := source.bits.uop.vlWen)
     sink.bits.exceptionVec.foreach(_ := source.bits.uop.exceptionVec)
-    sink.bits.isForVS.foreach(_ := source.bits.uop.isForVS)
     sink.bits.flushPipe.foreach(_ := source.bits.uop.flushPipe)
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
     sink.bits.debug := source.bits.debug
@@ -790,6 +790,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val exceptionAddr = Input(new Bundle {
     val vaddr = UInt(XLEN.W)
     val gpaddr = UInt(XLEN.W)
+    val isForVS = Bool()
   })
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))

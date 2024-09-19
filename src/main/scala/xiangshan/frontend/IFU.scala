@@ -27,6 +27,7 @@ import xiangshan.frontend.icache._
 import utils._
 import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import xiangshan.backend.GPAMemEntry
 import utility.ChiselDB
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
@@ -55,7 +56,7 @@ class IfuToBackendIO(implicit p:Parameters) extends XSBundle {
   val gpaddrMem_waddr = Output(UInt(log2Ceil(FtqSize).W)) // Ftq Ptr
   // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
   // TODO: avoid cross page entry in Ftq
-  val gpaddrMem_wdata = Output(UInt(GPAddrBits.W))
+  val gpaddrMem_wdata = Output(new GPAMemEntry)
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {
@@ -381,7 +382,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
-  val f2_isForVS      = VecInit((0 until PortNumber).map(i => fromICache(i).bits.isForVS))
+  val f2_isForVS      = fromICache(0).bits.isForVS
 
   // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
@@ -422,10 +423,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
       (isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine) -> f2_exception(1)
   ))))
   val f2_perf_info    = io.icachePerfInfo
-  val f2_isForVS_vec  = VecInit((0 until PredictWidth).map( i => MuxCase(ExceptionType.none, Seq(
-      !isNextLine(f2_pc(i), f2_ftq_req.startAddr)                   -> f2_isForVS(0),
-      (isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine) -> f2_isForVS(1)
-  ))))
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
     require(HasCExtension)
@@ -525,7 +522,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_jump_offset     = RegEnable(f2_jump_offset,   f2_fire)
   val f3_exception_vec   = RegEnable(f2_exception_vec, f2_fire)
   val f3_crossPage_exception_vec = RegEnable(f2_crossPage_exception_vec, f2_fire)
-  val f3_isForVS_vec     = RegEnable(f2_isForVS_vec, f2_fire)
 
   val f3_pc_lower_result = RegEnable(f2_pc_lower_result, f2_fire)
   val f3_pc_high         = RegEnable(f2_pc_high, f2_fire)
@@ -557,6 +553,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,             f2_fire)
   val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
   val f3_gpaddr         = RegEnable(f2_gpaddr,  f2_fire)
+  val f3_isForVS        = RegEnable(f2_isForVS, f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,             f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
@@ -586,6 +583,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val mmio_resend_addr      = RegInit(0.U(PAddrBits.W))
   val mmio_resend_exception = RegInit(0.U(ExceptionType.width.W))
   val mmio_resend_gpaddr    = RegInit(0.U(GPAddrBits.W))
+  val mmio_resend_isForVS    = RegInit(false.B)
 
   //last instuction finish
   val is_first_instr = RegInit(true.B)
@@ -684,6 +682,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         mmio_resend_addr      := io.iTLBInter.resp.bits.paddr(0)
         mmio_resend_exception := tlb_exception
         mmio_resend_gpaddr    := io.iTLBInter.resp.bits.gpaddr(0)
+        mmio_resend_isForVS   := io.iTLBInter.resp.bits.isForVS(0)
       }
     }
 
@@ -718,6 +717,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       mmio_resend_addr      := 0.U
       mmio_resend_exception := ExceptionType.none
       mmio_resend_gpaddr    := 0.U
+      mmio_resend_isForVS   := false.B
     }
   }
 
@@ -729,6 +729,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_resend_addr      := 0.U
     mmio_resend_exception := ExceptionType.none
     mmio_resend_gpaddr    := 0.U
+    mmio_resend_isForVS   := false.B
     f3_mmio_data.map(_ := 0.U)
   }
 
@@ -828,7 +829,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
-  io.toIbuffer.bits.isForVS     := f3_isForVS_vec
   // exceptionFromBackend only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
@@ -853,7 +853,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_exception.map(_ === ExceptionType.gpf).reduce(_||_)
   )
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata := Mux(f3_req_is_mmio, mmio_resend_gpaddr, f3_gpaddr)
+  io.toBackend.gpaddrMem_wdata.gpaddr  := Mux(f3_req_is_mmio, mmio_resend_gpaddr, f3_gpaddr)
+  io.toBackend.gpaddrMem_wdata.isForVS := Mux(f3_req_is_mmio, mmio_resend_isForVS, f3_isForVS)
 
   //Write back to Ftq
   val f3_cache_fetch = f3_valid && !(f2_fire && !f2_flush)

@@ -38,6 +38,7 @@ class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Output(UInt((log2Up(VLEN) + 1).W))
   val vl = Output(UInt((log2Up(VLEN) + 1).W))
   val gpaddr = Output(UInt(XLEN.W))
+  val isForVS = Output(Bool())
 }
 
 class FwdEntry extends Bundle {
@@ -230,6 +231,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.exceptionAddr.vstart := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vstart, loadQueue.io.exceptionAddr.vstart)
   io.exceptionAddr.vl     := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vl, loadQueue.io.exceptionAddr.vl)
   io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
+  io.exceptionAddr.isForVS:= Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isForVS, loadQueue.io.exceptionAddr.isForVS)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
 
   // naive uncache arbiter

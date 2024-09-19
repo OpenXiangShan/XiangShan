@@ -148,6 +148,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
   io.exceptionAddr.gpaddr := req.gpaddr
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
+  io.exceptionAddr.isForVS:= req.isForVS
 
   when(req_valid && io.flushFrmMaBuf) {
     req_valid := false.B
@@ -1096,9 +1097,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // Read vaddr for mem exception
   io.exceptionAddr.vaddr  := exceptionBuffer.io.exceptionAddr.vaddr
-  io.exceptionAddr.gpaddr  := exceptionBuffer.io.exceptionAddr.gpaddr
+  io.exceptionAddr.gpaddr := exceptionBuffer.io.exceptionAddr.gpaddr
   io.exceptionAddr.vstart := exceptionBuffer.io.exceptionAddr.vstart
   io.exceptionAddr.vl     := exceptionBuffer.io.exceptionAddr.vl
+  io.exceptionAddr.isForVS:= exceptionBuffer.io.exceptionAddr.isForVS
 
   // vector commit or replay from
   val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))

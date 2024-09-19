@@ -81,8 +81,6 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
-  private val isGuestExcp      = isFetchGuestExcp || isLSGuestExcp
-  private val isForVS          = isException && in.isForVS
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
   private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp
@@ -146,7 +144,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
-  out.htinst.bits.ALL           := Mux(isGuestExcp && isForVS, 0x3000.U, 0.U)
+  out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVS || isLSGuestExcp && in.memExceptionIsForVS, 0x3000.U, 0.U)
   out.targetPc.bits.pc          := in.pcFromXtvec
   out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec)

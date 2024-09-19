@@ -123,7 +123,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(XLEN.W)
-      val excpGPA = UInt(XLEN.W) // Todo: use guest physical address width
+      val excpGPA = UInt(XLEN.W)
+      val excpIsForVS = Bool()
     })
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
@@ -660,7 +661,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
-        in.isForVS := trapIsForVS
+        in.trapIsForVS := trapIsForVS
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
@@ -682,6 +683,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.memExceptionVAddr := io.fromMem.excpVA
         in.memExceptionGPAddr := io.fromMem.excpGPA
+        in.memExceptionIsForVS := io.fromMem.excpIsForVS
 
         in.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject
         in.hvictlIID := hvictl.regOut.IID.asUInt

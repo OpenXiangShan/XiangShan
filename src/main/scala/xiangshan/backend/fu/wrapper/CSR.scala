@@ -107,6 +107,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
   csrMod.io.fromMem.excpGPA := csrIn.memExceptionGPAddr
+  csrMod.io.fromMem.excpIsForVS := csrIn.memExceptionIsForVS
 
   csrMod.io.fromRob.trap.valid := csrIn.exception.valid
   csrMod.io.fromRob.trap.bits.pc := csrIn.exception.bits.pc

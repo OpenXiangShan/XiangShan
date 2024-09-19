@@ -46,9 +46,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val exceptionAddr = ValidIO(new Bundle {
+    val exceptionInfo = ValidIO(new Bundle {
       val vaddr = UInt(XLEN.W)
       val gpaddr = UInt(XLEN.W)
+      val isForVS = Bool()
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
@@ -86,9 +87,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val mask_reg = Reg(UInt(8.W))
   val fuop_reg = Reg(UInt(8.W))
 
-  io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits.vaddr := in.src(0)
-  io.exceptionAddr.bits.gpaddr := gpaddr
+  io.exceptionInfo.valid := atom_override_xtval
+  io.exceptionInfo.bits.vaddr := in.src(0)
+  io.exceptionInfo.bits.gpaddr := gpaddr
+  io.exceptionInfo.bits.isForVS := isForVS
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -361,7 +363,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits := DontCare
   io.out.bits.uop := in.uop
   io.out.bits.uop.exceptionVec := exceptionVec
-  io.out.bits.uop.isForVS := isForVS
   io.out.bits.data := resp_data
   io.out.bits.debug.isMMIO := is_mmio
   io.out.bits.debug.paddr := paddr

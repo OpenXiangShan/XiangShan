@@ -216,7 +216,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   )
 
   val s1_req_isForVS = PriorityMuxDefault(
-    s1_itlb_exception_gpf zip (0 until PortNumber).map(i => s1_req_isForVS_tmp(i)),
+    s1_itlb_exception_gpf zip s1_req_isForVS_tmp,
     0.U.asTypeOf(s1_req_isForVS_tmp(0))
   )
 

@@ -50,6 +50,7 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val vstart           = UInt(elemIdxBits.W)
   val exceptionVaddr   = UInt(VAddrBits.W)
   val exceptionGpaddr  = UInt(GPAddrBits.W)
+  val exceptionIsForVS = Bool()
   val exception_va     = Bool()
   val exception_gpa    = Bool()
   val exception_pa     = Bool()
@@ -190,7 +191,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val fuType                          = instMicroOp.uop.fuType
   val mask                            = instMicroOp.mask
   val exceptionVec                    = instMicroOp.uop.exceptionVec
-  val isForVS                         = instMicroOp.uop.isForVS
   val issueEew                        = instMicroOp.uop.vpu.veew
   val issueLmul                       = instMicroOp.uop.vpu.vtype.vlmul
   val issueSew                        = instMicroOp.uop.vpu.vtype.vsew
@@ -396,10 +396,10 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld && canTriggerException
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st && canTriggerException
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld && canTriggerException
-      isForVS := io.dtlb.resp.bits.isForVS
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
         instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
+        instMicroOp.exceptionIsForVS  := io.dtlb.resp.bits.isForVS
       }
   }
   // pmp
@@ -671,6 +671,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
+  io.exceptionInfo.bits.isForVS       := instMicroOp.exceptionIsForVS
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
