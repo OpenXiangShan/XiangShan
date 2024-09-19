@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
 import device.XSDebugModuleParams
@@ -39,7 +40,7 @@ class StandAloneDebugModule (
   useTL, baseAddress, addrWidth, dataWidth, hartNum
 ) with HasMasterInterface {
 
-  def addressSet: AddressSet = AddressSet(XSDebugModuleParams.apply(p(XSTileKey).head.XLEN).baseAddress, 0xfff)
+  def addressSet: AddressSet = p(DebugModuleKey).get.address
 
   val debugModule = LazyModule(new DebugModule(hartNum)(p))
   debugModule.debug.node := xbar

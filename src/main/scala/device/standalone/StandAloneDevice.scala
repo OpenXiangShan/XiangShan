@@ -22,6 +22,7 @@ import chisel3.experimental.{annotate, ChiselAnnotation}
 import chisel3.experimental.dataview._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
@@ -217,7 +218,9 @@ object ArgParser {
       case "StandAloneDebugModule" =>
         DisableMonitors(p => LazyModule(new StandAloneDebugModule(
           useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size
-        )(p)))(p)
+        )(p)))(p.alter((site, here, up) => {
+          case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = baseAddress))
+        }))
       case _: String => throw new IllegalArgumentException(s"$module not found")
     }
     (device, firrtlOpts)
