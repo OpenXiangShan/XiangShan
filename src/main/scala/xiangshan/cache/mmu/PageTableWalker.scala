@@ -441,8 +441,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire, true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
-  TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
-
   val perfEvents = Seq(
     ("fsm_count         ", io.req.fire                                     ),
     ("fsm_busy          ", !idle                                             ),
@@ -780,10 +778,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("mem_count", io.mem.req.fire)
   XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
   XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
-
-  for (i <- 0 until l2tlbParams.llptwsize) {
-    TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
-  }
 
   val perfEvents = Seq(
     ("tlbllptw_incount           ", io.in.fire               ),
