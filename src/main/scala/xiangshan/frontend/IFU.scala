@@ -26,7 +26,7 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import xiangshan.frontend.tracertl.ChiselRecordForField._
-import xiangshan.frontend.tracertl.{TraceReader, TraceDriver, TracePreDecodeAndChecker, TraceFakeICache}
+import xiangshan.frontend.tracertl.TraceRTL
 import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCareValue}
 import utils._
 import utility._
@@ -229,32 +229,20 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /*** TraceReader at F3 Stage ***/
-  val traceReader = Module(new TraceReader)
-  val tracePDaC = Module(new TracePreDecodeAndChecker)
-  val traceDriver = Module(new TraceDriver)
-  val traceFakeICache = Module(new TraceFakeICache)
+  val traceRTL = Module(new TraceRTL)
+  dontTouch(traceRTL.io)
 
-  val tracePreDecoder = tracePDaC.io.predecoder
-  val tracePredChecker = tracePDaC.io.checker
-  val traceChecker = tracePDaC.io.traceChecker
-  val traceBlock = traceDriver.io.out.block
-  val traceForceJump = tracePDaC.io.traceForceJump
+  val tracePreDecoder = traceRTL.io.predecoder
+  val tracePredChecker =  traceRTL.io.checker
+  val traceChecker =  traceRTL.io.traceChecker
 
-  val traceWrongPathEmu = tracePDaC.io.traceWrongPathEmu
-  val traceAlignInsts = WireInit(tracePDaC.io.traceAlignInsts)
+  val traceBlock = traceRTL.io.block
+  val traceWrongPathEmu = traceRTL.io.traceWrongPathEmu
+  val traceAlignInsts = traceRTL.io.traceAlignInsts
+  val traceForceJump = traceRTL.io.traceForceJump
   val ibufferFireForIFU = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
   val ibufferFireForTrace = io.toIbuffer.fire
-  when(traceWrongPathEmu) { traceAlignInsts := tracePDaC.io.traceWrongPathEmuInsts }
 
-  if (!env.TraceRTLMode) {
-    traceReader.io <> DontCare
-    tracePDaC.io <> DontCare
-    traceDriver.io <> DontCare
-    traceFakeICache.io <> DontCare
-  }
-  dontTouch(traceReader.io)
-  dontTouch(tracePDaC.io)
-  dontTouch(traceDriver.io)
 
   val preDecoder       = Module(new PreDecode)
 
@@ -626,55 +614,27 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val wb_enable = Wire(Bool())
   if (env.TraceRTLMode) {
-    val traceRecv = WireInit(traceDriver.io.out.recv)
-    when (traceWrongPathEmu) {
-      traceRecv := tracePDaC.io.traceWrongPathRecv
-    }
-    traceReader.io.specifyField(
-      _.recv := traceRecv,
-      _.redirect := fromFtq.redirect,
-      _.startSignal := fromFtq.req.ready,
-      _.pcMatch.pcVA := tracePDaC.io.pcMatch.pcVA,
-    )
-    tracePDaC.io.specifyField(
-      _.traceInsts := traceReader.io.traceInsts,
+    traceRTL.io.specifyField(
       _.fromIFU.specifyField(
         _.redirect := f3_flush,
+        _.f2_fire := f2_fire,
+        _.f3_fire := f3_fire,
         _.ibuffer_fire :=  ibufferFireForTrace,
         _.wb_enable := wb_enable,
         _.valid := f3_valid,
+        _.f2_ftq_req := f2_ftq_req,
+        _.predInfo.specifyField(
+          _.startAddr := f3_ftq_req.startAddr,
+          _.nextStartAddr := f3_ftq_req.nextStartAddr,
+          _.instRange := f3_instr_range,
+          _.ftqOffset := f3_ftq_req.ftqOffset,
+        ),
       ),
       _.redirect.fromBackend := fromFtq.redirect,
       _.redirect.fromIFUBPU := (wb_redirect && !f3_wb_not_flush),
-      _.predInfo.specifyField(
-        _.startAddr := f3_ftq_req.startAddr,
-        _.nextStartAddr := f3_ftq_req.nextStartAddr,
-        _.instRange := f3_instr_range,
-        _.ftqOffset := f3_ftq_req.ftqOffset,
-      ),
-      _.fromTraceDriver.specifyField(
-        _.endWithCFI := traceDriver.io.out.endWithCFI,
-      ),
-      _.icacheData := traceFakeICache.io.resp,
-      _.pcMatch.found := traceReader.io.pcMatch.found,
-    )
-    traceDriver.io.specifyField(
-      _.fire := f3_fire,
-      _.traceInsts := tracePDaC.io.traceAlignInsts,
-      _.traceRange := traceChecker.traceRange,
-      _.predInfo := tracePDaC.io.predInfo, // duplicate signal, just to speed up waveform debug
-      _.ifuRange := checkerOutStage1.fixedRange.asUInt,
-      _.redirect.fromBackend := fromFtq.redirect,
-      _.redirect.fromIFUBPU := (wb_redirect && !f3_wb_not_flush),
-    )
-    traceFakeICache.io.specifyField(
-      _.req.valid := f2_fire,
-      _.req.bits.addr := f2_ftq_req.startAddr,
     )
   } else {
-    traceReader.io <> DontCare
-    tracePDaC.io <> DontCare
-    traceDriver.io <> DontCare
+    traceRTL.io <> DontCare
   }
 
 
@@ -907,7 +867,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   f3_instr_valid := TraceRTLChoose(
     Mux(f3_lastHalf.valid,f3_hasHalfValid ,VecInit(f3_pd.map(inst => inst.valid))),
-    traceChecker.traceValid.asTypeOf(Vec(PredictWidth, Bool())))
+    VecInit(traceAlignInsts.map(_.valid)))
 
   /*** frontend Trigger  ***/
   frontendTrigger.io.pds  := f3_pd
@@ -925,9 +885,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.specifyField(
     _.traceInfo   := traceAlignInsts.map(_.bits),
     _.instrs      := f3_expd_instr,
-    _.valid       := Mux(traceWrongPathEmu, VecInit(tracePDaC.io.traceWrongPathEmuInsts.map(_.valid)).asUInt, f3_instr_valid.asUInt),
-    _.enqEnable   := Mux(traceWrongPathEmu,
-      VecInit(tracePDaC.io.traceWrongPathEmuInsts.map(_.valid)).asUInt,
+    _.valid       := f3_instr_valid.asUInt,
+    _.enqEnable   := Mux(traceWrongPathEmu, f3_instr_valid.asUInt,
       checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt),
     _.pd          := f3_pd,
     _.ftqPtr      := f3_ftq_req.ftqIdx,

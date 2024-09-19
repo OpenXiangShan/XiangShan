@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
 import xiangshan.frontend.tracertl.ChiselRecordForField._
-import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, BranchPredictionRedirect}
+import xiangshan.frontend.{FetchRequestBundle, PreDecodeResp, PredCheckerResp, BranchPredictionRedirect}
 
 class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
   val startAddr = UInt(VAddrBits.W)
@@ -32,9 +32,16 @@ class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
 
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val redirect = Bool()
+  val f2_fire = Bool()
+  val f3_fire = Bool()
   val ibuffer_fire = Bool()
   val wb_enable = Bool()
   val valid = Bool()
+
+  // IFU2
+  val f2_ftq_req = Input(new FetchRequestBundle())
+  // IFU3
+  val predInfo = Input(new TracePredictInfo())
 }
 
 class TraceFromDriver(implicit p: Parameters) extends TraceBundle {
@@ -46,45 +53,33 @@ class TracePCMatchBundle(implicit p: Parameters) extends TraceBundle {
   val found = Input(Bool())
 }
 
-class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
-  // IFU info
+class TraceRTLIO(implicit p: Parameters) extends TraceBundle {
   val fromIFU = Input(new TraceFromIFU())
-  // From TraceReader
-  val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
-  // FakeICache to provide wrong path inst info at one fetch bundle.
-  val icacheData = Input(Valid(new TraceFakeICacheRespBundle()))
-  // From BPU and IFU
-  val predInfo = Input(new TracePredictInfo())
-
-  val fromTraceDriver = Input(new TraceFromDriver())
-
   val redirect = Input(new Bundle {
    val fromBackend = Valid(new BranchPredictionRedirect()) // backend -> ftq -> ifu
    val fromIFUBPU = Bool()
   })
 
-  // Pre-decoder: normal predecoder
+  // data
   val predecoder = Output(new PreDecodeResp())
-  // Predict checker
   val checker = Output(new PredCheckerResp())
-  // trace checker
   val traceChecker = Output(new TraceCheckerResp())
-  // trace Inst: one-to-one with preDecoder but contains the traceInfo
   val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+
   val traceForceJump = Output(Bool())
-
   val traceWrongPathEmu = Output(Bool())
-  val traceWrongPathEmuInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
-  val traceWrongPathRecv = Output(ValidIO(new TraceRecvInfo()))
-  // val traceWrongPathRange = Output(UInt(PredictWidth.W))
-
-  val pcMatch = new TracePCMatchBundle()
+  val block = Output(Bool())
 }
 
-class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
+class TraceRTL(implicit p: Parameters) extends TraceModule
   with TraceParams {
-  val io = IO(new TracePreDecodeAndCheckerIO)
+  val io = IO(new TraceRTLIO)
   dontTouch(io)
+
+if (env.TraceRTLMode) {
+  val traceReader = Module(new TraceReader)
+  val traceDriver = Module(new TraceDriver)
+  val traceFakeICache = Module(new TraceFakeICache)
 
   val preDecoder = Module(new TracePreDecoder)
   val predChecker = Module(new TracePredictChecker)
@@ -94,6 +89,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   // wrong path instr comes from "arch" path
   val traceAlignerWrongPath = Module(new TraceAlignWrongPath)
 
+  val traceWrongPathEmu = RegInit(false.B)
   if (TraceEnableWrongPathEmu) {
     // bpu wrong that can only be checked by backend
     // 1. branch taken wrong
@@ -101,31 +97,23 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     // when these two happpen, turn to wrongPathState
     // The simple check:
     //   when stuck for pc-mismatch, and no ifu redirect, then go to wrongPathState
-    val wrongPathStuckIFU = RegInit(false.B)
     val convergenceCheck =
-      if (TraceWrongPathEmuWhenConvergence) io.pcMatch.found
+      if (TraceWrongPathEmuWhenConvergence) traceReader.io.pcMatch.found
       else true.B
     when (io.fromIFU.valid &&
       !Cat(traceAligner.io.cutInsts.map(_.valid)).orR &&
       convergenceCheck
       ) {
-      wrongPathStuckIFU := true.B
+      traceWrongPathEmu := true.B
     }
     when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
-      wrongPathStuckIFU := false.B
+      traceWrongPathEmu := false.B
     }
-    io.traceWrongPathEmu := wrongPathStuckIFU
-    io.traceWrongPathRecv.valid := io.fromIFU.ibuffer_fire
-    io.traceWrongPathRecv.bits.instNum := PopCount(io.traceWrongPathEmuInsts.map(_.valid))
-  } else {
-    io.traceWrongPathEmu := false.B
-    io.traceWrongPathRecv.valid := false.B
-    io.traceWrongPathRecv.bits := DontCare
   }
 
   val concede2Bytes = RegEnable(
     !io.fromIFU.redirect &&
-    !io.fromTraceDriver.endWithCFI &&
+    !traceDriver.io.out.endWithCFI &&
     (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
     false.B,
     io.fromIFU.ibuffer_fire || io.fromIFU.redirect
@@ -133,19 +121,43 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   // !lastFetchRedirect && lastFetchTakenMore2B && !lastEndWithCFI
   val traceInstIFUCut = traceAligner.io.cutInsts
 
+  val traceRecv = WireInit(traceDriver.io.out.recv)
+  when (traceWrongPathEmu) {
+    traceRecv.valid := io.fromIFU.ibuffer_fire
+    traceRecv.bits.instNum := PopCount(io.traceAlignInsts.map(_.valid))
+  }
+
+  /*** IO Connect ***/
+
+  traceReader.io.specifyField(
+    _.recv := traceRecv,
+    _.redirect := io.redirect.fromBackend,
+    _.pcMatch.pcVA := io.fromIFU.predInfo.startAddr,
+  )
+  traceDriver.io.specifyField(
+    _.fire := io.fromIFU.f3_fire,
+    _.traceInsts := traceAligner.io.cutInsts,
+    _.traceRange := traceChecker.io.traceRange,
+    _.predInfo := io.fromIFU.predInfo, // duplicate signal, just to speed up waveform debug
+    _.ifuRange := predChecker.io.out.stage1Out.fixedRange.asUInt,
+    _.redirect := io.redirect,
+  )
+  traceFakeICache.io.specifyField(
+    _.req.valid := io.fromIFU.f2_fire,
+    _.req.bits.addr := io.fromIFU.f2_ftq_req.startAddr,
+  )
   traceAligner.io.specifyField(
     _.debug_valid := io.fromIFU.valid,
-    _.traceInsts := io.traceInsts,
-    _.predStartAddr := io.predInfo.startAddr,
-    _.instRange := io.predInfo.instRange,
+    _.traceInsts := traceReader.io.traceInsts,
+    _.predStartAddr := io.fromIFU.predInfo.startAddr,
+    _.instRange := io.fromIFU.predInfo.instRange,
     _.lastHalfValid := concede2Bytes,
-    _.icacheData := io.icacheData,
+    _.icacheData := traceFakeICache.io.resp,
   )
   traceAlignerWrongPath.io.specifyField(
     _.debug_valid := io.fromIFU.valid,
-    _.traceInsts := io.traceInsts,
+    _.traceInsts := traceReader.io.traceInsts,
   )
-
   preDecoder.io.specifyField(
     _.traceInsts := traceInstIFUCut,
     _.pdValid := traceAligner.io.pdValid,
@@ -154,14 +166,14 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.wb_enable := io.fromIFU.wb_enable,
     _.traceInsts := traceInstIFUCut,
     // _.pdValid := traceAligner.pdValid,
-    _.predictInfo := io.predInfo,
+    _.predictInfo := io.fromIFU.predInfo,
     _.preDecode := preDecoder.io.out,
     _.traceRange := traceAligner.io.traceRange,
   )
   traceChecker.io.specifyField(
     _.debug_valid := io.fromIFU.valid,
     _.traceInsts := traceInstIFUCut,
-    _.predictInfo := io.predInfo,
+    _.predictInfo := io.fromIFU.predInfo,
     _.preDecode := preDecoder.io.out,
     _.predChecker := predChecker.io.out,
     _.traceRange := traceAligner.io.traceRange,
@@ -173,8 +185,15 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
     _.traceForceJump := traceAligner.io.traceForceJump,
-    _.traceWrongPathEmuInsts := traceAlignerWrongPath.io.cutInsts,
-    _.pcMatch.pcVA := io.predInfo.startAddr,
-    // _.traceWrongPathEmuRange := traceAlignerWrongPath.io.traceRange,
+    _.block := traceDriver.io.out.block,
+    _.traceWrongPathEmu := traceWrongPathEmu,
   )
+  when (io.traceWrongPathEmu) {
+    io.traceAlignInsts := traceAlignerWrongPath.io.cutInsts
+  }
+
+} else {
+  io <> DontCare
+}
+
 }
