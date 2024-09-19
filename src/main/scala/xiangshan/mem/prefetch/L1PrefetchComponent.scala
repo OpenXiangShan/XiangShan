@@ -713,7 +713,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_array(s1_pf_index).bit_vec := l1_array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && (s1_pf_bits.req.paddr >= 0x80000000L.U) && io.enable
+  io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && (s1_pf_bits.req.paddr >= PmemLowBound.U && s1_pf_bits.req.paddr < PmemHighBound.U) && io.enable
   io.l1_req.bits := s1_pf_bits.req
 
   l1_pf_req_arb.io.out.ready := s1_pf_can_go || !s1_pf_valid
@@ -881,9 +881,9 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.confidence := pf_ctrl.confidence
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
-  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && pf_queue_filter.io.l2_pf_addr.bits.addr > 0x80000000L.U && enable && pf_ctrl.enable
+  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && (pf_queue_filter.io.l2_pf_addr.bits.addr >= PmemLowBound.U && pf_queue_filter.io.l2_pf_addr.bits.addr < PmemHighBound.U) && enable && pf_ctrl.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
 
-  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && pf_queue_filter.io.l3_pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
+  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && (pf_queue_filter.io.l3_pf_addr.bits >= PmemLowBound.U && pf_queue_filter.io.l3_pf_addr.bits < PmemHighBound.U) && enable && pf_ctrl.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
 }

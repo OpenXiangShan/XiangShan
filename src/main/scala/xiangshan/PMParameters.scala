@@ -43,6 +43,8 @@ trait HasPMParameters {
   implicit val p: Parameters
 
   val PMPAddrBits = p(SoCParamsKey).PAddrBits
+  val PMPPmemLowBound = p(SoCParamsKey).PmemLowBound
+  val PMPPmemHighBound = p(SoCParamsKey).PmemHighBound
   val PMXLEN = p(XLen)
   val pmParams = p(PMParameKey)
   val NumPMP = pmParams.NumPMP

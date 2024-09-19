@@ -562,6 +562,8 @@ trait HasXSParameter {
   implicit val p: Parameters
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  def PmemLowBound = p(SoCParamsKey).PmemLowBound
+  def PmemHighBound = p(SoCParamsKey).PmemHighBound
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
