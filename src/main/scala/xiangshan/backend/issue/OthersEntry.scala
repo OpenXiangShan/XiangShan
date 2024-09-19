@@ -4,7 +4,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{HasCircularQueuePtrHelper, GatedValidRegNext}
-import utils.{MathUtils, OptionWrapper}
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
@@ -29,7 +28,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   val common          = Wire(new CommonWireBundle)
   val entryUpdate     = Wire(new EntryBundle)
   val entryRegNext    = Wire(new EntryBundle)
-  val hasWakeupIQ     = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
+  val hasWakeupIQ     = Option.when(params.hasIQWakeUp)(Wire(new CommonIQWakeupBundle))
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)

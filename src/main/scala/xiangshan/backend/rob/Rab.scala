@@ -25,7 +25,7 @@ object RenameBufferPtr {
 
 class RenameBufferEntry(implicit p: Parameters) extends XSBundle {
   val info = new RabCommitInfo
-  val robIdx = OptionWrapper(!env.FPGAPlatform, new RobPtr)
+  val robIdx = Option.when(!env.FPGAPlatform)(new RobPtr)
 }
 
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -46,7 +46,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
-    val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
+    val diffCommits = Option.when(backendParams.basicDebugEn)(Output(new DiffCommitIO))
 
     val status = Output(new Bundle {
       val walkEnd = Bool()

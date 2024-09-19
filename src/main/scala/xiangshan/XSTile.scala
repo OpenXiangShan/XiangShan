@@ -44,7 +44,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.memory_port.get)
   val tl_uncache = l2top.mmio_port
-  // val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
+  // val axi4_uncache = Option.when(enableCHI)(AXI4UserYanker())
   val beu_int_source = l2top.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.clint_int_node
@@ -113,8 +113,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
-      val chi = if (enableCHI) Some(new PortIO) else None
-      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val chi = Option.when(enableCHI)(new PortIO)
+      val nodeID = Option.when(enableCHI)(Input(UInt(NodeIDWidth.W)))
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
 

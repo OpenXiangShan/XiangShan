@@ -49,8 +49,8 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 {
-  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
-  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
+  val nocMisc = Option.when(enableCHI)(LazyModule(new MemMisc()))
+  val socMisc = Option.when(!enableCHI)(LazyModule(new SoCMisc()))
   val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
 
   ResourceBinding {

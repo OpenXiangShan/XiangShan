@@ -95,7 +95,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val plic_int_node = IntIdentityNode()
 
   println(s"enableCHI: ${enableCHI}")
-  val l2cache = if (enableL2) {
+  val l2cache = Option.when(enableL2) {
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
@@ -108,9 +108,9 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
       case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })
-    if (enableCHI) Some(LazyModule(new TL2CHICoupledL2()(new Config(config))))
-    else Some(LazyModule(new TL2TLCoupledL2()(new Config(config))))
-  } else None
+    if (enableCHI) LazyModule(new TL2CHICoupledL2()(new Config(config)))
+    else LazyModule(new TL2TLCoupledL2()(new Config(config)))
+  }
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   // =========== Connection ============
@@ -153,8 +153,8 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val robHeadPaddr = Flipped(Valid(UInt(36.W)))
       val l2MissMatch = Output(Bool())
     })
-    val chi = if (enableCHI) Some(IO(new PortIO)) else None
-    val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
+    val chi = Option.when(enableCHI)(IO(new PortIO))
+    val nodeID = Option.when(enableCHI)(IO(Input(UInt(NodeIDWidth.W))))
     val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = IO(Flipped(new PMPRespBundle))
     val l2_hint = IO(ValidIO(new L2ToL1Hint()))

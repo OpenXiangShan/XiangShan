@@ -267,22 +267,22 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
 
   private val intDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+    Option.when(backendParams.basicDebugEn)((Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
   private val fpDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
+    Option.when(backendParams.basicDebugEn)((Wire(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W)))))
   private val vfDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
+    Option.when(backendParams.basicDebugEn)((Wire(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))), Wire(Vec(31, UInt(VLEN.W)))))
   private val v0DiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
+    Option.when(backendParams.basicDebugEn)((Wire(Vec(1, UInt(log2Up(V0PhyRegs).W))), Wire(Vec(1, UInt(V0Data().dataWidth.W)))))
   private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
-    OptionWrapper(backendParams.basicDebugEn, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
+    Option.when(backendParams.basicDebugEn)((Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
   private val fpDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(32, UInt(XLEN.W))))
+    Option.when(backendParams.basicDebugEn)(Wire(Vec(32, UInt(XLEN.W))))
   private val vecDiffReadData: Option[Vec[UInt]] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
+    Option.when(backendParams.basicDebugEn)(Wire(Vec(64, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
   private val vlDiffReadData: Option[UInt] =
-    OptionWrapper(backendParams.basicDebugEn, Wire(UInt(VlData().dataWidth.W)))
+    Option.when(backendParams.basicDebugEn)(Wire(UInt(VlData().dataWidth.W)))
 
 
   fpDiffReadData.foreach(_ := fpDiffRead
@@ -653,25 +653,25 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           if (k == 3) {(
             Seq(None)
             :+
-            OptionWrapper(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty, 
+            Option.when(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty)(
               (SrcType.isV0(s1_srcType(i)(j)(k)) -> s1_v0PregRData(i)(j)(k)))
           )}
           else if (k == 4) {(
             Seq(None)
             :+
-            OptionWrapper(s1_vlPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VlRegSrcDataSet).nonEmpty, 
+            Option.when(s1_vlPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VlRegSrcDataSet).nonEmpty)(
               (SrcType.isVp(s1_srcType(i)(j)(k)) -> s1_vlPregRData(i)(j)(k)))
           )}
           else {(
             Seq(None)
             :+
-            OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty, 
+            Option.when(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty)(
               (SrcType.isXp(s1_srcType(i)(j)(k)) -> s1_intPregRData(i)(j)(k)))
             :+
-            OptionWrapper(s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VecRegSrcDataSet).nonEmpty,
+            Option.when(s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VecRegSrcDataSet).nonEmpty)(
               (SrcType.isVp(s1_srcType(i)(j)(k)) -> s1_vfPregRData(i)(j)(k)))
             :+
-            OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty, 
+            Option.when(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty)(
               (SrcType.isFp(s1_srcType(i)(j)(k)) -> s1_fpPregRData(i)(j)(k)))
           )}
         ).filter(_.nonEmpty).map(_.get)
@@ -871,10 +871,10 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
     Output(UInt(RegCacheIdxWidth.W))
   )
 
-  val diffIntRat = if (params.basicDebugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
-  val diffFpRat  = if (params.basicDebugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
-  val diffVecRat = if (params.basicDebugEn) Some(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W)))) else None
-  val diffV0Rat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
-  val diffVlRat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
-  val diffVl     = if (params.basicDebugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
+  val diffIntRat = Option.when(params.basicDebugEn)(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W))))
+  val diffFpRat  = Option.when(params.basicDebugEn)(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W))))
+  val diffVecRat = Option.when(params.basicDebugEn)(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W))))
+  val diffV0Rat  = Option.when(params.basicDebugEn)(Input(Vec(1, UInt(log2Up(V0PhyRegs).W))))
+  val diffVlRat  = Option.when(params.basicDebugEn)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))
+  val diffVl     = Option.when(params.basicDebugEn)(Output(UInt(VlData().dataWidth.W)))
 }

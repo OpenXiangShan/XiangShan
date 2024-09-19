@@ -34,9 +34,9 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
   val io = IO(new Bundle {
     val wen = Input(Bool())
     val write_idx = Input(UInt(idxWidth.W))
-    val write_tag = if (hasTag) Some(Input(UInt(tagWidth.W))) else None
+    val write_tag = Option.when(hasTag)(Input(UInt(tagWidth.W)))
     val write_data = Input(Vec(numWays, gen))
-    val write_way_mask = if (multipleWays) Some(Input(Vec(numWays, Bool()))) else None
+    val write_way_mask = Option.when(multipleWays)(Input(Vec(numWays, Bool())))
 
     val hit = Output(Bool())
     val hit_data = Vec(numWays, Valid(gen))
@@ -44,7 +44,7 @@ class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
 
   class Idx_Tag extends Bundle {
     val idx = UInt(idxWidth.W)
-    val tag = if (hasTag) Some(UInt(tagWidth.W)) else None
+    val tag = Option.when(hasTag)(UInt(tagWidth.W))
     def apply(idx: UInt, tag: UInt) = {
       this.idx := idx
       this.tag.map(_ := tag)

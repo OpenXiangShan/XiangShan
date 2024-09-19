@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid, PopCount}
 import utils.SeqUtils.{MixedVec3, Seq3}
-import utils.{OptionWrapper, SeqUtils}
+import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._

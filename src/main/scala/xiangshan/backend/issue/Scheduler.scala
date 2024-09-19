@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{HasPerfEvents, OptionWrapper}
+import utils.HasPerfEvents
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
@@ -98,7 +98,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     // Todo: remove this after no cancel signal from og1
     val og1Cancel = Input(ExuVec())
     // replace RCIdx to Wakeup Queue
-    val replaceRCIdx = OptionWrapper(params.needWriteRegCache, Vec(params.numWriteRegCache, Input(UInt(RegCacheIdxWidth.W))))
+    val replaceRCIdx = Option.when(params.needWriteRegCache)(Vec(params.numWriteRegCache, Input(UInt(RegCacheIdxWidth.W))))
     // just be compatible to old code
     def apply(i: Int)(j: Int) = resp(i)(j)
   }
@@ -109,10 +109,10 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
-  val memIO = if (params.isMemSchd) Some(new Bundle {
+  val memIO = Option.when(params.isMemSchd)(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
-  }) else None
-  val fromMem = if (params.isMemSchd) Some(new Bundle {
+  })
+  val fromMem = Option.when(params.isMemSchd)(new Bundle {
     val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
     val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val hyuFeedback = Flipped(Vec(params.HyuCnt, new MemRSFeedbackIO))
@@ -128,11 +128,11 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
-  }) else None
-  val toMem = if (params.isMemSchd) Some(new Bundle {
+  })
+  val toMem = Option.when(params.isMemSchd)(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
-  }) else None
-  val fromOg2Resp = if(params.needOg2Resp) Some(MixedVec(params.issueBlockParams.filter(_.needOg2Resp).map(x => Flipped(x.genOG2RespBundle)))) else None
+  })
+  val fromOg2Resp = Option.when(params.needOg2Resp)(MixedVec(params.issueBlockParams.filter(_.needOg2Resp).map(x => Flipped(x.genOG2RespBundle))))
 }
 
 abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)

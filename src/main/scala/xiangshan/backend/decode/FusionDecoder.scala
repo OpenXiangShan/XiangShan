@@ -68,14 +68,13 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
       require(thisInstr.isDefined, "thisInstr must be defined to infer the ctrl signals")
       val fused = func(fusedInstr.get)
       // Only when the two instructions have different control field, we make it not None.
-      if (fused != func(thisInstr.get)) Some(fused.value.toInt) else None
+      Option.when(fused != func(thisInstr.get))(fused.value.toInt)
     } else None
   }
   // We assume only fuType, fuOpType, lsrc2 may be changed now.
   def fuType: Option[Int] = compareAndGet(getInstrFuType)
   def fuOpType: Option[UInt => UInt] = {
-    val t = compareAndGet(getInstrFuOpType)
-    if (t.isDefined) Some((_: UInt) => t.get.U) else None
+    compareAndGet(getInstrFuOpType).map(x => ((_: UInt) => x.U))
   }
   def src2Type: Option[Int] = compareAndGet(getInstrSrc2Type)
   def selImm: Option[UInt] = None

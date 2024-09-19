@@ -6,7 +6,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
-import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.datapath.WbConfig._
@@ -73,17 +72,17 @@ class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Paramet
   private val v0WbLatencyMax = params.getV0WBExeGroup.map { case (portId, seq) => (portId, seq.map(_.v0LatencyValMax).max, seq.forall(_.v0LatencyCertain)) }
   private val vlWbLatencyMax = params.getVlWBExeGroup.map { case (portId, seq) => (portId, seq.map(_.vlLatencyValMax).max, seq.forall(_.vlLatencyCertain)) }
 
-  private val intWbBusyTable: Map[Int, Option[UInt]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
-  private val fpWbBusyTable = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
-  private val vfWbBusyTable = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
-  private val v0WbBusyTable = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
-  private val vlWbBusyTable = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Wire(UInt((latMax + 1).W)))) }.toMap
+  private val intWbBusyTable: Map[Int, Option[UInt]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Wire(UInt((latMax + 1).W)))) }.toMap
+  private val fpWbBusyTable = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Wire(UInt((latMax + 1).W)))) }.toMap
+  private val vfWbBusyTable = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Wire(UInt((latMax + 1).W)))) }.toMap
+  private val v0WbBusyTable = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Wire(UInt((latMax + 1).W)))) }.toMap
+  private val vlWbBusyTable = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Wire(UInt((latMax + 1).W)))) }.toMap
 
-  private val intConflict: Map[Int, Option[Bool]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
-  private val fpConflict = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
-  private val vfConflict = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
-  private val v0Conflict = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
-  private val vlConflict = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, OptionWrapper(latCertain, Reg(Bool()))) }.toMap
+  private val intConflict: Map[Int, Option[Bool]] = intWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Reg(Bool()))) }.toMap
+  private val fpConflict = fpWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Reg(Bool()))) }.toMap
+  private val vfConflict = vfWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Reg(Bool()))) }.toMap
+  private val v0Conflict = v0WbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Reg(Bool()))) }.toMap
+  private val vlConflict = vlWbLatencyMax.map { case (portId, latMax, latCertain) => (portId, Option.when(latCertain)(Reg(Bool()))) }.toMap
 
   def hitWbPort[T <: Data](source: Option[T], p: ExeUnitParams, portId: Int, wbType: PregWB) = {
     wbType match {

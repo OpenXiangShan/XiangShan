@@ -81,11 +81,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // status end
 
     // debug_begin
-    val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-    val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
-    val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_pc = Option.when(backendParams.debugEn)(UInt(VAddrBits.W))
+    val debug_instr = Option.when(backendParams.debugEn)(UInt(32.W))
+    val debug_ldest = Option.when(backendParams.basicDebugEn)(UInt(LogicRegsWidth.W))
+    val debug_pdest = Option.when(backendParams.basicDebugEn)(UInt(PhyRegIdxWidth.W))
+    val debug_fuType = Option.when(backendParams.debugEn)(FuType())
     // debug_end
 
     def isWritebacked: Bool = !uopNum.orR && stdWritebacked
@@ -117,11 +117,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // trace
     val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
     // debug_begin
-    val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
-    val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
-    val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_pc = Option.when(backendParams.debugEn)(UInt(VAddrBits.W))
+    val debug_instr = Option.when(backendParams.debugEn)(UInt(32.W))
+    val debug_ldest = Option.when(backendParams.basicDebugEn)(UInt(LogicRegsWidth.W))
+    val debug_pdest = Option.when(backendParams.basicDebugEn)(UInt(PhyRegIdxWidth.W))
+    val debug_fuType = Option.when(backendParams.debugEn)(FuType())
     // debug_end
     val dirtyFs = Bool()
     val dirtyVs = Bool()

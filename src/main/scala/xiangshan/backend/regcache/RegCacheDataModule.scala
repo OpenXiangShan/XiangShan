@@ -33,7 +33,7 @@ class RCWritePort(dataWidth: Int, addrWidth: Int, tagWidth: Int, debugEn: Boolea
   val wen  = Input(Bool())
   val addr = Input(UInt(addrWidth.W))
   val data = Input(UInt(dataWidth.W))
-  val tag  = OptionWrapper(debugEn, Input(UInt(tagWidth.W)))
+  val tag  = Option.when(debugEn)(Input(UInt(tagWidth.W)))
 }
 
 class RegCacheDataModule
@@ -56,7 +56,7 @@ class RegCacheDataModule
 
   val v   = RegInit(VecInit(Seq.fill(numEntries)(false.B)))
   val mem = Reg(Vec(numEntries, UInt(dataWidth.W)))
-  val tag = OptionWrapper(backendParams.debugEn, Reg(Vec(numEntries, UInt(tagWidth.W))))
+  val tag = Option.when(backendParams.debugEn)(Reg(Vec(numEntries, UInt(tagWidth.W))))
 
   for ((r, i) <- io.readPorts.zipWithIndex) {
     r.data := mem(r.addr)

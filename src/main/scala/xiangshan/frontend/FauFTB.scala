@@ -78,7 +78,7 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
 class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
 
   class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
-    val pred_way = if (!env.FPGAPlatform) Some(UInt(log2Ceil(numWays).W)) else None
+    val pred_way = Option.when(!env.FPGAPlatform)(UInt(log2Ceil(numWays).W))
     val hit = Bool()
   }
   val resp_meta = Wire(new FauFTBMeta)

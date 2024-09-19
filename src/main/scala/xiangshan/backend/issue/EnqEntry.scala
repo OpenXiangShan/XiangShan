@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{HasCircularQueuePtrHelper, GatedValidRegNext}
-import utils.{MathUtils, OptionWrapper}
+import utils.MathUtils
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
@@ -33,15 +33,15 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val entryUpdate         = Wire(new EntryBundle)
   val entryRegNext        = Wire(new EntryBundle)
   val enqDelayValidRegNext= Wire(Bool())
-  val hasWakeupIQ         = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
+  val hasWakeupIQ         = Option.when(params.hasIQWakeUp)(Wire(new CommonIQWakeupBundle))
 
   val currentStatus               = Wire(new Status())
   val enqDelaySrcState            = Wire(Vec(params.numRegSrc, SrcState()))
   val enqDelayDataSources         = Wire(Vec(params.numRegSrc, DataSource()))
-  val enqDelaySrcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, ExuVec())))
+  val enqDelaySrcWakeUpL1ExuOH    = Option.when(params.hasIQWakeUp)(Wire(Vec(params.numRegSrc, ExuVec())))
   val enqDelaySrcLoadDependency   = Wire(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
-  val enqDelayUseRegCache         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, Bool())))
-  val enqDelayRegCacheIdx         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, UInt(RegCacheIdxWidth.W))))
+  val enqDelayUseRegCache         = Option.when(params.needReadRegCache)(Wire(Vec(params.numRegSrc, Bool())))
+  val enqDelayRegCacheIdx         = Option.when(params.needReadRegCache)(Wire(Vec(params.numRegSrc, UInt(RegCacheIdxWidth.W))))
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)

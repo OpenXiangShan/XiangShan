@@ -123,7 +123,7 @@ case class FuConfig (
 
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     srcData
-      .map((x: Seq[DataConfig]) => if(x.isDefinedAt(srcIdx)) Some(x(srcIdx)) else None)
+      .map((x: Seq[DataConfig]) => Option.when(x.isDefinedAt(srcIdx))(x(srcIdx)))
       .filter(_.nonEmpty)
       .map(_.get)
       .toSet

@@ -39,7 +39,7 @@ class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
 case object HasTagEccParam
 
 abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
-  val TagEccParam = if(EnableTagEcc) Some(HasTagEccParam) else None
+  val TagEccParam = Option.when(EnableTagEcc)(HasTagEccParam)
 }
 
 class TagArray(implicit p: Parameters) extends AbstractTagArray {

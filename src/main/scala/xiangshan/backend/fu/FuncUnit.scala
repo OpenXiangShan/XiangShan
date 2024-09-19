@@ -4,7 +4,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.DataHoldBypass
-import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
@@ -19,43 +18,43 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val fuOpType    = FuOpType()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
-  val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
-  val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
-  val vecWen      = OptionWrapper(cfg.needVecWen, Bool())
-  val v0Wen       = OptionWrapper(cfg.needV0Wen, Bool())
-  val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
-  val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
-  val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
-  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(log2Up(PredictWidth).W))
-  val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
+  val rfWen       = Option.when(cfg.needIntWen)(Bool())
+  val fpWen       = Option.when(cfg.needFpWen) (Bool())
+  val vecWen      = Option.when(cfg.needVecWen)(Bool())
+  val v0Wen       = Option.when(cfg.needV0Wen) (Bool())
+  val vlWen       = Option.when(cfg.needVlWen) (Bool())
+  val flushPipe   = Option.when(cfg.flushPipe) (Bool())
+  val preDecode   = Option.when(cfg.hasPredecode)(new PreDecodeInfo)
+  val ftqIdx      = Option.when(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr)(new FtqPtr)
+  val ftqOffset   = Option.when(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr)(UInt(log2Up(PredictWidth).W))
+  val predictInfo = Option.when(cfg.needPdInfo)(new Bundle {
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })
-  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
-  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val fpu         = Option.when(cfg.writeFflags)(new FPUCtrlSignals)
+  val vpu         = Option.when(cfg.needVecCtrl)(new VPUCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
-  val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
-  val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
-  val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
-  val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
-  val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
-  val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
-  val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
-  val replay        = OptionWrapper(cfg.replayInst, Bool())
-  val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
-  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val rfWen         = Option.when(cfg.needIntWen)(Bool())
+  val fpWen         = Option.when(cfg.needFpWen) (Bool())
+  val vecWen        = Option.when(cfg.needVecWen)(Bool())
+  val v0Wen         = Option.when(cfg.needV0Wen) (Bool())
+  val vlWen         = Option.when(cfg.needVlWen) (Bool())
+  val exceptionVec  = Option.when(cfg.exceptionOut.nonEmpty)(ExceptionVec())
+  val flushPipe     = Option.when(cfg.flushPipe) (Bool())
+  val replay        = Option.when(cfg.replayInst)(Bool())
+  val preDecode     = Option.when(cfg.hasPredecode)(new PreDecodeInfo)
+  val fpu           = Option.when(cfg.writeFflags)(new FPUCtrlSignals)
+  val vpu           = Option.when(cfg.needVecCtrl)(new VPUCtrlSignals)
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.destDataBits.W)
-  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+  val pc        = Option.when(cfg.needPc)(UInt(VAddrData().dataWidth.W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)
   def getSrcMask    : UInt = src(cfg.maskSrcIdx)
@@ -63,10 +62,10 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val data      = UInt(cfg.destDataBits.W)
-  val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
-  val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
-  val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
-  val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
+  val fflags    = Option.when(cfg.writeFflags)(UInt(5.W))
+  val vxsat     = Option.when(cfg.writeVxsat)(Vxsat())
+  val pc        = Option.when(cfg.isFence)(UInt(VAddrData().dataWidth.W))
+  val redirect  = Option.when(cfg.hasRedirect)(ValidIO(new Redirect))
 }
 
 class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -85,15 +84,15 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
-  val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
-  val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
-  val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
-  val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
-  val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
-  val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
-  val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
-  val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
-  val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
+  val csrin = Option.when(cfg.isCsr)(new CSRInput)
+  val csrio = Option.when(cfg.isCsr)(new CSRFileIO)
+  val csrToDecode = Option.when(cfg.isCsr)(Output(new CSRToDecode))
+  val fenceio = Option.when(cfg.isFence)(new FenceIO)
+  val frm = Option.when(cfg.needSrcFrm)(Input(UInt(3.W)))
+  val vxrm = Option.when(cfg.needSrcVxrm)(Input(UInt(2.W)))
+  val vtype = Option.when(cfg.writeVlRf)((Valid(new VType)))
+  val vlIsZero = Option.when(cfg.writeVlRf)(Output(Bool()))
+  val vlIsVlmax = Option.when(cfg.writeVlRf)(Output(Bool()))
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
 }
 

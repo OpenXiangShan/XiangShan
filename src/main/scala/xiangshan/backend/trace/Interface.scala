@@ -20,9 +20,9 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
 }
 
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val iaddr     = if (hasIaddr)   Some(UInt(XLEN.W))                      else None
-  val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
-  val ftqOffset = if (!hasIaddr)  Some( UInt(log2Up(PredictWidth).W))     else None
+  val iaddr     = Option.when(hasIaddr) (UInt(XLEN.W))
+  val ftqIdx    = Option.when(!hasIaddr)(new FtqPtr)
+  val ftqOffset = Option.when(!hasIaddr)(UInt(log2Up(PredictWidth).W))
   val tracePipe = new TracePipe(iretireWidth)
 }
 

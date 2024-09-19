@@ -569,7 +569,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // val call_is_rvc = Bool()
   val hit = Bool()
 
-  val predCycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+  val predCycle = Option.when(!env.FPGAPlatform)(UInt(64.W))
 
   def br_slot_valids = slot_valids.init
   def tail_slot_valid = slot_valids.last

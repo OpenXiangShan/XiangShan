@@ -120,9 +120,9 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val mask                 = UInt(VLENB.W)
   val alignedType          = UInt(alignTypeBits.W)
   // for load
-  val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
-  val elemIdxInsideVd      = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index in scope of vd
-  val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
+  val reg_offset           = Option.when(!isVStore)(UInt(vOffsetBits.W))
+  val elemIdxInsideVd      = Option.when(!isVStore)(UInt(elemIdxBits.W)) // element index in scope of vd
+  val vecdata              = Option.when(!isVStore)(UInt(VLEN.W))
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
@@ -209,7 +209,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
-  val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
+  val vstd                = Option.when(isVStore)(Valid(new MemExuOutput(isVector = true)))
 }
 
 class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -223,7 +223,7 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new VLSBundle()))
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
-  val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
+  val vstd                = Option.when(isVStore)(ValidIO(new MemExuOutput(isVector = true)))
 }
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{
