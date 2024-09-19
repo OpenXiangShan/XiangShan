@@ -32,9 +32,14 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
   // use for cfi fix
   // we need to know the bpu result to know if the branch should redirect or not
 //  val bpuPredInfo = new TracePredInfoBundle
+  val isWrongPath = Bool()
 
   def hasException = exception =/= 0.U
   def isForceJump = exception(7)
+
+  def initMoreFromRaw() = {
+    isWrongPath := false.B
+  }
 }
 
 object TraceInstrBundle {
@@ -44,6 +49,7 @@ object TraceInstrBundle {
     rawInst.elements.foreach { case (name, elt) =>
       bundle.elements(name) := elt
     }
+    bundle.initMoreFromRaw()
     bundle
   }
 }

@@ -239,6 +239,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val traceChecker = tracePDaC.io.traceChecker
   val traceBlock = traceDriver.io.out.block
   val traceForceJump = tracePDaC.io.traceForceJump
+
+  val traceWrongPathEmu = tracePDaC.io.traceWrongPathEmu
+  val traceAlignInsts = WireInit(tracePDaC.io.traceAlignInsts)
+  val ibufferFireForIFU = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
+  val ibufferFireForTrace = io.toIbuffer.fire
+  when(traceWrongPathEmu) { traceAlignInsts := tracePDaC.io.traceWrongPathEmuInsts }
+
   if (!env.TraceRTLMode) {
     traceReader.io <> DontCare
     tracePDaC.io <> DontCare
@@ -532,7 +539,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
   val f3_doubleLine     = TraceRTLDontCareValue(RegEnable(f2_doubleLine, f2_fire))
-  val f3_fire           = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
+  val f3_fire           = ibufferFireForIFU
 
   val f3_cut_data       = RegEnable(f2_cut_data,   f2_fire)
 
@@ -540,7 +547,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_mmio           = TraceRTLDontCareValue(RegEnable(f2_mmio,       f2_fire))
 
   val f3_instr          = TraceRTLChoose(RegEnable(f2_instr, f2_fire),
-    VecInit(tracePDaC.io.traceAlignInsts.map(_.bits.inst)))
+    VecInit(traceAlignInsts.map(_.bits.inst)))
   expanders.zipWithIndex.foreach { case (expander, i) =>
     expander.io.in := f3_instr(i)
   }
@@ -619,8 +626,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val wb_enable = Wire(Bool())
   if (env.TraceRTLMode) {
+    val traceRecv = WireInit(traceDriver.io.out.recv)
+    when (traceWrongPathEmu) {
+      traceRecv := tracePDaC.io.traceWrongPathRecv
+    }
     traceReader.io.specifyField(
-      _.recv := traceDriver.io.out.recv,
+      _.recv := traceRecv,
       _.redirect := fromFtq.redirect,
       _.startSignal := fromFtq.req.ready,
     )
@@ -628,10 +639,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.traceInsts := traceReader.io.traceInsts,
       _.fromIFU.specifyField(
         _.redirect := f3_flush,
-        _.ibuffer_fire := f3_fire,
+        _.ibuffer_fire :=  ibufferFireForTrace,
         _.wb_enable := wb_enable,
         _.valid := f3_valid,
       ),
+      _.redirect.fromBackend := fromFtq.redirect,
+      _.redirect.fromIFUBPU := (wb_redirect && !f3_wb_not_flush),
       _.predInfo.specifyField(
         _.startAddr := f3_ftq_req.startAddr,
         _.nextStartAddr := f3_ftq_req.nextStartAddr,
@@ -712,7 +725,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(f3_flush && !f3_req_is_mmio)                              {f3_valid := false.B}
   .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush) {f3_valid := false.B}
   .elsewhen(f2_fire && !f2_flush )                               {f3_valid := true.B }
-  .elsewhen(io.toIbuffer.fire && !f3_req_is_mmio)                {f3_valid := false.B}
+  .elsewhen(ibufferFireForIFU && !f3_req_is_mmio)                {f3_valid := false.B}
   .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                {f3_valid := false.B}
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
@@ -723,7 +736,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(RegNext(f2_fire && !f2_flush) && f3_req_is_mmio)        { f3_mmio_use_seq_pc := true.B  }
   .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
 
-  f3_ready := (io.toIbuffer.ready && (f3_mmio_req_commit || !f3_req_is_mmio)) || !f3_valid
+  f3_ready := (io.toIbuffer.ready && (f3_mmio_req_commit || !f3_req_is_mmio)) && TraceRTLChoose(true.B, !traceBlock) || !f3_valid
 
   // mmio state machine
   switch(mmio_state){
@@ -905,16 +918,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
-  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) &&
-    !f3_flush && TraceRTLChoose(true.B, !traceBlock)
+  io.toIbuffer.valid            := f3_toIbuffer_valid &&
+    (TraceRTLChoose(true.B, !traceBlock) || traceWrongPathEmu)
   io.toIbuffer.bits.specifyField(
-    _.traceInfo   := tracePDaC.io.traceAlignInsts.map(_.bits),
+    _.traceInfo   := traceAlignInsts.map(_.bits),
     _.instrs      := f3_expd_instr,
-    _.valid       := f3_instr_valid.asUInt,
-    _.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt,
+    _.valid       := Mux(traceWrongPathEmu, VecInit(tracePDaC.io.traceWrongPathEmuInsts.map(_.valid)).asUInt, f3_instr_valid.asUInt),
+    _.enqEnable   := Mux(traceWrongPathEmu,
+      VecInit(tracePDaC.io.traceWrongPathEmuInsts.map(_.valid)).asUInt,
+      checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt),
     _.pd          := f3_pd,
     _.ftqPtr      := f3_ftq_req.ftqIdx,
-    _.pc          := f3_pc,
+    _.pc          := TraceRTLChoose(f3_pc, VecInit(traceAlignInsts.map(_.bits.pcVA))),
     _.ftqOffset.zipWithIndex.map{ case(a, i) =>
         a.bits := i.U
         a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio
@@ -1123,46 +1138,47 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
 
   /** performance counter */
+  // FIXME: wrongPath emu will set iBuffer.fire, fix the perf
   val f3_perf_info     = RegEnable(f2_perf_info,  f2_fire)
-  val f3_req_0    = io.toIbuffer.fire
-  val f3_req_1    = io.toIbuffer.fire && f3_doubleLine
-  val f3_hit_0    = io.toIbuffer.fire && f3_perf_info.bank_hit(0)
-  val f3_hit_1    = io.toIbuffer.fire && f3_doubleLine & f3_perf_info.bank_hit(1)
+  val f3_req_0    = ibufferFireForIFU
+  val f3_req_1    = ibufferFireForIFU && f3_doubleLine
+  val f3_hit_0    = ibufferFireForIFU && f3_perf_info.bank_hit(0)
+  val f3_hit_1    = ibufferFireForIFU && f3_doubleLine & f3_perf_info.bank_hit(1)
   val f3_hit      = f3_perf_info.hit
   val perfEvents = Seq(
     ("frontendFlush                ", wb_redirect                                ),
-    ("ifu_req                      ", io.toIbuffer.fire                        ),
-    ("ifu_miss                     ", io.toIbuffer.fire && !f3_perf_info.hit   ),
+    ("ifu_req                      ", ibufferFireForIFU                          ),
+    ("ifu_miss                     ", ibufferFireForIFU && !f3_perf_info.hit     ),
     ("ifu_req_cacheline_0          ", f3_req_0                                   ),
     ("ifu_req_cacheline_1          ", f3_req_1                                   ),
     ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
     ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
-    ("only_0_hit                   ", f3_perf_info.only_0_hit       && io.toIbuffer.fire ),
-    ("only_0_miss                  ", f3_perf_info.only_0_miss      && io.toIbuffer.fire ),
-    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1      && io.toIbuffer.fire ),
-    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && io.toIbuffer.fire ),
-    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && io.toIbuffer.fire ),
-    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && io.toIbuffer.fire ),
+    ("only_0_hit                   ", f3_perf_info.only_0_hit       && ibufferFireForIFU),
+    ("only_0_miss                  ", f3_perf_info.only_0_miss      && ibufferFireForIFU),
+    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1      && ibufferFireForIFU),
+    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && ibufferFireForIFU),
+    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && ibufferFireForIFU),
+    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && ibufferFireForIFU),
   )
   generatePerfEvent()
 
-  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire )
-  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire && !f3_hit )
+  XSPerfAccumulate("ifu_req",   ibufferFireForIFU )
+  XSPerfAccumulate("ifu_miss",  ibufferFireForIFU && !f3_hit )
   XSPerfAccumulate("ifu_req_cacheline_0", f3_req_0  )
   XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
   XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
   XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
   XSPerfAccumulate("frontendFlush",  wb_redirect )
-  XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && io.toIbuffer.fire  )
-  XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && io.toIbuffer.fire  )
-  XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && io.toIbuffer.fire  )
-  XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && io.toIbuffer.fire  )
-  XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && io.toIbuffer.fire )
-  XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire )
-  XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && io.toIbuffer.fire )
-  XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire )
-  XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire )
-  XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), io.toIbuffer.fire, 0, PredictWidth + 1, 1)
+  XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && ibufferFireForIFU  )
+  XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && ibufferFireForIFU  )
+  XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && ibufferFireForIFU  )
+  XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && ibufferFireForIFU  )
+  XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && ibufferFireForIFU )
+  XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && ibufferFireForIFU )
+  XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && ibufferFireForIFU )
+  XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && ibufferFireForIFU )
+  XSPerfAccumulate("except_0",   f3_perf_info.except_0 && ibufferFireForIFU )
+  XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), ibufferFireForIFU, 0, PredictWidth + 1, 1)
 
   val hartId = p(XSCoreParamsKey).HartId
   val isWriteFetchToIBufferTable = Constantin.createRecord(s"isWriteFetchToIBufferTable$hartId")
@@ -1173,7 +1189,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
   fetchIBufferDumpData.start_addr := f3_ftq_req.startAddr
   fetchIBufferDumpData.instr_count := PopCount(io.toIbuffer.bits.enqEnable)
-  fetchIBufferDumpData.exception := (f3_perf_info.except_0 && io.toIbuffer.fire) || (f3_perf_info.hit_0_except_1 && io.toIbuffer.fire) || (f3_perf_info.miss_0_except_1 && io.toIbuffer.fire)
+  fetchIBufferDumpData.exception := (f3_perf_info.except_0 && ibufferFireForIFU) || (f3_perf_info.hit_0_except_1 &&  ibufferFireForIFU) || (f3_perf_info.miss_0_except_1 && ibufferFireForIFU)
   fetchIBufferDumpData.is_cache_hit := f3_hit
 
   val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
@@ -1188,7 +1204,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   fetchToIBufferTable.log(
     data = fetchIBufferDumpData,
-    en = isWriteFetchToIBufferTable.orR && io.toIbuffer.fire,
+    en = isWriteFetchToIBufferTable.orR && ibufferFireForIFU,
     site = "IFU" + p(XSCoreParamsKey).HartId.toString,
     clock = clock,
     reset = reset

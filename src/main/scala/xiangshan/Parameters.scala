@@ -855,11 +855,12 @@ trait HasXSParameter {
   // TraceRTLMode
   def TraceFetchWidth = 16
   require(TraceFetchWidth >= PredictWidth)
-  def TraceBufferSize = TraceFetchWidth * 4 //
+  def TraceBufferSize = max(TraceFetchWidth * 4, RobSize) //
   def TraceCollectorWidth = CommitWidth
   def TraceRoBMergeNum = RenameWidth
   def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
   def TraceEnableDuplicateFlush = true
+  def TraceEnableWrongPathEmu = true
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25
