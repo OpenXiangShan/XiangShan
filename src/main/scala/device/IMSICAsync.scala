@@ -18,6 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 class IMSICAsync(
   NumVSIRFiles: Int = 5,
@@ -42,7 +43,7 @@ class IMSICAsync(
   }))
 
   // code about msi_vld_sync, delay 3 cycles after i.msiInfo.valid.
-  val validsync    = ShiftRegister(i.msiInfo.valid, 3, false.B, true.B)
+  val validsync    = AsyncResetSynchronizerShiftReg(i.msiInfo.valid, 3, 0)
   // delay one cycle after validsync.
   val validsyncdly = RegNext(validsync)
   // gen of Msivldsync

@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 import device.XSDebugModuleParams
 import system.SoCParamsKey
 import xiangshan.XSCoreParamsKey
@@ -60,8 +61,7 @@ class StandAloneDebugModule (
     outer.debugModule.module.io.debugIO.reset := io.debugIO.reset.asAsyncReset
     outer.debugModule.module.io.debugIO.systemjtag.foreach(_.reset := io.debugIO.systemjtag.get.reset.asAsyncReset)
     withClockAndReset(io.clock.asClock, io.reset.asAsyncReset) {
-      outer.debugModule.module.io.resetCtrl.hartIsInReset :=
-        RegNextN(io.resetCtrl.hartIsInReset, 2, Some(0.U.asTypeOf(io.resetCtrl.hartIsInReset)))
+      outer.debugModule.module.io.resetCtrl.hartIsInReset := AsyncResetSynchronizerShiftReg(io.resetCtrl.hartIsInReset, 3, 0)
       io.resetCtrl.hartResetReq.foreach(req =>
         req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.get, 0.U.asTypeOf(req)))
     }

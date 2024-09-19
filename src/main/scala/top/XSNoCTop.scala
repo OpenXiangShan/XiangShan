@@ -76,7 +76,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   core_with_l2.clintIntNode := clintIntNode
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
-  beuIntNode := IntBuffer(2) := core_with_l2.tile.beu_int_source
+  beuIntNode := core_with_l2.beuIntNode
   val clint = InModuleBody(clintIntNode.makeIOs())
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
@@ -119,13 +119,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
 
-    val reset_sync = withClockAndReset(clock, reset) { ResetGen() }
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen() })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
-
-    // override LazyRawModuleImp's clock and reset
-    childClock := clock
-    childReset := reset_sync
 
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
@@ -141,6 +136,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
+    core_with_l2.module.clock := clock
+    core_with_l2.module.reset := reset
+    core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
+    core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
@@ -149,25 +148,25 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     EnableClintAsyncBridge match {
       case Some(param) =>
-        val source = withClockAndReset(soc_clock, soc_reset_sync) {
-          Module(new AsyncQueueSource(UInt(64.W), param))
+        withClockAndReset(soc_clock, soc_reset_sync) {
+          val source = Module(new AsyncQueueSource(UInt(64.W), param))
+          source.io.enq.valid := io.clintTime.valid
+          source.io.enq.bits := io.clintTime.bits
+          core_with_l2.module.io.clintTime <> source.io.async
         }
-        source.io.enq.valid := io.clintTime.valid
-        source.io.enq.bits := io.clintTime.bits
-        core_with_l2.module.io.clintTime.get <> source.io.async
       case None =>
-        core_with_l2.module.io.clintTime.get <> io.clintTime
+        core_with_l2.module.io.clintTime <> io.clintTime
     }
 
     EnableCHIAsyncBridge match {
       case Some(param) =>
-        val sink = withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-          Module(new CHIAsyncBridgeSink(param))
+        withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+          val sink = Module(new CHIAsyncBridgeSink(param))
+          sink.io.async <> core_with_l2.module.io.chi
+          io.chi <> sink.io.deq
         }
-        sink.io.async <> core_with_l2.module.io.chi.get
-        io.chi <> sink.io.deq
       case None =>
-        io.chi <> core_with_l2.module.io.chi.get
+        io.chi <> core_with_l2.module.io.chi
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
@@ -176,14 +175,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_rst_node.out.head._1 := false.B.asAsyncReset
 
     core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
-
-    withClockAndReset(clock, reset_sync) {
-      // Modules are reset one by one
-      // reset ----> SYNC --> Core
-      val resetChain = Seq(Seq(core_with_l2.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
-    }
-
   }
 
   lazy val module = new XSNoCTopImp(this)
