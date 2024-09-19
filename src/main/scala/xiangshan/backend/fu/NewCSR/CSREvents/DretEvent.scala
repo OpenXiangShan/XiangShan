@@ -9,7 +9,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
 
 
-class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
+class DretEventOutput(implicit p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
   val debugMode = ValidIO(Bool())
@@ -17,7 +17,7 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val targetPc = ValidIO(new TargetPCBundle)
 }
 
-class DretEventInput extends Bundle {
+class DretEventInput(implicit p: Parameters) extends Bundle {
   val dcsr = Input(new DcsrBundle)
   val dpc = Input(new Epc)
   val mstatus = Input(new MstatusBundle)

@@ -3,8 +3,10 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.{BitPat, Cat, Fill, Mux1H, MuxCase, ValidIO}
+import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
 import freechips.rocketchip.rocket.CSRs
+import xiangshan.DebugOptionsKey
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -200,13 +202,18 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   )
 }
 
-class SstatusBundle extends CSRBundle {
+class SstatusBundle(implicit p: Parameters) extends CSRBundle {
+  def initContextStatus = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) ContextStatus.Clean
+    else ContextStatus.Off
+  }
   val SIE  = CSRWARLField   (1, wNoFilter)
   val SPIE = CSRWARLField   (5, wNoFilter)
   val UBE  = CSRROField     (6).withReset(0.U)
   val SPP  = CSRWARLField   (8, wNoFilter).withReset(0.U)
-  val VS   = ContextStatus  (10, 9).withReset(ContextStatus.Off)
-  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off)
+  val VS   = ContextStatus  (10, 9).withReset(initContextStatus)
+  val FS   = ContextStatus  (14, 13).withReset(initContextStatus)
   val XS   = ContextStatusRO(16, 15).withReset(0.U)
   val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U)
   val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U)

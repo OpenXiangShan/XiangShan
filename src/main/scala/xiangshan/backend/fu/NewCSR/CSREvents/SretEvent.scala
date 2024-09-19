@@ -13,7 +13,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
 
 
-class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
+class SretEventOutput(implicit p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   // Todo: write sstatus instead of mstatus
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.MPRV))
   val hstatus = ValidIO((new HstatusBundle).addInEvent(_.SPV))
@@ -21,7 +21,7 @@ class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val targetPc = ValidIO(new TargetPCBundle)
 }
 
-class SretEventInput extends Bundle {
+class SretEventInput(implicit p: Parameters) extends Bundle {
   val privState = Input(new PrivState)
   val sstatus   = Input(new SstatusBundle)
   val hstatus   = Input(new HstatusBundle)

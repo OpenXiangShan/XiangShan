@@ -12,7 +12,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
 
 
-class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
+class TrapEntryVSEventOutput(implicit val p: Parameters) extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
   val vsstatus = ValidIO((new SstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE))
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
