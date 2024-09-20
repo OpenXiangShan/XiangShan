@@ -666,6 +666,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     )
   )
 
+  // regfile prefetch
+  val s0_pfHit = (int_issue_vaddr === io.ldin.bits.uop.predAddr) && !io.ldin.bits.uop.isLoadPf
+  val s0_currAddr = int_issue_vaddr
+
   s0_tlb_hlv := Mux(
     s0_src_valid_vec(mab_idx),
     LSUOpType.isHlv(io.misalign_ldin.bits.uop.fuOpType),
@@ -709,6 +713,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.fullva        := s0_tlb_fullva
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
+  s0_out.uop.pfHit     := s0_pfHit
+  s0_out.uop.currAddr  := s0_currAddr
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
   s0_out.hasROBEntry   := s0_sel_src.has_rob_entry
   s0_out.isPrefetch    := s0_sel_src.prf
