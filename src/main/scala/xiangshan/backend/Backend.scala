@@ -202,6 +202,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
+  private val vecExcpMod = Module(new VecExcpDataMergeModule)
 
   private val iqWakeUpMappedBundle: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] = (
     intScheduler.io.toSchedulers.wakeupVec ++
@@ -252,6 +253,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
+  ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -375,6 +377,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   dataPath.io.diffV0Rat .foreach(_ := ctrlBlock.io.diff_v0_rat.get)
   dataPath.io.diffVlRat .foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
+  dataPath.io.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
+  dataPath.io.fromVecExcpMod.w := vecExcpMod.o.toVPRF.w
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -447,6 +451,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
+  csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -562,9 +567,19 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       x.oldVdPsrc := source.bits.uop.psrc(2)
       x.isIndexed := VlduType.isIndexed(source.bits.uop.fuOpType)
       x.isMasked := VlduType.isMasked(source.bits.uop.fuOpType)
+      x.isStrided := VlduType.isStrided(source.bits.uop.fuOpType)
+      x.isWhole := VlduType.isWhole(source.bits.uop.fuOpType)
+      x.isVecLoad := VlduType.isVecLd(source.bits.uop.fuOpType)
+      x.isVlm := VlduType.isMasked(source.bits.uop.fuOpType) && VlduType.isVecLd(source.bits.uop.fuOpType)
     })
     sink.bits.trigger.foreach(_ := source.bits.uop.trigger)
   }
+  wbDataPath.io.fromCSR.vstart := csrio.vpu.vstart
+
+  vecExcpMod.i.fromExceptionGen := ctrlBlock.io.toVecExcpMod.excpInfo
+  vecExcpMod.i.fromRab.logicPhyRegMap := ctrlBlock.io.toVecExcpMod.logicPhyRegMap
+  vecExcpMod.i.fromRat := ctrlBlock.io.toVecExcpMod.ratOldPest
+  vecExcpMod.i.fromVprf := dataPath.io.toVecExcpMod
 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams

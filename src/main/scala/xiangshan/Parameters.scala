@@ -724,8 +724,13 @@ trait HasXSParameter {
   def VfPhyRegs = coreParams.vfPreg.numEntries
   def V0PhyRegs = coreParams.v0Preg.numEntries
   def VlPhyRegs = coreParams.vlPreg.numEntries
-  def MaxPhyPregs = IntPhyRegs max VfPhyRegs
-  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(FpPhyRegs) max log2Up(VfPhyRegs)
+  def MaxPhyRegs = Seq(IntPhyRegs, FpPhyRegs, VfPhyRegs, V0PhyRegs, VlPhyRegs).max
+  def IntPhyRegIdxWidth = log2Up(IntPhyRegs)
+  def FpPhyRegIdxWidth = log2Up(FpPhyRegs)
+  def VfPhyRegIdxWidth = log2Up(VfPhyRegs)
+  def V0PhyRegIdxWidth = log2Up(V0PhyRegs)
+  def VlPhyRegIdxWidth = log2Up(VlPhyRegs)
+  def PhyRegIdxWidth = Seq(IntPhyRegIdxWidth, FpPhyRegIdxWidth, VfPhyRegIdxWidth, V0PhyRegIdxWidth, VlPhyRegIdxWidth).max
   def RobSize = coreParams.RobSize
   def RabSize = coreParams.RabSize
   def VTypeBufferSize = coreParams.VTypeBufferSize
@@ -863,6 +868,9 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
+
+  // Vector load exception
+  def maxMergeNumPerCycle = 4
 
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
