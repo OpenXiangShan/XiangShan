@@ -54,7 +54,16 @@ trait EventUpdatePrivStateOutput {
 }
 
 trait EventOutputBase {
-  def getBundleByName(name: String): Valid[CSRBundle]
+  import scala.reflect.runtime.{universe => ru}
+
+  def getBundleByName(name: String): Valid[CSRBundle] = {
+    val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
+    val im = mirror.reflect(this)
+    val classSymbol: ru.ClassSymbol = im.symbol.asClass
+    val fieldSymbol = classSymbol.info.decl(ru.TermName(name)).asTerm
+    val fieldMirror: ru.FieldMirror = mirror.reflect(this).reflectField(fieldSymbol)
+    fieldMirror.get.asInstanceOf[Valid[CSRBundle]]
+  }
 }
 
 trait CSREventBase {
@@ -138,6 +147,16 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val memExceptionGPAddr = Input(UInt(XLEN.W))
   val virtualInterruptIsHvictlInject = Input(Bool())
   val hvictlIID = Input(UInt(HIIDWidth.W))
+}
+
+trait EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
+  protected def addUpdateBundleInCSREnumType(updateBundle: ValidIO[CSRBundle]): Unit = {
+    (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
+      if (updateBundle.bits.eventFields.contains(source)) {
+        sink.addOtherUpdate(updateBundle.valid, source)
+      }
+    }
+  }
 }
 
 class TargetPCBundle extends Bundle {

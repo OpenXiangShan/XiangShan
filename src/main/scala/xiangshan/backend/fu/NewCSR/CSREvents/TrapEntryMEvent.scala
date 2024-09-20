@@ -21,18 +21,6 @@ class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val mtinst    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val tcontrol  = ValidIO((new TcontrolBundle).addInEvent(_.MPTE, _.MTE))
   val targetPc  = ValidIO(new TargetPCBundle)
-
-  def getBundleByName(name: String): Valid[CSRBundle] = {
-    name match {
-      case "mstatus"  => this.mstatus
-      case "mepc"     => this.mepc
-      case "mcause"   => this.mcause
-      case "mtval"    => this.mtval
-      case "mtval2"   => this.mtval2
-      case "mtinst"   => this.mtinst
-      case "tcontrol" => this.tcontrol
-    }
-  }
 }
 
 class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -142,16 +130,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   dontTouch(tvalFillGVA)
 }
 
-trait TrapEntryMEventSinkBundle { self: CSRModule[_] =>
+trait TrapEntryMEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val trapToM = IO(Flipped(new TrapEntryMEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = trapToM.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(trapToM.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

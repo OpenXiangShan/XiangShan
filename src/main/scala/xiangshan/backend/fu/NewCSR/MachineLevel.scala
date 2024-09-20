@@ -281,12 +281,12 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = RO(33, 32)
-    val SSEED = RO(     9)
-    val USEED = RO(     8)
-    val RLB   = RO(     2)
-    val MMWP  = RO(     1)
-    val MML   = RO(     0)
+    val MLPE  = RO(10) // Landing pand, Zicfilp extension
+    val SSEED = RO( 9) // Zkr extension
+    val USEED = RO( 8) // Zkr extension
+    val RLB   = RO( 2) // Smepmp
+    val MMWP  = RO( 1) // Smepmp
+    val MML   = RO( 0) // Smepmp
   })).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
@@ -478,9 +478,15 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   val sstatusRdata = IO(Output(UInt(64.W)))
 
   val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
+  for ((name, field) <- wAliasSstatus.wdataFields.elements) {
+    reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+      wAliasSstatus.wen && field.asInstanceOf[CSREnumType].isLegal,
+      field.asInstanceOf[CSREnumType]
+    )
+  }
 
   // write connection
-  this.wfn(reg)(Seq(wAliasSstatus))
+  reconnectReg()
 
   when (robCommit.fsDirty || writeFCSR) {
     assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
@@ -498,13 +504,14 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
 }
-class MnstatusBundle extends CSRBundle {
 
+class MnstatusBundle extends CSRBundle {
   val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
   val MNPV   = VirtMode    (7).withReset(0.U)
-  val MNPELP = CSRRWField  (9).withReset(0.U)
+  val MNPELP = RO          (9).withReset(0.U)
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
 }
+
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
   val A = RO( 0).withReset(1.U) // Atomic extension

@@ -17,13 +17,6 @@ class MNretEventOutput extends Bundle with EventUpdatePrivStateOutput with Event
   val mnstatus  = ValidIO((new MnstatusBundle).addInEvent(_.MNPP, _.MNPV, _.NMIE))
   val mstatus   = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
   val targetPc  = ValidIO(new TargetPCBundle)
-
-  override def getBundleByName(name: String): ValidIO[CSRBundle] = {
-    name match {
-      case "mnstatus"  => this.mnstatus
-      case "mstatus"   => this.mstatus
-    }
-  }
 }
 
 class MNretEventInput extends Bundle {
@@ -74,17 +67,10 @@ class MNretEventModule(implicit p: Parameters) extends Module with CSREventBase 
   out.targetPc.bits.raiseIGPF := instrAddrTransType.checkGuestPageFault(in.mnepc.asUInt)
 }
 
-trait MNretEventSinkBundle { self: CSRModule[_] =>
+trait MNretEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val retFromMN = IO(Flipped(new MNretEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = retFromMN.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(retFromMN.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
-
+  reconnectReg()
 }
