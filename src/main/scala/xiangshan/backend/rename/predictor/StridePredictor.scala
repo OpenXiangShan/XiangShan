@@ -26,6 +26,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.backend.BackendParams
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.util.SeqBoolBitwiseOps
+import chisel3.experimental.BundleLiterals._
 
 trait StridePredictorParams {
   val NumEntries: Int = 128
@@ -66,14 +67,13 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   require(NumEntries % NumWay == 0, "NumEntries % NumWay must be 0")
   require(NumGroup == (math.pow(2, GroupWidth)).toInt, "NumGroup must be a power of 2")
 
-  val spValid = RegInit(VecInit(Seq.fill(NumGroup)(VecInit(Seq.fill(NumWay)(false.B)))))
-  val spEntries = Reg(Vec(NumGroup, Vec(NumWay, new StridePredictorEntry)))
+  val spEntries = RegInit(VecInit.fill(NumGroup)(VecInit.fill(NumWay)((new StridePredictorEntry).Lit(_.valid -> false.B))))
 
   // 1. read status
   val readEnableVec = io.spReadPort.map(x => x.ren)
   val readAddrVec = io.spReadPort.map(x => get_group(x.pc))
   val readTagVec = io.spReadPort.map(x => get_tag(x.pc))
-  val readValidVec = readAddrVec.map(spValid(_))
+  val readValidVec = readAddrVec.map(spEntries(_).map(_.valid))
   val readEntryVec = readAddrVec.map(spEntries(_))
 
   val readMatchOHVec: IndexedSeq[Vec[Bool]] = readTagVec.zipWithIndex.map{ case (tag, i) =>
@@ -166,7 +166,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   val updateAddrVec = updatePC.map(x => get_group(x))
   val updateTagVec = updatePC.map(x => get_tag(x))
-  val updateValidVec = updateAddrVec.map(spValid(_))
+  val updateValidVec = updateAddrVec.map(spEntries(_).map(_.valid))
   val updateEntryVec = updateAddrVec.map(spEntries(_))
 
   val updateMatchOHVec: IndexedSeq[Vec[Bool]] = updateTagVec.zipWithIndex.map{ case (tag, i) =>
@@ -365,6 +365,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 }
 
 class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
+  val valid      = Bool()
   val tag        = UInt(TagWidth.W)
 
   val stride     = UInt(StrideWidth.W)
