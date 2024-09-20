@@ -144,6 +144,10 @@ class NewCSR(implicit val p: Parameters) extends Module
       val robDeqPtr = Input(new RobPtr)
     })
 
+    val fromVecExcpMod = Input(new Bundle {
+      val busy = Bool()
+    })
+
     val perf = Input(new PerfCounterIO)
 
     /** Output should be a DecoupledIO, since now CSR writing to integer register file might be blocked (by arbiter) */
@@ -1238,8 +1242,16 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
+    // Delay trap passed to difftest until VecExcpMod is not busy
+    val pendingTrap = RegInit(false.B)
+    when (hasTrap) {
+      pendingTrap := true.B
+    }.elsewhen (!io.fromVecExcpMod.busy) {
+      pendingTrap := false.B
+    }
+
     val hartId = io.fromTop.hartId
-    val trapValid = io.fromRob.trap.valid
+    val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val trapNO = Mux(virtualInterruptIsHvictlInject && hasTrap, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val hasNMI = nmi && hasTrap
@@ -1265,13 +1277,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     diffArchEvent.coreid := hartId
     diffArchEvent.valid := trapValid
-    diffArchEvent.interrupt := interruptNO
-    diffArchEvent.exception := exceptionNO
-    diffArchEvent.exceptionPC := exceptionPC
-    diffArchEvent.hasNMI := hasNMI
+    diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
+    diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
+    diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
+    diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
     diffArchEvent.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject && hasTrap
     if (env.EnableDifftest) {
-      diffArchEvent.exceptionInst := io.fromRob.trap.bits.instr
+      diffArchEvent.exceptionInst := RegEnable(io.fromRob.trap.bits.instr, hasTrap)
     }
 
     val diffCSRState = DifftestModule(new DiffCSRState)

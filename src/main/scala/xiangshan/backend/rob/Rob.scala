@@ -19,13 +19,14 @@ package xiangshan.backend.rob
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.BundleLiterals._
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
-import xiangshan.backend.BackendParams
+import xiangshan.backend.{BackendParams, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
@@ -91,6 +92,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
 
+    val toVecExcpMod = Output(new Bundle {
+      val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
+      val excpInfo = ValidIO(new VecExcpInfo)
+    })
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
     val debugEnqLsq = Input(new LsqEnqIO)
@@ -132,6 +137,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
   val allowEnqueue = RegInit(true.B)
+  val vecExcpInfo = RegInit(ValidIO(new VecExcpInfo).Lit(
+    _.valid -> false.B,
+  ))
 
   /**
    * Enqueue (from dispatch)
@@ -310,6 +318,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqVlsCanCommit= RegInit(false.B)
   rab.io.fromRob.commitSize := Mux(deqVlsExceptionNeedCommit, deqVlsExceptionCommitSize, commitSizeSum)
   rab.io.fromRob.walkSize := walkSizeSum
+  rab.io.fromRob.vecLoadExcp.valid := RegNext(exceptionDataRead.valid && exceptionDataRead.bits.isVecLoad)
+  rab.io.fromRob.vecLoadExcp.bits.isStrided := RegEnable(exceptionDataRead.bits.isStrided, exceptionDataRead.valid)
+  rab.io.fromRob.vecLoadExcp.bits.isVlm := RegEnable(exceptionDataRead.bits.isVlm, exceptionDataRead.valid)
   rab.io.snpt := io.snpt
   rab.io.snpt.snptEnq := snptEnq
 
@@ -637,6 +648,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val dirty_vs = io.commits.isCommit && VecInit(dirtyVs).asUInt.orR
 
   val resetVstart = dirty_vs && !io.vstartIsZero
+
+  vecExcpInfo.valid := exceptionHappen && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad
+  when (exceptionHappen) {
+    vecExcpInfo.bits.nf := exceptionDataRead.bits.nf
+    vecExcpInfo.bits.vsew := exceptionDataRead.bits.vsew
+    vecExcpInfo.bits.veew := exceptionDataRead.bits.veew
+    vecExcpInfo.bits.vlmul := exceptionDataRead.bits.vlmul
+    vecExcpInfo.bits.isStride := exceptionDataRead.bits.isStrided
+    vecExcpInfo.bits.isIndexed := exceptionDataRead.bits.isIndexed
+    vecExcpInfo.bits.isWhole := exceptionDataRead.bits.isWhole
+    vecExcpInfo.bits.isVlm := exceptionDataRead.bits.isVlm
+    vecExcpInfo.bits.vstart := exceptionDataRead.bits.vstart
+  }
 
   io.csr.vstart.valid := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstartEn, resetVstart))
   io.csr.vstart.bits := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstart, 0.U))
@@ -1111,6 +1135,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.vstartEn := false.B //DontCare
     exceptionGen.io.enq(i).bits.vstart := 0.U //DontCare
     exceptionGen.io.enq(i).bits.vuopIdx := 0.U
+    exceptionGen.io.enq(i).bits.isVecLoad := false.B
+    exceptionGen.io.enq(i).bits.isVlm := false.B
+    exceptionGen.io.enq(i).bits.isStrided := false.B
+    exceptionGen.io.enq(i).bits.isIndexed := false.B
+    exceptionGen.io.enq(i).bits.isWhole := false.B
+    exceptionGen.io.enq(i).bits.nf := 0.U
+    exceptionGen.io.enq(i).bits.vsew := 0.U
+    exceptionGen.io.enq(i).bits.veew := 0.U
+    exceptionGen.io.enq(i).bits.vlmul := 0.U
   }
 
   println(s"ExceptionGen:")
@@ -1138,9 +1171,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.get.asUInt.orR else 0.U)
     exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
     exc_wb.bits.vuopIdx := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vuopIdx else 0.U)
-    //    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
-    //      s"flushPipe ${configs.exists(_.flushPipe)}, " +
-    //      s"replayInst ${configs.exists(_.replayInst)}")
+    exc_wb.bits.isVecLoad := wb.bits.vls.map(_.isVecLoad).getOrElse(false.B)
+    exc_wb.bits.isVlm := wb.bits.vls.map(_.isVlm).getOrElse(false.B)
+    exc_wb.bits.isStrided := wb.bits.vls.map(_.isStrided).getOrElse(false.B) // strided need two mode tmp vreg
+    exc_wb.bits.isIndexed := wb.bits.vls.map(_.isIndexed).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
+    exc_wb.bits.isWhole := wb.bits.vls.map(_.isWhole).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
+    exc_wb.bits.nf := wb.bits.vls.map(_.vpu.nf).getOrElse(0.U)
+    exc_wb.bits.vsew := wb.bits.vls.map(_.vpu.vsew).getOrElse(0.U)
+    exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
+    exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
   }
 
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
@@ -1159,6 +1198,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
   io.headNotReady := commit_vDeqGroup(deqPtr.value(bankNumWidth-1, 0)) && !commit_wDeqGroup(deqPtr.value(bankNumWidth-1, 0))
+
+  io.toVecExcpMod.logicPhyRegMap := rab.io.toVecExcpMod.logicPhyRegMap
+  io.toVecExcpMod.excpInfo := vecExcpInfo
 
   /**
    * debug info
@@ -1388,7 +1430,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
 
-      val difftest = DifftestModule(new DiffInstrCommit(MaxPhyPregs), delay = 3, dontCare = true)
+      val difftest = DifftestModule(new DiffInstrCommit(MaxPhyRegs), delay = 3, dontCare = true)
       val dt_skip = Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
       difftest.coreid := io.hartId
       difftest.index := i.U
