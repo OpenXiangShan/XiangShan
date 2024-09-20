@@ -42,14 +42,15 @@ case class PMParameters
 trait HasPMParameters {
   implicit val p: Parameters
 
-  val PMPAddrBits = p(SoCParamsKey).PAddrBits
-  val PMPPmemLowBound = p(SoCParamsKey).PmemLowBound
-  val PMPPmemHighBound = p(SoCParamsKey).PmemHighBound
-  val PMXLEN = p(XLen)
-  val pmParams = p(PMParameKey)
-  val NumPMP = pmParams.NumPMP
-  val NumPMA = pmParams.NumPMA
+  def PMPAddrBits = p(SoCParamsKey).PAddrBits
+  def PMPPmemLowBounds = p(SoCParamsKey).PmemLowBounds
+  def PMPPmemHighBounds = p(SoCParamsKey).PmemHighBounds
+  def PMPPmemRanges = PMPPmemLowBounds zip PMPPmemHighBounds
+  def PMXLEN = p(XLen)
+  def pmParams = p(PMParameKey)
+  def NumPMP = pmParams.NumPMP
+  def NumPMA = pmParams.NumPMA
 
-  val PlatformGrain = pmParams.PlatformGrain
-  val mmpma = pmParams.mmpma
+  def PlatformGrain = pmParams.PlatformGrain
+  def mmpma = pmParams.mmpma
 }

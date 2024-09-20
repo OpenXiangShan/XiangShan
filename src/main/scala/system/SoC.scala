@@ -41,8 +41,8 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 48,
-  PmemLowBound: Long = 0x80000000L,
-  PmemHighBound: Long = 0x80000000000L,
+  PmemLowBounds: Seq[BigInt] = Seq(0x80000000L),
+  PmemHighBounds: Seq[BigInt] = Seq(0x80000000000L),
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
