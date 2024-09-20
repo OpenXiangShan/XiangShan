@@ -728,6 +728,10 @@ object Bundles {
       val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
       val isMasked = Bool()
+      val isStrided = Bool()
+      val isWhole = Bool()
+      val isVecLoad = Bool()
+      val isVlm = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
