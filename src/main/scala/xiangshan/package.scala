@@ -621,7 +621,7 @@ package object xiangshan {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))

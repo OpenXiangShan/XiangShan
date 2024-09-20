@@ -236,6 +236,8 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
+  VFOFBufferSize: Int = 8,
+  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -471,10 +473,10 @@ case class XSCoreParameters
         ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(7, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
+        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
+        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0), VlWB(port = 3, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(12, 0)))),
@@ -593,7 +595,7 @@ trait HasXSParameter {
   def GPAddrBits = {
     if (EnableSv48)
       coreParams.GPAddrBitsSv48x4
-    else 
+    else
       coreParams.GPAddrBitsSv39x4
   }
   def VAddrBits = {
@@ -786,6 +788,7 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
+  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward
