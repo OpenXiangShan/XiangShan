@@ -1140,7 +1140,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
-  io.headNotReady := commit_vDeqGroup.head && !commit_wDeqGroup.head
+  io.headNotReady := commit_vDeqGroup(deqPtr.value(bankNumWidth-1, 0)) && !commit_wDeqGroup(deqPtr.value(bankNumWidth-1, 0))
 
   /**
    * debug info
