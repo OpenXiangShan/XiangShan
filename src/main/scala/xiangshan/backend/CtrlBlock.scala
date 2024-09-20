@@ -258,7 +258,9 @@ class CtrlBlockImp(
   trace.io.fromRob         := rob.io.trace.traceCommitInfo
   rob.io.trace.blockCommit := trace.io.blockRobCommit
 
-  dontTouch(trace.io.toEncoder)
+  if(backendParams.debugEn){
+    dontTouch(trace.io.toEncoder)
+  }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
     val traceValid = trace.toPcMem(i).valid
