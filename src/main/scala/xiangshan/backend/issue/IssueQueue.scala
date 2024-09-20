@@ -315,6 +315,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.firstIssue                                := false.B
       enq.bits.status.issueTimer                                := "b11".U
       enq.bits.status.deqPortIdx                                := 0.U
+      enq.bits.status.needPf.foreach(_                          := s0_enqBits(enqIdx).needPf)
+      enq.bits.status.predAddr.foreach(_                        := s0_enqBits(enqIdx).predAddr)
       enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm)
       enq.bits.payload                                          := s0_enqBits(enqIdx)
     }
@@ -771,6 +773,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
     deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
+
+    deq.bits.common.isLoadPf.foreach(_ := false.B)
+    deq.bits.common.needPf.foreach(_ := deqEntryVec(i).bits.status.needPf.get)
+    deq.bits.common.predAddr.foreach(_ := deqEntryVec(i).bits.status.predAddr.get)
 
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
     deq.bits.common.perfDebugInfo.selectTime := GTimer()

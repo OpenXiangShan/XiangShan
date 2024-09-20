@@ -153,6 +153,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
+    // regfile prefetch
+    robEntry.pfHit := false.B
+    robEntry.currAddr := 0.U
     robEntry.debug_pc.foreach(_ := robEnq.pc)
     robEntry.debug_instr.foreach(_ := robEnq.instr)
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)

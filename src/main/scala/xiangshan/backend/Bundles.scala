@@ -239,8 +239,11 @@ object Bundles {
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
     // regfile prefetch
+    val isLoadPf        = Bool()
     val needPf          = Bool()
     val predAddr        = UInt(VAddrBits.W)
+    val pfHit           = Bool()
+    val currAddr        = UInt(VAddrBits.W)
     // debug module
     val singleStep      = Bool()
     // schedule
@@ -633,6 +636,10 @@ object Bundles {
     val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
     // only vector load store need
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
+    // regfile prefetch
+    val isLoadPf       = OptionWrapper(params.hasLoadFu, Bool())
+    val needPf         = OptionWrapper(params.hasLoadFu, Bool())
+    val predAddr       = OptionWrapper(params.hasLoadFu, UInt(VAddrBits.W))
 
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
@@ -694,6 +701,9 @@ object Bundles {
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
+      this.isLoadPf      .foreach(_ := source.common.isLoadPf.get)
+      this.needPf        .foreach(_ := source.common.needPf.get)
+      this.predAddr      .foreach(_ := source.common.predAddr.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
     }
   }
@@ -739,7 +749,8 @@ object Bundles {
       val isVlm = Bool()
     })
     // regfile prefetch
-    val pfHit = OptionWrapper(params.hasLoadFu, Bool())
+    val isLoadPf = OptionWrapper(params.hasLoadFu, Bool())
+    val pfHit    = OptionWrapper(params.hasLoadFu, Bool())
     val currAddr = OptionWrapper(params.hasLoadFu, UInt(VAddrBits.W))
     // debug
     val debug = new DebugBundle

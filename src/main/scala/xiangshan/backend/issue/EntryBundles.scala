@@ -30,6 +30,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqPortIdx            = UInt(1.W)
     //vector mem status
     val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
+    //regfile prefetch
+    val needPf                = Option.when(params.isLdAddrIQ)(Bool())
+    val predAddr              = Option.when(params.isLdAddrIQ)(UInt(VAddrBits.W))
 
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
@@ -380,6 +383,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.firstIssue                     := commonIn.deqSel || status.firstIssue
     entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, Mux(status.issueTimer === "b11".U, status.issueTimer, status.issueTimer + 1.U), "b11".U))
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
+    entryUpdate.status.needPf.foreach(_               := status.needPf.get)
+    entryUpdate.status.predAddr.foreach(_             := status.predAddr.get)
     entryUpdate.imm.foreach(_                         := entryReg.imm.get)
     entryUpdate.payload                               := entryReg.payload
     if (params.isVecMemIQ) {

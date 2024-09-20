@@ -575,6 +575,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       x.isVlm := VlduType.isMasked(source.bits.uop.fuOpType) && VlduType.isVecLd(source.bits.uop.fuOpType)
     })
     sink.bits.trigger.foreach(_ := source.bits.uop.trigger)
+    sink.bits.isLoadPf.foreach(_ := source.bits.uop.isLoadPf)
+    sink.bits.pfHit.foreach(_ := source.bits.uop.pfHit)
+    sink.bits.currAddr.foreach(_ := source.bits.uop.currAddr)
   }
   wbDataPath.io.fromCSR.vstart := csrio.vpu.vstart
 
@@ -694,6 +697,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.preDecodeInfo  := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
     sink.bits.uop.numLsElem      := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
     sink.bits.flowNum.foreach(_  := source.bits.numLsElem.get)
+    sink.bits.uop.isLoadPf       := source.bits.isLoadPf.getOrElse(false.B)
+    sink.bits.uop.needPf         := source.bits.needPf.getOrElse(false.B)
+    sink.bits.uop.predAddr       := source.bits.predAddr.getOrElse(0.U)
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
