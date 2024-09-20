@@ -201,36 +201,13 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   // commit update
-  val commitUpdateEntryVec = Wire(Vec(RenameWidth, Vec(NumWay, new StridePredictorEntry)))
+  val commitUpdateEntryVec = Wire(Vec(CommitUpdateSize, Vec(NumWay, new StridePredictorEntry)))
   commitUpdateEntryVec.zipWithIndex.foreach{ case (commitEntryVec, i) =>
     commitEntryVec.zipWithIndex.foreach{ case (entry, j) =>
       // note: only work in CommitUpdateSize = 2
       entry := updateEntryVec(i)(j)
       if (i != 0) {
         assert(finalUpdateMatchCountVec(i) <= 1.U, s"only i == 0 can have match count == 2")
-      }
-      when (finalUpdateMatchCountVec(i) === 2.U) {
-        entry.prevAddr := updateInfo(i + 1).currAddr
-        entry.inflight := updateEntryVec(i)(j).inflight + updateMatchReadCountVec(i) - 2.U
-        when (updateInfo(i).pfHit && updateInfo(i + 1).pfHit) {
-          entry.confidence := Mux(updateEntryVec(i)(j).confidence >= (MaxConfidenceVal - 1).U, MaxConfidenceVal.U, updateEntryVec(i)(j).confidence + 2.U)
-          entry.utility := Mux(updateEntryVec(i)(j).utility >= (MaxUtilityVal - 1).U, MaxUtilityVal.U, updateEntryVec(i)(j).utility + 2.U)
-        }.elsewhen (updateInfo(i).pfHit && !updateInfo(i + 1).pfHit) {
-          entry.confidence := updateEntryVec(i)(j).confidence >> 1
-          entry.utility := 0.U
-        }.elsewhen (!updateInfo(i).pfHit && updateInfo(i + 1).pfHit) {
-          entry.confidence := (updateEntryVec(i)(j).confidence >> 1) + 1.U
-          entry.utility := 1.U
-        }.otherwise {
-          entry.utility := 0.U
-          when (updateEntryVec(i)(j).confidence <= 1.U) {
-            entry.stride := updateInfo(i + 1).currAddr - updateInfo(i).currAddr
-            entry.confidence := 0.U
-          }.otherwise {
-            entry.confidence := updateEntryVec(i)(j).confidence >> 2
-          }
-        }
-      }.otherwise {
         entry.prevAddr := updateInfo(i).currAddr
         entry.inflight := updateEntryVec(i)(j).inflight + updateMatchReadCountVec(i) - 1.U
         when (updateInfo(i).pfHit) {
@@ -243,6 +220,45 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.confidence := 0.U
           }.otherwise {
             entry.confidence := updateEntryVec(i)(j).confidence >> 1
+          }
+        }
+      }
+      else {
+        when (finalUpdateMatchCountVec(i) === 2.U) {
+          entry.prevAddr := updateInfo(i + 1).currAddr
+          entry.inflight := updateEntryVec(i)(j).inflight + updateMatchReadCountVec(i) - 2.U
+          when (updateInfo(i).pfHit && updateInfo(i + 1).pfHit) {
+            entry.confidence := Mux(updateEntryVec(i)(j).confidence >= (MaxConfidenceVal - 1).U, MaxConfidenceVal.U, updateEntryVec(i)(j).confidence + 2.U)
+            entry.utility := Mux(updateEntryVec(i)(j).utility >= (MaxUtilityVal - 1).U, MaxUtilityVal.U, updateEntryVec(i)(j).utility + 2.U)
+          }.elsewhen (updateInfo(i).pfHit && !updateInfo(i + 1).pfHit) {
+            entry.confidence := updateEntryVec(i)(j).confidence >> 1
+            entry.utility := 0.U
+          }.elsewhen (!updateInfo(i).pfHit && updateInfo(i + 1).pfHit) {
+            entry.confidence := (updateEntryVec(i)(j).confidence >> 1) + 1.U
+            entry.utility := 1.U
+          }.otherwise {
+            entry.utility := 0.U
+            when (updateEntryVec(i)(j).confidence <= 1.U) {
+              entry.stride := updateInfo(i + 1).currAddr - updateInfo(i).currAddr
+              entry.confidence := 0.U
+            }.otherwise {
+              entry.confidence := updateEntryVec(i)(j).confidence >> 2
+            }
+          }
+        }.otherwise {
+          entry.prevAddr := updateInfo(i).currAddr
+          entry.inflight := updateEntryVec(i)(j).inflight + updateMatchReadCountVec(i) - 1.U
+          when (updateInfo(i).pfHit) {
+            entry.confidence := Mux(updateEntryVec(i)(j).confidence === MaxConfidenceVal.U, MaxConfidenceVal.U, updateEntryVec(i)(j).confidence + 1.U)
+            entry.utility := Mux(updateEntryVec(i)(j).utility === MaxUtilityVal.U, MaxUtilityVal.U, updateEntryVec(i)(j).utility + 1.U)
+          }.otherwise {
+            entry.utility := 0.U
+            when (updateEntryVec(i)(j).confidence === 0.U) {
+              entry.stride := updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr
+              entry.confidence := 0.U
+            }.otherwise {
+              entry.confidence := updateEntryVec(i)(j).confidence >> 1
+            }
           }
         }
       }
@@ -309,7 +325,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       assert(PopCount(selVec) <= 1.U, s"selVec(${i}) is not one-hot")
     }
     else {
-      enqEntry := Mux(enqNum === CommitWidth.U, io.spCommitPort.last, 0.U.asTypeOf(new SPCommitPort))
+      enqEntry := Mux(enqNum === CommitWidth.U, io.spCommitPort.last, 0.U.asTypeOf(enqEntry))
     }
   }
 
@@ -376,18 +392,18 @@ class SPReadPort()(implicit p: Parameters) extends XSBundle with StridePredictor
 }
 
 class SPCommitPort()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
-  val wen       = Input(Bool())
-  val ftqPtr    = Input(new FtqPtr)
-  val ftqOffset = Input(UInt(log2Up(PredictWidth).W))
-  val pfHit     = Input(Bool())
-  val currAddr  = Input(UInt(VAddrBits.W))
+  val wen       = Bool()
+  val ftqPtr    = new FtqPtr
+  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val pfHit     = Bool()
+  val currAddr  = UInt(VAddrBits.W)
 }
 
 class StridePredictorIO()(implicit p: Parameters) extends XSBundle with StridePredictorParams{
 
   val spReadPort = Vec(RenameWidth, new SPReadPort)
 
-  val spCommitPort = Vec(CommitWidth, new SPCommitPort)
+  val spCommitPort = Vec(CommitWidth, Input(new SPCommitPort))
 
   val fromSPPcMem = Flipped(Vec(CommitUpdateSize, new SPPcMemReadPort))
 }
