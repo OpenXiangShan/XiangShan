@@ -427,9 +427,9 @@ class CtrlBlockImp(
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodedInst)))
-
+  private val vecExcpModBusy = io.fromVecExcpMod.busy
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready,
+    PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready && !vecExcpModBusy,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
 
     decodePipeRename(i).ready := rename.io.in(i).ready
@@ -631,6 +631,30 @@ class CtrlBlockImp(
 
   io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
 
+  io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
+  io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo
+  // T  : rat receive rabCommit
+  // T+1: rat return oldPdest
+  io.toVecExcpMod.ratOldPest match {
+    case fromRat =>
+      (0 until RabCommitWidth).foreach { idx =>
+        fromRat.v0OldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).v0Wen
+        )
+        fromRat.v0OldVdPdest(idx).bits := rat.io.v0_old_pdest(idx)
+        fromRat.vecOldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).vecWen
+        )
+        fromRat.vecOldVdPdest(idx).bits := rat.io.vec_old_pdest(idx)
+      }
+  }
+
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
@@ -706,6 +730,16 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
   }
+
+  val fromVecExcpMod = Input(new Bundle {
+    val busy = Bool()
+  })
+
+  val toVecExcpMod = Output(new Bundle {
+    val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
+    val excpInfo = ValidIO(new VecExcpInfo)
+    val ratOldPest = new RatToVecExcpMod
+  })
 
   val perfInfo = Output(new Bundle{
     val ctrlInfo = new Bundle {

@@ -144,6 +144,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
 
+  csrMod.io.fromVecExcpMod.busy := io.csrin.get.fromVecExcpMod.busy
+
   csrMod.io.perf  := csrIn.perf
 
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
@@ -358,6 +360,9 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
   val clintTime = Input(ValidIO(UInt(64.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
+  val fromVecExcpMod = Input(new Bundle {
+    val busy = Bool()
+  })
 }
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
