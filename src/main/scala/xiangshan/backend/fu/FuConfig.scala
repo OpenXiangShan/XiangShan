@@ -760,6 +760,7 @@ object FuConfig {
     piped = false, // Todo: check it
     writeVecRf = true,
     writeV0Rf = true,
+    writeVlRf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint),
     flushPipe = true,
@@ -800,6 +801,7 @@ object FuConfig {
     piped = false, // Todo: check it
     writeVecRf = true,
     writeV0Rf = true,
+    writeVlRf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, breakPoint),
     flushPipe = true,

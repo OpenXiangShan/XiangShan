@@ -58,7 +58,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s0_nf = Mux(us_whole_reg(s0_fuOpType), 0.U, s0_uop.vpu.nf)
   val s0_vm = s0_uop.vpu.vm
   val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(s0_uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
-  val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
+  val s0_preIsSplit = !isUnitStride(s0_mop)
   val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
