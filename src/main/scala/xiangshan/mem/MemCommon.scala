@@ -84,7 +84,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val fullva = UInt(XLEN.W)
   val paddr = UInt(PAddrBits.W)
   val gpaddr = UInt(XLEN.W)
-  val isForVS = Bool()
+  val isForVSnonLeafPTE = Bool()
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
   val data = UInt((VLEN+1).W)
@@ -165,7 +165,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
     if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
-    if (latch) isForVS := RegEnable(input.isForVS, enable) else isForVS := input.isForVS
+    if (latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE
     if (latch) mask := RegEnable(input.mask, enable) else mask := input.mask
     if (latch) data := RegEnable(input.data, enable) else data := input.data
     if (latch) uop := RegEnable(input.uop, enable) else uop := input.uop
@@ -245,7 +245,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
     if(latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if(latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
-    if(latch) isForVS := RegEnable(input.isForVS, enable) else isForVS := input.isForVS
+    if(latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE
     if(latch) mask := RegEnable(input.mask, enable) else mask := input.mask
     if(latch) data := RegEnable(input.data, enable) else data := input.data
     if(latch) uop := RegEnable(input.uop, enable) else uop := input.uop

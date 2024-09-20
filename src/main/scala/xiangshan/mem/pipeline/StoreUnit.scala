@@ -259,7 +259,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
-  val s1_isForVS   = io.tlb.resp.bits.isForVS
+  val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_pbmt      = io.tlb.resp.bits.pbmt(0)
@@ -311,7 +311,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out         := s1_in
   s1_out.paddr   := s1_paddr
   s1_out.gpaddr  := s1_gpaddr
-  s1_out.isForVS := s1_isForVS
+  s1_out.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   s1_out.miss    := false.B
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
@@ -418,7 +418,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.bits.vaddr := s2_out.vaddr
   s2_misalign_stout.bits.paddr := s2_out.paddr
   s2_misalign_stout.bits.gpaddr := s2_out.gpaddr
-  s2_misalign_stout.bits.isForVS := s2_out.isForVS
+  s2_misalign_stout.bits.isForVSnonLeafPTE := s2_out.isForVSnonLeafPTE
   s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
   s2_misalign_stout.bits.uop.exceptionVec := s2_out.uop.exceptionVec
   io.misalign_stout := s2_misalign_stout
@@ -507,7 +507,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).mask        := s3_in.mask
       sx_in(i).vaddr       := s3_in.fullva
       sx_in(i).gpaddr      := s3_in.gpaddr
-      sx_in(i).isForVS     := s3_in.isForVS
+      sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -546,7 +546,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.mask        := sx_last_in.mask
   io.vecstout.bits.vaddr       := sx_last_in.vaddr
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
-  io.vecstout.bits.isForVS     := sx_last_in.isForVS
+  io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

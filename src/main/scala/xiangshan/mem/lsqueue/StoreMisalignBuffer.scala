@@ -95,7 +95,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       val valid = Bool()
       val vaddr = UInt(VAddrBits.W)
       val gpaddr = UInt(GPAddrBits.W)
-      val isForVS = Bool()
+      val isForVSnonLeafPTE = Bool()
     })
     val sqControl       = new StoreMaBufToSqControlIO
   })
@@ -594,12 +594,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
   val overwriteAddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
   val overwriteGpaddr = GatedRegNext(splitStoreResp(curPtr).gpaddr)
-  val overwriteIsForVS = GatedRegNext(splitStoreResp(curPtr).isForVS)
+  val overwriteIsForVSnonLeafPTE = GatedRegNext(splitStoreResp(curPtr).isForVSnonLeafPTE)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteAddr
   io.overwriteExpBuf.gpaddr := overwriteGpaddr
-  io.overwriteExpBuf.isForVS := overwriteIsForVS
+  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)
   XSPerfAccumulate("flush",                  flush)

@@ -32,7 +32,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
   private val gpa = gpabase + Cat(ftqOffset, 0.U(instOffsetBits.W))
 
   io.exceptionReadData.gpaddr := gpa
-  io.exceptionReadData.isForVS := mem.io.rdata.head.isForVS
+  io.exceptionReadData.isForVSnonLeafPTE := mem.io.rdata.head.isForVSnonLeafPTE
 
   def getGPAPage(vaddr: UInt): UInt = {
     require(vaddr.getWidth == GPAddrBits, s"The width of gpa should be $GPAddrBits")
@@ -42,7 +42,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
 
 class GPAMemEntry(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val gpaddr = UInt(GPAddrBits.W)
-  val isForVS = Bool()
+  val isForVSnonLeafPTE = Bool()
 }
 
 class GPAMemIO(implicit val p: Parameters) extends Bundle with HasXSParameter {

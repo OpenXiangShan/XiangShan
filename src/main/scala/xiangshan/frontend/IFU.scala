@@ -382,7 +382,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr       = fromICache(0).bits.gpaddr
-  val f2_isForVS      = fromICache(0).bits.isForVS
+  val f2_isForVSnonLeafPTE      = fromICache(0).bits.isForVSnonLeafPTE
 
   // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
@@ -553,7 +553,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,             f2_fire)
   val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
   val f3_gpaddr         = RegEnable(f2_gpaddr,  f2_fire)
-  val f3_isForVS        = RegEnable(f2_isForVS, f2_fire)
+  val f3_isForVSnonLeafPTE        = RegEnable(f2_isForVSnonLeafPTE, f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,             f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
@@ -583,7 +583,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val mmio_resend_addr      = RegInit(0.U(PAddrBits.W))
   val mmio_resend_exception = RegInit(0.U(ExceptionType.width.W))
   val mmio_resend_gpaddr    = RegInit(0.U(GPAddrBits.W))
-  val mmio_resend_isForVS    = RegInit(false.B)
+  val mmio_resend_isForVSnonLeafPTE    = RegInit(false.B)
 
   //last instuction finish
   val is_first_instr = RegInit(true.B)
@@ -682,7 +682,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         mmio_resend_addr      := io.iTLBInter.resp.bits.paddr(0)
         mmio_resend_exception := tlb_exception
         mmio_resend_gpaddr    := io.iTLBInter.resp.bits.gpaddr(0)
-        mmio_resend_isForVS   := io.iTLBInter.resp.bits.isForVS(0)
+        mmio_resend_isForVSnonLeafPTE   := io.iTLBInter.resp.bits.isForVSnonLeafPTE(0)
       }
     }
 
@@ -717,7 +717,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       mmio_resend_addr      := 0.U
       mmio_resend_exception := ExceptionType.none
       mmio_resend_gpaddr    := 0.U
-      mmio_resend_isForVS   := false.B
+      mmio_resend_isForVSnonLeafPTE   := false.B
     }
   }
 
@@ -729,7 +729,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_resend_addr      := 0.U
     mmio_resend_exception := ExceptionType.none
     mmio_resend_gpaddr    := 0.U
-    mmio_resend_isForVS   := false.B
+    mmio_resend_isForVSnonLeafPTE   := false.B
     f3_mmio_data.map(_ := 0.U)
   }
 
@@ -854,7 +854,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   )
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
   io.toBackend.gpaddrMem_wdata.gpaddr  := Mux(f3_req_is_mmio, mmio_resend_gpaddr, f3_gpaddr)
-  io.toBackend.gpaddrMem_wdata.isForVS := Mux(f3_req_is_mmio, mmio_resend_isForVS, f3_isForVS)
+  io.toBackend.gpaddrMem_wdata.isForVSnonLeafPTE := Mux(f3_req_is_mmio, mmio_resend_isForVSnonLeafPTE, f3_isForVSnonLeafPTE)
 
   //Write back to Ftq
   val f3_cache_fetch = f3_valid && !(f2_fire && !f2_flush)

@@ -889,7 +889,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.vaddr             := s1_vaddr
   s1_out.paddr             := s1_paddr_dup_lsu
   s1_out.gpaddr            := s1_gpaddr_dup_lsu
-  s1_out.isForVS           := io.tlb.resp.bits.isForVS
+  s1_out.isForVSnonLeafPTE           := io.tlb.resp.bits.isForVSnonLeafPTE
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
@@ -1574,7 +1574,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.fullva
   io.vecldout.bits.gpaddr := s3_in.gpaddr
-  io.vecldout.bits.isForVS := s3_in.isForVS
+  io.vecldout.bits.isForVSnonLeafPTE := s3_in.isForVSnonLeafPTE
   io.vecldout.bits.mmio := DontCare
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||

@@ -459,7 +459,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
-  csrio.memExceptionIsForVS := io.mem.exceptionAddr.isForVS
+  csrio.memExceptionIsForVSnonLeafPTE := io.mem.exceptionAddr.isForVSnonLeafPTE
   csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
   csrio.perf <> io.perf
   csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
@@ -790,7 +790,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val exceptionAddr = Input(new Bundle {
     val vaddr = UInt(XLEN.W)
     val gpaddr = UInt(XLEN.W)
-    val isForVS = Bool()
+    val isForVSnonLeafPTE = Bool()
   })
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))

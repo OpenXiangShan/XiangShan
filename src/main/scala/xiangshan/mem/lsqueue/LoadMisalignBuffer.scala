@@ -120,7 +120,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       val valid  = Bool()
       val vaddr  = UInt(XLEN.W)
       val gpaddr = UInt(XLEN.W)
-      val isForVS = Bool()
+      val isForVSnonLeafPTE = Bool()
     })
     val flushLdExpBuff  = Output(Bool())
   })
@@ -568,12 +568,12 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
   val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
   val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
-  val overwriteIsForVS = GatedRegNext(splitLoadResp(curPtr).isForVS)
+  val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteVaddr
   io.overwriteExpBuf.gpaddr := overwriteGpaddr
-  io.overwriteExpBuf.isForVS := overwriteIsForVS
+  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   // when no exception or mmio, flush loadExceptionBuffer at s_wb
   val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))

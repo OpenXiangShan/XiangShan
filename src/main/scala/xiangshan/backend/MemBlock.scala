@@ -137,7 +137,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val vstart = Output(UInt((log2Up(VLEN) + 1).W))
     val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(XLEN.W))
-    val isForVS = Output(Bool())
+    val isForVSnonLeafPTE = Output(Bool())
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
     val lqCanAccept = Output(Bool())
@@ -1642,9 +1642,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     storeMisalignBuffer.io.overwriteExpBuf.gpaddr
   )
 
-  val misalignBufExceptionIsForVS = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
-    loadMisalignBuffer.io.overwriteExpBuf.isForVS,
-    storeMisalignBuffer.io.overwriteExpBuf.isForVS
+  val misalignBufExceptionIsForVSnonLeafPTE = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
+    loadMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE,
+    storeMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE
   )
 
   val vSegmentException = RegInit(false.B)
@@ -1659,8 +1659,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vSegmentExceptionAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vaddr, vSegmentUnit.io.exceptionInfo.valid)
   val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionInfo.bits.gpaddr, atomicsUnit.io.exceptionInfo.valid)
   val vSegmentExceptionGPAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.gpaddr, vSegmentUnit.io.exceptionInfo.valid)
-  val atomicsExceptionIsForVS = RegEnable(atomicsUnit.io.exceptionInfo.bits.isForVS, atomicsUnit.io.exceptionInfo.valid)
-  val vSegmentExceptionIsForVS = RegEnable(vSegmentUnit.io.exceptionInfo.bits.isForVS, vSegmentUnit.io.exceptionInfo.valid)
+  val atomicsExceptionIsForVSnonLeafPTE = RegEnable(atomicsUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, atomicsUnit.io.exceptionInfo.valid)
+  val vSegmentExceptionIsForVSnonLeafPTE = RegEnable(vSegmentUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, vSegmentUnit.io.exceptionInfo.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
@@ -1695,14 +1695,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       )
     )
   ))
-  io.mem_to_ooo.lsqio.isForVS := RegNext(Mux(
+  io.mem_to_ooo.lsqio.isForVSnonLeafPTE := RegNext(Mux(
     atomicsException,
-    atomicsExceptionIsForVS,
+    atomicsExceptionIsForVSnonLeafPTE,
     Mux(misalignBufExceptionOverwrite,
-      misalignBufExceptionIsForVS,
+      misalignBufExceptionIsForVSnonLeafPTE,
       Mux(vSegmentException,
-        vSegmentExceptionIsForVS,
-        lsq.io.exceptionAddr.isForVS
+        vSegmentExceptionIsForVSnonLeafPTE,
+        lsq.io.exceptionAddr.isForVSnonLeafPTE
       )
     )
   ))

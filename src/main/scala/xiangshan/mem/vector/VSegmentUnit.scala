@@ -50,7 +50,7 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val vstart           = UInt(elemIdxBits.W)
   val exceptionVaddr   = UInt(VAddrBits.W)
   val exceptionGpaddr  = UInt(GPAddrBits.W)
-  val exceptionIsForVS = Bool()
+  val exceptionIsForVSnonLeafPTE = Bool()
   val exception_va     = Bool()
   val exception_gpa    = Bool()
   val exception_pa     = Bool()
@@ -399,7 +399,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
         instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
-        instMicroOp.exceptionIsForVS  := io.dtlb.resp.bits.isForVS
+        instMicroOp.exceptionIsForVSnonLeafPTE  := io.dtlb.resp.bits.isForVSnonLeafPTE
       }
   }
   // pmp
@@ -671,7 +671,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
-  io.exceptionInfo.bits.isForVS       := instMicroOp.exceptionIsForVS
+  io.exceptionInfo.bits.isForVSnonLeafPTE       := instMicroOp.exceptionIsForVSnonLeafPTE
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }

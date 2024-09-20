@@ -193,8 +193,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_req_gpaddr_tmp     = VecInit((0 until PortNumber).map( i =>
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))
   ))
-  val s1_req_isForVS_tmp    = VecInit((0 until PortNumber).map( i =>
-    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.isForVS), data = fromITLB(i).bits.isForVS)
+  val s1_req_isForVSnonLeafPTE_tmp    = VecInit((0 until PortNumber).map( i =>
+    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE), data = fromITLB(i).bits.isForVSnonLeafPTE)
   ))
   val s1_itlb_exception     = VecInit((0 until PortNumber).map( i =>
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits))
@@ -215,9 +215,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     0.U.asTypeOf(s1_req_gpaddr_tmp(0))
   )
 
-  val s1_req_isForVS = PriorityMuxDefault(
-    s1_itlb_exception_gpf zip s1_req_isForVS_tmp,
-    0.U.asTypeOf(s1_req_isForVS_tmp(0))
+  val s1_req_isForVSnonLeafPTE = PriorityMuxDefault(
+    s1_itlb_exception_gpf zip s1_req_isForVSnonLeafPTE_tmp,
+    0.U.asTypeOf(s1_req_isForVSnonLeafPTE_tmp(0))
   )
 
   /**
@@ -328,7 +328,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toWayLookup.bits.waymask      := s1_waymasks
   toWayLookup.bits.ptag         := s1_req_ptags
   toWayLookup.bits.gpaddr       := s1_req_gpaddr
-  toWayLookup.bits.isForVS      := s1_req_isForVS
+  toWayLookup.bits.isForVSnonLeafPTE      := s1_req_isForVSnonLeafPTE
   toWayLookup.bits.meta_codes   := s1_meta_codes
   (0 until PortNumber).foreach { i =>
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request

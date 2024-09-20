@@ -49,7 +49,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val exceptionInfo = ValidIO(new Bundle {
       val vaddr = UInt(XLEN.W)
       val gpaddr = UInt(XLEN.W)
-      val isForVS = Bool()
+      val isForVSnonLeafPTE = Bool()
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
@@ -71,7 +71,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val gpaddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
-  val isForVS = Reg(Bool())
+  val isForVSnonLeafPTE = Reg(Bool())
 
   // dcache response data
   val resp_data = Reg(UInt())
@@ -90,7 +90,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.exceptionInfo.valid := atom_override_xtval
   io.exceptionInfo.bits.vaddr := in.src(0)
   io.exceptionInfo.bits.gpaddr := gpaddr
-  io.exceptionInfo.bits.isForVS := isForVS
+  io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -164,7 +164,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr   := io.dtlb.resp.bits.paddr(0)
       gpaddr  := io.dtlb.resp.bits.gpaddr(0)
-      isForVS := io.dtlb.resp.bits.isForVS
+      isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
