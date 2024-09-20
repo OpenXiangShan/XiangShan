@@ -26,7 +26,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.fu.vector.Bundles.VEew
+import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 
@@ -57,6 +57,9 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val vd_last_uop         = Bool()
   val vd_first_uop        = Bool()
 
+  // Because the back-end needs to handle exceptions, it is necessary to retain the original NF.
+  // So we choose to pass the original value in the pipeline and override it when out.
+  val rawNf                = Nf()
   val indexedSrcMask     = UInt(VLENB.W)
   val indexedSplitOffset  = UInt(flowIdxBits.W)
   // Inst's uop
@@ -260,4 +263,12 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val exceptionInfo       = ValidIO(new FeedbackToLsqIO)
   //trigger
   val fromCsrTrigger      = Input(new CsrTriggerBundle)
+}
+
+class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
+  val redirect            = Flipped(ValidIO(new Redirect))
+  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
+  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExuOutput(isVector=true))))
+
+  val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
 }

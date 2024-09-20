@@ -58,7 +58,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s0_nf = Mux(us_whole_reg(s0_fuOpType), 0.U, s0_uop.vpu.nf)
   val s0_vm = s0_uop.vpu.vm
   val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(s0_uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
-  val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
+  val s0_preIsSplit = !isUnitStride(s0_mop)
   val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
@@ -146,6 +146,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.numUops := numUops
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
+    x.rawNf := io.in.bits.uop.vpu.nf
     x.flowMask := flowMask
     x.indexedSrcMask := indexedSrcMask // Only vector indexed instructions uses it
     x.indexedSplitOffset := indexedSplitOffset
@@ -230,6 +231,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
+  io.toMergeBuffer.req.bits.uop.vpu.nf   := s1_in.rawNf
   io.toMergeBuffer.req.bits.mask         := s1_mask
   io.toMergeBuffer.req.bits.vaddr        := s1_in.baseAddr
   io.toMergeBuffer.req.bits.vdIdx        := s1_vdIdx  //TODO vdIdxReg should no longer be useful, don't delete it for now
@@ -253,6 +255,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
   io.out.bits.usMask        := usMask
+  io.out.bits.uop.vpu.nf    := s1_in.rawNf
 
   XSPerfAccumulate("split_out",     io.out.fire)
   XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)

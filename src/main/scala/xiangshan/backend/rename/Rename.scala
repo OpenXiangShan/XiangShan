@@ -227,6 +227,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
     isVlsTypeItme && isUnitStrideItem
   }
+  private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
   private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
@@ -239,7 +240,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     )
   }
   uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
+    u.numLsElem := Mux(io.in(i).valid & isVlsType(i) && !isfofFixVlUop(i), numLsElem(i), 0.U)
   }
 
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))

@@ -1155,7 +1155,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       // MemAddrIQ also handle vector insts
       enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
     
-      val isFirstLoad           = s0_enqBits(i).lqIdx === memIO.lqDeqPtr.get
+      val isFirstLoad           = s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get
       val isVleff               = s0_enqBits(i).vpu.isVleff
       enqData.blocked          := !isFirstLoad && isVleff
     }
