@@ -40,9 +40,8 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
   val s1_out = WireInit(0.U.asTypeOf(s1_in))
 
   for(i <- 0 until CommitWidth) {
-    if(i == 0){
-      s1_out.trap := RegEnable(s1_in.trap, s1_in.blocks(i).valid)
-    }
+    // Trap only occor in block(0).
+    s1_out.trap := RegEnable(s1_in.trap, s1_in.blocks(0).valid && Itype.isTrap(s1_in.blocks(0).bits.tracePipe.itype))
     s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, !blockCommit)
     s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, s1_in.blocks(i).valid)
   }
