@@ -63,8 +63,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock)
 
-  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
-  memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
+  memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
+  memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -82,7 +82,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
-    val resetIsInFrontend = Output(Bool())
+    val resetInFrontend = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -163,8 +163,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
-  backend.io.perf.perfEventsFrontend := frontend.getPerf
-  backend.io.perf.perfEventsLsu := memBlock.getPerf
+  backend.io.perf.perfEventsFrontend := frontend.io_perf
+  backend.io.perf.perfEventsLsu := memBlock.io_perf
   backend.io.perf.perfEventsHc := io.perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
@@ -234,14 +234,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
-  io.resetIsInFrontend := frontend.reset.asBool
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
 
+  memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
+  io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
+
   if (debugOpts.ResetGen) {
-    backend.reset := memBlock.reset_backend
+    backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
   }
 }

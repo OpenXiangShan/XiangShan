@@ -895,7 +895,7 @@ object skidBuffer{
                         out: DecoupledIO[T],
                         flush: Bool,
                         moduleName: String
-                      ) {
+                      ): Unit = {
     val buffer = Module(new skidBufferConnect(in.bits))
     buffer.suggestName(moduleName)
     buffer.io.in <> in
