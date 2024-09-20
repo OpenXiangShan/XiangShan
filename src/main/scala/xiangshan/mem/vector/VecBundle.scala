@@ -111,7 +111,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val exceptionVec         = ExceptionVec()
   val vaddr                = UInt(XLEN.W)
   val gpaddr               = UInt(XLEN.W)
-  val isForVSnonLeafPTE              = Bool()
+  val isForVSnonLeafPTE    = Bool()
   //val vec                  = new OnlyVecExuOutput
    // feedback
   val vecFeedback          = Bool()
