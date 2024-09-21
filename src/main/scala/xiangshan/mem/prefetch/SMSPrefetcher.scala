@@ -1096,7 +1096,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 }
 
 class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper with HasL1PrefetchSourceParameter {
-
+  import freechips.rocketchip.util._
 
   val io_agt_en = IO(Input(Bool()))
   val io_stride_en = IO(Input(Bool()))
@@ -1202,7 +1202,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid || stride_gen_valid
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
-  val is_valid_address = pf_filter.io.l2_pf_addr.bits >= PmemLowBound.U && pf_filter.io.l2_pf_addr.bits < PmemHighBound.U
+  val is_valid_address = PmemRanges.map(range => pf_filter.io.l2_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ && _)
 
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
