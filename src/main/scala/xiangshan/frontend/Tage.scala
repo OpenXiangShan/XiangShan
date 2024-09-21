@@ -234,7 +234,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   )).asUInt
 
   //Using WrBypass to store wdata dual ports for reading and writing to the same address.
-  val write_conflict = ((u_idx === s0_idx && io.update_mask.reduce(_||_)) || (doing_reset && resetRow === s0_idx)) && s0_fire
+  val write_conflict = u_idx === s0_idx && io.update_mask.reduce(_||_) && s0_fire
   val can_write = (wrbypass.io.update_idx.get =/= s0_idx || !s0_fire) && wrbypass.io.has_conflict.get
 
   wrbypass.io.conflict_valid.get := write_conflict || (can_write && (io.update_mask.reduce(_||_) || doing_reset))
