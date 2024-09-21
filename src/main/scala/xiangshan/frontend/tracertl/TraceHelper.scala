@@ -24,8 +24,8 @@ import freechips.rocketchip.util.Annotated.resetVector
 class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val pcVA = UInt(VAddrBits.W)
   val pcPA = UInt(PAddrBits.W)
-  val memoryAddrVA = UInt(VAddrBits.W)
-  val memoryAddrPA = UInt(PAddrBits.W)
+  val memoryAddrVA = UInt(XLEN.W)
+  val memoryAddrPA = UInt(XLEN.W)
   val target = UInt(VAddrBits.W)
   val inst = UInt(TraceInstrWidth.W)
   val memoryType = UInt(8.W)
@@ -35,6 +35,10 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val exception = UInt(8.W)
 
   val InstID = UInt(64.W)
+
+  def arthiSrc0 = memoryAddrVA
+  def arthiSrc1 = memoryAddrPA
+  def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
 }
 
 

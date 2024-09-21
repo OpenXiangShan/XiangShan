@@ -103,6 +103,10 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
   val io = IO(new FuncUnitIO(cfg))
 
+  if (env.TraceRTLMode) {
+    dontTouch(io.in.bits.ctrl.traceInfo)
+  }
+
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
     io.out.bits.ctrl.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)

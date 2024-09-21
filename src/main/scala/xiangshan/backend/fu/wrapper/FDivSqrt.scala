@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.XSError
+import utility.{XSError, StartStopCounter, XSPerfHistogram}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpNonPipedFuncUnit
@@ -59,4 +59,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
   io.out.bits.res.fflags.get := fflagsData
   io.out.bits.res.data       := resultData
+
+  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, false.B)
+  XSPerfHistogram("fdivSqrtCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
 }

@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
-import utility.{MaskExpand, RegNextWithEnable}
+import utility.{MaskExpand, RegNextWithEnable, XSError, StartStopCounter, XSPerfHistogram}
 import xiangshan.backend.fu.FuConfig
 
 import scala.collection.mutable
@@ -103,4 +103,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) 
   io.in.ready := dataModule.in_ready
   io.out.valid := dataModule.out_valid
   connectNonPipedCtrlSingal
+
+  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, dataModule.kill_r || dataModule.kill_w)
+  XSPerfHistogram("fdivSqrtCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
 }
