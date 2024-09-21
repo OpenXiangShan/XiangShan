@@ -347,6 +347,4 @@ trait HypervisorBundle { self: CSRModule[_] =>
 
 trait HasHypervisorEnvBundle { self: CSRModule[_] =>
   val menvcfg = IO(Input(new MEnvCfg))
-  val privState = IO(Input(new PrivState))
-  val accessStimecmp = IO(Input(Bool()))
 }
