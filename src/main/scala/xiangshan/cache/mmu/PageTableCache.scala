@@ -560,9 +560,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := (resp_res.l0.hit || resp_res.sp.hit) && (!isAllStage || isAllStage && stage1Pf)
   if (EnableSv48) {
-    io.resp.bits.bypassed := (bypassed(0) || (bypassed(1) && !resp_res.l1.hit) || (bypassed(2) && !resp_res.l2.hit) || (bypassed(3) && !resp_res.l3.get.hit)) && !isAllStage
+    io.resp.bits.bypassed := ((bypassed(0) && !resp_res.l0.hit) || (bypassed(1) && !resp_res.l1.hit) || (bypassed(2) && !resp_res.l2.hit) || (bypassed(3) && !resp_res.l3.get.hit)) && !isAllStage
   } else {
-    io.resp.bits.bypassed := (bypassed(0) || (bypassed(1) && !resp_res.l1.hit) || (bypassed(2) && !resp_res.l2.hit)) && !isAllStage
+    io.resp.bits.bypassed := ((bypassed(0) && !resp_res.l0.hit) || (bypassed(1) && !resp_res.l1.hit) || (bypassed(2) && !resp_res.l2.hit)) && !isAllStage
   }
   io.resp.bits.prefetch := resp_res.l0.pre && resp_res.l0.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l3Hit.map(_ := resp_res.l3.get.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq)
@@ -573,9 +573,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   io.resp.bits.isHptwReq := stageResp.bits.isHptwReq
   if (EnableSv48) {
-    io.resp.bits.toHptw.bypassed := (hptw_bypassed(0) || (hptw_bypassed(1) && !resp_res.l1.hit) || (hptw_bypassed(2) && !resp_res.l2.hit) || (hptw_bypassed(3) && !resp_res.l3.get.hit)) && stageResp.bits.isHptwReq
+    io.resp.bits.toHptw.bypassed := ((hptw_bypassed(0) && !resp_res.l0.hit) || (hptw_bypassed(1) && !resp_res.l1.hit) || (hptw_bypassed(2) && !resp_res.l2.hit) || (hptw_bypassed(3) && !resp_res.l3.get.hit)) && stageResp.bits.isHptwReq
   } else {
-    io.resp.bits.toHptw.bypassed := (hptw_bypassed(0) || (hptw_bypassed(1) && !resp_res.l1.hit) || (hptw_bypassed(2) && !resp_res.l2.hit)) && stageResp.bits.isHptwReq
+    io.resp.bits.toHptw.bypassed := ((hptw_bypassed(0) && !resp_res.l0.hit) || (hptw_bypassed(1) && !resp_res.l1.hit) || (hptw_bypassed(2) && !resp_res.l2.hit)) && stageResp.bits.isHptwReq
   }
   io.resp.bits.toHptw.id := stageResp.bits.hptwId
   io.resp.bits.toHptw.l3Hit.map(_ := resp_res.l3.get.hit && stageResp.bits.isHptwReq)
@@ -652,7 +652,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.stage1.not_merge := false.B
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l0.hit && resp_res.sp.hit, "normal page and super page both hit")
-  XSError(stageResp.valid && io.resp.bits.hit && bypassed(0), "page cache, bypassed but hit")
 
   // refill Perf
   val l3RefillPerf = if (EnableSv48) Some(Wire(Vec(l2tlbParams.l3Size, Bool()))) else None

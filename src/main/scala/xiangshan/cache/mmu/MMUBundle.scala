@@ -960,7 +960,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.ppn
-      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
       ps.perms.map(_(i) := pte.perm)
     }
