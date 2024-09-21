@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -86,7 +87,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ftqPtr = new FtqPtr()
       val ftqOffset = UInt(log2Up(PredictWidth).W)
     })
-    val readGPAMemData = Input(UInt(GPAddrBits.W))
+    val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
 
     val debug_ls = Flipped(new DebugLSIO)
@@ -556,7 +557,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
-  io.exception.bits.gpaddr := io.readGPAMemData
+  io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
+  io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)

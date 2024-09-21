@@ -132,7 +132,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
-  out.htinst.bits.ALL           := 0.U
+  out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
   out.targetPc.bits.pc          := in.pcFromXtvec
   out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec)

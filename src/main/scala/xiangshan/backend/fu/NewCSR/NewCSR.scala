@@ -123,7 +123,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(XLEN.W)
-      val excpGPA = UInt(XLEN.W) // Todo: use guest physical address width
+      val excpGPA = UInt(XLEN.W)
+      val excpIsForVSnonLeafPTE = Bool()
     })
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
@@ -137,6 +138,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isInterrupt = Bool()
         val isHls = Bool()
         val isFetchMalAddr = Bool()
+        val isForVSnonLeafPTE = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -230,6 +232,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
+  val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -656,6 +659,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
+        in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
@@ -677,6 +681,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.memExceptionVAddr := io.fromMem.excpVA
         in.memExceptionGPAddr := io.fromMem.excpGPA
+        in.memExceptionIsForVSnonLeafPTE := io.fromMem.excpIsForVSnonLeafPTE
 
         in.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject
         in.hvictlIID := hvictl.regOut.IID.asUInt

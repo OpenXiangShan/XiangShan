@@ -862,6 +862,7 @@ object Bundles {
     val isHls = Bool()
     val vls = Bool()
     val trigger = TriggerAction()
+    val isForVSnonLeafPTE = Bool()
   }
 
   object UopIdx {

@@ -545,6 +545,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
   val miss = Output(Bool())
   val fastMiss = Output(Bool())
+  val isForVSnonLeafPTE = Output(Bool())
   val excp = Vec(nDups, new Bundle {
     val gpf = new TlbExceptionBundle()
     val pf = new TlbExceptionBundle()
