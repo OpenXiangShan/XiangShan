@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.RegEnable
-import utility.{SignExt, ZeroExt}
+import utility.{SignExt, ZeroExt, StartStopCounter, XSPerfHistogram}
 import xiangshan.DIVOpType
 import xiangshan.backend.fu.{FuncUnit, MulDivCtrl, SRT16DividerDataModule}
 import xiangshan.backend.fu.FuConfig
@@ -51,4 +51,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := divDataModule.io.out_valid
   io.out.bits.res.data := divDataModule.io.out_data
   connectNonPipedCtrlSingal
+
+  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, kill_w || kill_r)
+  XSPerfHistogram("divCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
 }
