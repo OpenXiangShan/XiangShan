@@ -6,8 +6,8 @@ import difftest._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt}
-import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
+import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt, HPerfMonitor, PerfEvent}
+import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
@@ -1046,13 +1046,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val hcEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
   for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
     hcEvents(i) := io.perf.perfEventsHc(i)
-  }
-
-  val allHcPerfEvents = hcEvents.map(x => (s"Hc", x.value))
-  if (printEventCoding) {
-    for (((name, inc), i) <- allHcPerfEvents.zipWithIndex) {
-      println("HuanCun perfEvents Set", name, inc, i)
-    }
   }
 
   val hpmHc = HPerfMonitor(csrevents, hcEvents)
