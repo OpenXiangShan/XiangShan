@@ -275,6 +275,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     idle := false.B
     vpn := io.req.bits.req_info.vpn
     s_bitmap_check := false.B
+    last_s2xlate := false.B
+    hptw_pageFault := false.B
+    hptw_accessFault := false.B
   }
 
   when (io.req.fire && io.req.bits.stage1Hit && (if(HasCVMExtension) !jmp_bitmap_check_w else true.B)){
@@ -1206,6 +1209,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       gpaddr := Cat(io.req.bits.gvpn, 0.U(offLen.W))
       s_bitmap_check := false.B
       id := io.req.bits.id
+      level := Mux(io.req.bits.fromSP,io.req.bits.SPlevel,0.U)
     }
     when(io.req.fire && (if(HasCVMExtension) !io.req.bits.jmp_bitmap_check else true.B)){
       bypassed := io.req.bits.bypassed
