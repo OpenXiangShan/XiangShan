@@ -499,7 +499,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     ))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
-    val pred_rdata = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
+    val pred_rdata = HoldUnless(
+      ftb.io.r.resp.data,
+      RegNext(io.req_pc.valid && !io.update_access),
+      init = Some(VecInit.fill(numWays)(0.U.asTypeOf(new FTBEntryWithTag)))
+    ) // rdata has ftb_entry.valid, shoud reset
     ftb.io.r.req.valid := io.req_pc.valid || io.u_req_pc.valid // io.s0_fire
     ftb.io.r.req.bits.setIdx := Mux(
       io.u_req_pc.valid,
