@@ -603,7 +603,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // the vec indicating if ghr should shift on each branch
   def shouldShiftVec =
     VecInit(br_valids.zipWithIndex.map{ case (v, i) =>
-      v && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
+      v && hit && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
 
   def lastBrPosOH =
     VecInit((!hit || !br_valids.reduce(_||_)) +: // not hit or no brs in entry
