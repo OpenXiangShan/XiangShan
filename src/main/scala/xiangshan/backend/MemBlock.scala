@@ -530,13 +530,31 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
     l1PrefetcherOpt.foreach(l1_pf => {
-      val sms_pf_to_l2 = DelayNWithValid(sms_pf.io.l2_req, 2)
       val l1_pf_to_l2 = DelayNWithValid(l1_pf.io.l2_req, 2)
+      val sms_pf_to_l2 = DelayNWithValid(sms_pf.io.l2_req, 2)
+      val asp_pf_to_l2 = DelayNWithValid(lsq.io.aspPfIO.l2_pf_addr, 2)
 
-      outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
-      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
-      outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
+      outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid || asp_pf_to_l2.valid
+      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(
+        l1_pf_to_l2.valid,
+        l1_pf_to_l2.bits.addr,
+        Mux(
+          sms_pf_to_l2.valid,
+          sms_pf_to_l2.bits.addr,
+          asp_pf_to_l2.bits.addr
+        )
+      )
+      outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(
+        l1_pf_to_l2.valid,
+        l1_pf_to_l2.bits.source,
+        Mux(
+          sms_pf_to_l2.valid,
+          sms_pf_to_l2.bits.source,
+          asp_pf_to_l2.bits.source
+        )
+      )
       outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
+      outer.l2_pf_sender_opt.get.out.head._1.needT := !l1_pf_to_l2.valid && !sms_pf_to_l2.valid && asp_pf_to_l2.valid
 
       sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
 
@@ -585,14 +603,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // dtlb
   val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
   val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(3, 2, pftlbParams))
   val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
   val dtlb_st = Seq(dtlb_st_tlb_st.io)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 2) // (load + hyu + stream pf, store, sms+l2bop)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 3) // (load + hyu + stream pf, store, sms+l2bop+asp)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
@@ -628,7 +646,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
-      val replace_pf = Module(new TlbReplace(2, pftlbParams))
+      val replace_pf = Module(new TlbReplace(3, pftlbParams))
       replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
@@ -1086,6 +1104,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
   val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
+  val ASPDTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 2
   prefetcherOpt match {
   case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
   case None =>
@@ -1104,6 +1123,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
   io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
+  dtlb_reqs(ASPDTLBPortIndex) <> lsq.io.aspPfIO.tlb_req
   // StoreUnit
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect

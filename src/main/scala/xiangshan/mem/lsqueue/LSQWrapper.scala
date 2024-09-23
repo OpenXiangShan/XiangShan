@@ -123,6 +123,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
     val seqStoreDetected = Output(Bool())
+    val aspPfIO = new AspPfIO
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -189,6 +190,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.flushSbuffer     <> io.flushSbuffer
   storeQueue.io.maControl        <> io.maControl
   storeQueue.io.seqStoreDetected <> io.seqStoreDetected
+  storeQueue.io.aspPfIO          <> io.aspPfIO
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

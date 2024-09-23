@@ -26,12 +26,14 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.mem.prefetch.L2PrefetchReq
 import xiangshan.backend.fu.FuType
 import xiangshan.ExceptionNO._
 import coupledL2.{CMOReq, CMOResp}
@@ -56,6 +58,11 @@ class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
   val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
   val resp = Vec(LSQEnqWidth, Output(new SqPtr))
+}
+
+class AspPfIO(implicit p: Parameters) extends MemBlockBundle {
+  val tlb_req = new TlbRequestIO(nRespDups = 2)
+  val l2_pf_addr = ValidIO(new L2PrefetchReq())
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
@@ -197,9 +204,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
     val seqStoreDetected = Output(Bool())
+    val aspPfIO = new AspPfIO
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
+
+  // ASP prefetcher
+  val asp = Module(new ASP)
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new DynInst))
@@ -1020,58 +1031,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  // sequential store detection:
-  // store D, (A); store D, (A + K), store D, (A + 2K) ...
-  val DATAHASHBITS = 16
-  val SEQTHRESHOLD = 64
-  val seqStoreDetected = WireInit(false.B)
-  val prevCycleVaddr = RegInit(0.U(VAddrBits.W))
-  val prevCycleDataHash = RegInit(0.U(DATAHASHBITS.W))
-  val seqKStride = RegInit(0.U(6.W))
-  val seqPatternVec = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
-  val seqPatternCnt = RegInit(0.U(log2Up(SEQTHRESHOLD+1).W))
-  val sbufferFire = Cat(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire))).orR
-  val validKStride = (seqKStride === 1.U || seqKStride === 2.U || seqKStride === 4.U || seqKStride === 8.U)
-
-  for (i <- 0 until EnsbufferWidth) {
-    when(io.sbuffer(i).fire) {
-      val thisCycleVaddr    = io.sbuffer(i).bits.vaddr
-      val thisCycleDataHash = io.sbuffer(i).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
-      prevCycleVaddr    := thisCycleVaddr
-      prevCycleDataHash := thisCycleDataHash
-
-      if(i == 0) {
-        seqKStride := thisCycleVaddr - prevCycleVaddr
-        seqPatternVec(i) := ((thisCycleVaddr - prevCycleVaddr) === seqKStride) &&
-                            (prevCycleDataHash === thisCycleDataHash)
-      }else {
-        val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
-        val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
-        seqKStride := thisCycleVaddr - lastLoopVaddr
-        seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
-                            (lastLoopDataHash === thisCycleDataHash)
-      }
-    }.otherwise {
-      seqPatternVec(i) := true.B
-    }
-  }
-
-  when(sbufferFire) {
-    when(Cat(seqPatternVec).andR) {
-      seqPatternCnt := Mux(seqPatternCnt === SEQTHRESHOLD.U, seqPatternCnt, seqPatternCnt + 1.U)
-    }.otherwise {
-      seqPatternCnt := 0.U
-    }
-  }
-  when(seqPatternCnt === SEQTHRESHOLD.U && validKStride) {
-    seqStoreDetected := true.B
-  }.otherwise {
-    seqStoreDetected := false.B
-  }
-  when(io.sqEmpty) {
-    seqStoreDetected := false.B
-  }
-  io.seqStoreDetected := seqStoreDetected
+  asp.io.sbuffer.zipWithIndex.foreach {case (s, idx) => {
+    s.valid := io.sbuffer(idx).fire
+    s.bits  := io.sbuffer(idx).bits
+  }}
+  asp.io.sqEmpty := io.sqEmpty
+  asp.io.enable  := EnableStorePrefetchASP.B
+  io.seqStoreDetected := asp.io.seqStoreDetected
+  io.aspPfIO <> asp.io.aspPfIO
 
   // All vector instruction uop normally dequeue, but the Uop after the exception is raised does not write to the 'sbuffer'.
   // Flags are used to record whether there are any exceptions when the queue is displayed.
