@@ -165,6 +165,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
       bypassWrite = true
     ))
 
+  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr, extraPort = Some(true))) // logical bridx
+
   // Power-on reset to weak taken
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -180,8 +182,10 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   bt.io.r.req.valid := s0_fire
   bt.io.r.req.bits.setIdx := s0_idx
 
-  val s1_read = bt.io.r.resp.data
   val s1_idx = RegEnable(s0_idx, s0_fire)
+  //The cached data in wrbypass can participate in prediction
+  val use_wrbypass_data = wrbypass.io.has_conflict.getOrElse(false.B) && wrbypass.io.update_idx.getOrElse(0.U) === s1_idx
+  val s1_read = Mux(use_wrbypass_data, wrbypass.io.update_data.get, bt.io.r.resp.data)
 
 
   val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
@@ -192,7 +196,6 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
 
-  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr)) // logical bridx
   wrbypass.io.wen := io.update_mask.reduce(_||_)
   wrbypass.io.write_idx := u_idx
   wrbypass.io.write_way_mask.map(_ := io.update_mask)
@@ -230,13 +233,25 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
     ).reduce(_||_)
   )).asUInt
 
-  bt.io.w.apply(
-    valid = io.update_mask.reduce(_||_) || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
-    setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
-  )
+  //Using WrBypass to store wdata dual ports for reading and writing to the same address.
+  val write_conflict = u_idx === s0_idx && io.update_mask.reduce(_||_) && s0_fire
+  val can_write = (wrbypass.io.update_idx.get =/= s0_idx || !s0_fire) && wrbypass.io.has_conflict.get
 
+  wrbypass.io.conflict_valid.get := write_conflict || (can_write && (io.update_mask.reduce(_||_) || doing_reset))
+  wrbypass.io.conflict_write_data.get := Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs)
+  wrbypass.io.conflict_way_mask.get := Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask.asUInt)
+
+  val wrbrpass_idx = wrbypass.io.update_idx.get
+  val wrbypass_write_data = wrbypass.io.update_data.get
+  val wrbypass_write_waymask = wrbypass.io.update_way_mask.get
+  wrbypass.io.conflict_clean.get := can_write
+
+  bt.io.w.apply(
+    valid = ((io.update_mask.reduce(_||_) || doing_reset) && !write_conflict) || can_write,
+    data = Mux(can_write, wrbypass_write_data, Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs)), // Weak taken
+    setIdx = Mux(can_write, wrbrpass_idx, Mux(doing_reset, resetRow, u_idx)),
+    waymask = Mux(can_write, wrbypass_write_waymask , Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask))
+  )
 }
 
 
