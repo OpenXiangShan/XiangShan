@@ -401,7 +401,8 @@ class WithFuzzer extends Config((site, here, up) => {
 
 class BitmapCompile extends Config((site, here, up) => {
   case SoCParamsKey => up(SoCParamsKey).copy(
-    HasMEMencryption = Some(true)
+    HasMEMencryption = Some(true),
+    HasDelayNoencryption = Some(false)
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
     HasCVMExtension = Some(true)))

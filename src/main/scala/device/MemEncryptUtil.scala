@@ -234,7 +234,7 @@ class AXI4BundleRWithoutData(params: AXI4BundleParameters) extends Bundle {
   val last = Bool()
 }
 
-class OnePipeForEnc(implicit p:Parameters) extends MemEncryptModule {
+abstract class OnePipeEncBase(implicit p:Parameters) extends MemEncryptModule {
   val io = IO(new Bundle {
     val onepipe_in = new Bundle{
       val keyid = Input(UInt(KeyIDBits.W))
@@ -250,6 +250,8 @@ class OnePipeForEnc(implicit p:Parameters) extends MemEncryptModule {
       val keyid_out = Output(UInt(5.W))
     }
   })
+}
+class OnePipeForEnc(implicit p:Parameters) extends OnePipeEncBase {
 
   val OneRoundForEncDecs = Seq.fill(32/MemencPipes)(Module(new OneRoundForEncDec))
 
@@ -265,8 +267,14 @@ class OnePipeForEnc(implicit p:Parameters) extends MemEncryptModule {
   io.onepipe_out.tweak_out := io.onepipe_in.tweak_in
 
 }
+class OnePipeForEncNoEnc(implicit p:Parameters) extends OnePipeEncBase {
+  io.onepipe_out.result_out := io.onepipe_in.data_in
+  io.onepipe_out.keyid_out := io.onepipe_in.keyid
+  io.onepipe_out.tweak_out := io.onepipe_in.tweak_in
+  io.onepipe_out.axi4_other_out := io.onepipe_in.axi4_other
+}
 
-class OnePipeForDec(implicit p:Parameters) extends MemEncryptModule {
+abstract class OnePipeDecBase(implicit p:Parameters) extends MemEncryptModule {
   val io = IO(new Bundle {
     val onepipe_in = new Bundle{
       val keyid = Input(UInt(KeyIDBits.W))
@@ -282,6 +290,8 @@ class OnePipeForDec(implicit p:Parameters) extends MemEncryptModule {
       val keyid_out = Output(UInt(5.W))
     }
   })
+}
+class OnePipeForDec(implicit p:Parameters) extends OnePipeDecBase {
 
   val OneRoundForEncDecs = Seq.fill(32/MemencPipes)(Module(new OneRoundForEncDec))
 
@@ -297,7 +307,12 @@ class OnePipeForDec(implicit p:Parameters) extends MemEncryptModule {
   io.onepipe_out.tweak_out := io.onepipe_in.tweak_in
 
 }
-
+class OnePipeForDecNoDec(implicit p:Parameters) extends OnePipeDecBase {
+  io.onepipe_out.result_out := io.onepipe_in.data_in
+  io.onepipe_out.keyid_out := io.onepipe_in.keyid
+  io.onepipe_out.axi4_other_out := io.onepipe_in.axi4_other
+  io.onepipe_out.tweak_out := io.onepipe_in.tweak_in
+}
 
 // tweak queue enc
 
