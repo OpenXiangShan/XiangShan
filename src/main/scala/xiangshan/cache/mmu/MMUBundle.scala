@@ -236,7 +236,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     asid_hit && level_matchs.asUInt.andR && addr_low_hit && vmid_hit && pteidx_hit
   }
 
-  def wbhit(data: PtwRespS2, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, s2xlate: UInt): Bool = {
+  def wbhit(data: PtwRespS2, asid: UInt, vmid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, s2xlate: UInt): Bool = {
     val s1vpn = data.s1.entry.tag
     val s2vpn = data.s2.entry.tag(vpnLen - 1, sectortlbwidth)
     val wb_vpn = Mux(s2xlate === onlyStage2, s2vpn, s1vpn)
@@ -248,6 +248,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val hasS2xlate = this.s2xlate =/= noS2xlate
     val onlyS1 = this.s2xlate === onlyStage1
     val onlyS2 = this.s2xlate === onlyStage2
+    val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
     val pteidx_hit = MuxCase(true.B, Seq(
       onlyS2 -> (VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0))).asUInt === pteidx.asUInt),
       hasS2xlate -> (pteidx.asUInt === data.s1.pteidx.asUInt)
@@ -267,7 +268,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       level_matchs(i) := tag_matchs(i) || tmp_level >= (i + 1).U
     }
     level_matchs(Level) := tag_matchs(Level)
-    vpn_hit := asid_hit && level_matchs.asUInt.andR
+    vpn_hit := asid_hit && vmid_hit && level_matchs.asUInt.andR
 
     for (i <- 0 until tlbcontiguous) {
       index_hit(i) := wb_valididx(i) && valididx(i)
