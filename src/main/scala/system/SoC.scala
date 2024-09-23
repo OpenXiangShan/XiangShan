@@ -53,6 +53,7 @@ case class SoCParameters
   KeyIDBits: Int = 5,
   MemencPipes: Int = 4,
   HasMEMencryption: Option[Boolean] = Some(false),
+  HasDelayNoencryption: Option[Boolean] = Some(false), // Test specific
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -118,9 +119,6 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val SoCPAddrBits = soc.PAddrBits
-  val SoCKeyIDBits = soc.KeyIDBits
-  val MemencPipes  = soc.MemencPipes
 
   def HasMEMencryption = soc.HasMEMencryption.getOrElse(false)
 }
