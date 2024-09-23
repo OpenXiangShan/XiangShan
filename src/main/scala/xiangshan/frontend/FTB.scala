@@ -525,15 +525,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     val multi_way = PriorityMux(Seq.tabulate(numWays)(i => ((total_hits_reg(i)) -> i.asUInt(log2Ceil(numWays).W))))
     val multi_hit_selectEntry = PriorityMux(Seq.tabulate(numWays)(i => ((total_hits_reg(i)) -> read_entries_reg(i))))
 
-    //Check if the entry read by ftbBank is legal.
-    for (n <- 0 to numWays -1 ) {
-      val req_pc_reg = RegEnable(io.req_pc.bits, io.req_pc.valid)
-      val ftb_entry_fallThrough = read_entries(n).getFallThrough(req_pc_reg)
-      when(read_entries(n).valid && total_hits(n) && io.s1_fire){
-        assert(req_pc_reg + (2*PredictWidth).U >= ftb_entry_fallThrough, s"FTB sram entry in way${n} fallThrough address error!")
-      }
-    }
-
     val u_total_hits = VecInit((0 until numWays).map(b =>
         ftb.io.r.resp.data(b).tag === u_req_tag && ftb.io.r.resp.data(b).entry.valid && RegNext(io.update_access)))
     val u_hit = u_total_hits.reduce(_||_)

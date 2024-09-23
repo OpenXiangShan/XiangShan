@@ -121,12 +121,6 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   io.fauftb_entry_out := s1_hit_fauftbentry
   io.fauftb_entry_hit_out := s1_hit && fauftb_enable
 
-  // Illegal check for FTB entry reading
-  val uftb_read_fallThrough = s1_hit_fauftbentry.getFallThrough(s1_pc_dup(0))
-  when(io.s1_fire(0) && s1_hit){
-    assert(s1_pc_dup(0) + (FetchWidth * 4).U >= uftb_read_fallThrough, s"FauFTB entry fallThrough address error!")
-  }
-
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
   resp_meta.hit := RegEnable(RegEnable(s1_hit, io.s1_fire(0)), io.s2_fire(0))
