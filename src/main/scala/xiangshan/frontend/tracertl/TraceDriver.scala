@@ -53,11 +53,13 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   val pcMismatch = io.out.recv.bits.instNum === 0.U
   io.out.block := pcMismatch
 
+  val finalRange = io.traceRange & io.ifuRange
+
   val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
-  io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
+  io.out.recv.bits.instNum := PopCount(finalRange & traceValid)
   io.out.recv.valid := io.fire
 
-  io.out.endWithCFI := ParallelPosteriorityMux(io.traceRange & traceValid, io.traceInsts.map(x =>
+  io.out.endWithCFI := ParallelPosteriorityMux(finalRange & traceValid, io.traceInsts.map(x =>
     (x.bits.branchType =/= 0.U) && x.bits.branchTaken(0)
   ))
 
