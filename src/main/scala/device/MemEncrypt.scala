@@ -13,19 +13,22 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.tilelink.AXI4TLState
 import javax.xml.crypto.dsig.keyinfo.KeyInfo
+import system._
 
 case object MemcEdgeInKey extends Field[AXI4EdgeParameters]
 case object MemcEdgeOutKey extends Field[AXI4EdgeParameters]
 
 trait Memconsts {
   val p:Parameters
-  val PAddrBits= 41
-  val KeyIDBits= 5
-  val MemencPipes = 4
+  val soc = p(SoCParamsKey)
+  val PAddrBits= soc.PAddrBits
+  val KeyIDBits= soc.KeyIDBits
+  val MemencPipes = soc.MemencPipes
   lazy val MemcedgeIn = p(MemcEdgeInKey)
   lazy val MemcedgeOut = p(MemcEdgeOutKey)
   require (isPow2(MemencPipes), s"AXI4MemEncrypt: MemencPipes must be a power of two, not $MemencPipes")
   require (PAddrBits > KeyIDBits, s"AXI4MemEncrypt: PAddrBits must be greater than KeyIDBits")
+  def HasDelayNoencryption = soc.HasDelayNoencryption.getOrElse(false)
 }
 
 
@@ -250,11 +253,15 @@ class WdataEncrptyPipe(implicit p:Parameters) extends MemEncryptModule
 
   val pipes_first_data_0 = Wire(UInt(128.W))
   val pipes_first_data_1 = Wire(UInt(128.W))
-  pipes_first_data_0 := io.in_w.bits.axi4.data(127,0) ^ io.in_w.bits.tweak(127, 0)
-  pipes_first_data_1 := io.in_w.bits.axi4.data(255,128) ^ io.in_w.bits.tweak(255,128)
+  if(HasDelayNoencryption){
+    pipes_first_data_0 := io.in_w.bits.axi4.data(127,0)
+    pipes_first_data_1 := io.in_w.bits.axi4.data(255,128)
+  }else{
+    pipes_first_data_0 := io.in_w.bits.axi4.data(127,0) ^ io.in_w.bits.tweak(127, 0)
+    pipes_first_data_1 := io.in_w.bits.axi4.data(255,128) ^ io.in_w.bits.tweak(255,128)
+  }
 
-  def configureModule(flag: Boolean, i: Int, keyId: UInt, dataIn: UInt, tweakIn: UInt, axi4In: AXI4BundleWWithoutData, roundKeys: UInt): OnePipeForEnc = {
-
+  def configureModule(flag: Boolean, i: Int, keyId: UInt, dataIn: UInt, tweakIn: UInt, axi4In: AXI4BundleWWithoutData, roundKeys: UInt): OnePipeEncBase = {
       when(wire_ready_result(i) && (if (i == 0) io.in_w.valid else reg_encdec_valid(i-1))) {
         reg_encdec_valid(i) := true.B
       }.elsewhen(reg_encdec_valid(i) && (if (i == MemencPipes - 1) io.out_w.ready else wire_ready_result(i+1))){
@@ -265,7 +272,7 @@ class WdataEncrptyPipe(implicit p:Parameters) extends MemEncryptModule
 
       wire_ready_result(i) := !reg_encdec_valid(i) || (reg_encdec_valid(i) && (if (i == MemencPipes - 1) io.out_w.ready else wire_ready_result(i+1)))
 
-      val module = Module(new OnePipeForEnc())
+      val module: OnePipeEncBase = if (HasDelayNoencryption) Module(new OnePipeForEncNoEnc()) else Module(new OnePipeForEnc())
       module.io.onepipe_in.keyid := keyId
       module.io.onepipe_in.data_in := dataIn
       module.io.onepipe_in.tweak_in := tweakIn
@@ -301,7 +308,9 @@ class WdataEncrptyPipe(implicit p:Parameters) extends MemEncryptModule
       configureModule(false, i, reg_keyid(i-1), reg_encdec_result_1(i-1), reg_tweak_result_1(i-1), reg_axi4_other_result(i-1), io.enc_round_keys(i))
     }
   }
-
+  if(HasDelayNoencryption){
+    io.out_w.bits.data := Cat(reg_encdec_result_1.last, reg_encdec_result_0.last)
+  }else{
     val enc_0_out = Cat(
       reg_encdec_result_0.last(31, 0),
       reg_encdec_result_0.last(63, 32),
@@ -315,6 +324,7 @@ class WdataEncrptyPipe(implicit p:Parameters) extends MemEncryptModule
       reg_encdec_result_1.last(127, 96)
     )
     io.out_w.bits.data := Cat(enc_1_out ^ reg_tweak_result_1.last, enc_0_out ^ reg_tweak_result_0.last)
+  }
 
   io.out_w.bits.strb := reg_axi4_other_result.last.strb
   io.out_w.bits.last := reg_axi4_other_result.last.last
@@ -497,10 +507,15 @@ class RdataDecrptyPipe(implicit p:Parameters) extends MemEncryptModule
 
   val pipes_first_data_0 = Wire(UInt(128.W))
   val pipes_first_data_1 = Wire(UInt(128.W))
-  pipes_first_data_0 := io.in_r.bits.axi4.data(127,0) ^ io.in_r.bits.tweak(127, 0)
-  pipes_first_data_1 := io.in_r.bits.axi4.data(255,128) ^ io.in_r.bits.tweak(255,128)
 
-  def configureModule(flag: Boolean, i: Int, keyId: UInt, dataIn: UInt, tweakIn: UInt, axi4In: AXI4BundleRWithoutData, roundKeys: UInt): OnePipeForDec = {
+  if(HasDelayNoencryption){
+    pipes_first_data_0 := io.in_r.bits.axi4.data(127,0)
+    pipes_first_data_1 := io.in_r.bits.axi4.data(255,128)
+  }else{
+    pipes_first_data_0 := io.in_r.bits.axi4.data(127,0) ^ io.in_r.bits.tweak(127, 0)
+    pipes_first_data_1 := io.in_r.bits.axi4.data(255,128) ^ io.in_r.bits.tweak(255,128)
+  }
+  def configureModule(flag: Boolean, i: Int, keyId: UInt, dataIn: UInt, tweakIn: UInt, axi4In: AXI4BundleRWithoutData, roundKeys: UInt): OnePipeDecBase = {
 
     when(wire_ready_result(i) && (if (i == 0) io.in_r.valid else reg_encdec_valid(i-1))) {
       reg_encdec_valid(i) := true.B
@@ -512,7 +527,7 @@ class RdataDecrptyPipe(implicit p:Parameters) extends MemEncryptModule
 
     wire_ready_result(i) := !reg_encdec_valid(i) || (reg_encdec_valid(i) && (if (i == MemencPipes - 1) io.out_r.ready else wire_ready_result(i+1)))
 
-    val module = Module(new OnePipeForDec())
+    val module: OnePipeDecBase = if (HasDelayNoencryption) Module(new OnePipeForDecNoDec()) else Module(new OnePipeForDec())
     module.io.onepipe_in.keyid := keyId
     module.io.onepipe_in.data_in := dataIn
     module.io.onepipe_in.tweak_in := tweakIn
@@ -549,7 +564,9 @@ class RdataDecrptyPipe(implicit p:Parameters) extends MemEncryptModule
       configureModule(false, i, reg_keyid(i-1),reg_encdec_result_1(i-1), reg_tweak_result_1(i-1), reg_axi4_other_result(i-1), io.dec_round_keys(i))
     }
   }
-
+  if(HasDelayNoencryption){
+    io.out_r.bits.data := Cat(reg_encdec_result_1.last, reg_encdec_result_0.last)
+  }else{
     val enc_0_out = Cat(
       reg_encdec_result_0.last(31, 0),
       reg_encdec_result_0.last(63, 32),
@@ -563,6 +580,7 @@ class RdataDecrptyPipe(implicit p:Parameters) extends MemEncryptModule
       reg_encdec_result_1.last(127, 96)
     )
     io.out_r.bits.data := Cat(enc_1_out ^ reg_tweak_result_1.last, enc_0_out ^ reg_tweak_result_0.last)
+  }
 
   io.out_r.bits.id := reg_axi4_other_result.last.id
   io.out_r.bits.resp := reg_axi4_other_result.last.resp
