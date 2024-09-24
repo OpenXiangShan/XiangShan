@@ -146,6 +146,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.numUops := numUops
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
+    x.rawNf := io.in.bits.uop.vpu.nf
     x.flowMask := flowMask
     x.indexedSrcMask := indexedSrcMask // Only vector indexed instructions uses it
     x.indexedSplitOffset := indexedSplitOffset
@@ -230,6 +231,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
+  io.toMergeBuffer.req.bits.uop.vpu.nf   := s1_in.rawNf
   io.toMergeBuffer.req.bits.mask         := s1_mask
   io.toMergeBuffer.req.bits.vaddr        := s1_in.baseAddr
   io.toMergeBuffer.req.bits.vdIdx        := s1_vdIdx  //TODO vdIdxReg should no longer be useful, don't delete it for now
@@ -253,6 +255,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
   io.out.bits.usMask        := usMask
+  io.out.bits.uop.vpu.nf    := s1_in.rawNf
 
   XSPerfAccumulate("split_out",     io.out.fire)
   XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)
