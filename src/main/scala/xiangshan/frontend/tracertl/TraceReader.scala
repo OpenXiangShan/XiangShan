@@ -136,6 +136,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
       enqPtr := enqPtr + TraceFetchWidth.U
     }
 
+    // TODO: when redirect target instID is deqPtr, no need to flush
     when (redirect.valid) {
       enqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
       deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))

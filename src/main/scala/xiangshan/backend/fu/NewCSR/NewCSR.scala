@@ -240,10 +240,10 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val wenLegal = permitMod.io.out.hasLegalWen
 
-  val legalSret  = permitMod.io.out.hasLegalSret
-  val legalMret  = permitMod.io.out.hasLegalMret
-  val legalMNret = permitMod.io.out.hasLegalMNret
-  val legalDret  = permitMod.io.out.hasLegalDret
+  val legalSret  = TraceRTLChoose(permitMod.io.out.hasLegalSret, true.B)
+  val legalMret  = TraceRTLChoose(permitMod.io.out.hasLegalMret, true.B)
+  val legalMNret = TraceRTLChoose(permitMod.io.out.hasLegalMNret, true.B)
+  val legalDret  = TraceRTLChoose(permitMod.io.out.hasLegalDret, true.B)
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
