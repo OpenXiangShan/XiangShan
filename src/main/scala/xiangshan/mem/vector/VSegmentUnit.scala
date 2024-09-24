@@ -473,7 +473,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     when(exception_va || exception_gpa || exception_pa) {
       when(canTriggerException) {
         instMicroOp.exceptionVaddr  := vaddr
-        instMicroOp.exceptionVl     := segmentIdx // for exception
         instMicroOp.exceptionVstart := segmentIdx // for exception
       }.otherwise {
         instMicroOp.exceptionVl     := segmentIdx
@@ -693,6 +692,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   when(fofFixVlValid) {
     writebackOut.uop                    := fofBuffer
+    writebackOut.uop.vpu.vl             := instMicroOp.exceptionVl
     writebackOut.data                   := instMicroOp.exceptionVl
     writebackOut.mask.get               := Fill(VLEN, 1.U)
   }.otherwise{
