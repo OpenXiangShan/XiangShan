@@ -43,7 +43,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val vl               = UInt(elemIdxBits.W)
-  val vaddr            = UInt(VAddrBits.W)
+  val vaddr            = UInt(XLEN.W)
   val gpaddr           = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE= Bool()
   val fof              = Bool()
