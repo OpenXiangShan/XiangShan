@@ -26,7 +26,7 @@ import xiangshan.frontend.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
 
 class StridePredictorPCMem()(implicit p: Parameters) extends XSModule with StridePredictorParams {
 
-  private val numMemRead = RenameWidth + CommitUpdateSize
+  private val numMemRead = RenameWidth + CommitWidth
 
   val io = IO(new StridePredictorPcMemIO())
 
@@ -87,5 +87,5 @@ class StridePredictorPcMemIO()(implicit p: Parameters) extends XSBundle with Str
   // from frontend
   val fromFrontendFtq = Flipped(new FtqToCtrlIO)
   // to stride predictor
-  val toStridePredictor = Vec(RenameWidth + CommitUpdateSize, new SPPcMemReadPort)
+  val toStridePredictor = Vec(RenameWidth + CommitWidth, new SPPcMemReadPort)
 }

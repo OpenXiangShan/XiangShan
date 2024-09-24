@@ -160,35 +160,26 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   // 3. commit update entry
-  val updateValid = RegInit(VecInit(Seq.fill(CommitUpdateSize)(false.B)))
-  val updateInfo = Reg(Vec(CommitUpdateSize, new SPUpdateBundle))
-  val updatePC = io.fromSPPcMem.map(_.pc)
+  val updateInfo = RegInit(VecInit.fill(CommitUpdateSize)((new SPCommitBufferEntry).Lit(_.valid -> false.B)))
 
-  val updateAddrVec = updatePC.map(x => get_group(x))
-  val updateTagVec = updatePC.map(x => get_tag(x))
+  val updateValid = updateInfo.map(x => x.valid)
+  val updateAddrVec = updateInfo.map(x => get_group(x.pc))
+  val updateTagVec = updateInfo.map(x => get_tag(x.pc))
   val updateValidVec = updateAddrVec.map(spEntries(_).map(_.valid))
   val updateEntryVec = updateAddrVec.map(spEntries(_))
-
-  val updateMatchOHVec: IndexedSeq[Vec[Bool]] = updateTagVec.zipWithIndex.map{ case (tag, i) =>
-    val matchOH = VecInit(updateValidVec(i).zip(updateEntryVec(i)).map{ case (v, entry) =>
-      v && entry.tag === tag
-    })
-    assert(PopCount(matchOH) <= 1.U, s"updateMatchOH(${i}) is not one-hot")
-    matchOH
-  }
-  val updateMatchVec = updateMatchOHVec.map(_.asUInt.orR)
+  val updateMatchOHVec: IndexedSeq[Vec[Bool]] = updateInfo.map(x => x.matchOH)
 
   // check same entry
   val finalUpdateMatchOHVec: IndexedSeq[Vec[Bool]] = updateMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
-    val updateEnable = (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).take(i).map{ case (wen, group, tag) =>
-      !(wen && group === updateAddrVec(i) && tag === updateTagVec(i))
+    val updateEnable = (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).take(i).map{ case (valid, group, tag) =>
+      !(valid && group === updateAddrVec(i) && tag === updateTagVec(i))
     }.fold(true.B)(_ && _) && updateValid(i)
     VecInit(matchOH.map(_ && updateEnable))
   }
   val finalUpdateMatchCountVec = Wire(Vec(CommitUpdateSize, UInt(log2Up(CommitUpdateSize + 1).W)))
   finalUpdateMatchCountVec.zipWithIndex.foreach{ case (count, i) =>
-    count := (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).takeRight(CommitUpdateSize - i - 1).map{ case (wen, group, tag) =>
-      Mux(wen && group === updateAddrVec(i) && tag === updateTagVec(i), 1.U, 0.U)
+    count := (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).takeRight(CommitUpdateSize - i - 1).map{ case (valid, group, tag) =>
+      Mux(valid && group === updateAddrVec(i) && tag === updateTagVec(i), 1.U, 0.U)
     }.fold(1.U)(_ +& _)
   }
   val updateMatchReadVec: IndexedSeq[Vec[Bool]] = updateAddrVec.zip(updateTagVec).map{ case (upgroup, uptag) =>
@@ -297,70 +288,112 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   // 5. commit buffer
-  val spCommitBuffer = Reg(Vec(CommitBufferSize, new SPCommitPort))
+  // enq read pc
+  val enqBuffer = RegInit(VecInit.fill(CommitWidth)((new SPEnqBufferEntry).Lit(_.valid -> false.B)))
+
+  enqBuffer.lazyZip(io.spCommitPort).lazyZip(io.fromSPPcMem).foreach{ case (enqBuf, commit, pcMem) =>
+    enqBuf.valid    := commit.wen
+    enqBuf.pfHit    := commit.pfHit
+    enqBuf.currAddr := commit.currAddr
+    pcMem.ren       := commit.wen
+    pcMem.ftqPtr    := commit.ftqPtr
+    pcMem.ftqOffset := commit.ftqOffset
+  }
+
+  // enq filter not match
+  val filteredEnqReq = Wire(Vec(CommitWidth, new SPCommitBufferEntry))
+
+  val enqReqAddrVec = io.fromSPPcMem.map(x => get_group(x.pc))
+  val enqReqTagVec = io.fromSPPcMem.map(x => get_tag(x.pc))
+  val enqReqValidVec = enqReqAddrVec.map(spEntries(_).map(_.valid))
+  val enqReqEntryVec = enqReqAddrVec.map(spEntries(_))
+
+  val enqReqMatchOHVec: IndexedSeq[Vec[Bool]] = enqReqTagVec.zipWithIndex.map{ case (tag, i) =>
+    val matchOH = VecInit(enqReqValidVec(i).zip(enqReqEntryVec(i)).map{ case (v, entry) =>
+      v && entry.tag === tag
+    })
+    assert(PopCount(matchOH) <= 1.U, s"enqReqMatchOH(${i}) is not one-hot")
+    matchOH
+  }
+  val enqReqMatchVec = enqReqMatchOHVec.map(_.asUInt.orR)
+
+  filteredEnqReq.zipWithIndex.foreach{ case (enq, i) =>
+    enq.valid    := enqBuffer(i).valid && enqReqMatchVec(i)
+    enq.matchOH  := enqReqMatchOHVec(i)
+    enq.pc       := io.fromSPPcMem(i).pc
+    enq.pfHit    := enqBuffer(i).pfHit
+    enq.currAddr := enqBuffer(i).currAddr
+  }
+
+  // commit buffer
+  val spCommitBuffer = RegInit(VecInit.fill(CommitBufferSize)((new SPCommitBufferEntry).Lit(_.valid -> false.B)))
   val enqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(_.U.asTypeOf(new SPCommitBufferPtr(CommitBufferSize))))
   val deqPtrVec = RegInit(VecInit.tabulate(CommitUpdateSize)(_.U.asTypeOf(new SPCommitBufferPtr(CommitBufferSize))))
   val enqPtrHead = enqPtrVec(0)
   val deqPtrHead = deqPtrVec(0)
 
-  // enq
-  val commitValidVec = io.spCommitPort.map(_.wen)
+  val commitValidVec = filteredEnqReq.map(_.valid)
   val enqNum = Wire(UInt(log2Up(CommitWidth + 1).W))
   val enqNumVec = Wire(Vec(CommitWidth, UInt(log2Up(CommitWidth + 1).W)))
   enqNumVec.zipWithIndex.foreach{ case (num, i) =>
-    num := io.spCommitPort.take(i + 1).map(_.wen.asUInt).reduce(_ +& _)
+    num := filteredEnqReq.take(i + 1).map(_.valid.asUInt).reduce(_ +& _)
   }
   enqNum := enqNumVec.last
 
-  val enqEntries = Wire(Vec(CommitWidth, new SPCommitPort))
+  val enqEntries = Wire(Vec(CommitWidth, new SPCommitBufferEntry))
   enqEntries.zipWithIndex.foreach{ case (enqEntry, i) =>
     if (i == 0) {
       val selVec = commitValidVec(0) +: enqNumVec.dropRight(1).map(_ === 0.U).zip(commitValidVec.drop(1)).map(x => x._1 && x._2)
-      enqEntry := Mux1H(selVec, io.spCommitPort)
+      enqEntry := Mux1H(selVec, filteredEnqReq)
       assert(PopCount(selVec) <= 1.U, s"selVec(${i}) is not one-hot")
     }
     else if (i != CommitWidth - 1) {
       val selVec = enqNumVec.drop(i - 1).dropRight(1).map(_ === i.U).zip(commitValidVec.drop(i)).map(x => x._1 && x._2)
-      enqEntry := Mux1H(selVec, io.spCommitPort.drop(i))
+      enqEntry := Mux1H(selVec, filteredEnqReq.drop(i))
       assert(PopCount(selVec) <= 1.U, s"selVec(${i}) is not one-hot")
     }
     else {
-      enqEntry := Mux(enqNum === CommitWidth.U, io.spCommitPort.last, 0.U.asTypeOf(enqEntry))
+      enqEntry := Mux(enqNum === CommitWidth.U, filteredEnqReq.last, 0.U.asTypeOf(enqEntry))
     }
   }
 
   val validNum = distanceBetween(enqPtrHead, deqPtrHead)
   val freeNum = CommitBufferSize.U - validNum
-  val OverflowNum = Mux((enqNum <= freeNum), 0.U, enqNum - freeNum)
+  val overflowNum = Mux(enqNum <= freeNum, 0.U, enqNum - freeNum)
   enqPtrVec.zipWithIndex.foreach{ case (enqPtr, i) =>
-    enqPtr := enqPtr + enqNum
+    enqPtr := enqPtr + Mux(enqNum <= freeNum, enqNum, freeNum)
     when (i.U < enqNum && i.U < freeNum) {
       spCommitBuffer(enqPtr.value) := enqEntries(i)
     }
   }
-  XSPerfAccumulate("overflow_instr_cnt", OverflowNum)
+  XSPerfAccumulate("overflow_instr_cnt", overflowNum)
   XSPerfHistogram("valid_entry_cnt", validNum, true.B, 0, NumEntries + 1)
 
   // deq
   val deqNum = Wire(UInt(log2Up(CommitUpdateSize + 1).W))
-  val deqEntries = deqPtrVec.map(x => spCommitBuffer(x.value))
-  deqNum := deqEntries.map(_.wen.asUInt).reduce(_ +& _)
+  val deqEntries = VecInit(deqPtrVec.map(x => spCommitBuffer(x.value)))
+  deqNum := deqEntries.map(_.valid.asUInt).reduce(_ +& _)
   assert(deqNum <= validNum, "deqNum should be small than or equal to validNum")
 
   deqPtrVec.zipWithIndex.foreach{ case (deqPtr, i) =>
     deqPtr := deqPtr + deqNum
     when (i.U < deqNum) {
-      spCommitBuffer(deqPtr.value).wen := false.B
+      spCommitBuffer(deqPtr.value).valid := false.B
     }
   }
 
-  updateValid.lazyZip(updateInfo).lazyZip(deqEntries).lazyZip(io.fromSPPcMem).foreach{ case (valid, info, deqEntry, readPC) =>
-    valid := deqEntry.wen
-    info.pfHit := deqEntry.pfHit
-    info.currAddr := deqEntry.currAddr
-    readPC.ren := deqEntry.wen
-    readPC.ftqPtr := deqEntry.ftqPtr
-    readPC.ftqOffset := deqEntry.ftqOffset
+  updateInfo.zip(deqEntries).foreach{ case (info, deqEntry) =>
+    info := deqEntry
+  }
+
+  if (backendParams.debugEn) {
+    dontTouch(enqNum)
+    dontTouch(deqNum)
+    dontTouch(validNum)
+    dontTouch(freeNum)
+    dontTouch(overflowNum)
+    dontTouch(enqEntries)
+    dontTouch(deqEntries)
   }
 }
 
@@ -377,12 +410,21 @@ class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with Strid
   val utility    = UInt(UtilityWidth.W)
 }
 
-class SPUpdateBundle()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
+class SPCommitBufferEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
+  val valid     = Bool()
+  val matchOH   = Vec(NumWay, Bool())
+  val pc        = UInt(ValidPcWidth.W)
   val pfHit     = Bool()
   val currAddr  = UInt(VAddrBits.W)
 }
 
 class SPCommitBufferPtr(entries: Int) extends CircularQueuePtr[SPCommitBufferPtr](entries) with HasCircularQueuePtrHelper {
+}
+
+class SPEnqBufferEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
+  val valid     = Bool()
+  val pfHit     = Bool()
+  val currAddr  = UInt(VAddrBits.W)
 }
 
 class SPReadPort()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
@@ -393,18 +435,18 @@ class SPReadPort()(implicit p: Parameters) extends XSBundle with StridePredictor
 }
 
 class SPCommitPort()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
-  val wen       = Bool()
-  val ftqPtr    = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val pfHit     = Bool()
-  val currAddr  = UInt(VAddrBits.W)
+  val wen       = Input(Bool())
+  val ftqPtr    = Input(new FtqPtr)
+  val ftqOffset = Input(UInt(log2Up(PredictWidth).W))
+  val pfHit     = Input(Bool())
+  val currAddr  = Input(UInt(VAddrBits.W))
 }
 
 class StridePredictorIO()(implicit p: Parameters) extends XSBundle with StridePredictorParams{
 
   val spReadPort = Vec(RenameWidth, new SPReadPort)
 
-  val spCommitPort = Vec(CommitWidth, Input(new SPCommitPort))
+  val spCommitPort = Vec(CommitWidth, new SPCommitPort)
 
-  val fromSPPcMem = Flipped(Vec(CommitUpdateSize, new SPPcMemReadPort))
+  val fromSPPcMem = Flipped(Vec(CommitWidth, new SPPcMemReadPort))
 }
