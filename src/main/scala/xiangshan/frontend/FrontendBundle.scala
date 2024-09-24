@@ -710,7 +710,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def shouldShiftVec   = VecInit(full_pred.map(_.shouldShiftVec))
   def fallThruError    = VecInit(full_pred.map(_.fallThruError))
   def ftbMultiHit      = VecInit(full_pred.map(_.ftbMultiHit))
-  def fallThroughAddr  = VecInit(full_pred.map(_.fallThroughAddr))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
