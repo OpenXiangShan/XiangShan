@@ -585,8 +585,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val s3_jalr_target = io.out.s3.full_pred.jalr_target
   // val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred(2).targets.last
   // val s3_last_target_out = io.out.s3.full_pred(2).targets.last
-  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr
-  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret
+  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
   // assert(is_jalr && is_ret || !is_ret)
   when(s3_is_ret && io.ctrl.ras_enable) {
     io.out.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
@@ -599,8 +599,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire(2))
   val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire(2))
-  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call
-  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret
+  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
 
   val s3_cancel = io.s3_fire(2) && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
   stack.s2_fire := io.s2_fire(2)
