@@ -32,6 +32,7 @@ import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueu
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
@@ -551,10 +552,10 @@ class CtrlBlockImp(
 
   spPCMem.io.fromFrontendFtq := io.frontend.fromFtq
   spPCMem.io.toStridePredictor.take(RenameWidth).zipWithIndex.foreach{ case (toSP, i) =>
-    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire
+    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire && FuType.isLoad(renameOut(i).bits.fuType)
     toSP.ftqPtr := renameOut(i).bits.ftqPtr
     toSP.ftqOffset := renameOut(i).bits.ftqOffset
-    stridePredictor.io.spReadPort(i).ren := dispatchFirstValid(i)
+    stridePredictor.io.spReadPort(i).ren := dispatchFirstValid(i) && FuType.isLoad(dispatch.io.fromRename(i).bits.fuType)
     stridePredictor.io.spReadPort(i).pc := toSP.pc
   }
   stridePredictor.io.fromSPPcMem <> spPCMem.io.toStridePredictor.takeRight(stridePredictor.io.fromSPPcMem.size)
