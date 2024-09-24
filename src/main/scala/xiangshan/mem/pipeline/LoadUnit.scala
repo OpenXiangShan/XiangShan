@@ -887,6 +887,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
+  s1_out.fullva            := io.tlb.resp.bits.excp(0).excpAddr
   s1_out.paddr             := s1_paddr_dup_lsu
   s1_out.gpaddr            := s1_gpaddr_dup_lsu
   s1_out.isForVSnonLeafPTE           := io.tlb.resp.bits.isForVSnonLeafPTE

@@ -307,6 +307,27 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     resp(idx).bits.pbmt(d) := Mux(portTranslateEnable(idx), res, 0.U)
   }
 
+  def GenExceptionVa(vmEnable: Bool, s2xlateEnable: Bool, onlyStage2: Bool,
+                     Sv39: Bool, Sv48: Bool, Sv39x4: Bool, Sv48x4: Bool, vaddr: UInt) = {
+    require(VAddrBits >= 50)
+
+    val bareAddr   = ZeroExt(vaddr(PAddrBits - 1, 0), XLEN)
+    val sv39Addr   = SignExt(vaddr.take(39), XLEN)
+    val sv39x4Addr = ZeroExt(vaddr.take(39 + 2), XLEN)
+    val sv48Addr   = SignExt(vaddr.take(48), XLEN)
+    val sv48x4Addr = ZeroExt(vaddr.take(48 + 2), XLEN)
+
+    val ExceptionVa = Mux1H(Seq(
+      (!(vmEnable || s2xlateEnable))    -> bareAddr,
+      (!onlyStage2 && (Sv39 || Sv39x4)) -> sv39Addr,
+      (!onlyStage2 && (Sv48 || Sv48x4)) -> sv48Addr,
+      ( onlyStage2 && (Sv39 || Sv39x4)) -> sv39x4Addr,
+      ( onlyStage2 && (Sv48 || Sv48x4)) -> sv48x4Addr,
+    ))
+
+    ExceptionVa
+  }
+
   // for timing optimization, pmp check is divided into dynamic and static
   def perm_check(perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int, g_perm: TlbPermBundle, hlvx: Bool, s2xlate: UInt, prepf: Bool = false.B, pregpf: Bool = false.B, preaf: Bool = false.B) = {
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
@@ -366,6 +387,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
       resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
       resp(idx).bits.excp(nDups).af.instr := false.B
+
+      resp(idx).bits.excp(nDups).excpAddr := RegNext(req(idx).bits.fullva)
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
@@ -386,6 +409,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
       resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
       resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
+
+      resp(idx).bits.excp(nDups).excpAddr := GenExceptionVa(vmEnable(idx), s2xlateEnable(idx), onlyS2,
+        Sv39Enable, Sv48Enable, Sv39x4Enable, Sv48x4Enable, RegNext(req(idx).bits.vaddr))
     }
   }
 

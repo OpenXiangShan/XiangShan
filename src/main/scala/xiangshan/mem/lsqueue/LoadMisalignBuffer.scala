@@ -566,7 +566,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).fullva)
   val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
 

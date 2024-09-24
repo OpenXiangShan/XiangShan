@@ -93,8 +93,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val writeBack       = Decoupled(new MemExuOutput)
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
-      val vaddr = UInt(VAddrBits.W)
-      val gpaddr = UInt(GPAddrBits.W)
+      val vaddr = UInt(XLEN.W)
+      val gpaddr = UInt(XLEN.W)
       val isForVSnonLeafPTE = Bool()
     })
     val sqControl       = new StoreMaBufToSqControlIO
@@ -592,7 +592,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the storeExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteAddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
+  val overwriteAddr = GatedRegNext(splitStoreResp(curPtr).fullva)
   val overwriteGpaddr = GatedRegNext(splitStoreResp(curPtr).gpaddr)
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitStoreResp(curPtr).isForVSnonLeafPTE)
 

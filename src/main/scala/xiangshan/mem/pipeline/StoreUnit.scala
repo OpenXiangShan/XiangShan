@@ -257,6 +257,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
+  val s1_fullva    = io.tlb.resp.bits.excp(0).excpAddr
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
@@ -311,6 +312,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out         := s1_in
   s1_out.paddr   := s1_paddr
   s1_out.gpaddr  := s1_gpaddr
+  s1_out.fullva  := s1_fullva
   s1_out.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   s1_out.miss    := false.B
   s1_out.mmio    := s1_mmio
