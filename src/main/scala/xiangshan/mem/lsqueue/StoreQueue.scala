@@ -1083,6 +1083,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       io.sbufferVecDifftestInfo(i).bits := difftestBuffer.get.io.deq(i).bits
     }
+
+    // commit cbo.inval to difftest
+    val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
+    cmoInvalEvent.coreid := io.hartId
+    cmoInvalEvent.valid  := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
+    cmoInvalEvent.addr   := cboMmioAddr
   }
 
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
