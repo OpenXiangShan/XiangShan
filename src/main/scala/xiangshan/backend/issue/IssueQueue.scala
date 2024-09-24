@@ -57,8 +57,10 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle)
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val vlIsZero = Input(Bool())
-  val vlIsVlmax = Input(Bool())
+  val vlFromIntIsZero = Input(Bool())
+  val vlFromIntIsVlmax = Input(Bool())
+  val vlFromVfIsZero = Input(Bool())
+  val vlFromVfIsVlmax = Input(Bool())
   val og0Cancel = Input(ExuVec())
   val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
@@ -353,8 +355,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     entriesIO.wakeUpFromWB                                      := io.wakeupFromWB
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
-    entriesIO.vlIsZero                                          := io.vlIsZero
-    entriesIO.vlIsVlmax                                         := io.vlIsVlmax
+    entriesIO.vlFromIntIsZero                                   := io.vlFromIntIsZero
+    entriesIO.vlFromIntIsVlmax                                  := io.vlFromIntIsVlmax
+    entriesIO.vlFromVfIsZero                                    := io.vlFromVfIsZero
+    entriesIO.vlFromVfIsVlmax                                   := io.vlFromVfIsVlmax
     entriesIO.og0Cancel                                         := io.og0Cancel
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
