@@ -154,8 +154,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   // allocate update
   val allocateUpdateEntryVec = Wire(Vec(RenameWidth, new StridePredictorEntry))
   allocateUpdateEntryVec.zipWithIndex.foreach{ case (entry, i) =>
-    entry := 0.U.asTypeOf(new StridePredictorEntry)
-    entry.tag := readTagVec(i)
+    entry          := 0.U.asTypeOf(new StridePredictorEntry)
+    entry.valid    := true.B
+    entry.tag      := readTagVec(i)
     entry.inflight := finalMatchCountVec(i)
   }
 
@@ -277,12 +278,15 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
       when (commitEn) {
         entry := Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
+        assert(entry.valid, s"entry(${i})(${j}) is not valid when commitEn")
       }
       .elsewhen (readEn) {
         entry.inflight := Mux1H(readOH, readUpdateInflightVec.map(_(j)))
+        assert(entry.valid, s"entry(${i})(${j}) is not valid when readEn")
       }
       .elsewhen (allocEn) {
         entry := Mux1H(allocOH, allocateUpdateEntryVec)
+        assert(!entry.valid, s"entry(${i})(${j}) is valid when allocEn")
       }
     }
   }
