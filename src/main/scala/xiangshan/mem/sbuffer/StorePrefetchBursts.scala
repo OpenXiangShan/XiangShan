@@ -370,7 +370,7 @@ class ASPBurstGenerator(implicit p: Parameters) extends DCacheModule with HasSto
   }
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
 
-  val s1_tlb_req_valid = Reg(Bool())
+  val s1_tlb_req_valid = RegInit(false.B)
   val s1_tlb_req_bits = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.fire)
   val s1_tlb_req_index = RegEnable(OHToUInt(s0_tlb_fire_vec.asUInt), tlb_req_arb.io.out.fire)
   when(io.aspPfIO.tlb_req.req.fire) {
