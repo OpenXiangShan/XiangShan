@@ -262,6 +262,7 @@ class HedelegBundle extends ExceptionBundle {
   this.EX_LGPF  .setRO().withReset(0.U)
   this.EX_VI    .setRO().withReset(0.U)
   this.EX_SGPF  .setRO().withReset(0.U)
+  this.EX_DBLTRP.setRO().withReset(0.U) // double trap is not delegatable
 }
 
 class HidelegBundle extends InterruptBundle {
