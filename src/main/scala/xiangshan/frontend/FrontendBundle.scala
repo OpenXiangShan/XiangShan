@@ -547,7 +547,7 @@ object selectByTaken {
   }
 }
 
-class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
+class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
   val slot_valids = Vec(totalSlot, Bool())
@@ -618,7 +618,11 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b && hit}.reduce(_||_)
 
   def target(pc: UInt): UInt = {
-    selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
+    if (isNotS3){
+      selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
+    }else {
+      selectByTaken(taken_mask_on_slot, hit && !fallThroughErr, allTarget(pc))
+    }
   }
 
   // allTarget return a Vec of all possible target of a BP stage
@@ -692,13 +696,14 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val topAddr = UInt(VAddrBits.W)
 }
 
-class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
+// 
+class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
   val pc    = Vec(numDup, UInt(VAddrBits.W))
   val valid = Vec(numDup, Bool())
   val hasRedirect  = Vec(numDup, Bool())
   val ftq_idx = new FtqPtr
-  val full_pred    = Vec(numDup, new FullBranchPrediction)
+  val full_pred    = Vec(numDup, new FullBranchPrediction(isNotS3))
 
 
   def target(pc: UInt) = VecInit(full_pred.map(_.target(pc)))
@@ -723,9 +728,9 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val s1 = new BranchPredictionBundle
-  val s2 = new BranchPredictionBundle
-  val s3 = new BranchPredictionBundle
+  val s1 = new BranchPredictionBundle(isNotS3 = true)
+  val s2 = new BranchPredictionBundle(isNotS3 = true)
+  val s3 = new BranchPredictionBundle(isNotS3 = false)
 
   val s1_uftbHit = Bool()
   val s1_uftbHasIndirect = Bool()

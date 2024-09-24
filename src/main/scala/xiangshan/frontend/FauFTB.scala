@@ -101,7 +101,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_oh = VecInit(ways.map(_.io.resp_hit)).asUInt
   val s1_hit = s1_hit_oh.orR
   val s1_hit_way = OHToUInt(s1_hit_oh)
-  val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction))
+  val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction(isNotS3 = true)))
 
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
