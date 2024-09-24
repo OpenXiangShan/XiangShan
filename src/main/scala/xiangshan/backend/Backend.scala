@@ -254,6 +254,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
+  if (env.TraceRTLMode) {
+    ctrlBlock.io.fromWB.wbData.foreach { wb =>
+      wb.bits.exceptionVec.map(_:= 0.U.asTypeOf(wb.bits.exceptionVec.get))
+    }
+  }
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
