@@ -209,11 +209,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
 
-  exceptionVec(EX_BP    ) := isEbreak
-  exceptionVec(EX_MCALL ) := isEcall && privState.isModeM
-  exceptionVec(EX_HSCALL) := isEcall && privState.isModeHS
-  exceptionVec(EX_VSCALL) := isEcall && privState.isModeVS
-  exceptionVec(EX_UCALL ) := isEcall && privState.isModeHUorVU
+  exceptionVec(EX_BP    ) := Mux(io.in.fire, isEbreak, RegEnable(isEbreak, false.B, io.in.fire))
+  exceptionVec(EX_MCALL ) := Mux(io.in.fire, isEcall && privState.isModeM, RegEnable(isEcall && privState.isModeM, false.B, io.in.fire))
+  exceptionVec(EX_HSCALL) := Mux(io.in.fire, isEcall && privState.isModeHS, RegEnable(isEcall && privState.isModeHS, false.B, io.in.fire))
+  exceptionVec(EX_VSCALL) := Mux(io.in.fire, isEcall && privState.isModeVS, RegEnable(isEcall && privState.isModeVS, false.B, io.in.fire))
+  exceptionVec(EX_UCALL ) := Mux(io.in.fire, isEcall && privState.isModeHUorVU, RegEnable(isEcall && privState.isModeHUorVU, false.B, io.in.fire))
   exceptionVec(EX_II    ) := csrMod.io.out.bits.EX_II
   exceptionVec(EX_VI    ) := csrMod.io.out.bits.EX_VI
 
@@ -267,7 +267,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   /** initialize NewCSR's io_out_ready from wrapper's io */
   csrMod.io.out.ready := io.out.ready
 
-  io.out.bits.res.redirect.get.valid := isXRet
+  io.out.bits.res.redirect.get.valid := io.out.valid && Mux(io.in.fire, isXRet, RegEnable(isXRet, false.B, io.in.fire))
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
@@ -283,10 +283,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 
-  connect0LatencyCtrlSingal
+  connectNonPipedCtrlSingalForCSR
 
   // Todo: summerize all difftest skip condition
-  csrOut.isPerfCnt  := csrMod.io.out.bits.isPerfCnt && csrModOutValid && func =/= CSROpType.jmp
+  csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && DataHoldBypass(func =/= CSROpType.jmp, io.in.fire)
   csrOut.fpu.frm    := csrMod.io.status.fpState.frm.asUInt
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt
