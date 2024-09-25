@@ -35,7 +35,7 @@ trait StridePredictorParams {
   val TagWidth: Int = 16
   val PcOffset: Int = 2
 
-  val StrideWidth = 8
+  val StrideWidth = 9
   val InflightWidth = 7
   val ConfidenceWidth = 4
   val UtilityWidth = 2
@@ -90,7 +90,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   io.spReadPort.zipWithIndex.foreach{ case (rport, i) =>
     rport.needPf   := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.confidence >= 4.U))
-    rport.predAddr := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.prevAddr + x.stride * (x.inflight + 1.U)))
+    rport.predAddr := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.prevAddr + SignExt((x.stride * Cat(0.U, x.inflight + 1.U).asSInt).asUInt, x.prevAddr.getWidth)))
   }
 
   // update inflight counter
@@ -238,7 +238,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
           entry.confidence := updateEntryVec(i)(j).confidence >> 1
           entry.utility := 0.U
           when (updateEntryVec(i)(j).confidence === 0.U && updateEntryVec(i)(j).prevAddr =/= 0.U) {
-            entry.stride := updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr
+            entry.stride := (updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr).asSInt
           }
         }
       }
@@ -259,7 +259,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.confidence := updateEntryVec(i)(j).confidence >> 2
             entry.utility := 0.U
             when (updateEntryVec(i)(j).confidence <= 1.U) {
-              entry.stride := updateInfo(i + 1).currAddr - updateInfo(i).currAddr
+              entry.stride := (updateInfo(i + 1).currAddr - updateInfo(i).currAddr).asSInt
             }
           }
         }.otherwise {
@@ -272,7 +272,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.confidence := updateEntryVec(i)(j).confidence >> 1
             entry.utility := 0.U
             when (updateEntryVec(i)(j).confidence === 0.U && updateEntryVec(i)(j).prevAddr =/= 0.U) {
-              entry.stride := updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr
+              entry.stride := (updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr).asSInt
             }
           }
         }
@@ -461,7 +461,7 @@ class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with Strid
   val tag        = UInt(TagWidth.W)
   val lastRobIdx = new RobPtr
 
-  val stride     = UInt(StrideWidth.W)
+  val stride     = SInt(StrideWidth.W)
   val prevAddr   = UInt(VAddrBits.W)
 
   val inflight   = UInt(InflightWidth.W)
