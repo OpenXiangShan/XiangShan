@@ -119,6 +119,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val overwriteExpBuf = Output(new XSBundle {
       val valid  = Bool()
       val vaddr  = UInt(XLEN.W)
+      val isHyper = Bool()
       val gpaddr = UInt(XLEN.W)
       val isForVSnonLeafPTE = Bool()
     })
@@ -567,11 +568,13 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
   val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val overwriteIsHyper = GatedRegNext(splitLoadResp(curPtr).isHyper)
   val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteVaddr
+  io.overwriteExpBuf.isHyper := overwriteIsHyper
   io.overwriteExpBuf.gpaddr := overwriteGpaddr
   io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 

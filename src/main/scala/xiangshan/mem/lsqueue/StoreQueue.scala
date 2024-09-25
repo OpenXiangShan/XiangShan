@@ -144,11 +144,13 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr  := req.fullva
-  io.exceptionAddr.gpaddr := req.gpaddr
-  io.exceptionAddr.vstart := req.uop.vpu.vstart
-  io.exceptionAddr.vl     := req.uop.vpu.vl
-  io.exceptionAddr.isForVSnonLeafPTE:= req.isForVSnonLeafPTE
+  io.exceptionAddr.vaddr     := req.fullva
+  io.exceptionAddr.vaNeedExt := req.vaNeedExt
+  io.exceptionAddr.isHyper   := req.isHyper
+  io.exceptionAddr.gpaddr    := req.gpaddr
+  io.exceptionAddr.vstart    := req.uop.vpu.vstart
+  io.exceptionAddr.vl        := req.uop.vpu.vl
+  io.exceptionAddr.isForVSnonLeafPTE := req.isForVSnonLeafPTE
 
   when(req_valid && io.flushFrmMaBuf) {
     req_valid := false.B
@@ -235,14 +237,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VecStorePipelineWidth) {
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits                := DontCare
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.fullva         := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.vaNeedExt      := io.vecFeedback(i).bits.vaNeedExt
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.gpaddr         := io.vecFeedback(i).bits.gpaddr
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.exceptionVec     := io.vecFeedback(i).bits.exceptionVec
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.isForVSnonLeafPTE := io.vecFeedback(i).bits.isForVSnonLeafPTE
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.exceptionVec  := io.vecFeedback(i).bits.exceptionVec
   }
 
 
@@ -897,7 +900,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   exceptionBuffer.io.storeAddrIn.last.valid := io.mmioStout.fire
   exceptionBuffer.io.storeAddrIn.last.bits := DontCare
-  exceptionBuffer.io.storeAddrIn.last.bits.vaddr := vaddrModule.io.rdata.head
+  exceptionBuffer.io.storeAddrIn.last.bits.fullva := vaddrModule.io.rdata.head
+  exceptionBuffer.io.storeAddrIn.last.bits.vaNeedExt := true.B
   exceptionBuffer.io.storeAddrIn.last.bits.uop := uncacheUop
 
   // (4) or vector store:
@@ -1097,11 +1101,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr  := exceptionBuffer.io.exceptionAddr.vaddr
-  io.exceptionAddr.gpaddr := exceptionBuffer.io.exceptionAddr.gpaddr
-  io.exceptionAddr.vstart := exceptionBuffer.io.exceptionAddr.vstart
-  io.exceptionAddr.vl     := exceptionBuffer.io.exceptionAddr.vl
-  io.exceptionAddr.isForVSnonLeafPTE:= exceptionBuffer.io.exceptionAddr.isForVSnonLeafPTE
+  io.exceptionAddr.vaddr     := exceptionBuffer.io.exceptionAddr.vaddr
+  io.exceptionAddr.vaNeedExt := exceptionBuffer.io.exceptionAddr.vaNeedExt
+  io.exceptionAddr.isHyper   := exceptionBuffer.io.exceptionAddr.isHyper
+  io.exceptionAddr.gpaddr    := exceptionBuffer.io.exceptionAddr.gpaddr
+  io.exceptionAddr.vstart    := exceptionBuffer.io.exceptionAddr.vstart
+  io.exceptionAddr.vl        := exceptionBuffer.io.exceptionAddr.vl
+  io.exceptionAddr.isForVSnonLeafPTE := exceptionBuffer.io.exceptionAddr.isForVSnonLeafPTE
 
   // vector commit or replay from
   val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))
