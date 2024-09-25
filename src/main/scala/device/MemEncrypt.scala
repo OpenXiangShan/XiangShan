@@ -641,7 +641,7 @@ class MemEncryptCSR(implicit p:Parameters) extends MemEncryptModule
   val key_id             = RegInit(0.U(5.W)) //[4:0]
   val mode               = RegInit(0.U(2.W)) //[6:5]
   val tweak_flage        = RegInit(0.U(1.W)) //[7]
-  val memenc_enable      = RegInit(false.B) //[8]
+  val memenc_enable      = if(HasDelayNoencryption) RegInit(true.B) else RegInit(false.B) //[8]
   val memenc_enable_lock = RegInit(false.B)
   val random_ready_flag  = Wire(Bool()) //[32]
   val key_expansion_idle = Wire(Bool()) //[33]
@@ -780,7 +780,11 @@ class KeyTable(implicit p:Parameters) extends MemEncryptModule {
 
   val init_entry = Wire(new KeyTableEntry)
   init_entry.round_key_data := DontCare // Keep round_key_data as default (uninitialized)
-  init_entry.encdec_mode := false.B
+  if(HasDelayNoencryption){
+    init_entry.encdec_mode := true.B
+  }else{
+    init_entry.encdec_mode := false.B
+  }
   val table = RegInit(VecInit(Seq.fill(1 << KeyIDBits)(init_entry)))
   val wire_enc_round_keys = Wire(Vec(MemencPipes, UInt((32*32/MemencPipes).W)))
   val wire_dec_round_keys = Wire(Vec(MemencPipes, UInt((32*32/MemencPipes).W)))
