@@ -257,6 +257,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
+  val s1_vaNeedExt = io.tlb.resp.bits.excp(0).vaNeedExt
+  val s1_isHyper   = io.tlb.resp.bits.excp(0).isHyper
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
@@ -308,15 +310,17 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  s1_out         := s1_in
-  s1_out.paddr   := s1_paddr
-  s1_out.gpaddr  := s1_gpaddr
+  s1_out           := s1_in
+  s1_out.paddr     := s1_paddr
+  s1_out.gpaddr    := s1_gpaddr
+  s1_out.vaNeedExt := s1_vaNeedExt
+  s1_out.isHyper   := s1_isHyper
+  s1_out.miss      := false.B
+  s1_out.mmio      := s1_mmio
+  s1_out.tlbMiss   := s1_tlb_miss
+  s1_out.atomic    := s1_mmio
   s1_out.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
-  s1_out.miss    := false.B
-  s1_out.mmio    := s1_mmio
-  s1_out.tlbMiss := s1_tlb_miss
-  s1_out.atomic  := s1_mmio
-  when (!s1_out.isFrmMisAlignBuf && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(storePageFault) || s1_out.uop.exceptionVec(storeAccessFault) || s1_out.uop.exceptionVec(storeGuestPageFault))) {
+  when (!s1_out.isvec && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(storePageFault) || s1_out.uop.exceptionVec(storeAccessFault) || s1_out.uop.exceptionVec(storeGuestPageFault))) {
     s1_out.uop.exceptionVec(storeAddrMisaligned) := false.B
   }
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
@@ -416,6 +420,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.valid := s2_valid && s2_can_go && s2_frm_mabuf
   s2_misalign_stout.bits.mmio := s2_out.mmio
   s2_misalign_stout.bits.vaddr := s2_out.vaddr
+  s2_misalign_stout.bits.isHyper := s2_out.isHyper
   s2_misalign_stout.bits.paddr := s2_out.paddr
   s2_misalign_stout.bits.gpaddr := s2_out.gpaddr
   s2_misalign_stout.bits.isForVSnonLeafPTE := s2_out.isForVSnonLeafPTE
@@ -506,6 +511,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).mbIndex     := s3_in.mbIndex
       sx_in(i).mask        := s3_in.mask
       sx_in(i).vaddr       := s3_in.fullva
+      sx_in(i).vaNeedExt   := s3_in.vaNeedExt
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
@@ -545,6 +551,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.alignedType := sx_last_in.alignedType
   io.vecstout.bits.mask        := sx_last_in.mask
   io.vecstout.bits.vaddr       := sx_last_in.vaddr
+  io.vecstout.bits.vaNeedExt   := sx_last_in.vaNeedExt
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
   // io.vecstout.bits.reg_offset.map(_ := DontCare)

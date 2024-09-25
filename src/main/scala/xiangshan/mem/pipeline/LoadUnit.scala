@@ -887,6 +887,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
+  s1_out.vaNeedExt         := io.tlb.resp.bits.excp(0).vaNeedExt
+  s1_out.isHyper           := io.tlb.resp.bits.excp(0).isHyper
   s1_out.paddr             := s1_paddr_dup_lsu
   s1_out.gpaddr            := s1_gpaddr_dup_lsu
   s1_out.isForVSnonLeafPTE           := io.tlb.resp.bits.isForVSnonLeafPTE
@@ -903,7 +905,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
-    when (!s1_out.isFrmMisAlignBuf && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(loadPageFault) || s1_out.uop.exceptionVec(loadGuestPageFault) || s1_out.uop.exceptionVec(loadAccessFault))) {
+    when (!s1_out.isvec && RegNext(io.tlb.req.bits.checkfullva) && (s1_out.uop.exceptionVec(loadPageFault) || s1_out.uop.exceptionVec(loadGuestPageFault) || s1_out.uop.exceptionVec(loadAccessFault))) {
       s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     }
   } .otherwise {
@@ -1573,6 +1575,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.fullva
+  io.vecldout.bits.vaNeedExt := s3_in.vaNeedExt
   io.vecldout.bits.gpaddr := s3_in.gpaddr
   io.vecldout.bits.isForVSnonLeafPTE := s3_in.isForVSnonLeafPTE
   io.vecldout.bits.mmio := DontCare
