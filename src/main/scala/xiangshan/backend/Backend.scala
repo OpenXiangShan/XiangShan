@@ -224,8 +224,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   private val og1Cancel = dataPath.io.og1Cancel
   private val og0Cancel = dataPath.io.og0Cancel
-  private val vlIsZero = intExuBlock.io.vlIsZero.get
-  private val vlIsVlmax = intExuBlock.io.vlIsVlmax.get
+  private val vlFromIntIsZero = intExuBlock.io.vlIsZero.get
+  private val vlFromIntIsVlmax = intExuBlock.io.vlIsVlmax.get
+  private val vlFromVfIsZero = vfExuBlock.io.vlIsZero.get
+  private val vlFromVfIsVlmax = vfExuBlock.io.vlIsVlmax.get
 
   ctrlBlock.io.intIQValidNumVec := intScheduler.io.intIQValidNumVec
   ctrlBlock.io.fpIQValidNumVec := fpScheduler.io.fpIQValidNumVec
@@ -266,8 +268,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intScheduler.io.fromDataPath.og1Cancel := og1Cancel
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.replaceRCIdx.get := dataPath.io.toWakeupQueueRCIdx.take(params.getIntExuRCWriteSize)
-  intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
-  intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
+  intScheduler.io.vlWriteBackInfo.vlFromIntIsZero := false.B
+  intScheduler.io.vlWriteBackInfo.vlFromIntIsVlmax := false.B
+  intScheduler.io.vlWriteBackInfo.vlFromVfIsZero := false.B
+  intScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := false.B
 
   fpScheduler.io.fromTop.hartId := io.fromTop.hartId
   fpScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -283,8 +287,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpScheduler.io.fromDataPath.og0Cancel := og0Cancel
   fpScheduler.io.fromDataPath.og1Cancel := og1Cancel
   fpScheduler.io.ldCancel := io.mem.ldCancel
-  fpScheduler.io.vlWriteBackInfo.vlIsZero := false.B
-  fpScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
+  fpScheduler.io.vlWriteBackInfo.vlFromIntIsZero := false.B
+  fpScheduler.io.vlWriteBackInfo.vlFromIntIsVlmax := false.B
+  fpScheduler.io.vlWriteBackInfo.vlFromVfIsZero := false.B
+  fpScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := false.B
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -320,8 +326,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.fromDataPath.og1Cancel := og1Cancel
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.replaceRCIdx.get := dataPath.io.toWakeupQueueRCIdx.takeRight(params.getMemExuRCWriteSize)
-  memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
-  memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
+  memScheduler.io.vlWriteBackInfo.vlFromIntIsZero := vlFromIntIsZero
+  memScheduler.io.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
+  memScheduler.io.vlWriteBackInfo.vlFromVfIsZero := vlFromVfIsZero
+  memScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   memScheduler.io.fromOg2Resp.get := og2ForVector.io.toMemIQOg2Resp
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
@@ -338,8 +346,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfScheduler.io.fromDataPath.og0Cancel := og0Cancel
   vfScheduler.io.fromDataPath.og1Cancel := og1Cancel
   vfScheduler.io.ldCancel := io.mem.ldCancel
-  vfScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
-  vfScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
+  vfScheduler.io.vlWriteBackInfo.vlFromIntIsZero := vlFromIntIsZero
+  vfScheduler.io.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
+  vfScheduler.io.vlWriteBackInfo.vlFromVfIsZero := vlFromVfIsZero
+  vfScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   vfScheduler.io.fromOg2Resp.get := og2ForVector.io.toVfIQOg2Resp
 
   dataPath.io.hartId := io.fromTop.hartId
