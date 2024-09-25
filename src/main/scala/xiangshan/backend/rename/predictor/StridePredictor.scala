@@ -301,7 +301,12 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       assert(PopCount(readOH) <= 1.U, s"entry(${i})(${j}) readOH is not one-hot")
 
       when (commitEn) {
-        entry := Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
+        val commitEntry = Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
+        entry.stride     := commitEntry.stride
+        entry.prevAddr   := commitEntry.prevAddr
+        entry.inflight   := commitEntry.inflight
+        entry.confidence := commitEntry.confidence
+        entry.utility    := commitEntry.utility
         assert(entry.valid, s"entry(${i})(${j}) is not valid when commitEn")
       }
       .elsewhen (readEn) {
@@ -309,8 +314,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
         assert(entry.valid, s"entry(${i})(${j}) is not valid when readEn")
       }
       .elsewhen (allocEn) {
-        entry := Mux1H(allocOH, allocateUpdateEntryVec)
-        assert(!entry.valid, s"entry(${i})(${j}) is valid when allocEn")
+        when (!entry.valid || entry.inflight === 0.U || entry.confidence === 0.U && entry.utility === 0.U) {
+          entry := Mux1H(allocOH, allocateUpdateEntryVec)
+        }
       }
     }
   }
