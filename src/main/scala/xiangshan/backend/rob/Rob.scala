@@ -1122,6 +1122,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     needUpdate(i).vxsat := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).vxsat | vxsatRes)
+
+    // regfile prefetch
+    val loadWbOH = loadWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    when (loadWbOH.reduce(_ || _) && needUpdate(i).commitType === CommitType.LOAD) {
+      needUpdate(i).pfHit := Mux1H(loadWbOH, loadWBs.map(_.bits.pfHit.getOrElse(false.B)))
+      needUpdate(i).currAddr := Mux1H(loadWbOH, loadWBs.map(_.bits.currAddr.getOrElse(0.U)))
+    }
   }
   robBanksRdataThisLineUpdate := VecInit(needUpdate.take(8))
   robBanksRdataNextLineUpdate := VecInit(needUpdate.drop(8))
