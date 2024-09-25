@@ -71,18 +71,18 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   // 1. read status
   val readEnableVec = io.spReadPort.map(x => x.ren)
-  val readAddrVec = io.spReadPort.map(x => get_group(x.pc))
-  val readTagVec = io.spReadPort.map(x => get_tag(x.pc))
-  val readValidVec = readAddrVec.map(spEntries(_).map(_.valid))
-  val readEntryVec = readAddrVec.map(spEntries(_))
+  val readAddrVec   = VecInit(io.spReadPort.map(x => get_group(x.pc)))
+  val readTagVec    = VecInit(io.spReadPort.map(x => get_tag(x.pc)))
+  val readValidVec  = VecInit(readAddrVec.map(x => VecInit(spEntries(x).map(_.valid))))
+  val readEntryVec  = VecInit(readAddrVec.map(spEntries(_)))
 
-  val readMatchOHVec: IndexedSeq[Vec[Bool]] = readTagVec.zipWithIndex.map{ case (tag, i) =>
+  val readMatchOHVec: Vec[Vec[Bool]] = VecInit(readTagVec.zipWithIndex.map{ case (tag, i) =>
     val matchOH = VecInit(readValidVec(i).zip(readEntryVec(i)).map{ case (v, entry) =>
       v && entry.tag === tag
     })
     assert(PopCount(matchOH) <= 1.U, s"readMatchOH(${i}) is not one-hot")
     matchOH
-  }
+  })
   val readMatchVec = readMatchOHVec.map(_.asUInt.orR)
 
   io.spReadPort.zipWithIndex.foreach{ case (rport, i) =>
@@ -91,12 +91,12 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   // update inflight counter
-  val finalMatchOHVec = readMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
+  val finalMatchOHVec: Vec[Vec[Bool]] = VecInit(readMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
     val updateEnable = (readEnableVec.lazyZip(readAddrVec).lazyZip(readTagVec)).take(i).map{ case (ren, group, tag) =>
       !(ren && group === readAddrVec(i) && tag === readTagVec(i))
     }.fold(true.B)(_ && _) && readEnableVec(i)
     VecInit(matchOH.map(_ && updateEnable))
-  }
+  })
   val finalMatchCountVec = Wire(Vec(RenameWidth, UInt(log2Up(RenameWidth + 1).W)))
   finalMatchCountVec.zipWithIndex.foreach{ case (count, i) =>
     count := (readEnableVec.lazyZip(readAddrVec).lazyZip(readTagVec)).takeRight(RenameWidth - i - 1).map{ case (ren, group, tag) =>
@@ -112,11 +112,22 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     }
   }
 
+  if (backendParams.debugEn) {
+    dontTouch(readAddrVec)
+    dontTouch(readTagVec)
+    dontTouch(readValidVec)
+    dontTouch(readEntryVec)
+    dontTouch(readMatchOHVec)
+    dontTouch(finalMatchOHVec)
+    dontTouch(finalMatchCountVec)
+    dontTouch(readUpdateInflightVec)
+  }
+
   // 2. allocate entry
-  val needAllocVec = io.spReadPort.zip(readMatchVec).map(x => x._1.ren && !x._2)
+  val needAllocVec = VecInit(io.spReadPort.zip(readMatchVec).map(x => x._1.ren && !x._2))
 
   // find entry to replace
-  val allocOHVec: IndexedSeq[Vec[Bool]] = readValidVec.zip(readEntryVec).zipWithIndex.map{ case ((validVec, entryVec), idx) =>
+  val allocOHVec: Vec[Vec[Bool]] = VecInit(readValidVec.zip(readEntryVec).zipWithIndex.map{ case ((validVec, entryVec), idx) =>
     val age = Wire(Vec(NumWay, Vec(NumWay, Bool())))
     for((row, i) <- age.zipWithIndex) {
       for((elem, j) <- row.zipWithIndex) {
@@ -141,15 +152,15 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     val oldestOH = VecInit(age.map(_.asUInt.andR))
     assert(PopCount(oldestOH) <= 1.U, s"oldestOH(${idx}) is not one-hot")
     oldestOH
-  }
+  })
 
   // check same entry
-  val finalAllocOHVec = allocOHVec.zipWithIndex.map{ case (allocOH, i) =>
+  val finalAllocOHVec: Vec[Vec[Bool]] = VecInit(allocOHVec.zipWithIndex.map{ case (allocOH, i) =>
     val allocEnable = (needAllocVec.lazyZip(readAddrVec)).take(i).map{ case (need, group) =>
       !(need && group === readAddrVec(i))
     }.fold(true.B)(_ && _) && needAllocVec(i)
     VecInit(allocOH.map(_ && allocEnable))
-  }
+  })
 
   // allocate update
   val allocateUpdateEntryVec = Wire(Vec(RenameWidth, new StridePredictorEntry))
@@ -160,37 +171,43 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     entry.inflight := finalMatchCountVec(i)
   }
 
+  if (backendParams.debugEn) {
+    dontTouch(needAllocVec)
+    dontTouch(allocOHVec)
+    dontTouch(finalAllocOHVec)
+  }
+
   // 3. commit update entry
   val updateInfo = RegInit(VecInit.fill(CommitUpdateSize)((new SPCommitBufferEntry).Lit(_.valid -> false.B)))
 
-  val updateValid = updateInfo.map(x => x.valid)
-  val updateAddrVec = updateInfo.map(x => get_group(x.pc))
-  val updateTagVec = updateInfo.map(x => get_tag(x.pc))
-  val updateValidVec = updateAddrVec.map(spEntries(_).map(_.valid))
-  val updateEntryVec = updateAddrVec.map(spEntries(_))
+  val updateValid    = VecInit(updateInfo.map(x => x.valid))
+  val updateAddrVec  = VecInit(updateInfo.map(x => get_group(x.pc)))
+  val updateTagVec   = VecInit(updateInfo.map(x => get_tag(x.pc)))
+  val updateValidVec = VecInit(updateAddrVec.map(x => VecInit(spEntries(x).map(_.valid))))
+  val updateEntryVec = VecInit(updateAddrVec.map(spEntries(_)))
   val updateMatchOHVec: IndexedSeq[Vec[Bool]] = updateInfo.map(x => x.matchOH)
 
   // check same entry
-  val finalUpdateMatchOHVec: IndexedSeq[Vec[Bool]] = updateMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
+  val finalUpdateMatchOHVec: Vec[Vec[Bool]] = VecInit(updateMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
     val updateEnable = (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).take(i).map{ case (valid, group, tag) =>
       !(valid && group === updateAddrVec(i) && tag === updateTagVec(i))
     }.fold(true.B)(_ && _) && updateValid(i)
     VecInit(matchOH.map(_ && updateEnable))
-  }
+  })
   val finalUpdateMatchCountVec = Wire(Vec(CommitUpdateSize, UInt(log2Up(CommitUpdateSize + 1).W)))
   finalUpdateMatchCountVec.zipWithIndex.foreach{ case (count, i) =>
     count := (updateValid.lazyZip(updateAddrVec).lazyZip(updateTagVec)).takeRight(CommitUpdateSize - i - 1).map{ case (valid, group, tag) =>
       Mux(valid && group === updateAddrVec(i) && tag === updateTagVec(i), 1.U, 0.U)
     }.fold(1.U)(_ +& _)
   }
-  val updateMatchReadVec: IndexedSeq[Vec[Bool]] = updateAddrVec.zip(updateTagVec).map{ case (upgroup, uptag) =>
+  val updateMatchReadVec: Vec[Vec[Bool]] = VecInit(updateAddrVec.zip(updateTagVec).map{ case (upgroup, uptag) =>
     VecInit(readEnableVec.lazyZip(readAddrVec).lazyZip(readTagVec).map{ case (ren, group, tag) =>
       ren && upgroup === group && uptag === tag
     })
-  }
-  val updateMatchReadCountVec = updateMatchReadVec.map{ case matchOH =>
+  })
+  val updateMatchReadCountVec = VecInit(updateMatchReadVec.map{ case matchOH =>
     PriorityMuxDefault(matchOH.zip(finalMatchCountVec), 0.U)
-  }
+  })
 
   // commit update
   val commitUpdateEntryVec = Wire(Vec(CommitUpdateSize, Vec(NumWay, new StridePredictorEntry)))
@@ -255,6 +272,17 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
         }
       }
     }
+  }
+
+  if (backendParams.debugEn) {
+    dontTouch(updateAddrVec)
+    dontTouch(updateTagVec)
+    dontTouch(updateValidVec)
+    dontTouch(updateEntryVec)
+    dontTouch(finalUpdateMatchOHVec)
+    dontTouch(finalUpdateMatchCountVec)
+    dontTouch(updateMatchReadVec)
+    dontTouch(updateMatchReadCountVec)
   }
 
   // 4. write entry
@@ -398,6 +426,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     dontTouch(overflowNum)
     dontTouch(enqEntries)
     dontTouch(deqEntries)
+    dontTouch(filteredEnqReq)
+    dontTouch(enqPtrHead)
+    dontTouch(deqPtrHead)
   }
 }
 
