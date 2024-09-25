@@ -67,7 +67,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   require(NumEntries % NumWay == 0, "NumEntries % NumWay must be 0")
   require(NumGroup == (math.pow(2, GroupWidth)).toInt, "NumGroup must be a power of 2")
 
-  val spEntries = RegInit(VecInit.fill(NumGroup)(VecInit.fill(NumWay)((new StridePredictorEntry).Lit(_.valid -> false.B))))
+  val spEntries = RegInit(VecInit.fill(NumGroup)(VecInit.fill(NumWay)(
+    (new StridePredictorEntry).Lit(_.valid -> false.B, _.utility -> 0.U)
+  )))
 
   // 1. read status
   val readEnableVec = io.spReadPort.map(x => x.ren)
@@ -223,12 +225,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
           entry.confidence := Mux(updateEntryVec(i)(j).confidence === MaxConfidenceVal.U, MaxConfidenceVal.U, updateEntryVec(i)(j).confidence + 1.U)
           entry.utility := Mux(updateEntryVec(i)(j).utility === MaxUtilityVal.U, MaxUtilityVal.U, updateEntryVec(i)(j).utility + 1.U)
         }.otherwise {
+          entry.confidence := updateEntryVec(i)(j).confidence >> 1
           entry.utility := 0.U
-          when (updateEntryVec(i)(j).confidence === 0.U) {
+          when (updateEntryVec(i)(j).confidence === 0.U && updateEntryVec(i)(j).prevAddr =/= 0.U) {
             entry.stride := updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr
-            entry.confidence := 0.U
-          }.otherwise {
-            entry.confidence := updateEntryVec(i)(j).confidence >> 1
           }
         }
       }
@@ -246,12 +246,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.confidence := (updateEntryVec(i)(j).confidence >> 1) + 1.U
             entry.utility := 1.U
           }.otherwise {
+            entry.confidence := updateEntryVec(i)(j).confidence >> 2
             entry.utility := 0.U
             when (updateEntryVec(i)(j).confidence <= 1.U) {
               entry.stride := updateInfo(i + 1).currAddr - updateInfo(i).currAddr
-              entry.confidence := 0.U
-            }.otherwise {
-              entry.confidence := updateEntryVec(i)(j).confidence >> 2
             }
           }
         }.otherwise {
@@ -261,12 +259,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.confidence := Mux(updateEntryVec(i)(j).confidence === MaxConfidenceVal.U, MaxConfidenceVal.U, updateEntryVec(i)(j).confidence + 1.U)
             entry.utility := Mux(updateEntryVec(i)(j).utility === MaxUtilityVal.U, MaxUtilityVal.U, updateEntryVec(i)(j).utility + 1.U)
           }.otherwise {
+            entry.confidence := updateEntryVec(i)(j).confidence >> 1
             entry.utility := 0.U
-            when (updateEntryVec(i)(j).confidence === 0.U) {
+            when (updateEntryVec(i)(j).confidence === 0.U && updateEntryVec(i)(j).prevAddr =/= 0.U) {
               entry.stride := updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr
-              entry.confidence := 0.U
-            }.otherwise {
-              entry.confidence := updateEntryVec(i)(j).confidence >> 1
             }
           }
         }
@@ -415,7 +411,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   updateInfo.zip(deqEntries).foreach{ case (info, deqEntry) =>
-    info := deqEntry
+    when (deqEntry.valid) {
+      info := deqEntry
+    }
+    info.valid := deqEntry.valid
   }
 
   if (backendParams.debugEn) {
