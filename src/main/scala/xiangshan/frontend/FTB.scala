@@ -643,14 +643,14 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s2_fauftb_ftb_entry_dup zip s2_ftbBank_dup zip s2_ftb_entry_dup){
       s2_ftb_entry := Mux(s2_close_ftb_req, s2_fauftb_entry, s2_ftbBank_entry)
   }
-  val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_entry, e), f)}
+  val s3_ftb_entry_dup  = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_entry, e), f)}
   val real_s2_ftb_entry = Mux(s2_multi_hit_enable, s2_multi_hit_entry, s2_ftb_entry_dup(0))
   val real_s2_pc        = s2_pc_dup(0).getAddr()
   val real_s2_startLower          = Cat(0.U(1.W),    real_s2_pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
   val real_s2_endLowerwithCarry   = Cat(real_s2_ftb_entry.carry, real_s2_ftb_entry.pftAddr)
   val real_s2_fallThroughErr      = real_s2_startLower >= real_s2_endLowerwithCarry || real_s2_endLowerwithCarry > (real_s2_startLower + (PredictWidth).U)
   val real_s3_fallThroughErr_dup  = io.s2_fire.map {f => RegEnable(real_s2_fallThroughErr, f)}
-
+  
   //After closing ftb, the hit output from s2 is the hit of FauFTB cached in s1.
   //s1_hit is the ftbBank hit.
   val s1_hit = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid && io.ctrl.btb_enable)

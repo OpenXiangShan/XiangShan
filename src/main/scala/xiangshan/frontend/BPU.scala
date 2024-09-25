@@ -725,16 +725,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   }
 
-  val s3_redirect_target_dup = dup_wire(UInt(VAddrBits.W))
-  for ((((s3_redirect_target, s3_fall_thru_error), s3_fallThroughAddr), s3_target) <- s3_redirect_target_dup zip s3_redirect_on_fall_thru_error_dup zip resp.s3.fallThroughAddr zip resp.s3.getTarget){
-    s3_redirect_target := Mux(s3_fall_thru_error, s3_fallThroughAddr, s3_target)
-  }
-
   XSPerfAccumulate(f"s3_redirect_on_br_taken", s3_fire_dup(0) && s3_redirect_on_br_taken_dup(0))
   XSPerfAccumulate(f"s3_redirect_on_jalr_target", s3_fire_dup(0) && s3_redirect_on_jalr_target_dup(0))
   XSPerfAccumulate(f"s3_redirect_on_others", s3_redirect_dup(0) && !(s3_redirect_on_br_taken_dup(0) || s3_redirect_on_jalr_target_dup(0)))
 
-  for (((npcGen, s3_redirect), s3_target) <- npcGen_dup zip s3_redirect_dup zip s3_redirect_target_dup)
+  for (((npcGen, s3_redirect), s3_target) <- npcGen_dup zip s3_redirect_dup zip resp.s3.getTarget)
     npcGen.register(s3_redirect, s3_target, Some("s3_target"), 3)
   for (((foldedGhGen, s3_redirect), s3_predicted_fh) <- foldedGhGen_dup zip s3_redirect_dup zip s3_predicted_fh_dup)
     foldedGhGen.register(s3_redirect, s3_predicted_fh, Some("s3_FGH"), 3)

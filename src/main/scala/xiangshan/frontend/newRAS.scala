@@ -582,6 +582,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val s3_top = RegEnable(stack.spec_pop_addr, io.s2_fire(2))
   val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire(2))
 
+  // val s3_jalr_target = io.out.s3.full_pred.jalr_target
+  // val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred(2).targets.last
+  // val s3_last_target_out = io.out.s3.full_pred(2).targets.last
   val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
   val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
   // assert(is_jalr && is_ret || !is_ret)
