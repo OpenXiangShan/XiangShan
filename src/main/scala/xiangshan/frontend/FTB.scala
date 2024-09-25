@@ -452,11 +452,18 @@ object FTBMeta {
 //   }
 // }
 
+
+class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implicit p: Parameters) extends XSBundle {
+  val addr = new TableAddr(idxBits, banks)
+  def getIdx(x: UInt) = addr.getIdx(x) ^ Cat(addr.getTag(x), addr.getIdx(x))(idxBits + skewedBits - 1, skewedBits)
+  def getTag(x: UInt) = addr.getTag(x)
+}
+
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
   with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
-  val ftbAddr = new TableAddr(log2Up(numSets), 1)
+  val ftbAddr = new FTBTableAddr(log2Up(numSets), 1, 3)
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
