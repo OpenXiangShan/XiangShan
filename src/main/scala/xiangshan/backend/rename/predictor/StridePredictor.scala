@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.frontend.FtqPtr
 import xiangshan.backend.BackendParams
+import xiangshan.backend.rob.RobPtr
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import freechips.rocketchip.util.SeqBoolBitwiseOps
 import chisel3.experimental.BundleLiterals._
@@ -113,6 +114,14 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       inflight := readEntryVec(i)(j).inflight + finalMatchCountVec(i)
     }
   }
+  val readUpdateRobIdxVec = Wire(Vec(RenameWidth, new RobPtr))
+  readUpdateRobIdxVec.zipWithIndex.foreach{ case (robIdx, i) =>
+    val selOH = (readEnableVec.lazyZip(readAddrVec).lazyZip(readTagVec)).takeRight(RenameWidth - i - 1).map{ case (ren, group, tag) =>
+      ren && group === readAddrVec(i) && tag === readTagVec(i)
+    }.toSeq
+    val selData = io.spReadPort.takeRight(RenameWidth - i - 1).map(_.robIdx)
+    robIdx := MuxCase(io.spReadPort(i).robIdx, selOH.reverse.zip(selData.reverse))
+  }
 
   if (backendParams.debugEn) {
     dontTouch(readAddrVec)
@@ -167,10 +176,11 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   // allocate update
   val allocateUpdateEntryVec = Wire(Vec(RenameWidth, new StridePredictorEntry))
   allocateUpdateEntryVec.zipWithIndex.foreach{ case (entry, i) =>
-    entry          := 0.U.asTypeOf(new StridePredictorEntry)
-    entry.valid    := true.B
-    entry.tag      := readTagVec(i)
-    entry.inflight := finalMatchCountVec(i)
+    entry            := 0.U.asTypeOf(new StridePredictorEntry)
+    entry.valid      := true.B
+    entry.tag        := readTagVec(i)
+    entry.lastRobIdx := io.spReadPort(i).robIdx
+    entry.inflight   := finalMatchCountVec(i)
   }
 
   if (backendParams.debugEn) {
@@ -282,6 +292,8 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   }
 
   // 4. write entry
+  val redirectVec = Seq(io.redirect, RegNext(io.redirect))
+
   for((group, i) <- spEntries.zipWithIndex) {
     for((entry, j) <- group.zipWithIndex) {
       val commitOH = updateAddrVec.zip(finalUpdateMatchOHVec).map{ case (addr, matchOH) =>
@@ -300,17 +312,24 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       assert(PopCount(allocOH) <= 1.U, s"entry(${i})(${j}) allocOH is not one-hot")
       assert(PopCount(readOH) <= 1.U, s"entry(${i})(${j}) readOH is not one-hot")
 
-      when (commitEn) {
+      when (entry.lastRobIdx.needFlush(redirectVec)) {
+        entry.valid := false.B
+      }
+      .elsewhen (commitEn) {
         val commitEntry = Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
         entry.stride     := commitEntry.stride
         entry.prevAddr   := commitEntry.prevAddr
         entry.inflight   := commitEntry.inflight
         entry.confidence := commitEntry.confidence
         entry.utility    := commitEntry.utility
+        when (readEn) {
+          entry.lastRobIdx := Mux1H(readOH, readUpdateRobIdxVec)
+        }
         assert(entry.valid, s"entry(${i})(${j}) is not valid when commitEn")
       }
       .elsewhen (readEn) {
-        entry.inflight := Mux1H(readOH, readUpdateInflightVec.map(_(j)))
+        entry.inflight   := Mux1H(readOH, readUpdateInflightVec.map(_(j)))
+        entry.lastRobIdx := Mux1H(readOH, readUpdateRobIdxVec)
         assert(entry.valid, s"entry(${i})(${j}) is not valid when readEn")
       }
       .elsewhen (allocEn) {
@@ -440,6 +459,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val valid      = Bool()
   val tag        = UInt(TagWidth.W)
+  val lastRobIdx = new RobPtr
 
   val stride     = UInt(StrideWidth.W)
   val prevAddr   = UInt(VAddrBits.W)
@@ -470,6 +490,7 @@ class SPEnqBufferEntry()(implicit p: Parameters) extends XSBundle with StridePre
 class SPReadPort()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val ren       = Input(Bool())
   val pc        = Input(UInt(ValidPcWidth.W))
+  val robIdx    = Input(new RobPtr)
   val needPf    = Output(Bool())
   val predAddr  = Output(UInt(VAddrBits.W))
 }
@@ -483,6 +504,8 @@ class SPCommitPort()(implicit p: Parameters) extends XSBundle with StridePredict
 }
 
 class StridePredictorIO()(implicit p: Parameters) extends XSBundle with StridePredictorParams{
+
+  val redirect = Flipped(ValidIO(new Redirect))
 
   val spReadPort = Vec(RenameWidth, new SPReadPort)
 

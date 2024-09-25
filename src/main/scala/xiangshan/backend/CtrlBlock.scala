@@ -552,12 +552,15 @@ class CtrlBlockImp(
 
   spPCMem.io.fromFrontendFtq := io.frontend.fromFtq
   spPCMem.io.toStridePredictor.take(RenameWidth).zipWithIndex.foreach{ case (toSP, i) =>
-    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire && FuType.isLoad(renameOut(i).bits.fuType)
+    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire && FuType.isLoad(renameOut(i).bits.fuType) && ~s1_s3_redirect.valid
     toSP.ftqPtr := renameOut(i).bits.ftqPtr
     toSP.ftqOffset := renameOut(i).bits.ftqOffset
+    // for better timing, do not consider redirect here
     stridePredictor.io.spReadPort(i).ren := dispatchFirstValid(i) && FuType.isLoad(dispatch.io.fromRename(i).bits.fuType)
-    stridePredictor.io.spReadPort(i).pc := toSP.pc
+    stridePredictor.io.spReadPort(i).pc  := toSP.pc
+    stridePredictor.io.spReadPort(i).robIdx := dispatch.io.fromRename(i).bits.robIdx
   }
+  stridePredictor.io.redirect := s1_s3_redirect
   stridePredictor.io.fromSPPcMem <> spPCMem.io.toStridePredictor.takeRight(stridePredictor.io.fromSPPcMem.size)
   stridePredictor.io.spCommitPort.zipWithIndex.foreach{ case (commit, i) =>
     commit.wen := rob.io.commits.isCommit && rob.io.commits.commitValid(i) && rob.io.commits.info(i).commitType === CommitType.LOAD
