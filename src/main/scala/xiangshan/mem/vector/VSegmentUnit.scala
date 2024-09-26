@@ -703,7 +703,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     writebackOut.data                   := data(deqPtr.value)
     writebackOut.vdIdx.get              := vdIdxInField
     writebackOut.uop.vpu.vl             := instMicroOp.vl
-    writebackOut.uop.vpu.vstart         := instMicroOp.vstart
+    writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR, instMicroOp.exceptionVstart, instMicroOp.vstart)
     writebackOut.uop.vpu.vmask          := maskUsed
     writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
     writebackOut.debug                  := DontCare
