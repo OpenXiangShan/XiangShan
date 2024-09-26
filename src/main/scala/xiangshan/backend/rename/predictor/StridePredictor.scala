@@ -197,7 +197,13 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   val updateTagVec   = VecInit(updateInfo.map(x => get_tag(x.pc)))
   val updateValidVec = VecInit(updateAddrVec.map(x => VecInit(spEntries(x).map(_.valid))))
   val updateEntryVec = VecInit(updateAddrVec.map(spEntries(_)))
-  val updateMatchOHVec: IndexedSeq[Vec[Bool]] = updateInfo.map(x => x.matchOH)
+  val updateMatchOHVec: Vec[Vec[Bool]] = VecInit(updateTagVec.zipWithIndex.map{ case (tag, i) =>
+    val matchOH = VecInit(updateValidVec(i).zip(updateEntryVec(i)).map{ case (v, entry) =>
+      v && entry.tag === tag
+    })
+    assert(PopCount(matchOH) <= 1.U, s"updateMatchOH(${i}) is not one-hot")
+    matchOH
+  })
 
   // check same entry
   val finalUpdateMatchOHVec: Vec[Vec[Bool]] = VecInit(updateMatchOHVec.zipWithIndex.map{ case (matchOH, i) =>
@@ -285,6 +291,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     dontTouch(updateTagVec)
     dontTouch(updateValidVec)
     dontTouch(updateEntryVec)
+    dontTouch(updateMatchOHVec)
     dontTouch(finalUpdateMatchOHVec)
     dontTouch(finalUpdateMatchCountVec)
     dontTouch(updateMatchReadVec)
@@ -372,7 +379,6 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   filteredEnqReq.zipWithIndex.foreach{ case (enq, i) =>
     enq.valid    := enqBuffer(i).valid && enqReqMatchVec(i)
-    enq.matchOH  := enqReqMatchOHVec(i)
     enq.pc       := io.fromSPPcMem(i).pc
     enq.pfHit    := enqBuffer(i).pfHit
     enq.currAddr := enqBuffer(i).currAddr
@@ -472,7 +478,6 @@ class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with Strid
 
 class SPCommitBufferEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val valid     = Bool()
-  val matchOH   = Vec(NumWay, Bool())
   val pc        = UInt(ValidPcWidth.W)
   val pfHit     = Bool()
   val currAddr  = UInt(VAddrBits.W)
