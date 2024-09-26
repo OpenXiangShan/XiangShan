@@ -1359,8 +1359,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
-  s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
-
+  s3_mmio.bits := DelayNWithValid(io.lsq.uncache.bits, io.lsq.uncache.fire, 3)._2
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
@@ -1480,6 +1479,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // data from load queue refill
   val s3_ld_raw_data_frm_uncache = RegNextN(io.lsq.ld_raw_data, 3)
+  s3_ld_raw_data_frm_uncache.lqData := GatedRegNextN(io.lsq.ld_raw_data.lqData, 3)
+  s3_ld_raw_data_frm_uncache.uop.fuOpType := GatedRegNextN(io.lsq.ld_raw_data.uop.fuOpType, 3)
   val s3_merged_data_frm_uncache = s3_ld_raw_data_frm_uncache.mergedData()
   val s3_picked_data_frm_uncache = LookupTree(s3_ld_raw_data_frm_uncache.addrOffset, List(
     "b000".U -> s3_merged_data_frm_uncache(63,  0),
