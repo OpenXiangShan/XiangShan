@@ -300,7 +300,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.mstatusMIE := mstatus.regOut.MIE.asBool
   intrMod.io.in.sstatusSIE := mstatus.regOut.SIE.asBool
   intrMod.io.in.vsstatusSIE := vsstatus.regOut.SIE.asBool
-  intrMod.io.in.mip := mip.regOut
+  intrMod.io.in.mip := mip.rdataFields
   intrMod.io.in.mie := mie.regOut
   intrMod.io.in.mideleg := mideleg.regOut
   intrMod.io.in.sip := sip.regOut
