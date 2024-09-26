@@ -408,8 +408,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.flush                    := io.flush
     in.wakeUpFromWB             := io.wakeUpFromWB
     in.wakeUpFromIQ             := io.wakeUpFromIQ
-    in.vlIsZero                 := io.vlIsZero
-    in.vlIsVlmax                := io.vlIsVlmax
+    in.vlFromIntIsZero          := io.vlFromIntIsZero
+    in.vlFromIntIsVlmax         := io.vlFromIntIsVlmax
+    in.vlFromVfIsZero           := io.vlFromVfIsZero
+    in.vlFromVfIsVlmax          := io.vlFromVfIsVlmax
     in.og0Cancel                := io.og0Cancel
     in.og1Cancel                := io.og1Cancel
     in.ldCancel                 := io.ldCancel
@@ -537,8 +539,10 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // wakeup
   val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val vlIsZero            = Input(Bool())
-  val vlIsVlmax           = Input(Bool())
+  val vlFromIntIsZero     = Input(Bool())
+  val vlFromIntIsVlmax    = Input(Bool())
+  val vlFromVfIsZero      = Input(Bool())
+  val vlFromVfIsVlmax     = Input(Bool())
   val og0Cancel           = Input(ExuVec())
   val og1Cancel           = Input(ExuVec())
   val ldCancel            = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))

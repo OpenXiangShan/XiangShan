@@ -452,11 +452,18 @@ object FTBMeta {
 //   }
 // }
 
+
+class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implicit p: Parameters) extends XSBundle {
+  val addr = new TableAddr(idxBits, banks)
+  def getIdx(x: UInt) = addr.getIdx(x) ^ Cat(addr.getTag(x), addr.getIdx(x))(idxBits + skewedBits - 1, skewedBits)
+  def getTag(x: UInt) = addr.getTag(x)
+}
+
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
   with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
-  val ftbAddr = new TableAddr(log2Up(numSets), 1)
+  val ftbAddr = new FTBTableAddr(log2Up(numSets), 1, 3)
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
@@ -524,15 +531,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     }).reduce(_||_)
     val multi_way = PriorityMux(Seq.tabulate(numWays)(i => ((total_hits_reg(i)) -> i.asUInt(log2Ceil(numWays).W))))
     val multi_hit_selectEntry = PriorityMux(Seq.tabulate(numWays)(i => ((total_hits_reg(i)) -> read_entries_reg(i))))
-
-    //Check if the entry read by ftbBank is legal.
-    for (n <- 0 to numWays -1 ) {
-      val req_pc_reg = RegEnable(io.req_pc.bits, io.req_pc.valid)
-      val ftb_entry_fallThrough = read_entries(n).getFallThrough(req_pc_reg)
-      when(read_entries(n).valid && total_hits(n) && io.s1_fire){
-        assert(req_pc_reg + (2*PredictWidth).U >= ftb_entry_fallThrough, s"FTB sram entry in way${n} fallThrough address error!")
-      }
-    }
 
     val u_total_hits = VecInit((0 until numWays).map(b =>
         ftb.io.r.resp.data(b).tag === u_req_tag && ftb.io.r.resp.data(b).entry.valid && RegNext(io.update_access)))
@@ -658,7 +656,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val real_s2_startLower          = Cat(0.U(1.W),    real_s2_pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
   val real_s2_endLowerwithCarry   = Cat(real_s2_ftb_entry.carry, real_s2_ftb_entry.pftAddr)
   val real_s2_fallThroughErr      = real_s2_startLower >= real_s2_endLowerwithCarry || real_s2_endLowerwithCarry > (real_s2_startLower + (PredictWidth).U)
-
+  val real_s3_fallThroughErr_dup  = io.s2_fire.map {f => RegEnable(real_s2_fallThroughErr, f)}
+  
   //After closing ftb, the hit output from s2 is the hit of FauFTB cached in s1.
   //s1_hit is the ftbBank hit.
   val s1_hit = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid && io.ctrl.btb_enable)
@@ -668,7 +667,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s2_fauftb_ftb_entry_hit_dup zip s2_ftb_hit_dup zip s2_hit_dup){
       s2_hit := Mux(s2_close_ftb_req, s2_fauftb_hit, s2_ftb_hit)
   }
-  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit, h) && !real_s2_fallThroughErr, 0.B, f)}
+  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit, h), 0.B, f)}
   val s3_multi_hit_dup = io.s2_fire.map(f => RegEnable(s2_multi_hit_enable,f))
   val writeWay = Mux(s1_close_ftb_req, 0.U, ftbBank.io.read_hits.bits)
   val s2_ftb_meta = RegEnable(FTBMeta(writeWay.asUInt, s1_hit, GTimer()).asUInt, io.s1_fire(0))
@@ -736,6 +735,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   for (full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
     io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire)
       full_pred.fromFtbEntry(s3_ftb_entry, s3_pc.getAddr(), Some((s2_pc.getAddr(), s2_fire)))
+
+  // Overwrite the fallThroughErr value
+  io.out.s3.full_pred.zipWithIndex.map {case(fp, i) => fp.fallThroughErr := real_s3_fallThroughErr_dup(i)}
 
   io.out.last_stage_ftb_entry := s3_ftb_entry_dup(0)
   io.out.last_stage_meta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire(0))

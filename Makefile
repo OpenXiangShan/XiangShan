@@ -36,7 +36,7 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-ISSUE ?= B
+ISSUE ?= E.b
 
 SUPPORT_CHI_ISSUE = B E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)

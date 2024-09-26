@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{HasPerfEvents, OptionWrapper}
+import utility.HasPerfEvents
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
@@ -80,8 +81,10 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
   val vlWriteBackInfo = new Bundle {
-    val vlIsZero = Input(Bool())
-    val vlIsVlmax = Input(Bool())
+    val vlFromIntIsZero  = Input(Bool())
+    val vlFromIntIsVlmax = Input(Bool())
+    val vlFromVfIsZero   = Input(Bool())
+    val vlFromVfIsVlmax  = Input(Bool())
   }
 
   val fromSchedulers = new Bundle {
@@ -384,8 +387,10 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // connect the vl writeback informatino to the issue queues
   issueQueues.zipWithIndex.foreach { case(iq, i) =>
-    iq.io.vlIsVlmax := io.vlWriteBackInfo.vlIsVlmax
-    iq.io.vlIsZero := io.vlWriteBackInfo.vlIsZero
+    iq.io.vlFromIntIsVlmax := io.vlWriteBackInfo.vlFromIntIsVlmax
+    iq.io.vlFromIntIsZero := io.vlWriteBackInfo.vlFromIntIsZero
+    iq.io.vlFromVfIsVlmax := io.vlWriteBackInfo.vlFromVfIsVlmax
+    iq.io.vlFromVfIsZero := io.vlWriteBackInfo.vlFromVfIsZero
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =

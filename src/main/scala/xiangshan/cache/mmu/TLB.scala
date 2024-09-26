@@ -120,6 +120,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val preaf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val prevmEnable = (0 until Width).map(i => !(virt_in || req_in(i).bits.hyperinst) && (
+    if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
+    else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
+  )
+  val pres2xlateEnable = (0 until Width).map(i => (virt_in || req_in(i).bits.hyperinst) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
   (0 until Width).foreach{i =>
     val pf48 = SignExt(req(i).bits.fullva(47, 0), XLEN) =/= req(i).bits.fullva
     val pf39 = SignExt(req(i).bits.fullva(38, 0), XLEN) =/= req(i).bits.fullva
@@ -127,7 +132,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val gpf39 = req(i).bits.fullva(XLEN - 1, 39 + 2) =/= 0.U
     val af = req(i).bits.fullva(XLEN - 1, PAddrBits) =/= 0.U
     when (req(i).valid && req(i).bits.checkfullva) {
-      when (vmEnable(i) || s2xlateEnable(i)) {
+      when (prevmEnable(i) || pres2xlateEnable(i)) {
         when (req_in_s2xlate(i) === onlyStage2) {
           when (Sv48x4Enable) {
             pregpf(i) := gpf48
