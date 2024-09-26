@@ -283,7 +283,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 
-  connect0LatencyCtrlSingal
+  connectNonPipedCtrlSingalForCSR
 
   // Todo: summerize all difftest skip condition
   csrOut.isPerfCnt  := csrMod.io.out.bits.isPerfCnt && csrModOutValid && func =/= CSROpType.jmp
