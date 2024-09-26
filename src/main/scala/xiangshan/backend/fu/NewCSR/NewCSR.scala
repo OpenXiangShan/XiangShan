@@ -893,12 +893,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
-  /** Data that have been read before,and should be stored because output not fired */
-  val rdataReg = RegInit(UInt(64.W), 0.U)
-
-  when(valid && !asyncRead) {
-    rdataReg := rdata
-  }
 
   // Todo: check IMSIC EX_II and EX_VI
   private val imsicIllegal = fromAIA.rdata.valid && fromAIA.rdata.bits.illegal
@@ -913,20 +907,23 @@ class NewCSR(implicit val p: Parameters) extends Module
    * When in IDLE state, when input_valid is high, we set it.
    * When in waitIMSIC state, and the next state is IDLE, we set it.
    **/
-  io.out.valid := (state === s_idle) && valid && !(asyncRead && fromAIA.rdata.valid) ||
-                  (state === s_waitIMSIC) && fromAIA.rdata.valid ||
-                  (state === s_finish)
-  io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
-  io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
 
-  io.out.bits.flushPipe := flushPipe
+  /** Data that have been read before,and should be stored because output not fired */
+  io.out.valid := state === s_idle && valid && !asyncRead ||
+                  state === s_waitIMSIC && fromAIA.rdata.valid ||
+                  state === s_finish
+  io.out.bits.EX_II := DataHoldBypass(permitMod.io.out.EX_II || noCSRIllegal, false.B, io.in.fire) ||
+                       DataHoldBypass(imsic_EX_II, false.B, fromAIA.rdata.valid)
+  io.out.bits.EX_VI := DataHoldBypass(permitMod.io.out.EX_VI, false.B, io.in.fire) ||
+                       DataHoldBypass(imsic_EX_VI, false.B, fromAIA.rdata.valid)
+  io.out.bits.flushPipe := DataHoldBypass(flushPipe, false.B, io.in.fire)
 
   /** Prepare read data for output */
-  io.out.bits.rData := MuxCase(0.U, Seq(
-    ((state === s_idle) && valid) -> rdata,
-    (state === s_waitIMSIC && fromAIA.rdata.valid) -> fromAIA.rdata.bits.data,
-    (state === s_finish) -> rdataReg,
-  ))
+  io.out.bits.rData := DataHoldBypass(
+    Mux1H(Seq(
+      io.in.fire -> rdata,
+      fromAIA.rdata.valid -> fromAIA.rdata.bits.data
+    )), 0.U(64.W), io.in.fire || fromAIA.rdata.valid)
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,
@@ -943,8 +940,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       )
     ),
   needTargetUpdate)
-  io.out.bits.targetPcUpdate := needTargetUpdate
-  io.out.bits.isPerfCnt := addrInPerfCnt
+  io.out.bits.targetPcUpdate := DataHoldBypass(needTargetUpdate, false.B, io.in.fire)
+  io.out.bits.isPerfCnt := DataHoldBypass(addrInPerfCnt, false.B, io.in.fire)
 
   io.status.privState := privState
   io.status.fpState.frm := fcsr.frm
