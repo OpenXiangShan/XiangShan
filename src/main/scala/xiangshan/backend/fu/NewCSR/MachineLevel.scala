@@ -341,10 +341,10 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mimpid)
 
   val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
-    val ALL = RO(7, 0)
+    val ALL = RO(hartIdLen - 1, 0)
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.reg.ALL := RegEnable(hartid, reset.asBool)
+    this.regOut.ALL := hartid
   })
     .setAddr(CSRs.mhartid)
 
