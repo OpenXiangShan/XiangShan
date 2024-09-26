@@ -1409,7 +1409,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && s3_safe_writeback
   s3_out.bits.uop             := s3_in.uop
-  s3_out.bits.uop.fpWen       := s3_in.uop.fpWen && !s3_exception
+  s3_out.bits.uop.fpWen       := s3_in.uop.fpWen
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
