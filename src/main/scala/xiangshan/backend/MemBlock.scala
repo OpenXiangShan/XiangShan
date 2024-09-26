@@ -565,7 +565,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   })
 
   // ptw
-  val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
+  val sfence = Wire(new SfenceBundle)
+   sfence.bits := DelayNWithValid(io.ooo_to_mem.sfence.bits, io.ooo_to_mem.sfence.valid, 2)._2
+   sfence.bits.flushPipe := DontCare  // unused 
+   sfence.valid := RegNext(RegNext(io.ooo_to_mem.sfence.valid))
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
