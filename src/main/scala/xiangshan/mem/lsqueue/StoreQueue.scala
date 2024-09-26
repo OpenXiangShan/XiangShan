@@ -192,6 +192,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val exceptionAddr = new ExceptionAddrIO
     val flushSbuffer = new SbufferFlushBundle
     val sqEmpty = Output(Bool())
+    val lqEmpty = Input(Bool())
     val stAddrReadySqPtr = Output(new SqPtr)
     val stAddrReadyVec = Output(Vec(StoreQueueSize, Bool()))
     val stDataReadySqPtr = Output(new SqPtr)
@@ -1036,6 +1037,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     s.bits  := io.sbuffer(idx).bits
   }}
   asp.io.sqEmpty := io.sqEmpty
+  asp.io.lqEmpty := io.lqEmpty
   asp.io.enable  := EnableStorePrefetchASP.B
   io.seqStoreDetected := asp.io.seqStoreDetected
   io.aspPfIO <> asp.io.aspPfIO

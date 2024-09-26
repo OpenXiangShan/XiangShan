@@ -440,6 +440,7 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
   val io = IO(new DCacheBundle {
     val sbuffer = Vec(EnsbufferWidth, Flipped(ValidIO(new DCacheWordReqWithVaddrAndPfFlag)))
     val sqEmpty = Input(Bool())
+    val lqEmpty = Input(Bool())
     val enable  = Input(Bool())
     val seqStoreDetected = Output(Bool())
     val aspPfIO = new AspPfIO
@@ -526,12 +527,12 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
     when (io.enable) {
       if (i == 0) {
         when(io.sbuffer(i).fire) {
-          generator.io.alloc := seqStoreDetected
+          generator.io.alloc := seqStoreDetected && io.lqEmpty
           generator.io.vaddr := prefetchVaddr(0)
         }
       } else {
         when(io.sbuffer(i).fire) {
-          generator.io.alloc := seqStoreDetected
+          generator.io.alloc := seqStoreDetected && io.lqEmpty
           when (!same_granularity_addr(prefetchVaddr(i), prefetchVaddr(i - 1), granularity)) {
             generator.io.vaddr := prefetchVaddr(i)
           }

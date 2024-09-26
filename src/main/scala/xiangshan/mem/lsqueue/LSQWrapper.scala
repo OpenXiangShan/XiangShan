@@ -182,6 +182,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqCancelCnt      <> io.sqCancelCnt
   storeQueue.io.sqDeq            <> io.sqDeq
   storeQueue.io.sqEmpty          <> io.sqEmpty
+  storeQueue.io.lqEmpty          <> loadQueue.io.lqEmpty
   storeQueue.io.sqFull           <> io.sqFull
   storeQueue.io.forward          <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write      <> io.force_write
