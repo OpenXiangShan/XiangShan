@@ -720,6 +720,8 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     pf
   }
 
+  // G-stage which for supporting VS-stage is LOAD type, only need to check A bit
+  // The check of D bit is in L1TLB
   def isGpf(level: UInt, pbmte: Bool) = {
     val gpf = WireInit(false.B)
     when (reserved =/= 0.U){
@@ -734,8 +736,10 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
       gpf := true.B
     }.elsewhen (n =/= 0.U && ppn(3, 0) =/= 8.U) {
       gpf := true.B
-    }.otherwise{
-      gpf := unaligned(level)
+    }.elsewhen (unaligned(level)) {
+      gpf := true.B
+    }.elsewhen (!perm.a) {
+      gpf := true.B
     }
     gpf
   }
