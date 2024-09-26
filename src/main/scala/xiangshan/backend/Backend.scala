@@ -710,7 +710,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.csrCustomCtrl := csrio.customCtrl
 
-  io.toTop.cpuHalted := false.B // TODO: implement cpu halt
+  io.toTop.cpuHalted := ctrlBlock.io.toTop.cpuHalt
 
   io.debugTopDown.fromRob := ctrlBlock.io.debugTopDown.fromRob
   ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
