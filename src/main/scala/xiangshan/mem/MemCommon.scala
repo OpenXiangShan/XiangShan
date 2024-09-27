@@ -81,7 +81,10 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasVLSUParameters {
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
+  // For exception vaddr generate
   val fullva = UInt(XLEN.W)
+  val vaNeedExt = Bool()
+  val isHyper = Bool()
   val paddr = UInt(PAddrBits.W)
   val gpaddr = UInt(XLEN.W)
   val isForVSnonLeafPTE = Bool()
@@ -163,6 +166,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
     if (latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
+    if (latch) vaNeedExt := RegEnable(input.vaNeedExt, enable) else vaNeedExt := input.vaNeedExt
+    if (latch) isHyper := RegEnable(input.isHyper, enable) else isHyper := input.isHyper
     if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if (latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE
@@ -243,6 +248,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if(latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
     if(latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
+    if(latch) vaNeedExt := RegEnable(input.vaNeedExt, enable) else vaNeedExt := input.vaNeedExt
+    if(latch) isHyper := RegEnable(input.isHyper, enable) else isHyper := input.isHyper
     if(latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if(latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if(latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE

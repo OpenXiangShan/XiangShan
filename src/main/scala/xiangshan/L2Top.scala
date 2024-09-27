@@ -207,7 +207,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.l2_tlb_req.resp.bits.paddr.head := io.l2_tlb_req.resp.bits.paddr.head
       l2.io.l2_tlb_req.resp.bits.pbmt := io.l2_tlb_req.resp.bits.pbmt.head
       l2.io.l2_tlb_req.resp.bits.miss := io.l2_tlb_req.resp.bits.miss
-      l2.io.l2_tlb_req.resp.bits.excp.head <> io.l2_tlb_req.resp.bits.excp.head
+      l2.io.l2_tlb_req.resp.bits.excp.head.gpf := io.l2_tlb_req.resp.bits.excp.head.gpf
+      l2.io.l2_tlb_req.resp.bits.excp.head.pf := io.l2_tlb_req.resp.bits.excp.head.pf
+      l2.io.l2_tlb_req.resp.bits.excp.head.af := io.l2_tlb_req.resp.bits.excp.head.af
       l2.io.l2_tlb_req.pmp_resp.ld := io.l2_pmp_resp.ld
       l2.io.l2_tlb_req.pmp_resp.st := io.l2_pmp_resp.st
       l2.io.l2_tlb_req.pmp_resp.instr := io.l2_pmp_resp.instr
