@@ -368,6 +368,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.instr := false.B
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
+      // overwrite resp.miss when exception related to high address truncation happens
+      resp(idx).bits.miss := false.B
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
