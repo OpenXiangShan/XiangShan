@@ -25,12 +25,13 @@ trait MachineLevel { self: NewCSR =>
     if(!HasBitmapCheckDefault) {
       reg.BME := Mux(wen && !mcvm_lock, wdata.BME, reg.BME)
       reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-      reg.BMA := Mux(wen & !mcvm_lock, wdata.BMA, reg.BMA)
+      reg.BMA := Mux(wen && !mcvm_lock, wdata.BMA, reg.BMA)
     } else {
       reg.BME := 1.U
       reg.CMODE := 0.U
-      reg.BMA := "h80200000".U
+      reg.BMA := BMAField.TestBMA
     }
+    reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
   })
     .setAddr(CSRs.mcvm))  else  None
   
@@ -449,7 +450,8 @@ trait MachineLevel { self: NewCSR =>
 class McvmBundle extends  CSRBundle {
   val BME  = RW(63).withReset(0.U)
   val CMODE  = RW(62).withReset(0.U)
-  val BMA  = RW(61,0).withReset(0.U)
+  val BCLEAR = RW(61).withReset(0.U)
+  val BMA  = BMAField(60,0,null).withReset(BMAField.ResetBMA)
 }
 
 class MstatusBundle extends CSRBundle {

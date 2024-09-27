@@ -821,6 +821,37 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val hPBMTE = io.csr.hPBMTE
   val pbmte = Mux(refill.req_info_dup(0).s2xlate === onlyStage1 || refill.req_info_dup(0).s2xlate === allStage, hPBMTE, mPBMTE)
 
+  def Tran2D(flushMask: UInt): Vec[UInt] = {
+    val tran2D = Wire(Vec(l2tlbParams.l0nSets,UInt(l2tlbParams.l0nWays.W)))
+    for (i <- 0 until l2tlbParams.l0nSets) {
+      tran2D(i) := flushMask((i + 1) * l2tlbParams.l0nWays - 1, i * l2tlbParams.l0nWays)
+    }
+    tran2D
+  }
+  def updateL0BitmapReg(l0BitmapReg: Vec[Vec[Vec[UInt]]], tran2D: Vec[UInt]) = {
+    for (i <- 0 until l2tlbParams.l0nSets) {
+      for (j <- 0 until l2tlbParams.l0nWays) {
+        when(tran2D(i)(j) === 0.U){
+          for(k <- 0 until tlbcontiguous){
+            l0BitmapReg(i)(j)(k) := 0.U
+          }
+        }
+      }
+    }
+  }
+  def TranVec(flushMask: UInt): Vec[UInt] = {
+    val vec = Wire(Vec(l2tlbParams.spSize,UInt(1.W)))
+    for (i <- 0 until l2tlbParams.spSize) {
+      vec(i) := flushMask(i)
+    }
+    vec
+  }
+  def updateSpBitmapReg(spBitmapReg: Vec[UInt], vec : Vec[UInt]) = {
+    for (i <- 0 until l2tlbParams.spSize) {
+      spBitmapReg(i) := spBitmapReg(i) & vec(i)
+    }
+  }
+
   // TODO: handle sfenceLatch outsize
   if (EnableSv48) {
     val l3Refill =
@@ -955,6 +986,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l0v := l0v | l0RfvOH
     l0g := l0g & ~l0RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, l0RfvOH, 0.U)
     l0h(l0RefillIdx)(l0VictimWay) := refill_h(0)
+    if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~l0RfvOH))}
 
     for (i <- 0 until l2tlbParams.l0nWays) {
       l0RefillPerf(i) := i.U === l0VictimWay
@@ -988,6 +1020,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     spv := spv | spRfOH
     spg := spg & ~spRfOH | Mux(memPte(0).perm.g, spRfOH, 0.U)
     sph(spRefillIdx) := refill_h(0)
+    if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~spRfOH))}
 
     for (i <- 0 until l2tlbParams.spSize) {
       spRefillPerf(i) := i.U === spRefillIdx
@@ -999,37 +1032,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1eccFlush = resp_res.l1.ecc && stageResp_valid_1cycle_dup(0) // RegNext(l1eccError, init = false.B)
   val l0eccFlush = resp_res.l0.ecc && stageResp_valid_1cycle_dup(1) // RegNext(l0eccError, init = false.B)
   val eccVpn = stageResp.bits.req_info.vpn
-
-  def Tran2D(flushMask: UInt): Vec[UInt] = {
-    val tran2D = Wire(Vec(l2tlbParams.l0nSets,UInt(l2tlbParams.l0nWays.W)))
-    for (i <- 0 until l2tlbParams.l0nSets) {
-      tran2D(i) := flushMask((i + 1) * l2tlbParams.l0nWays - 1, i * l2tlbParams.l0nWays)
-    }
-    tran2D
-  }
-  def updateL0BitmapReg(l0BitmapReg: Vec[Vec[Vec[UInt]]], tran2D: Vec[UInt]) = {
-    for (i <- 0 until l2tlbParams.l0nSets) {
-      for (j <- 0 until l2tlbParams.l0nWays) {
-        when(tran2D(i)(j) === 0.U){
-          for(k <- 0 until tlbcontiguous){
-            l0BitmapReg(i)(j)(k) := 0.U
-          }
-        }
-      }
-    }
-  }
-  def TranVec(flushMask: UInt): Vec[UInt] = {
-    val vec = Wire(Vec(l2tlbParams.spSize,UInt(1.W)))
-    for (i <- 0 until l2tlbParams.spSize) {
-      vec(i) := flushMask(i)
-    }
-    vec
-  }
-  def updateSpBitmapReg(spBitmapReg: Vec[UInt], vec : Vec[UInt]) = {
-    for (i <- 0 until l2tlbParams.spSize) {
-      spBitmapReg(i) := spBitmapReg(i) & vec(i)
-    }
-  }
 
   XSError(l1eccFlush, "l2tlb.cache.l1 ecc error. Should not happen at sim stage")
   XSError(l0eccFlush, "l2tlb.cache.l0 ecc error. Should not happen at sim stage")
@@ -1044,9 +1046,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val flushSetIdxOH = UIntToOH(genPtwL0SetIdx(eccVpn))
     val flushMask = VecInit(flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l0nWays, a.asUInt) }).asUInt
     l0v := l0v & ~flushMask
-    if(HasCVMExtension){
-      updateL0BitmapReg(l0BitmapReg,Tran2D(~flushMask))
-    }
     l0g := l0g & ~flushMask
   }
 
@@ -1059,11 +1058,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       when (sfence_dup(0).bits.rs2) {
         // all va && all asid
         l0v := l0v & ~l0hhit
-        if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~l0hhit))}
       } .otherwise {
         // all va && specific asid except global
         l0v := l0v & (l0g | ~l0hhit)
-        if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(l0g | ~l0hhit))}
       }
     } .otherwise {
       // val flushMask = UIntToOH(genTlbl1Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
@@ -1076,11 +1073,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
         l0v := l0v & ~flushMask & ~l0hhit
-        if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~flushMask & ~l0hhit))}
       } .otherwise {
         // specific leaf of addr && specific asid
         l0v := l0v & (~flushMask | l0g | ~l0hhit)
-        if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~flushMask | l0g | ~l0hhit))}
       }
     }
   }
@@ -1090,7 +1085,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   when(hfencev_valid_l0) {
     val flushMask = VecInit(l0h.flatMap(_.map(_  === onlyStage1))).asUInt
     l0v := l0v & ~flushMask // all VS-stage l0 pte
-    if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~flushMask))}
   }
 
   // hfenceg, simple implementation for l0
@@ -1098,7 +1092,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   when(hfenceg_valid_l0) {
     val flushMask = VecInit(l0h.flatMap(_.map(_ === onlyStage2))).asUInt
     l0v := l0v & ~flushMask // all G-stage l0 pte
-    if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~flushMask))}
   }
 
   val l2asidhit = VecInit(l2asids.map(_ === sfence_dup(2).bits.id)).asUInt
@@ -1118,23 +1111,19 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l1v := l1v & ~l1hhit
         l2v := l2v & ~(l2hhit & VecInit(l2vmidhit.asBools.map{a => io.csr_dup(2).priv.virt && a || !io.csr_dup(2).priv.virt}).asUInt)
         spv := spv & ~(sphhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)))}
       } .otherwise {
         // all va && specific asid except global
         l1v := l1v & (l1g | ~l1hhit)
         l2v := l2v & ~(~l2g & l2hhit & l2asidhit & VecInit(l2vmidhit.asBools.map{a => io.csr_dup(2).priv.virt && a || !io.csr_dup(2).priv.virt}).asUInt)
         spv := spv & ~(~spg & sphhit & spasidhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(~spg & sphhit & spasidhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)))}
       }
     } .otherwise {
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
         spv := spv & ~(sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)))}
       } .otherwise {
         // specific leaf of addr && specific asid
         spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(~spg & sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = io.csr_dup(0).priv.virt))).asUInt)))}
       }
     }
   }
@@ -1152,20 +1141,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l1v := l1v & ~l1hhit
         l2v := l2v & ~(l2hhit & l2vmidhit)
         spv := spv & ~(sphhit & spvmidhit)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & spvmidhit)))}
       }.otherwise {
         l1v := l1v & (l1g | ~l1hhit)
         l2v := l2v & ~(~l2g & l2hhit & l2asidhit & l2vmidhit)
         spv := spv & ~(~spg & sphhit & spasidhit & spvmidhit)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(~spg & sphhit & spasidhit & spvmidhit)))}
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
         spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = true.B))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = true.B))).asUInt)))}
       }.otherwise {
         spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = true.B))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = true.B))).asUInt)))}
       }
     }
   }
@@ -1184,20 +1169,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l1v := l1v & ~l1hhit
         l2v := l2v & ~l2hhit
         spv := spv & ~sphhit
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~sphhit))}
       }.otherwise {
         l1v := l1v & ~l1hhit
         l2v := l2v & ~(l2hhit & l2vmidhit)
         spv := spv & ~(sphhit & spvmidhit)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & spvmidhit)))}
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
         spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)))}
       }.otherwise {
         spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
-        if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)))}
       }
     }
   }

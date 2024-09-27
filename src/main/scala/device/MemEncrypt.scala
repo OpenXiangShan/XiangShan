@@ -736,7 +736,7 @@ class MemEncryptCSR(implicit p:Parameters) extends MemEncryptModule
   when(key_init_req && req_leagl) {
     last_req_accepted := true.B
   }.elsewhen(key_init_req) {
-    keyextend_req_valid := false.B
+    last_req_accepted := false.B
   }.otherwise {
     last_req_accepted := last_req_accepted
   }

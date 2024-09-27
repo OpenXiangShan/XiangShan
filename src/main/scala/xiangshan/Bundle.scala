@@ -517,7 +517,8 @@ class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
 class McvmStruct(implicit p: Parameters) extends XSBundle {
   val BME = UInt(1.W)
   val CMODE = UInt(1.W)
-  val BMA = UInt(62.W)
+  val BCLEAR = UInt(1.W)
+  val BMA = UInt(61.W)
 }
 
 class TlbMcvmBundle(implicit p: Parameters) extends McvmStruct {
@@ -528,6 +529,7 @@ class TlbMcvmBundle(implicit p: Parameters) extends McvmStruct {
     val mc = mcvm_value.asTypeOf(new McvmStruct)
     BME := mc.BME
     CMODE := mc.CMODE
+    BCLEAR := mc.BCLEAR
     BMA := mc.BMA
     //changed := DataChanged(mc.CMODE)
   }
