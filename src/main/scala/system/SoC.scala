@@ -43,13 +43,14 @@ case object SoCParamsKey extends Field[SoCParameters]
 case class SoCParameters
 (
   EnableILA: Boolean = false,
-  PAddrBits: Int = 48,
+  PAddrBits: Int = 50,  //48
   PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
   CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
+  KeyIDBits: Int = 5,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -202,7 +203,7 @@ trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
   // 48-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  val memRange = AddressSet(0x00000000L, 0x1fffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
