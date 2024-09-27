@@ -20,20 +20,16 @@ import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
   
-  val mcvm = if(HasCVMExtension) Some(Module(new CSRModule("Mcmv", new McvmBundle) {
-    val mcvm_WMask = WireInit(UInt(XLEN.W),~(0x0.U(XLEN.W)))
-    mcvm_WMask := ~(0x0.U(XLEN.W))
-      when(reg.BME.asBool){
-        mcvm_WMask := (1.U << 62)
-      }.otherwise{
-        mcvm_WMask := ~(0x0.U(XLEN.W))
-      }
-    when (wen) {
-      reg.BME := wdata.BME
-      reg.CMODE := wdata.CMODE
-      reg.BMA := wdata.BMA
-    }.otherwise {
-      reg := reg
+  val mcvm = if(HasCVMExtension) Some(Module(new CSRModule("Mcvm", new McvmBundle) {
+    val mcvm_lock = reg.BME.asBool
+    if(!HasBitmapCheckDefault) {
+      reg.BME := Mux(wen && !mcvm_lock, wdata.BME, reg.BME)
+      reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
+      reg.BMA := Mux(wen & !mcvm_lock, wdata.BMA, reg.BMA)
+    } else {
+      reg.BME := 1.U
+      reg.CMODE := 0.U
+      reg.BMA := "h80200000".U
     }
   })
     .setAddr(CSRs.mcvm))  else  None
