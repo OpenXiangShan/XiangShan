@@ -141,14 +141,19 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   //Using buffer data for prediction
   val use_conflict_data = conflict_buffer_valid && conflict_buffer_idx === s1_idx
-  val conflict_prediction_data = conflict_buffer_data.sliding(2,2).toSeq.map(VecInit(_))
-  val per_br_ctrs_unshuffled = if(use_conflict_data == true.B) conflict_prediction_data else table.io.r.resp.data.sliding(2,2).toSeq.map(VecInit(_))
+  val conflict_data_bypass = conflict_buffer_data.zip(conflict_buffer_waymask).map {case (data, mask) => Mux(mask, data, 0.U.asTypeOf(data))}
+  val conflict_prediction_data = conflict_data_bypass.sliding(2,2).toSeq.map(VecInit(_))
+  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(VecInit(_))
   val per_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
     UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
     per_br_ctrs_unshuffled
   )))
+  val conflict_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
+    UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
+    conflict_prediction_data
+  )))
 
-  io.resp.ctrs := per_br_ctrs
+  io.resp.ctrs := Mux(use_conflict_data, conflict_br_ctrs, per_br_ctrs)
 
   table.io.w.apply(
     valid = (io.update.mask.reduce(_||_) && !write_conflict) || can_write,
