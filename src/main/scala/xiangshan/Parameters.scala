@@ -61,6 +61,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasCVMExtension: Option[Boolean] = Some(false),
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -584,6 +585,7 @@ trait HasXSParameter {
   def PmemRanges = p(SoCParamsKey).PmemRanges
   def PmemLowBounds = PmemRanges.unzip._1
   def PmemHighBounds = PmemRanges.unzip._2
+  def KeyIDBits = p(SoCParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
@@ -601,6 +603,7 @@ trait HasXSParameter {
   def hartIdLen = p(MaxHartIdBits)
   val xLen = XLEN
 
+  def HasCVMExtension = coreParams.HasCVMExtension.getOrElse(false)
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension

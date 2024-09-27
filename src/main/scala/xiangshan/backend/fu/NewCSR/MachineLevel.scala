@@ -19,6 +19,26 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
+  
+  val mcvm = if(HasCVMExtension) Some(Module(new CSRModule("Mcmv", new McvmBundle) {
+    val mcvm_WMask = WireInit(UInt(XLEN.W),~(0x0.U(XLEN.W)))
+    mcvm_WMask := ~(0x0.U(XLEN.W))
+      when(reg.BME.asBool){
+        mcvm_WMask := (1.U << 62)
+      }.otherwise{
+        mcvm_WMask := ~(0x0.U(XLEN.W))
+      }
+    when (wen) {
+      reg.BME := wdata.BME
+      reg.CMODE := wdata.CMODE
+      reg.BMA := wdata.BMA
+    }.otherwise {
+      reg := reg
+    }
+  })
+    .setAddr(CSRs.mcvm))  else  None
+  
+
   val mstatus = Module(new MstatusModule)
     .setAddr(CSRs.mstatus)
 
@@ -417,7 +437,8 @@ trait MachineLevel { self: NewCSR =>
     mncause,
     mnstatus,
     mnscratch,
-  ) ++ mhpmevents ++ mhpmcounters
+  ) ++ mhpmevents ++ mhpmcounters ++ (if(HasCVMExtension) Seq(mcvm.get) else Seq())
+
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
@@ -427,6 +448,12 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
+}
+
+class McvmBundle extends  CSRBundle {
+  val BME  = RW(63).withReset(0.U)
+  val CMODE  = RW(62).withReset(0.U)
+  val BMA  = RW(61,0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {
