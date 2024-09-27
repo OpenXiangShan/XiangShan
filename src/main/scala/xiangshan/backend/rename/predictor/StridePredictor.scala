@@ -43,6 +43,8 @@ trait StridePredictorParams {
   val CommitUpdateSize = 2
   val CommitBufferSize = 24
 
+  val ConfidenceThreshold = 4
+
   def NumGroup = NumEntries / NumWay
   def GroupWidth = log2Up(NumGroup)
   def ValidPcWidth = PcOffset + GroupWidth + TagWidth - 1
@@ -89,7 +91,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
   val readMatchVec = readMatchOHVec.map(_.asUInt.orR)
 
   io.spReadPort.zipWithIndex.foreach{ case (rport, i) =>
-    rport.needPf   := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.confidence >= 4.U))
+    rport.needPf   := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.confidence >= ConfidenceThreshold.U))
     rport.predAddr := Mux1H(readMatchOHVec(i), readEntryVec(i).map(x => x.prevAddr + SignExt((x.stride * Cat(0.U, x.inflight + 1.U).asSInt).asUInt, x.prevAddr.getWidth)))
   }
 
@@ -300,6 +302,8 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   // 4. write entry
   val redirectVec = Seq(io.redirect, RegNext(io.redirect))
+  // perf
+  val perfPredConfVec = WireInit(VecInit.fill(NumGroup)(VecInit.fill(NumWay)(false.B)))
 
   for((group, i) <- spEntries.zipWithIndex) {
     for((entry, j) <- group.zipWithIndex) {
@@ -332,6 +336,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
         when (readEn) {
           entry.lastRobIdx := Mux1H(readOH, readUpdateRobIdxVec)
         }
+        when (entry.confidence === (ConfidenceThreshold - 1).U && commitEntry.confidence === ConfidenceThreshold.U) {
+          perfPredConfVec(i)(j) := true.B
+        }
         assert(entry.valid, s"entry(${i})(${j}) is not valid when commitEn")
       }
       .elsewhen (readEn) {
@@ -346,6 +353,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       }
     }
   }
+
+  XSPerfAccumulate("predict_confident_entry_cnt", PopCount(perfPredConfVec.flatten))
+  XSPerfHistogram("stride_predictor_valid_entry_cnt", PopCount(spEntries.flatMap(_.map(_.valid))), true.B, 0, NumEntries + 1)
+  XSPerfHistogram("stride_predictor_valid_group_cnt", PopCount(spEntries.map(_.map(_.valid).orR)), true.B, 0, NumGroup + 1)
 
   // 5. commit buffer
   // enq read pc
@@ -426,7 +437,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     }
   }
   XSPerfAccumulate("overflow_instr_cnt", overflowNum)
-  XSPerfHistogram("valid_entry_cnt", validNum, true.B, 0, NumEntries + 1)
+  XSPerfHistogram("commit_buffer_valid_cnt", validNum, true.B, 0, CommitBufferSize + 1)
 
   // deq
   val deqNum = Wire(UInt(log2Up(CommitUpdateSize + 1).W))
