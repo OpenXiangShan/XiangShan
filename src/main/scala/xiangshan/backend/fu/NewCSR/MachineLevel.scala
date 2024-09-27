@@ -29,7 +29,7 @@ trait MachineLevel { self: NewCSR =>
     } else {
       reg.BME := 1.U
       reg.CMODE := 0.U
-      reg.BMA := "h80200000".U
+      reg.BMA := BMAField.TestBMA
     }
   })
     .setAddr(CSRs.mcvm))  else  None
@@ -449,7 +449,7 @@ trait MachineLevel { self: NewCSR =>
 class McvmBundle extends  CSRBundle {
   val BME  = RW(63).withReset(0.U)
   val CMODE  = RW(62).withReset(0.U)
-  val BMA  = RW(61,0).withReset(0.U)
+  val BMA  = BMAField(61,0,null).withReset(BMAField.ResetBMA)
 }
 
 class MstatusBundle extends CSRBundle {
