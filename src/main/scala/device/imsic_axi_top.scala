@@ -127,6 +127,7 @@ class imsic_bus_top(
         TLToAXI4() :=
         TLWidthWidget(4) :=
         TLFIFOFixer() :=
+        TLBuffer() :=
         tlnode
     }
 
