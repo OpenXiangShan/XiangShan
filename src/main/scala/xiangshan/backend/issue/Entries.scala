@@ -58,6 +58,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     resps.flatten
   }
 
+  // only memAddrIQ use it
+  // Vec(params.nonPipedExu, Flipped(ValidIO(new EntryDeqRespBundle)))
+  val nonPipedResps: Seq[Option[ValidIO[EntryDeqRespBundle]]]
+
   val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = Wire(Vec(4, chiselTypeOf(io.og0Resp)))
 
   if (params.needOg2Resp)
@@ -272,7 +276,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   //issueRespVec
   if (params.needFeedBackSqIdx || params.needFeedBackLqIdx) {
-    issueRespVec.lazyZip(sqIdxVec.get.zip(lqIdxVec.get)).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (sqIdx, lqIdx), (issueTimer, deqPortIdx)) =>
+    (issueRespVec lazyZip (sqIdxVec.get).zip(lqIdxVec.get) lazyZip issueTimerVec lazyZip deqPortIdxReadVec).foreach {
+      case (issueResp, (sqIdx, lqIdx), issueTimer, deqPortIdx) =>
       val respInDatapath = if (!params.isVecMemIQ) resps(issueTimer(0))(deqPortIdx)
                            else resps(issueTimer)(deqPortIdx)
       val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
@@ -289,7 +294,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
   else {
-    issueRespVec.lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (issueTimer, deqPortIdx)) =>
+    (issueRespVec lazyZip issueTimerVec lazyZip deqPortIdxReadVec).foreach { case (issueResp, issueTimer, deqPortIdx) =>
       val Resp = resps(issueTimer)(deqPortIdx)
       issueResp := Resp
     }

@@ -689,6 +689,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
 
+  intExuBlock.io.robDeqPtr.foreach(_ := ctrlBlock.io.robio.robDeqPtr)
+
   // mem io
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq

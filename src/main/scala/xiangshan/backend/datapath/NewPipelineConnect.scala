@@ -42,9 +42,13 @@ object NewPipelineConnect {
     left.ready := right.ready || !valid
     val data = RegEnable(left.bits, left.fire)
 
-    when (rightOutFire) { valid := false.B }
-    when (left.fire) { valid := true.B }
-    when (isFlush) { valid := false.B }
+    when (isFlush) {
+      valid := false.B
+    }.elsewhen (left.fire) {
+      valid := true.B
+    }.elsewhen (rightOutFire) {
+      valid := false.B
+    }
 
     right.bits := data
     right.valid := valid
@@ -75,3 +79,52 @@ object NewPipelineConnect {
     }
   }
 }
+
+/**
+ * New pipeline connect with replace signal, that allows data to go into the next stage.
+ * @param replaced signal of an valid data transfering in pipeline
+ * @note When this object is USED, REMEMBER TO MODIFY val NonPipedExu in IssueBlockParams.
+ */
+class ReplacePipelineConnectPipe[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val in = Flipped(DecoupledIO(gen.cloneType))
+    val out = DecoupledIO(gen.cloneType)
+    val rightOutFire = Input(Bool())
+    val isFlush = Input(Bool())
+    val replace = Input(Bool())
+    val replaced = Output(Bool())
+  })
+
+  io.replaced := io.in.fire || io.replace
+
+  ReplacePipelineConnect.connect(io.in, io.out, io.rightOutFire, io.isFlush, io.replace)
+}
+
+object ReplacePipelineConnect {
+  def connect[T <: Data](
+    left: DecoupledIO[T],
+    right: DecoupledIO[T],
+    rightOutFire: Bool,
+    isFlush: Bool,
+    replace: Bool
+  ): T = {
+    val valid = RegInit(false.B)
+
+    left.ready := right.ready || !valid
+    val data = RegEnable(left.bits, left.fire || replace)
+
+    when (isFlush) {
+      valid := false.B
+    }.elsewhen (left.fire) {
+      valid := true.B
+    }.elsewhen (rightOutFire) {
+      valid := false.B
+    }
+
+    right.bits := data
+    right.valid := valid
+
+    data
+  }
+}
+

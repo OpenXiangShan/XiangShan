@@ -22,7 +22,9 @@ object FuType extends OHEnumeration {
 
   private def addType(name: String): OHType = {
     val ohval = OHType(initVal, name)
-    initVal += 1
+    this.synchronized {
+      initVal += 1
+    }
     ohval
   }
 

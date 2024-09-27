@@ -13,6 +13,7 @@ import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.backend.rob.RobPtr
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -45,6 +46,7 @@ class ExuBlockImp(
     exu.io.vlIsZero.foreach(exuio => io.vlIsZero.get := exuio)
     exu.io.vlIsVlmax.foreach(exuio => io.vlIsVlmax.get := exuio)
     exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
+    exu.io.robDeqPtr.foreach(exuio => exuio := io.robDeqPtr.get)
     exu.io.in <> input
     output <> exu.io.out
     io.csrToDecode.foreach(toDecode => exu.io.csrToDecode.foreach(exuOut => toDecode := exuOut))
@@ -83,4 +85,5 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
+  val robDeqPtr = Option.when(params.hasCSR)(Input(new RobPtr))
 }

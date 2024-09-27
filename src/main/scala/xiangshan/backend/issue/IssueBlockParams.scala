@@ -422,4 +422,8 @@ case class IssueBlockParams(
   def getEntryName = {
     "Entries" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
   }
+
+  /** non-pipelined execution unit */
+  def nonPipedExu = CsrCnt
+
 }

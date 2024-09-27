@@ -258,7 +258,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hPBMTE := csrMod.io.tlb.hPBMTE
 
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
-  io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
+  io.in.ready := csrMod.io.in.ready && io.in.bits.ctrl.robIdx === io.robDeqPtr // Todo: Async read imsic may block CSR
   io.out.valid := csrModOutValid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
   io.out.bits.ctrl.flushPipe.get := flushPipe

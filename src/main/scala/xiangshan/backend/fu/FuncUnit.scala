@@ -91,10 +91,11 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
-  val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
+  val vtype = OptionWrapper(cfg.writeVlRf, Valid(new VType))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
+  val robDeqPtr = OptionWrapper(cfg.isCsr, Input(new RobPtr))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {

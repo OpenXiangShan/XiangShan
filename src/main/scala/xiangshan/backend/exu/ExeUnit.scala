@@ -30,6 +30,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.backend.rob.RobPtr
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -45,6 +46,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
   val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu)(Input(new AddrTransType))
+  val robDeqPtr = Option.when(params.hasCSR)(Input(new RobPtr))
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -344,6 +346,7 @@ class ExeUnitImp(
   io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))
   io.vlIsVlmax.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsVlmax.foreach(fuio => exuio := fuio)))
   io.instrAddrTransType.foreach(exuio => funcUnits.foreach(fu => fu.io.instrAddrTransType.foreach(fuio => fuio := exuio)))
+  io.robDeqPtr.foreach(exuio => funcUnits.foreach(fu => fu.io.robDeqPtr.foreach(fuio => fuio := exuio)))
 
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
