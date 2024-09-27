@@ -62,6 +62,7 @@ case class XSCoreParameters
   ELEN: Int = 64,
   HSXLEN: Int = 64,
   HasCVMExtension: Option[Boolean] = Some(false),
+  HasBitmapCheckDefault: Option[Boolean] = Some(false),
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -606,6 +607,7 @@ trait HasXSParameter {
   val xLen = XLEN
 
   def HasCVMExtension = coreParams.HasCVMExtension.getOrElse(false)
+  def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault.getOrElse(false)
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension
