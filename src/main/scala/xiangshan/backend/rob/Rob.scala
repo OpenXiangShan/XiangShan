@@ -77,6 +77,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
+      val walkToArchVType = Output(Bool())
       val walkVType = ValidIO(VType())
       val commitVType = new Bundle {
         val vtype = ValidIO(VType())
@@ -330,6 +331,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   vtypeBuffer.io.snpt := io.snpt
   vtypeBuffer.io.snpt.snptEnq := snptEnq
   io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
+  io.toDecode.walkToArchVType := vtypeBuffer.io.toDecode.walkToArchVType
   io.toDecode.commitVType := vtypeBuffer.io.toDecode.commitVType
   io.toDecode.walkVType := vtypeBuffer.io.toDecode.walkVType
 

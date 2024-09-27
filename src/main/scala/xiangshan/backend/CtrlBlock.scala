@@ -316,12 +316,12 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
-  decode.io.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.commitVType := rob.io.toDecode.commitVType
-  decode.io.walkVType := rob.io.toDecode.walkVType
+  decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
+  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
+  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
+  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
-  decode.io.vtypeRedirect := s1_s3_redirect.valid
 
   // add decode Buf for in.ready better timing
   val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
