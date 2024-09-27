@@ -641,7 +641,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s2_multi_hit = ftbBank.io.read_multi_hits.valid && io.s2_fire(0)
   val s2_multi_hit_way = ftbBank.io.read_multi_hits.bits
   val s2_multi_hit_entry = ftbBank.io.read_multi_entry
-  val s2_multi_hit_enable = s2_multi_hit && io.s2_redirect(0) && !s2_close_ftb_req
+  val s2_multi_hit_enable = s2_multi_hit && !s2_close_ftb_req
   XSPerfAccumulate("ftb_s2_multi_hit", s2_multi_hit)
   XSPerfAccumulate("ftb_s2_multi_hit_enable", s2_multi_hit_enable)
 
