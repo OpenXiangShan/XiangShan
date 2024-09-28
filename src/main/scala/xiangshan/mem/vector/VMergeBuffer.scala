@@ -250,7 +250,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val firstUnmask            = genVFirstUnmask(selPort(0).mask).asUInt
     val vaddrOffset            = Mux(entryIsUS, firstUnmask, 0.U)
     val vaddr                  = selVaddr + vaddrOffset
-    val vstart                 = Mux(entryIsUS, (selPort(0).vecVaddrOffset >> entryVeew).asUInt, selElemInfield)
+    val vstart                 = Mux(entryIsUS, selPort(0).vstart, selElemInfield)
 
     // select oldest port to raise exception
     when((((entryElemIdx >= selElemIdx) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)) {
@@ -265,7 +265,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entry.gpaddr       := selPort(0).gpaddr
         entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{
-        entry.vl           := Mux(entries(wbMbIndex(i)).vl > vstart, vstart, entries(wbMbIndex(i)).vl)
+        entry.vl           := vstart
       }
     }
   }

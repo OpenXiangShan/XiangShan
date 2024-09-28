@@ -352,11 +352,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.vecVaddrOffset := Mux(
     s1_trigger_debug_mode || s1_trigger_breakpoint,
     storeTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
-    Mux(
-      s1_in.elemIdx =/= 0.U,
-      s1_in.vaddr - s1_in.vecBaseVaddr + genVFirstUnmask(s1_in.mask).asUInt,
-      genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr(3, 0)
-    )
+    s1_in.vaddr + genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr ,
   )
   s1_out.vecTriggerMask := Mux(s1_trigger_debug_mode || s1_trigger_breakpoint, storeTrigger.io.toLoadStore.triggerMask, 0.U)
 
@@ -418,6 +414,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                                                 s2_pmp.st ||
                                                 (s2_in.isvec && s2_pmp.mmio && RegNext(s1_feedback.bits.hit))
                                                 ) && s2_vecActive
+    s2_out.uop.vpu.vstart     := s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew
 
   // kill dcache write intent request when mmio or exception
   io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
@@ -531,7 +528,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).vaNeedExt   := s3_in.vaNeedExt
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
-      sx_in(i).vecVaddrOffset := s3_in.vecVaddrOffset
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
@@ -574,7 +570,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.vaNeedExt   := sx_last_in.vaNeedExt
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
-  io.vecstout.bits.vecVaddrOffset := sx_last_in.vecVaddrOffset
+  io.vecstout.bits.vstart      := sx_last_in.output.uop.vpu.vstart
   io.vecstout.bits.vecTriggerMask := sx_last_in.vecTriggerMask
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
