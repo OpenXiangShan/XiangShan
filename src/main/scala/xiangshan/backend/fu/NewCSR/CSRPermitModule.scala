@@ -3,11 +3,13 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
-class CSRPermitModule extends Module {
+class CSRPermitModule(implicit p: Parameters) extends Module {
   val io = IO(new CSRPermitIO)
 
   private val (ren, wen, addr, privState, debugMode) = (
@@ -254,7 +256,7 @@ class CSRPermitModule extends Module {
   private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
     ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
     (privState.isModeVS && vsiselect > 0x1FF.U)) && addr === CSRs.sireg.U
-  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) || 
+  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) ||
     privState.isModeVU) && addr === CSRs.sireg.U
 
   private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
@@ -266,21 +268,23 @@ class CSRPermitModule extends Module {
    */
 
   // Todo: check correct
-  io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
+  io.out.EX_II := TraceRTLChoose(csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
     rwIllegal || mnret_EX_II || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
     rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
-    rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
-  io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
-    mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
+    rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II,
+    false.B)
+  io.out.EX_VI := TraceRTLChoose((csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
+    mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI,
+    false.B)
 
-  io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
-  io.out.hasLegalMNret := mnret && !mnretIllegal
-  io.out.hasLegalMret  := mret  && !mretIllegal
-  io.out.hasLegalSret  := sret  && !sretIllegal
-  io.out.hasLegalDret  := dret  && !dretIllegal
+  io.out.hasLegalWen   := wen   && TraceRTLChoose(!(io.out.EX_II || io.out.EX_VI), true.B)
+  io.out.hasLegalMNret := mnret && TraceRTLChoose(!mnretIllegal, true.B)
+  io.out.hasLegalMret  := mret  && TraceRTLChoose(!mretIllegal, true.B)
+  io.out.hasLegalSret  := sret  && TraceRTLChoose(!sretIllegal, true.B)
+  io.out.hasLegalDret  := dret  && TraceRTLChoose(!dretIllegal, true.B)
 
-  io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
-  io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
+  io.out.hasLegalWriteFcsr := wen && TraceRTLChoose(csrIsFp && !fsEffectiveOff, true.B)
+  io.out.hasLegalWriteVcsr := wen && TraceRTLChoose(csrIsWritableVec && !vsEffectiveOff, true.B)
 
   dontTouch(regularPrivilegeLegal)
 }
