@@ -1016,7 +1016,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     loadTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
     s1_in.vaddr + genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr
   )
-  s1_out.vecTriggerMask := Mux(s1_trigger_debug_mode || s1_trigger_breakpoint, loadTrigger.io.toLoadStore.triggerMask, 0.U)
 
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
@@ -1428,7 +1427,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.elemIdxInsideVd   := s3_in.elemIdxInsideVd
   s3_vecout.trigger           := s3_in.uop.trigger
   s3_vecout.vstart            := s3_in.uop.vpu.vstart
-  s3_vecout.vecTriggerMask    := s3_in.vecTriggerMask
   val s3_usSecondInv          = s3_in.usSecondInv
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
@@ -1599,7 +1597,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.isForVSnonLeafPTE := s3_in.isForVSnonLeafPTE
   io.vecldout.bits.mmio := DontCare
   io.vecldout.bits.vstart := s3_vecout.vstart
-  io.vecldout.bits.vecTriggerMask := s3_vecout.vecTriggerMask
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?

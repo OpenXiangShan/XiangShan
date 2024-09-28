@@ -119,7 +119,6 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val gpaddr               = UInt(XLEN.W)
   val isForVSnonLeafPTE    = Bool()
   val vstart               = UInt(elemIdxBits.W)
-  val vecTriggerMask       = UInt((VLEN/8).W)
 
   //val vec                  = new OnlyVecExuOutput
    // feedback

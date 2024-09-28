@@ -130,7 +130,6 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val is_first_ele = Bool()
   val vecBaseVaddr = UInt(VAddrBits.W)
   val vecVaddrOffset = UInt(VAddrBits.W)
-  val vecTriggerMask = UInt((VLEN/8).W)
   // val flowPtr = new VlflowPtr() // VLFlowQueue ptr
   // val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
@@ -207,7 +206,6 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) elemIdxInsideVd     := RegEnable(input.elemIdxInsideVd, enable)     else elemIdxInsideVd     := input.elemIdxInsideVd
     if (latch) vecBaseVaddr        := RegEnable(input.vecBaseVaddr, enable)        else vecBaseVaddr        := input.vecBaseVaddr
     if (latch) vecVaddrOffset      := RegEnable(input.vecVaddrOffset, enable)      else vecVaddrOffset      := input.vecVaddrOffset
-    if (latch) vecTriggerMask      := RegEnable(input.vecTriggerMask, enable)      else vecTriggerMask      := input.vecTriggerMask
     // if (latch) flowPtr             := RegEnable(input.flowPtr, enable)             else flowPtr             := input.flowPtr
     // if (latch) sflowPtr            := RegEnable(input.sflowPtr, enable)            else sflowPtr            := input.sflowPtr
 

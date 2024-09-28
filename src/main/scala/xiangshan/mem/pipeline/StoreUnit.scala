@@ -354,7 +354,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     storeTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
     s1_in.vaddr + genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr ,
   )
-  s1_out.vecTriggerMask := Mux(s1_trigger_debug_mode || s1_trigger_breakpoint, storeTrigger.io.toLoadStore.triggerMask, 0.U)
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_frm_mabuf
@@ -528,7 +527,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).vaNeedExt   := s3_in.vaNeedExt
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
-      sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -571,7 +569,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.gpaddr      := sx_last_in.gpaddr
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
   io.vecstout.bits.vstart      := sx_last_in.output.uop.vpu.vstart
-  io.vecstout.bits.vecTriggerMask := sx_last_in.vecTriggerMask
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)
