@@ -1014,11 +1014,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.vecVaddrOffset := Mux(
     s1_trigger_debug_mode || s1_trigger_breakpoint,
     loadTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
-    Mux(
-      s1_in.elemIdx =/= 0.U,
-      s1_in.vaddr - s1_in.vecBaseVaddr + genVFirstUnmask(s1_in.mask).asUInt,
-      genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr(3, 0)
-    )
+    s1_in.vaddr + genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr
   )
   s1_out.vecTriggerMask := Mux(s1_trigger_debug_mode || s1_trigger_breakpoint, loadTrigger.io.toLoadStore.triggerMask, 0.U)
 
@@ -1220,6 +1216,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.handledByMSHR       := s2_cache_handled
   s2_out.miss                := s2_dcache_miss && s2_troublem
   s2_out.feedbacked          := io.feedback_fast.valid
+  s2_out.uop.vpu.vstart      := Mux(s2_in.isLoadReplay || s2_in.isFastReplay, s2_in.uop.vpu.vstart, s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew)
 
   // Generate replay signal caused by:
   // * st-ld violation check
@@ -1430,7 +1427,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.elemIdx           := s3_in.elemIdx // elemIdx is already saved in flow queue // TODO:
   s3_vecout.elemIdxInsideVd   := s3_in.elemIdxInsideVd
   s3_vecout.trigger           := s3_in.uop.trigger
-  s3_vecout.vecVaddrOffset    := s3_in.vecVaddrOffset
+  s3_vecout.vstart            := s3_in.uop.vpu.vstart
   s3_vecout.vecTriggerMask    := s3_in.vecTriggerMask
   val s3_usSecondInv          = s3_in.usSecondInv
 
@@ -1601,7 +1598,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.gpaddr := s3_in.gpaddr
   io.vecldout.bits.isForVSnonLeafPTE := s3_in.isForVSnonLeafPTE
   io.vecldout.bits.mmio := DontCare
-  io.vecldout.bits.vecVaddrOffset := s3_vecout.vecVaddrOffset
+  io.vecldout.bits.vstart := s3_vecout.vstart
   io.vecldout.bits.vecTriggerMask := s3_vecout.vecTriggerMask
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
