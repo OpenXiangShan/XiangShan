@@ -31,6 +31,7 @@ import xiangshan.backend.fu.vector.Bundles._
 class VfofDataBundle(implicit p: Parameters) extends VLSUBundle{
   val uop              = new DynInst
   val vl               = UInt(elemIdxBits.W)
+  val vuopIdx          = UopIdx()
 }
 
 
@@ -54,7 +55,7 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   val enqIsFixVl = enqBits.uop.vpu.isVleff && enqBits.uop.vpu.lastUop
 
   XSError(entries.uop.robIdx.value =/= enqBits.uop.robIdx.value && valid && enqValid, "There should be no new fof instrction coming in\n")
-  XSError(entriesIsFixVl && valid && enqValid, "A new fof instrction enters when exiting the team\n")
+  XSError(entriesIsFixVl && valid && enqValid, "There should not new uop enqueue\n")
 
   when(enqValid && !enqNeedCancel) {
     when(!valid){
@@ -92,7 +93,7 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
           res(i).bits := bits(i)
         }
         val oldest = Mux(
-          !valid(1) || (bits(1).vpu.vl > bits(0).vpu.vl),
+          !valid(1) || (bits(1).vpu.vuopIdx > bits(0).vpu.vuopIdx),
           res(0),
           res(1)
         )
@@ -109,9 +110,12 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   //Update uop vl
   io.mergeUopWriteback.map{_.ready := true.B}
   val wbUpdateBits  = getOldest(wbIsfof, io.mergeUopWriteback.map(_.bits.uop))
-  val wbUpdateValid = wbIsfof.reduce(_ || _) && (wbUpdateBits.vpu.vl < entries.vl || !entries.vl.orR) && valid && !needRedirect
+  val wbUpdateValid = wbIsfof.reduce(_ || _) && (wbUpdateBits.vpu.vuopIdx <= entries.vuopIdx) && valid && !needRedirect
 
-  when(wbUpdateValid) { entries.vl  := wbUpdateBits.vpu.vl }
+  when(wbUpdateValid) {
+    entries.vl       := wbUpdateBits.vpu.vl
+    entries.vuopIdx  := wbUpdateBits.vpu.vuopIdx
+  }
 
   //Deq
   io.uopWriteback.bits               := 0.U.asTypeOf(new MemExuOutput(isVector = true))
