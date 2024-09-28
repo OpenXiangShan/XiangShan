@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.{FuType, PMPRespBundle}
 import freechips.rocketchip.diplomacy.BufferParams
 import xiangshan.cache.mmu._
 import xiangshan.cache._
@@ -439,7 +439,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
   // pmp
   // NOTE: only handle load/store exception here, if other exception happens, don't send here
-  val pmp = WireInit(io.pmpResp)
+  val exceptionWithPf = exceptionVec(storePageFault) || exceptionVec(loadPageFault) || exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
+  val pmp = (io.pmpResp.asUInt & Fill(io.pmpResp.asUInt.getWidth, !exceptionWithPf)).asTypeOf(new PMPRespBundle())
   when(state === s_pm) {
     val addr_aligned = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
       "b00".U   -> true.B,                   //b
