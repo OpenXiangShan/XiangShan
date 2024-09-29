@@ -1053,7 +1053,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until RenameWidth) {
     // We RegNext the updates for better timing.
     // Note that instructions won't change the system's states in this cycle.
-    when(RegNext(canEnqueue(i))) {
+    when(canEnqueue(i)) {
       // For now, we allow non-load-store instructions to trigger interrupts
       // For MMIO instructions, they should not trigger interrupts since they may
       // be sent to lower level before it writes back.
@@ -1061,7 +1061,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // Thus, we don't allow load/store instructions to trigger an interrupt.
       // TODO: support non-MMIO load-store instructions to trigger interrupts
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) && !FuType.isFence(io.enq.req(i).bits.fuType) && !FuType.isCsr(io.enq.req(i).bits.fuType)
-      robEntries(RegEnable(allocatePtrVec(i).value, canEnqueue(i))).interrupt_safe := RegEnable(allow_interrupts, canEnqueue(i))
+      robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
     }
   }
 
