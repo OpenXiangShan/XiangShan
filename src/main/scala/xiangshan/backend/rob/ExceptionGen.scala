@@ -117,6 +117,8 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   // (3) current is not valid: s1 or enq
   val current_flush = current.robIdx.needFlush(io.redirect) || io.flush
   val s1_flush = s1_out_bits.robIdx.needFlush(io.redirect) || io.flush
+
+  val isVecUpdate = s1_out_bits.vstart < current.vstart || !current.vstartEn
   when (currentValid) {
     when (current_flush) {
       currentValid := Mux(s1_flush, false.B, s1_out_valid)
@@ -125,12 +127,12 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
       when (isAfter(current.robIdx, s1_out_bits.robIdx)) {
         current := s1_out_bits
       }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
-        current.exceptionVec := (s1_out_bits.exceptionVec.asUInt | current.exceptionVec.asUInt).asTypeOf(ExceptionVec())
+        current.exceptionVec := Mux(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
         current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.asUInt.orR
         current.replayInst := s1_out_bits.replayInst || current.replayInst
         current.singleStep := s1_out_bits.singleStep || current.singleStep
         current.trigger := (s1_out_bits.trigger | current.trigger)
-        current.vstart  := Mux((s1_out_bits.vstart < current.vstart) || !current.vstartEn, s1_out_bits.vstart, current.vstart)
+        current.vstart  := Mux(isVecUpdate, s1_out_bits.vstart, current.vstart)
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
