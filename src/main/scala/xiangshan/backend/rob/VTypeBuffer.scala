@@ -46,6 +46,7 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
 
   val toDecode = Output(new Bundle {
     val isResumeVType = Bool()
+    val walkToArchVType = Bool()
     val walkVType = ValidIO(VType())
     val commitVType = new Bundle {
       val vtype = ValidIO(VType())
@@ -267,10 +268,11 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
   private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
   private val commitVTypeValid = commitValidVec.asUInt.orR
+  private val walkToArchVType = RegInit(false.B)
 
-  when (reset.asBool) {
-    decodeResumeVType.valid := false.B
-  }.elsewhen (state === s_spcl_walk) {
+  walkToArchVType := false.B
+
+  when (state === s_spcl_walk) {
     // special walk use commit vtype
     decodeResumeVType.valid := commitVTypeValid
     decodeResumeVType.bits := newestArchVType
@@ -281,6 +283,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }.elsewhen (state === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := newestVType
+  }.elsewhen (state === s_walk && stateLastCycle =/= s_walk) {
+    // walk start with arch vtype
+    decodeResumeVType.valid := false.B
+    walkToArchVType := true.B
   }.otherwise {
     decodeResumeVType.valid := false.B
   }
@@ -295,6 +301,8 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   io.toDecode.commitVType.vtype.valid := commitVTypeValid
   io.toDecode.commitVType.vtype.bits := newestArchVType
+
+  io.toDecode.walkToArchVType := walkToArchVType
 
   // because vsetvl flush pipe, there is only one vset instruction when vsetvl is committed
   private val hasVsetvl = commitValidVec.zip(hasVsetvlVec).map { case(commitValid, hasVsetvl) => commitValid && hasVsetvl }.reduce(_ || _)

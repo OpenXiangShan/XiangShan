@@ -341,10 +341,10 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mimpid)
 
   val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
-    val ALL = RO(7, 0)
+    val ALL = RO(hartIdLen - 1, 0)
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.reg.ALL := RegEnable(hartid, reset.asBool)
+    this.regOut.ALL := hartid
   })
     .setAddr(CSRs.mhartid)
 
@@ -548,6 +548,7 @@ class MedelegBundle extends ExceptionBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   this.EX_MCALL.setRO().withReset(0.U) // never delegate machine level ecall
   this.EX_BP.setRO().withReset(0.U)    // Parter 5.4 in debug spec. tcontrol is implemented. medeleg [3] is hard-wired to 0.
+  this.EX_DBLTRP.setRO().withReset(0.U)// double trap is not delegatable
 }
 
 class MidelegBundle extends InterruptBundle {

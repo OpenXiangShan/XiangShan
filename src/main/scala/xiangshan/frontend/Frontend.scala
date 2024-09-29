@@ -105,7 +105,7 @@ class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := RegEnable(io.reset_vector, reset.asBool)
+  bpu.io.reset_vector := io.reset_vector
 
 // pmp
   val PortNumber = ICacheParameters().PortNumber

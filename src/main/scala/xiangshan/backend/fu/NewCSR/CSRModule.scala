@@ -42,7 +42,7 @@ class CSRModule[T <: CSRBundle](
 
   reconnectReg()
 
-  protected val rdataFields = Wire(bundle)
+  val rdataFields = IO(Output(bundle))
   rdataFields :|= regOut
 
   rdata := rdataFields.asUInt

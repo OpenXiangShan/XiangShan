@@ -715,7 +715,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_array(s1_pf_index).bit_vec := l1_array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  val in_pmem = PmemRanges.map(range => s1_pf_bits.req.paddr.inRange(range._1.U, range._2.U)).reduce(_ && _)
+  val in_pmem = PmemRanges.map(range => s1_pf_bits.req.paddr.inRange(range._1.U, range._2.U)).reduce(_ || _)
   io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && in_pmem && io.enable
   io.l1_req.bits := s1_pf_bits.req
 
@@ -884,11 +884,11 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.confidence := pf_ctrl.confidence
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
-  val l2_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ && _)
+  val l2_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ || _)
   io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && enable && pf_ctrl.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
 
-  val l3_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l3_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ && _)
+  val l3_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l3_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ || _)
   io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && enable && pf_ctrl.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
 }

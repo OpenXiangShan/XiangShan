@@ -11,7 +11,7 @@ import xiangshan.backend.fu.VsetModule
 class VTypeGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val insts = Flipped(Vec(DecodeWidth, ValidIO(UInt(32.W))))
-    val redirect = Input(Bool())
+    val walkToArchVType = Input(Bool())
     val walkVType   = Flipped(Valid(new VType))
     val canUpdateVType = Input(Bool())
     val vtype = Output(new VType)
@@ -72,10 +72,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
     vtypeSpecNext := io.vsetvlVType
   }.elsewhen(io.walkVType.valid) {
     vtypeSpecNext := io.walkVType.bits
-  }.elsewhen(io.redirect && io.commitVType.vtype.valid) {
-    // when redirect and commit both coming, we should use commit vtype
-    vtypeSpecNext := io.commitVType.vtype.bits
-  }.elsewhen(io.redirect && !io.commitVType.vtype.valid) {
+  }.elsewhen(io.walkToArchVType) {
     vtypeSpecNext := vtypeArch
   }.elsewhen(inHasVset && io.canUpdateVType) {
     vtypeSpecNext := vtypeNew

@@ -370,6 +370,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
       resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
       resp(idx).bits.excp(nDups).af.instr := false.B
+
+      resp(idx).bits.excp(nDups).vaNeedExt := false.B
+      // overwrite miss & gpaddr when exception related to high address truncation happens
+      resp(idx).bits.miss := false.B
+      resp(idx).bits.gpaddr(nDups) := RegNext(req(idx).bits.fullva)
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
@@ -390,7 +395,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
       resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
       resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
+
+      resp(idx).bits.excp(nDups).vaNeedExt := true.B
     }
+
+    resp(idx).bits.excp(nDups).isHyper := isHyperInst(idx)
   }
 
   def handle_nonblock(idx: Int): Unit = {

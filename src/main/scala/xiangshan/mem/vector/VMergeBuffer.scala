@@ -43,7 +43,8 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val vl               = UInt(elemIdxBits.W)
-  val vaddr            = UInt(VAddrBits.W)
+  val vaNeedExt        = Bool()
+  val vaddr            = UInt(XLEN.W)
   val gpaddr           = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE= Bool()
   val fof              = Bool()
@@ -104,6 +105,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.feedback(VecFeedbacks.LAST)        := true.B
     sink.vstart                             := source.vstart // TODO: if lsq need vl for fof?
     sink.vaddr                              := source.vaddr
+    sink.vaNeedExt                          := source.vaNeedExt
     sink.gpaddr                             := source.gpaddr
     sink.isForVSnonLeafPTE                  := source.isForVSnonLeafPTE
     sink.vl                                 := source.vl
@@ -245,6 +247,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entries(wbMbIndex(i)).vstart       := selElemInfield
         entries(wbMbIndex(i)).exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
         entries(wbMbIndex(i)).vaddr        := vaddr
+        entries(wbMbIndex(i)).vaNeedExt    := selPort(0).vaNeedExt
         entries(wbMbIndex(i)).gpaddr       := selPort(0).gpaddr
         entries(wbMbIndex(i)).isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{

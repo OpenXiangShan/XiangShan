@@ -264,6 +264,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(LoadPipelineWidth + i).valid                 := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits                  := DontCare
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr            := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.fullva           := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaNeedExt        := io.vecFeedback(i).bits.vaNeedExt
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.gpaddr           := io.vecFeedback(i).bits.gpaddr
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx       := io.vecFeedback(i).bits.uopidx
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx       := io.vecFeedback(i).bits.robidx
@@ -273,6 +275,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   // mmio non-data error exception
   exceptionBuffer.io.req.last := uncacheBuffer.io.exception
+  exceptionBuffer.io.req.last.bits.vaNeedExt := true.B
   exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr

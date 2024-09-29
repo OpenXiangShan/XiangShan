@@ -38,7 +38,7 @@ import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
 {
-  val baseVaddr        = UInt(VAddrBits.W)
+  val baseVaddr        = UInt(XLEN.W)
   val uop              = new DynInst
   val paddr            = UInt(PAddrBits.W)
   val mask             = UInt(VLEN.W)
@@ -50,8 +50,8 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val isVsegst         = Bool()
   // for exception
   val vstart           = UInt(elemIdxBits.W)
-  val exceptionVaddr   = UInt(VAddrBits.W)
-  val exceptionGpaddr  = UInt(GPAddrBits.W)
+  val exceptionVaddr   = UInt(XLEN.W)
+  val exceptionGpaddr  = UInt(XLEN.W)
   val exceptionIsForVSnonLeafPTE = Bool()
   val exception_va     = Bool()
   val exception_gpa    = Bool()
@@ -172,7 +172,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val segmentIdx        = RegInit(0.U(elemIdxBits.W))
   val fieldIdx          = RegInit(0.U(fieldBits.W))
-  val segmentOffset     = RegInit(0.U(VAddrBits.W))
+  val segmentOffset     = RegInit(0.U(XLEN.W))
   val splitPtr          = RegInit(0.U.asTypeOf(new VSegUPtr)) // for select load/store data
   val splitPtrNext      = WireInit(0.U.asTypeOf(new VSegUPtr))
 
@@ -330,7 +330,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     // element number in a vd
     // TODO Rewrite it in a more elegant way.
     val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew, true), elemIdxBits)
-    instMicroOp.baseVaddr             := io.in.bits.src_rs1(VAddrBits - 1, 0)
+    instMicroOp.baseVaddr             := io.in.bits.src_rs1
     instMicroOpValid                  := true.B // if is first uop
     instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew)
     instMicroOp.uop                   := io.in.bits.uop
@@ -372,7 +372,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   //latch vaddr
   when(state === s_tlb_req){
-    latchVaddr := vaddr
+    latchVaddr := vaddr(VAddrBits - 1, 0)
   }
   /**
    * tlb req and tlb resq
@@ -383,7 +383,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.resp.ready                  := true.B
   io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
   io.dtlb.req.bits.cmd                := Mux(isVsegld, TlbCmd.read, TlbCmd.write)
-  io.dtlb.req.bits.vaddr              := vaddr
+  io.dtlb.req.bits.vaddr              := vaddr(VAddrBits - 1, 0)
+  io.dtlb.req.bits.fullva             := vaddr
+  io.dtlb.req.bits.checkfullva        := true.B
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
   io.dtlb.req.bits.memidx.is_ld       := isVsegld
   io.dtlb.req.bits.memidx.is_st       := isVsegst

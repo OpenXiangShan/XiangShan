@@ -352,7 +352,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usNoSplit        = (issueUsAligned128 || usMaskInSingleUop) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
-  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx, VAddrBits)
+  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx, XLEN)
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
@@ -489,7 +489,11 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
-  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect), "VLSplitSkidBuffer")
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in,
+    Mux(splitPipeline.io.out.fire,
+      splitPipeline.io.out.bits.uop.robIdx.needFlush(io.redirect),
+      splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect)),
+    "VSSplitSkidBuffer")
 
   // Split Buffer
   splitBuffer.io.redirect <> io.redirect
@@ -506,7 +510,11 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
-  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect),"VSSplitSkidBuffer")
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in,
+    Mux(splitPipeline.io.out.fire,
+      splitPipeline.io.out.bits.uop.robIdx.needFlush(io.redirect),
+      splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect)),
+    "VSSplitSkidBuffer")
 
   // Split Buffer
   splitBuffer.io.redirect <> io.redirect
