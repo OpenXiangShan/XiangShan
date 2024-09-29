@@ -1452,9 +1452,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
 
   // data from load queue refill
-  val s3_ld_raw_data_frm_uncache = RegNextN(io.lsq.ld_raw_data, 3)
-  s3_ld_raw_data_frm_uncache.lqData := GatedRegNextN(io.lsq.ld_raw_data.lqData, 3)
-  s3_ld_raw_data_frm_uncache.uop.fuOpType := GatedRegNextN(io.lsq.ld_raw_data.uop.fuOpType, 3)
+  val s3_ld_raw_data_frm_uncache = DelayNWithValid(io.lsq.ld_raw_data, io.lsq.uncache.fire, 3)._2
   val s3_merged_data_frm_uncache = s3_ld_raw_data_frm_uncache.mergedData()
   val s3_picked_data_frm_uncache = LookupTree(s3_ld_raw_data_frm_uncache.addrOffset, List(
     "b000".U -> s3_merged_data_frm_uncache(63,  0),
