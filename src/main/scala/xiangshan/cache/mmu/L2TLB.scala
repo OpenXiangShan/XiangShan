@@ -76,9 +76,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   difftestIO <> DontCare
 
-  val sfence_tmp = DelayN(io.sfence, 1)
+  val sfence_tmp = Wire(new SfenceBundle)
+   sfence_tmp.bits := DelayNWithValid(io.sfence.bits, io.sfence.valid, 2)._2
+   sfence_tmp.valid := RegNext(RegNext(io.sfence.valid))
   val csr_tmp    = DelayN(io.csr.tlb, 1)
-  val sfence_dup = Seq.fill(9)(RegNext(sfence_tmp))
+  val sfence_dup = Seq.fill(9)(sfence_tmp)
   val csr_dup = Seq.fill(8)(RegNext(csr_tmp)) // TODO: add csr_modified?
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp

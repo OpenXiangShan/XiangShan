@@ -56,7 +56,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     * So, Svinval will not flush pipe, which means
     * it should not drop reqs from pipe and should return right resp
     */
-  val sfence = DelayN(io.sfence, q.fenceDelay)
+  val sfence_tmp = DelayNWithValid(io.sfence.bits, io.sfence.valid, q.fenceDelay)
+  val sfence = Wire(new SfenceBundle)
+  sfence.bits := sfence_tmp._2
+  sfence.valid := sfence_tmp._1
+  sfence.bits.flushPipe := DontCare  // unused 
   val csr = io.csr
   val satp = DelayN(io.csr.satp, q.fenceDelay)
   val vsatp = DelayN(io.csr.vsatp, q.fenceDelay)
