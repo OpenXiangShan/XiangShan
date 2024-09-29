@@ -275,7 +275,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     idle := false.B
     vpn := io.req.bits.req_info.vpn
     s_bitmap_check := false.B
-    last_s2xlate := false.B
+    need_last_s2xlate := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
   }
