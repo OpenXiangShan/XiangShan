@@ -57,10 +57,10 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val hasDebugEbreakException = isEbreak && ebreakEnterDebugMode
 
   // debug_exception_trigger
-  val mcontrolWireVec = tdata1Vec.map{ mod => {
-    val mcontrolWire = Wire(new Mcontrol)
-    mcontrolWire := mod.DATA.asUInt
-    mcontrolWire
+  val mcontrol6WireVec = tdata1Vec.map{ mod => {
+    val mcontrol6Wire = Wire(new Mcontrol6)
+    mcontrol6Wire := mod.DATA.asUInt
+    mcontrol6Wire
   }}
 
   val triggerCanRaiseBpExp = Mux(privState.isModeM, tcontrol.MTE.asBool, true.B)
@@ -73,38 +73,40 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val hasDebugTrap = hasDebugException || hasDebugIntr
 
   val tselect1H = UIntToOH(tselect.asUInt, TriggerNum).asBools
-  val chainVec = mcontrolWireVec.map(_.CHAIN.asBool)
+  val chainVec = mcontrol6WireVec.map(_.CHAIN.asBool)
   val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
   val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
 
   val triggerUpdate = tdata1Update || tdata2Update
 
-  val mcontrolWdata = Wire(new Mcontrol)
-  mcontrolWdata := tdata1Wdata.DATA.asUInt
+  val mcontrol6Wdata = Wire(new Mcontrol6)
+  mcontrol6Wdata := tdata1Wdata.DATA.asUInt
   val tdata1TypeWdata = tdata1Wdata.TYPE
 
-  val mcontrolSelected = Wire(new Mcontrol)
-  mcontrolSelected := tdata1Selected.DATA.asUInt
+  val mcontrol6Selected = Wire(new Mcontrol6)
+  mcontrol6Selected := tdata1Selected.DATA.asUInt
 
   val frontendTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isFetchTrigger ||
-      mcontrolSelected.isFetchTrigger && triggerUpdate
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isFetchTrigger ||
+      mcontrol6Selected.isFetchTrigger && triggerUpdate
 
   val memTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isMemAccTrigger ||
-      mcontrolSelected.isMemAccTrigger && triggerUpdate
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isMemAccTrigger ||
+      mcontrol6Selected.isMemAccTrigger && triggerUpdate
 
-  val triggerEnableVec = tdata1Vec.zip(mcontrolWireVec).map { case(tdata1, mcontrol) =>
+  val triggerEnableVec = tdata1Vec.zip(mcontrol6WireVec).map { case(tdata1, mcontrol6) =>
     tdata1.TYPE.isLegal && (
-      mcontrol.M && privState.isModeM  ||
-        mcontrol.S && privState.isModeHS ||
-        mcontrol.U && privState.isModeHU)
+      mcontrol6.M && privState.isModeM  ||
+        mcontrol6.S && privState.isModeHS ||
+        mcontrol6.U && privState.isModeHU ||
+        mcontrol6.VS && privState.isModeVS ||
+        mcontrol6.VU && privState.isModeVU)
   }
 
-  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isFetchTrigger
   }
-  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isMemAccTrigger
   }
   
