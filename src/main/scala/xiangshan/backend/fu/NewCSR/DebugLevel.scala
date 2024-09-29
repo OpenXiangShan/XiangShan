@@ -126,7 +126,7 @@ class Tdata1Bundle extends CSRBundle{
   val DATA    = RW(58, 0).withReset(0.U)
 
   def getTriggerAction: CSREnumType = {
-    val res = Wire(new Mcontrol)
+    val res = Wire(new Mcontrol6)
     res := this.asUInt
     res.ACTION
   }
@@ -138,9 +138,9 @@ class Tdata1Bundle extends CSRBundle{
     res.TYPE := this.TYPE.legalize.asUInt
     res.DMODE := dmode
     when(this.TYPE.isLegal) {
-      val mcontrolRes = Wire(new Mcontrol)
-      mcontrolRes := this.DATA.asUInt
-      res.DATA := mcontrolRes.writeData(dmode, chainable).asUInt
+      val mcontrol6Res = Wire(new Mcontrol6)
+      mcontrol6Res := this.DATA.asUInt
+      res.DATA := mcontrol6Res.writeData(dmode, chainable).asUInt
     }.otherwise{
       res.DATA := 0.U
     }
@@ -148,34 +148,32 @@ class Tdata1Bundle extends CSRBundle{
   }
 }
 
-class Mcontrol extends CSRBundle{
+class Mcontrol6 extends CSRBundle{
   override val len: Int = 59
   // xiangshan don't support match = NAPOT
-  val MASKMAX = RO(58, 53).withReset(0.U)
-  val SIZEHI  = RW(22, 21).withReset(0.U)
-  val HIT     = RW(20).withReset(0.U)
-  val SELECT  = RW(19).withReset(0.U)
-  val TIMING  = RW(18).withReset(0.U)
-  val SIZELO  = RW(17, 16).withReset(0.U)
-  val ACTION  = TrigAction(15, 12, wNoFilter).withReset(TrigAction.BreakpointExp)
-  val CHAIN   = RW(11).withReset(0.U)
-  val MATCH   = TrigMatch(10, 7, wNoFilter).withReset(TrigMatch.EQ)
-  val M       = RW(6).withReset(0.U)
-  val S       = RW(4).withReset(0.U)
-  val U       = RW(3).withReset(0.U)
-  val EXECUTE = RW(2).withReset(0.U)
-  val STORE   = RW(1).withReset(0.U)
-  val LOAD    = RW(0).withReset(0.U)
+  val UNCERTAIN   = RO(26).withReset(0.U)
+  val HIT1        = RO(25).withReset(0.U)
+  val VS          = RW(24).withReset(0.U)
+  val VU          = RW(23).withReset(0.U)
+  val HIT0        = RO(22).withReset(0.U)
+  val SELECT      = RW(21).withReset(0.U)
+  val SIZE        = RW(18, 16).withReset(0.U)
+  val ACTION      = TrigAction(15, 12, wNoFilter).withReset(TrigAction.BreakpointExp)
+  val CHAIN       = RW(11).withReset(0.U)
+  val MATCH       = TrigMatch(10, 7, wNoFilter).withReset(TrigMatch.EQ)
+  val M           = RW(6).withReset(0.U)
+  val UNCERTAINEN = RO(5).withReset(0.U)
+  val S           = RW(4).withReset(0.U)
+  val U           = RW(3).withReset(0.U)
+  val EXECUTE     = RW(2).withReset(0.U)
+  val STORE       = RW(1).withReset(0.U)
+  val LOAD        = RW(0).withReset(0.U)
 
-  def writeData(dmode: Bool, chainable: Bool): Mcontrol = {
-    val res = Wire(new Mcontrol)
+  def writeData(dmode: Bool, chainable: Bool): Mcontrol6 = {
+    val res = Wire(new Mcontrol6)
     res := this.asUInt
-    res.MASKMAX     := 0.U
-    res.SIZEHI      := 0.U
-    res.HIT         := false.B
+    res.SIZE        := 0.U
     res.SELECT      := this.EXECUTE.asBool && this.SELECT.asBool
-    res.TIMING      := false.B
-    res.SIZELO      := 0.U
     res.ACTION      := this.ACTION.legalize(dmode).asUInt
     res.CHAIN       := this.CHAIN.asBool && chainable
     res.MATCH       := this.MATCH.legalize.asUInt
@@ -197,7 +195,7 @@ object Tdata1Type extends CSREnum with WARLApply {
   val Tmexttrigger = Value(7.U)
   val Disabled     = Value(15.U)
 
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Mcontrol)
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Mcontrol6)
 
   override def legalize(enumeration: CSREnumType): CSREnumType = {
     val res = WireInit(enumeration)
@@ -260,8 +258,8 @@ class Tdata2Bundle extends OneFieldBundle
 class TinfoBundle extends CSRBundle{
   // Version isn't in version 0.13
   val VERSION     = RO(31, 24).withReset(0.U)
-  // only support mcontrol
-  val MCONTROLEN  = RO(2).withReset(1.U)
+  // only support mcontrol6
+  val MCONTROL6EN = RO(6).withReset(1.U)
 }
 
 class TcontrolBundle extends CSRBundle{
