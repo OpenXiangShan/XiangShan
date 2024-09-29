@@ -205,7 +205,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         Mux(sel(0) < sel(1),
             res(0), res(1)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits), Seq(0.U))
+
+      val oldidx = Mux(valid(0) && valid(1),
+        Mux(sel(0) < sel(1),
+          sel(0), sel(1)),
+        Mux(valid(0) && !valid(1), sel(0), sel(1)))
+      (Seq(oldest.valid), Seq(oldest.bits), Seq(oldidx))
     } else {
       val left  = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), sel.take(sel.length / 2))
       val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), sel.takeRight(sel.length - (sel.length / 2)))
