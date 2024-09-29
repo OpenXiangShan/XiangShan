@@ -777,8 +777,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr === CSRs.mip.U) || (addr === CSRs.sip.U) || (addr === CSRs.vsip.U) ||
     (addr === CSRs.hip.U) || (addr === CSRs.mvip.U) || (addr === CSRs.hvip.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR ||
-    (addr === CSRs.menvcfg.U) ||
-    (addr === CSRs.henvcfg.U) ||
     (addr === CSRs.stimecmp.U)
   )
 
