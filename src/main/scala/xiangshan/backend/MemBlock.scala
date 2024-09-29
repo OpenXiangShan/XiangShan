@@ -730,9 +730,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // After the segment instruction directive starts executing, no other instructions should be executed.
   val vSegmentFlag = RegInit(false.B)
 
-  when(vSegmentUnit.io.in.fire){
+  when(GatedValidRegNext(vSegmentUnit.io.in.fire)) {
     vSegmentFlag := true.B
-  }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
+  }.elsewhen(GatedValidRegNext(vSegmentUnit.io.uopwriteback.valid)) {
     vSegmentFlag := false.B
   }
 
@@ -1050,7 +1050,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // misalignBuffer
-  loadMisalignBuffer.io.redirect                <> redirect  
+  loadMisalignBuffer.io.redirect                <> redirect
   loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
   loadMisalignBuffer.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
