@@ -604,7 +604,6 @@ class CtrlBlockImp(
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
-  io.robio.exception.bits.gpaddr := gpaMem.io.exceptionReadData
 
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
