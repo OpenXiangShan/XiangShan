@@ -33,7 +33,7 @@ trait StridePredictorParams {
   val NumEntries: Int = 128
   val NumWay: Int = 4
   val TagWidth: Int = 16
-  val PcOffset: Int = 2
+  val PcOffset: Int = 1
 
   val StrideWidth = 9
   val InflightWidth = 7
@@ -47,7 +47,7 @@ trait StridePredictorParams {
 
   def NumGroup = NumEntries / NumWay
   def GroupWidth = log2Up(NumGroup)
-  def ValidPcWidth = PcOffset + GroupWidth + TagWidth - 1
+  def ValidPcWidth = TagWidth + GroupWidth + PcOffset
 
   def MaxConfidenceVal = (math.pow(2, ConfidenceWidth) - 1).toInt
   def MaxUtilityVal = (math.pow(2, UtilityWidth) - 1).toInt
@@ -57,7 +57,7 @@ trait StridePredictorParams {
   }
 
   def get_tag(pc: UInt): UInt = {
-    Cat(pc(TagWidth + GroupWidth + PcOffset - 2, GroupWidth + PcOffset), pc(1))
+    pc(TagWidth + GroupWidth + PcOffset - 1, GroupWidth + PcOffset)
   }
 }
 
