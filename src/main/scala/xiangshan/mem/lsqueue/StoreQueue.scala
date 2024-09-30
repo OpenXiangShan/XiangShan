@@ -299,7 +299,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val doMisalignSt = GatedValidRegNext((rdataPtrExt(0).value === deqPtr) && (cmtPtr === deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && unaligned(deqPtr))
   val finishMisalignSt = GatedValidRegNext(doMisalignSt && io.maControl.control.removeSq && !io.maControl.control.hasException)
   val misalignBlock = doMisalignSt && !finishMisalignSt
-  
+
   // store miss align info
   io.maControl.storeInfo.data := dataModule.io.rdata(0).data
   io.maControl.storeInfo.dataReady := doMisalignSt
@@ -859,7 +859,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   io.cmoOpReq.valid := deqCanDoCbo && cboFlushedSb && (uncacheState === s_req)
-  io.cmoOpReq.bits.opcode  := uop(deqPtr).fuOpType(1, 0)
+  io.cmoOpReq.bits.opcode  := GatedRegNext(uop(deqPtr).fuOpType(1, 0))
   io.cmoOpReq.bits.address := cboMmioAddr
 
   io.cmoOpResp.ready := deqCanDoCbo && (uncacheState === s_resp)
