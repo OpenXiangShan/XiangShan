@@ -100,7 +100,8 @@ trait HasXSDts {
     val int_resources = (
       memBlock.inner.clint_int_sink.edges.in.flatMap(_.source.sources) ++
       memBlock.inner.plic_int_sink.edges.in.flatMap(_.source.sources) ++
-      memBlock.inner.debug_int_sink.edges.in.flatMap(_.source.sources)
+      memBlock.inner.debug_int_sink.edges.in.flatMap(_.source.sources) ++
+      memBlock.inner.nmi_int_sink.edges.in.flatMap(_.source.sources)
       ).flatMap {
       s =>
         println(s.resources.map(_.key), s.range)
@@ -111,7 +112,9 @@ trait HasXSDts {
       7,    // mtip  [clint]
       11,   // meip  [plic]
       9,    // seip  [plic]
-      65535 // debug [debug]
+      65535, // debug [debug]
+      31,   // nmi_31 [nmi]
+      43    // nmi_43 [nmi]
     )
     assert(int_resources.size == int_ids.size)
     for((resources, id) <- int_resources.zip(int_ids)){

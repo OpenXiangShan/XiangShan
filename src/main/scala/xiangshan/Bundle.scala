@@ -371,8 +371,9 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val nmi = new NonmaskableInterruptIO()
 }
 
-class NonmaskableInterruptIO(implicit p: Parameters) extends XSBundle {
-  val nmi = Input(Bool())
+class NonmaskableInterruptIO() extends Bundle {
+  val nmi_31 = Input(Bool())
+  val nmi_43 = Input(Bool())
   // reserve for other nmi type
 }
 
