@@ -164,17 +164,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem_addr := Mux(af_level === 3.U, l3addr, Mux(af_level === 2.U, l2addr, l1addr))
 
   val hptw_resp = Reg(new HptwResp)
+  val full_gvpn = Reg(UInt(ptePPNLen.W))
   val gpaddr = MuxCase(mem_addr, Seq(
-    stage1Hit -> Cat(stage1.genPPN(), 0.U(offLen.W)),
-    onlyS2xlate -> Cat(vpn, 0.U(offLen.W)
-  )))
-  val last_s2xlate_gpaddr = Cat(MuxLookup(level, pte.getPPN())(Seq(
+    (stage1Hit || onlyS2xlate) -> Cat(full_gvpn, 0.U(offLen.W)),
+    !s_last_hptw_req -> Cat(MuxLookup(level, pte.getPPN())(Seq(
       3.U -> Cat(pte.getPPN()(ptePPNLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
       2.U -> Cat(pte.getPPN()(ptePPNLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
       1.U -> Cat(pte.getPPN()(ptePPNLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)
     ))),
     0.U(offLen.W))
-  val full_gvpn = Reg(UInt(ptePPNLen.W))
+  ))
   val gvpn_gpf = !(hptw_pageFault || hptw_accessFault ) && Mux(s2xlate && io.csr.hgatp.mode === Sv39x4, full_gvpn(ptePPNLen - 1, GPAddrBitsSv39x4 - offLen) =/= 0.U, Mux(s2xlate && io.csr.hgatp.mode === Sv48x4, full_gvpn(ptePPNLen - 1, GPAddrBitsSv48x4 - offLen) =/= 0.U, false.B))
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
@@ -224,7 +223,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
-  io.hptw.req.bits.gvpn := Mux(!s_last_hptw_req, get_pn(last_s2xlate_gpaddr), get_pn(gpaddr))
+  io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
 
   when (io.req.fire && io.req.bits.stage1Hit){
