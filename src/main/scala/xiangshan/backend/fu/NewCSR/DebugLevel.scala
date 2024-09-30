@@ -56,9 +56,6 @@ trait DebugLevel { self: NewCSR =>
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
-  val tcontrol = Module(new CSRModule("Tcontrol", new TcontrolBundle) with TrapEntryMEventSinkBundle with MretEventSinkBundle)
-    .setAddr(CSRs.tcontrol)
-
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
     .setAddr(CSRs.dcsr)
 
@@ -76,7 +73,6 @@ trait DebugLevel { self: NewCSR =>
     tdata2,
     tselect,
     tinfo,
-    tcontrol,
     dcsr,
     dpc,
     dscratch0,
@@ -260,13 +256,6 @@ class TinfoBundle extends CSRBundle{
   val VERSION     = RO(31, 24).withReset(0.U)
   // only support mcontrol6
   val MCONTROL6EN = RO(6).withReset(1.U)
-}
-
-class TcontrolBundle extends CSRBundle{
-  // M-mode previous trigger enable field
-  val MPTE = RW(7).withReset(0.U)
-  // M-mode trigger enable field
-  val MTE  = RW(3).withReset(0.U)
 }
 
 // Dscratch

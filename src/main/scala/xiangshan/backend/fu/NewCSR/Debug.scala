@@ -23,7 +23,6 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val debugMode = io.in.debugMode
 
   private val dcsr = io.in.dcsr
-  private val tcontrol = io.in.tcontrol
   private val tselect = io.in.tselect
   private val tdata1Selected = io.in.tdata1Selected
   private val tdata2Selected = io.in.tdata2Selected
@@ -63,7 +62,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
     mcontrol6Wire
   }}
 
-  val triggerCanRaiseBpExp = Mux(privState.isModeM, tcontrol.MTE.asBool, true.B)
+  val triggerCanRaiseBpExp = io.in.triggerCanRaiseBpExp
   val triggerEnterDebugMode = hasExp && TriggerAction.isDmode(trigger)
 
   // debug_exception_single
@@ -149,11 +148,11 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     val debugMode = Bool()
 
     val dcsr = new DcsrBundle
-    val tcontrol = new TcontrolBundle
     val tselect = new TselectBundle(TriggerNum)
     val tdata1Selected = new Tdata1Bundle
     val tdata2Selected = new Tdata2Bundle
     val tdata1Vec = Vec(TriggerNum, new Tdata1Bundle)
+    val triggerCanRaiseBpExp = Bool()
 
     val tdata1Update = Bool()
     val tdata2Update = Bool()

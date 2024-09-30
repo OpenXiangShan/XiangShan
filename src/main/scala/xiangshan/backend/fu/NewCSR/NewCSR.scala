@@ -677,7 +677,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.sstatus := mstatus.sstatus
         in.vsstatus := vsstatus.regOut
         in.pcFromXtvec := trapHandleMod.io.out.pcFromXtvec
-        in.tcontrol := tcontrol.regOut
 
         in.satp  := satp.regOut
         in.vsatp := vsatp.regOut
@@ -708,7 +707,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     case in =>
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
-      in.tcontrol := tcontrol.regOut
       in.satp := satp.regOut
       in.vsatp := vsatp.regOut
       in.hgatp := hgatp.regOut
@@ -973,6 +971,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     tdata1Wire
   }}
 
+  val triggerCanRaiseBpExp = !(privState.isModeM && !mstatus.regOut.MIE ||
+    medeleg.regOut.EX_BP && privState.isModeHS && !mstatus.sstatus.SIE ||
+    medeleg.regOut.EX_BP && hedeleg.regOut.EX_BP && privState.isModeVS && !vsstatus.regOut.SIE)
+
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
@@ -983,7 +985,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
   debugMod.io.in.dcsr                      := dcsr.regOut
-  debugMod.io.in.tcontrol                  := tcontrol.regOut
   debugMod.io.in.tselect                   := tselect.regOut
   debugMod.io.in.tdata1Vec                 := tdata1Vec
   debugMod.io.in.tdata1Selected            := tdata1.rdata
@@ -991,6 +992,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata1Update              := tdata1Update
   debugMod.io.in.tdata2Update              := tdata2Update
   debugMod.io.in.tdata1Wdata               := wdata
+  debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
@@ -1315,7 +1317,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffTriggerCSRState.tselect   := tselect.rdata
     diffTriggerCSRState.tdata1    := tdata1.rdata
     diffTriggerCSRState.tinfo     := tinfo.rdata
-    diffTriggerCSRState.tcontrol  := tcontrol.rdata
 
     val diffVecCSRState = DifftestModule(new DiffVecCSRState)
     diffVecCSRState.coreid := hartId
