@@ -667,8 +667,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
 
   // regfile prefetch
-  val s0_pfHit = (int_issue_vaddr === io.ldin.bits.uop.predAddr) && !io.ldin.bits.uop.isLoadPf
-  val s0_currAddr = int_issue_vaddr
+  val int_issue_pfHit = (int_issue_vaddr === io.ldin.bits.uop.predAddr) && !io.ldin.bits.uop.isLoadPf
+  val s0_pfHit = MuxCase(false.B, Seq(
+    s0_src_select_vec(mab_idx)       -> io.misalign_ldin.bits.uop.pfHit,
+    s0_src_select_vec(super_rep_idx) -> io.replay.bits.uop.pfHit,
+    s0_src_select_vec(fast_rep_idx)  -> io.fast_rep_in.bits.uop.pfHit,
+    s0_src_select_vec(lsq_rep_idx)   -> io.replay.bits.uop.pfHit,
+    s0_src_select_vec(int_iss_idx)   -> int_issue_pfHit,
+  ))
 
   s0_tlb_hlv := Mux(
     s0_src_valid_vec(mab_idx),
@@ -714,7 +720,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.uop.pfHit     := s0_pfHit
-  s0_out.uop.currAddr  := s0_currAddr
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
   s0_out.hasROBEntry   := s0_sel_src.has_rob_entry
   s0_out.isPrefetch    := s0_sel_src.prf
@@ -1575,6 +1580,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.valid       := (s3_mmio.valid ||
                           (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
+  io.ldout.bits.uop.pfHit := s3_in.uop.pfHit && s3_valid
+  io.ldout.bits.uop.currAddr := Mux(s3_valid, s3_in.vaddr, 0.U)
   io.ldout.bits.isFromLoadUnit := true.B
 
   // TODO: check this --hx
