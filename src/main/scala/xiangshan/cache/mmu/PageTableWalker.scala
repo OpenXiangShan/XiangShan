@@ -235,7 +235,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     need_last_s2xlate := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
-    full_gvpn := stage1.genPPN()
+    full_gvpn := io.req.bits.stage1.genPPN()
   }
 
   when (io.resp.fire && stage1Hit){
