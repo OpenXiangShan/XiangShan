@@ -136,8 +136,6 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
 
-  val tcontrol = Input(new TcontrolBundle)
-
   val pcFromXtvec = Input(UInt(XLEN.W))
 
   val satp = Input(new SatpBundle)
