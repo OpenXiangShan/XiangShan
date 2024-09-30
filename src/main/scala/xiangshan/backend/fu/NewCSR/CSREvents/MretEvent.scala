@@ -15,14 +15,12 @@ import xiangshan.AddrTransType
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
-  val tcontrol = ValidIO((new TcontrolBundle).addInEvent(_.MTE))
   val targetPc = ValidIO(new TargetPCBundle)
 }
 
 class MretEventInput extends Bundle {
   val mstatus  = Input(new MstatusBundle)
   val mepc     = Input(new Epc())
-  val tcontrol = Input(new TcontrolBundle)
   val satp     = Input(new SatpBundle)
   val vsatp    = Input(new SatpBundle)
   val hgatp    = Input(new HgatpBundle)
@@ -53,7 +51,6 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.valid := valid
   out.mstatus  .valid := valid
-  out.tcontrol .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits.PRVM     := in.mstatus.MPP
@@ -63,7 +60,6 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.mstatus.bits.MIE        := in.mstatus.MPIE
   out.mstatus.bits.MPIE       := 1.U
   out.mstatus.bits.MPRV       := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
-  out.tcontrol.bits.MTE       := in.tcontrol.MPTE
   out.targetPc.bits.pc        := in.mepc.asUInt
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(in.mepc.asUInt)
   out.targetPc.bits.raiseIAF  := instrAddrTransType.checkAccessFault(in.mepc.asUInt)

@@ -56,9 +56,6 @@ trait DebugLevel { self: NewCSR =>
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
-  val tcontrol = Module(new CSRModule("Tcontrol", new TcontrolBundle) with TrapEntryMEventSinkBundle with MretEventSinkBundle)
-    .setAddr(CSRs.tcontrol)
-
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
     .setAddr(CSRs.dcsr)
 
@@ -76,7 +73,6 @@ trait DebugLevel { self: NewCSR =>
     tdata2,
     tselect,
     tinfo,
-    tcontrol,
     dcsr,
     dpc,
     dscratch0,
@@ -156,8 +152,8 @@ class Mcontrol6 extends CSRBundle{
   val VS          = RW(24).withReset(0.U)
   val VU          = RW(23).withReset(0.U)
   val HIT0        = RO(22).withReset(0.U)
-  val SELECT      = RW(21).withReset(0.U)
-  val SIZE        = RW(18, 16).withReset(0.U)
+  val SELECT      = RO(21).withReset(0.U)
+  val SIZE        = RO(18, 16).withReset(0.U)
   val ACTION      = TrigAction(15, 12, wNoFilter).withReset(TrigAction.BreakpointExp)
   val CHAIN       = RW(11).withReset(0.U)
   val MATCH       = TrigMatch(10, 7, wNoFilter).withReset(TrigMatch.EQ)
@@ -172,11 +168,15 @@ class Mcontrol6 extends CSRBundle{
   def writeData(dmode: Bool, chainable: Bool): Mcontrol6 = {
     val res = Wire(new Mcontrol6)
     res := this.asUInt
+    res.UNCERTAIN   := 0.U
+    res.HIT1        := 0.U
+    res.HIT0        := 0.U
+    res.SELECT      := 0.U
     res.SIZE        := 0.U
-    res.SELECT      := this.EXECUTE.asBool && this.SELECT.asBool
     res.ACTION      := this.ACTION.legalize(dmode).asUInt
     res.CHAIN       := this.CHAIN.asBool && chainable
     res.MATCH       := this.MATCH.legalize.asUInt
+    res.UNCERTAINEN := 0.U
     res
   }
   def isFetchTrigger: Bool = this.EXECUTE.asBool
@@ -260,13 +260,6 @@ class TinfoBundle extends CSRBundle{
   val VERSION     = RO(31, 24).withReset(0.U)
   // only support mcontrol6
   val MCONTROL6EN = RO(6).withReset(1.U)
-}
-
-class TcontrolBundle extends CSRBundle{
-  // M-mode previous trigger enable field
-  val MPTE = RW(7).withReset(0.U)
-  // M-mode trigger enable field
-  val MTE  = RW(3).withReset(0.U)
 }
 
 // Dscratch
