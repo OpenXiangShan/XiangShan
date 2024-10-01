@@ -1043,7 +1043,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Just select the last Uop tah has an exception.
   val vecCommitHasExceptionSelectUop  = ParallelPosteriorityMux(vecCommitHasExceptionValid, vecCommitHasExceptionUop)
   // If the last flow with an exception is the LastFlow of this instruction, the flag is not set.
-  val vecCommitLastFlow =  ParallelPosteriorityMux(vecCommitHasExceptionValid, vecCommitHasExceptionLastFlow)
+  // compare robidx to select the last flow
+  require(EnsbufferWidth == 2, "The vector store exception handle process only support EnsbufferWidth == 2 yet.")
+  val robidxEQ = uop(rdataPtrExt(0).value).robIdx === uop(rdataPtrExt(1).value).robIdx
+
+  val vecCommitLastFlow = 
+    // robidx equal => check if 1 is last flow
+    robidxEQ && vecCommitHasExceptionLastFlow(1) || 
+    // robidx not equal => 0 must be the last flow, just check if 1 is last flow when 1 has exception
+    !robidxEQ && vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1)
+  
 
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr                   = rdataPtrExt(i).value
