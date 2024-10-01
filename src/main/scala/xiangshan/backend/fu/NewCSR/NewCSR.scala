@@ -1354,7 +1354,7 @@ class NewCSR(implicit val p: Parameters) extends Module
                                   platformIRP.VSEIP && !RegNext(platformIRP.VSEIP) ||
                                  !hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt) &&  RegNext(hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt)) ||
                                   hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt) && !RegNext(hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt))
-    val platformIRPVstipChange = !platformIRP.VSTIP && RegNext(platformIRP.VSTIP) || platformIRP.VSTIP && !RegNext(platformIRP.VSTIP)
+    val platformIRPVstipChange = !sstcIRGen.o.VSTIP && RegNext(sstcIRGen.o.VSTIP) || sstcIRGen.o.VSTIP && !RegNext(sstcIRGen.o.VSTIP)
     val lcofiReqChange         = !lcofiReq && RegNext(lcofiReq) || lcofiReq && !RegNext(lcofiReq)
 
     val diffNonRegInterruptPendingEvent = DifftestModule(new DiffNonRegInterruptPendingEvent)
