@@ -520,8 +520,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val deqPtrEntry = robDeqGroup(deqPtr.value(bankAddrWidth-1,0))
   val deqPtrEntryValid = deqPtrEntry.commit_v
+  val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe
+  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
   val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
@@ -648,7 +649,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val misPredBlock = misPredBlockCounter(0)
   val deqFlushBlockCounter = Reg(UInt(3.W))
   val deqFlushBlock = deqFlushBlockCounter(0)
-  val deqHasFlushed = RegInit(false.B)
   val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
   val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
   when(deqNeedFlush && deqHitRedirectReg){
