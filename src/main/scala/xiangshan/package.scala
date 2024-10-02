@@ -115,6 +115,7 @@ package object xiangshan {
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
     def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
+    def isFof    (fuOpType: UInt): Bool = isVecLd(fuOpType) && fuOpType(4)
   }
 
   object VstuType {
