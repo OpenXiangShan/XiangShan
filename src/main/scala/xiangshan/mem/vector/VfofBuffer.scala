@@ -31,7 +31,7 @@ import xiangshan.backend.fu.vector.Bundles._
 class VfofDataBundle(implicit p: Parameters) extends VLSUBundle{
   val uop              = new DynInst
   val vl               = UInt(elemIdxBits.W)
-  val vuopIdx          = UopIdx()
+  val hasException     = Bool()
 }
 
 
@@ -54,14 +54,14 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   val enqNeedCancel = enqBits.uop.robIdx.needFlush(io.redirect)
   val enqIsFixVl = enqBits.uop.vpu.isVleff && enqBits.uop.vpu.lastUop
 
-  XSError(entries.uop.robIdx.value =/= enqBits.uop.robIdx.value && valid && enqValid, "There should be no new fof instrction coming in\n")
-  XSError(entriesIsFixVl && valid && enqValid, "There should not new uop enqueue\n")
+  XSError(entries.uop.robIdx.value =/= enqBits.uop.robIdx.value && valid && enqValid, "There should be no new fof instrction coming in!\n")
+  XSError(entriesIsFixVl && valid && enqValid, "There should not new uop enqueue!\n")
 
   when(enqValid && !enqNeedCancel) {
     when(!valid){
-      entries.uop     := enqBits.uop
-      entries.vl      := 0.U
-      entries.vuopIdx := 0.U
+      entries.uop           := enqBits.uop
+      entries.vl            := enqBits.src_vl.asTypeOf(VConfig()).vl
+      entries.hasException  := false.B
     }.elsewhen(valid && enqIsFixVl){
       entries.uop     := enqBits.uop
     }
@@ -79,7 +79,7 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   }
 
   //Gather writeback information
-  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.uop.robIdx.value === entries.uop.robIdx.value }
+  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.uop.robIdx === entries.uop.robIdx }
 
   def getOldest(valid: Seq[Bool], bits: Seq[DynInst]): DynInst = {
     def getOldest_recursion[T <: Data](valid: Seq[Bool], bits: Seq[DynInst]): (Seq[Bool], Seq[DynInst]) = {
@@ -92,10 +92,13 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
           res(i).valid := valid(i)
           res(i).bits := bits(i)
         }
+        val withExcep0 = bits(0).exceptionVec.asUInt.orR
+        val withExcep1 = bits(1).exceptionVec.asUInt.orR
+        XSError(withExcep0 && withExcep1 && valid(0) && valid(1), "Multiple fof Uop are written back at the same time!\n")
         val oldest = Mux(
-          !valid(1) || (bits(1).vpu.vuopIdx > bits(0).vpu.vuopIdx),
-          res(0),
-          res(1)
+          valid(0) && valid(1),
+          Mux((bits(1).vpu.vl > bits(0).vpu.vl || withExcep0) && !withExcep1, res(0), res(1)),
+          Mux(valid(0) && !valid(1), res(0), res(1))
         )
         (Seq(oldest.valid), Seq(oldest.bits))
       } else {
@@ -109,22 +112,27 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
 
   //Update uop vl
   io.mergeUopWriteback.map{_.ready := true.B}
-  val wbUpdateBits  = getOldest(wbIsfof, io.mergeUopWriteback.map(_.bits.uop))
-  val wbUpdateValid = wbIsfof.reduce(_ || _) && (wbUpdateBits.vpu.vuopIdx <= entries.vuopIdx) && valid && !needRedirect
+  val wbBits          = getOldest(wbIsfof, io.mergeUopWriteback.map(_.bits.uop))
+  val wbValid         = wbIsfof.reduce(_ || _)
+  val wbHasException  = wbBits.exceptionVec.asUInt.orR
+  val wbUpdateValid = wbValid && (wbBits.vpu.vl < entries.vl || wbHasException) && valid && !needRedirect && !entries.hasException
+
+  XSError(wbValid && wbHasException && valid && entries.hasException, "The same instruction triggers an exception multiple times!\n")
 
   when(wbUpdateValid) {
-    entries.vl       := wbUpdateBits.vpu.vl
-    entries.vuopIdx  := wbUpdateBits.vpu.vuopIdx
+    entries.vl                    := wbBits.vpu.vl
+    entries.hasException          := wbHasException
   }
 
   //Deq
-  io.uopWriteback.bits               := 0.U.asTypeOf(new MemExuOutput(isVector = true))
-  io.uopWriteback.bits.uop           := entries.uop
-  io.uopWriteback.bits.data          := entries.vl
-  io.uopWriteback.bits.uop.vpu.vl    := entries.vl
-  io.uopWriteback.bits.mask.get      := Fill(VLEN, 1.U)
-  io.uopWriteback.bits.uop.vpu.vmask := Fill(VLEN, 1.U)
-  io.uopWriteback.valid              := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
+  io.uopWriteback.bits                  := 0.U.asTypeOf(new MemExuOutput(isVector = true))
+  io.uopWriteback.bits.uop              := entries.uop
+  io.uopWriteback.bits.uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+  io.uopWriteback.bits.data             := entries.vl
+  io.uopWriteback.bits.uop.vpu.vl       := entries.vl
+  io.uopWriteback.bits.mask.get         := Fill(VLEN, 1.U)
+  io.uopWriteback.bits.uop.vpu.vmask    := Fill(VLEN, 1.U)
+  io.uopWriteback.valid                 := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
 
   when(io.uopWriteback.fire) { valid   := false.B }
 
