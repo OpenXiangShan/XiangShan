@@ -274,7 +274,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.robIdx, io.ldin.bits.uop.robIdx)
   private val SRC_NUM = 10
   private val Seq(
-    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, lsq_rep_idx, 
+    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, lsq_rep_idx,
     high_pf_idx, vec_iss_idx, int_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -1056,7 +1056,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // soft prefetch will not trigger any exception (but ecc error interrupt may
   // be triggered)
-  when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
+  val s2_tlb_unrelated_exceps = s2_in.uop.exceptionVec(loadAddrMisaligned) ||
+                                s2_in.uop.exceptionVec(breakPoint)
+  when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss && !s2_tlb_unrelated_exceps)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
   val s2_exception = s2_vecActive &&
