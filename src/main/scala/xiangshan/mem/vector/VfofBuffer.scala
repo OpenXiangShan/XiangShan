@@ -70,13 +70,15 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   //Control Signal
   val needRedirect = entries.uop.robIdx.needFlush(io.redirect)
 
-  when(enqValid && !enqNeedCancel) {
-    valid := true.B  //Enq
+
+  when(io.uopWriteback.fire) {
+    valid := false.B  //Deq
   }.elsewhen(needRedirect) {
     valid := false.B //Redirect
-  }.elsewhen(io.uopWriteback.fire) {
-    valid := false.B //Deq
+  }.elsewhen(enqValid && !enqNeedCancel) {
+    valid := true.B //Enq
   }
+
 
   //Gather writeback information
   val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.uop.robIdx === entries.uop.robIdx }
