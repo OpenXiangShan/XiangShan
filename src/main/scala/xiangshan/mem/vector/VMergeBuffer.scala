@@ -30,6 +30,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.datapath.NewPipelineConnect
 import freechips.rocketchip.diplomacy.BufferParams
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val data             = UInt(VLEN.W)
@@ -270,6 +271,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entry.gpaddr       := selPort(0).gpaddr
         entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{
+        entry.uop.vpu.vta  := VType.tu
         entry.vl           := vstart
       }
     }
