@@ -94,7 +94,7 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
         }
         val withExcep0 = bits(0).exceptionVec.asUInt.orR
         val withExcep1 = bits(1).exceptionVec.asUInt.orR
-        XSError(withExcep0 && withExcep1 && valid(0) && valid(1), "Multiple fof Uop are written back at the same time!\n")
+        XSError(this.valid && withExcep0 && withExcep1 && valid(0) && valid(1), "Writeback to multiple Uop with exceptions at the same time!\n")
         val oldest = Mux(
           valid(0) && valid(1),
           Mux((bits(1).vpu.vl > bits(0).vpu.vl || withExcep0) && !withExcep1, res(0), res(1)),
@@ -134,6 +134,5 @@ class VfofBuffer(implicit p: Parameters) extends VLSUModule{
   io.uopWriteback.bits.uop.vpu.vmask    := Fill(VLEN, 1.U)
   io.uopWriteback.valid                 := valid && entries.uop.vpu.lastUop && entries.uop.vpu.isVleff && !needRedirect
 
-  when(io.uopWriteback.fire) { valid   := false.B }
 
 }
