@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
+import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecInfo, VecPipedFuncUnit}
 import xiangshan.ExceptionNO

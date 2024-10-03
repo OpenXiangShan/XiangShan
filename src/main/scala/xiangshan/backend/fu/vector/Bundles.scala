@@ -82,6 +82,14 @@ object Bundles {
       res.vlmul := 0.U
       res
     }
+
+    def mu: UInt = 0.U(1.W)
+
+    def ma: UInt = 1.U(1.W)
+
+    def tu: UInt = 0.U(1.W)
+
+    def ta: UInt = 1.U(1.W)
   }
 
   object VsetVType {
@@ -122,11 +130,6 @@ object Bundles {
       new VConfig()
     }
   }
-
-  def mu: UInt = 0.U(1.W)
-  def ma: UInt = 1.U(1.W)
-  def tu: UInt = 0.U(1.W)
-  def ta: UInt = 1.U(1.W)
 
   // modify the width when support more vector data width
   object VSew extends NamedUInt(2) {
