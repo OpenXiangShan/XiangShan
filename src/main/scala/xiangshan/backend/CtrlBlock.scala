@@ -427,9 +427,8 @@ class CtrlBlockImp(
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodedInst)))
-  private val vecExcpModBusy = io.fromVecExcpMod.busy
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready && !vecExcpModBusy,
+    PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
 
     decodePipeRename(i).ready := rename.io.in(i).ready
@@ -589,6 +588,7 @@ class CtrlBlockImp(
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
+  rob.io.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
   io.redirect := s1_s3_redirect
 

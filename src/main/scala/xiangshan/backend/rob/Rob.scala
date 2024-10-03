@@ -85,6 +85,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val hasVsetvl = Output(Bool())
       }
     }
+    val fromVecExcpMod = Input(new Bundle {
+      val busy = Bool()
+    })
     val readGPAMemAddr = ValidIO(new Bundle {
       val ftqPtr = new FtqPtr()
       val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -152,7 +155,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq
+  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
@@ -807,7 +810,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect
-  enqPtrGenModule.io.allowEnqueue := allowEnqueue && rab.io.canEnq
+  enqPtrGenModule.io.allowEnqueue := allowEnqueue && rab.io.canEnq && !io.fromVecExcpMod.busy
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
   enqPtrGenModule.io.enq := VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop))
   enqPtrVec := enqPtrGenModule.io.out
