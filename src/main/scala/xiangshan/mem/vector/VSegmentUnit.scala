@@ -56,7 +56,8 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val exception_gpa    = Bool()
   val exception_pa     = Bool()
   val exceptionVstart  = UInt(elemIdxBits.W)
-  val exceptionVl      = UInt(elemIdxBits.W)
+  // valid: have fof exception but can not trigger, need update all writebacked uop.vl with exceptionVl
+  val exceptionVl      = ValidIO(UInt(elemIdxBits.W))
   val isFof            = Bool()
 }
 
@@ -352,7 +353,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.uopFlowNum            := uopFlowNum
     instMicroOp.uopFlowNumMask        := GenVlMaxMask(uopFlowNum, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
-    instMicroOp.exceptionVl           := io.in.bits.src_vl.asTypeOf(VConfig()).vl
+    instMicroOp.exceptionVl.valid     := false.B
+    instMicroOp.exceptionVl.bits      := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
     instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
   }
@@ -476,7 +478,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
         instMicroOp.exceptionVaddr  := vaddr
         instMicroOp.exceptionVstart := segmentIdx // for exception
       }.otherwise {
-        instMicroOp.exceptionVl     := segmentIdx
+        instMicroOp.exceptionVl.valid := true.B
+        instMicroOp.exceptionVl.bits := segmentIdx
       }
     }
 
@@ -693,8 +696,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   when(fofFixVlValid) {
     writebackOut.uop                    := fofBuffer
-    writebackOut.uop.vpu.vl             := instMicroOp.exceptionVl
-    writebackOut.data                   := instMicroOp.exceptionVl
+    writebackOut.uop.vpu.vl             := instMicroOp.exceptionVl.bits
+    writebackOut.data                   := instMicroOp.exceptionVl.bits
     writebackOut.mask.get               := Fill(VLEN, 1.U)
     writebackOut.uop.vpu.vmask          := Fill(VLEN, 1.U)
   }.otherwise{
@@ -704,7 +707,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     writebackOut.mask.get               := instMicroOp.mask
     writebackOut.data                   := data(deqPtr.value)
     writebackOut.vdIdx.get              := vdIdxInField
-    writebackOut.uop.vpu.vl             := instMicroOp.vl
+    writebackOut.uop.vpu.vl             := Mux(instMicroOp.exceptionVl.valid, instMicroOp.exceptionVl.bits, instMicroOp.vl)
     writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR, instMicroOp.exceptionVstart, instMicroOp.vstart)
     writebackOut.uop.vpu.vmask          := maskUsed
     writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
@@ -743,7 +746,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := instMicroOp.exceptionIsForVSnonLeafPTE
-  io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
+  io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
 
