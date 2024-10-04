@@ -171,6 +171,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.fullva             := s0_fullva
   io.tlb.req.bits.checkfullva        := s0_use_flow_rs || s0_use_flow_vec
   io.tlb.req.bits.cmd                := TlbCmd.write
+  io.tlb.req.bits.isPrefetch         := s0_use_flow_prf
   io.tlb.req.bits.size               := s0_size
   io.tlb.req.bits.kill               := false.B
   io.tlb.req.bits.memidx.is_ld       := false.B
