@@ -640,12 +640,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
 
   // only first issue of int / vec load intructions need to check full vaddr
-  s0_tlb_fullva := Mux(s0_src_select_vec(vec_iss_idx),
-    io.vecldin.bits.vaddr,
-    Mux(
-      s0_src_select_vec(int_iss_idx),
-      io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), XLEN),
-      s0_dcache_vaddr
+  s0_tlb_fullva := Mux(s0_src_valid_vec(mab_idx),
+    io.misalign_ldin.bits.fullva,
+    Mux(s0_src_select_vec(vec_iss_idx),
+      io.vecldin.bits.vaddr,
+      Mux(
+        s0_src_select_vec(int_iss_idx),
+        io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), XLEN),
+        s0_dcache_vaddr
+      )
     )
   )
 

@@ -276,6 +276,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       unSentLoads := 1.U
       curPtr := 0.U
       new128Load.vaddr := aligned16BytesAddr
+      new128Load.fullva := req.fullva
       // new128Load.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
       new128Load.mask  := 0xffff.U
       new128Load.uop   := req.uop
@@ -288,8 +289,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       curPtr := 0.U
       lowAddrLoad.uop := req.uop
       lowAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
+      lowAddrLoad.fullva := req.fullva
       highAddrLoad.uop := req.uop
       highAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
+      highAddrLoad.fullva := req.fullva
 
       switch (req.uop.fuOpType(1, 0)) {
         is (LB) {
@@ -566,8 +569,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
-  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteVaddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val overwriteExpBuf = GatedValidRegNext(req_valid && globalException)
+  val overwriteVaddr = GatedRegNext(Mux(
+    cross16BytesBoundary && (curPtr === 1.U), 
+    splitLoadResp(curPtr).vaddr,
+    splitLoadResp(curPtr).fullva))
   val overwriteIsHyper = GatedRegNext(splitLoadResp(curPtr).isHyper)
   val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
