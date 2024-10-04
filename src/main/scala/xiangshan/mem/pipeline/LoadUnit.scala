@@ -346,6 +346,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
                                        )
+  io.tlb.req.bits.isPrefetch         := s0_sel_src.prf
   io.tlb.req.bits.vaddr              := s0_tlb_vaddr
   io.tlb.req.bits.fullva             := s0_tlb_fullva
   io.tlb.req.bits.checkfullva        := s0_src_select_vec(vec_iss_idx) || s0_src_select_vec(int_iss_idx)
