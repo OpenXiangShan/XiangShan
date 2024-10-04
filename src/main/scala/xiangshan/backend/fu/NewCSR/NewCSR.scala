@@ -367,10 +367,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmpEntryMod.io.in.pmpCfg  := cfgs.map(_.regOut.asInstanceOf[PMPCfgBundle])
   pmpEntryMod.io.in.pmpAddr := pmpaddr.map(_.regOut.asInstanceOf[PMPAddrBundle])
   pmpEntryMod.io.in.ren   := ren
-  pmpEntryMod.io.in.wen   := wen
+  pmpEntryMod.io.in.wen   := wenLegal
   pmpEntryMod.io.in.addr  := addr
   pmpEntryMod.io.in.wdata := wdata
 
+  // Todo: all wen and wdata of CSRModule assigned in this for loop
   for ((id, (wBundle, _)) <- csrRwMap) {
     if (vsMapS.contains(id)) {
       // VS access CSR by S: privState.isModeVS && addrMappedToVS === sMapVS(id).U
@@ -441,24 +442,24 @@ class NewCSR(implicit val p: Parameters) extends Module
   sstcIRGen.i.henvcfgSTCE := henvcfg.regOut.STCE.asBool
 
   miregiprios.foreach { mod =>
-    mod.w.wen := wen && (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wen := mireg.w.wen && (miselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
   }
 
   siregiprios.foreach { mod =>
-    mod.w.wen := wen && (addr === sireg.addr.U) && (siselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wen := sireg.w.wen && (siselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
   }
 
   mhartid.hartid := this.io.fromTop.hartId
 
   cfgs.zipWithIndex.foreach { case (mod, i) =>
-    mod.w.wen := wen && (addr === (0x3A0 + i / 8 * 2).U)
+    mod.w.wen := wenLegal && (addr === (0x3A0 + i / 8 * 2).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpCfgWData(8*((i%8)+1)-1,8*(i%8))
   }
 
   pmpaddr.zipWithIndex.foreach{ case(mod, i) =>
-    mod.w.wen := wen && (addr === (0x3B0 + i).U)
+    mod.w.wen := wenLegal && (addr === (0x3B0 + i).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpAddrWData(i)
   }
 
@@ -774,7 +775,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   // perf
-  val addrInPerfCnt = (wen || ren) && (
+  val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr === mcountinhibit.addr.U) ||
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
@@ -1132,7 +1133,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.instrAddrTransType.sv48x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4
   assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
-  private val csrAccess = wen || ren
+  private val csrAccess = wenLegal || ren
 
   private val imsicAddrValid =
     csrAccess &&  addr === CSRs.mireg.U &&  miselect.inIMSICRange ||
