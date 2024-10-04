@@ -885,6 +885,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
     tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
     tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
