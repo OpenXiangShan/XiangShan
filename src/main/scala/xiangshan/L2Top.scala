@@ -95,6 +95,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val clint_int_node = IntIdentityNode()
   val debug_int_node = IntIdentityNode()
   val plic_int_node = IntIdentityNode()
+  val nmi_int_node = IntIdentityNode()
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {

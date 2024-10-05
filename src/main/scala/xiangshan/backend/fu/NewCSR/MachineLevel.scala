@@ -686,7 +686,8 @@ trait HasExternalInterruptBundle {
 }
 trait HasNonMaskableIRPBundle {
   val nonMaskableIRP = IO(new Bundle {
-    val NMI = Input(Bool())
+    val NMI_43 = Input(Bool())
+    val NMI_31 = Input(Bool())
   })
 }
 

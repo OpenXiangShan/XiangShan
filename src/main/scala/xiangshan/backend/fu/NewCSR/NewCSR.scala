@@ -299,6 +299,14 @@ class NewCSR(implicit val p: Parameters) extends Module
     pmpCSROutMap
 
   // interrupt
+  val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
+  when(nonMaskableIRP.NMI_43) {
+    nmip.NMI_43 := true.B
+  }
+  when(nonMaskableIRP.NMI_31) {
+    nmip.NMI_31 := true.B
+  }
+
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
   intrMod.io.in.mstatusMIE := mstatus.regOut.MIE.asBool
@@ -324,17 +332,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
   intrMod.io.in.mnstatusNMIE := mnstatus.regOut.NMIE.asBool
-
-  val nmip = RegInit(new NonMaskableIRPendingBundle, (new NonMaskableIRPendingBundle).init)
-  when(nonMaskableIRP.NMI) {
-    nmip.NMI := true.B
-  }
-
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
 
   when(intrMod.io.out.nmi && intrMod.io.out.interruptVec.valid) {
-    nmip.NMI := false.B
+    nmip.NMI_31 := nmip.NMI_31 & !intrMod.io.out.interruptVec.bits(NonMaskableIRNO.NMI_31).asBool
+    nmip.NMI_43 := nmip.NMI_43 & !intrMod.io.out.interruptVec.bits(NonMaskableIRNO.NMI_43).asBool
   }
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val nmi = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)

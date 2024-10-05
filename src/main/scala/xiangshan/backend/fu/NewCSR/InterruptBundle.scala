@@ -289,15 +289,17 @@ class InterruptEnableBundle extends CSRBundle {
 }
 
 class NonMaskableIRPendingBundle extends CSRBundle {
-  val NMI = RW(1).withReset(0.U)
+  val NMI_31 = RW(31).withReset(0.U)
+  val NMI_43 = RW(43).withReset(0.U)
   // reserve for more NMI type
 }
 object NonMaskableIRNO{
-  final val NMI = 1
+  final val NMI_43 = 43
+  final val NMI_31 = 31
   // reserve for more NMI type
 
   val interruptDefaultPrio = Seq(
-    NMI
+    NMI_43, NMI_31
   )
   def getIRQHigherThan(irq: Int): Seq[Int] = {
     val idx = this.interruptDefaultPrio.indexOf(irq, 0)

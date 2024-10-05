@@ -34,6 +34,7 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
@@ -106,11 +107,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(pf) => Some(BundleBridgeSource(() => new PrefetchRecv))
     case None => None
   }
+  val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, NumCores, (new NonmaskableInterruptIO).elements.size))
+  val nmi = InModuleBody(nmiIntNode.makeIOs())
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_node := misc.clint.intnode
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
+    core_with_l2(i).nmi_int_node := nmiIntNode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     if (!enableCHI) {
       misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache

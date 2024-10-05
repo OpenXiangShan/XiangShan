@@ -51,9 +51,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val clint_int_node = l2top.inner.clint_int_node
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
+  val nmi_int_node = l2top.inner.nmi_int_node
   memBlock.clint_int_sink := clint_int_node
   memBlock.plic_int_sink :*= plic_int_node
   memBlock.debug_int_sink := debug_int_node
+  memBlock.nmi_int_sink := nmi_int_node
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
