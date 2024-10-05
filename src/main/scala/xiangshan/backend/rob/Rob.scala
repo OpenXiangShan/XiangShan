@@ -553,7 +553,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   when(deqIsVlsException && deqVlsCanCommit){
     deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
     deqVlsExceptionNeedCommit := true.B
-  }.elsewhen(state === s_idle) {
+  }.elsewhen(deqVlsExceptionNeedCommit) {
+    // Only assert one cycle to avoid multi message passed to Rab
     deqVlsExceptionNeedCommit := false.B
   }
 
