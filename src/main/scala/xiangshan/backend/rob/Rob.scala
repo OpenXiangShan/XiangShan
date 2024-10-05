@@ -259,6 +259,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
+  val state_next = Wire(chiselTypeOf(state))
 
   val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
   val tip_state = WireInit(0.U(4.W))
@@ -787,7 +788,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * (1) redirect: switch to s_walk
    * (2) walk: when walking comes to the end, switch to s_idle
    */
-  val state_next = Mux(
+  state_next := Mux(
     io.redirect.valid || RegNext(io.redirect.valid), s_walk,
     Mux(
       state === s_walk && walkFinished && rab.io.status.walkEnd && vtypeBuffer.io.status.walkEnd, s_idle,
