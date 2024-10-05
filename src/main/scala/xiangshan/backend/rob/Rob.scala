@@ -552,15 +552,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // delay 2 cycle wait exceptionGen out
   deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w))
 
-  // lock at assertion of deqVlsExceptionNeedCommit until state is idle
+  // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
   when(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock) {
     deqVlsExcpLock := true.B
-  }.elsewhen(state === s_walk && state_next === s_idle) {
+  }.elsewhen(!(deqIsVlsException && deqVlsCanCommit)) {
     deqVlsExcpLock := false.B
   }
 
-  // Only assert once when deqVlsExcp occurs until state is idle  to avoid multi message passed to RAB
+  // Only assert once when deqVlsExcp occurs until condition not assert to avoid multi message passed to RAB
   when (deqVlsExceptionNeedCommit) {
     deqVlsExceptionNeedCommit := false.B
   }.elsewhen(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock){
