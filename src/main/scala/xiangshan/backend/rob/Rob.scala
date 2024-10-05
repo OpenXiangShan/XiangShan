@@ -550,12 +550,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqIsVlsException = deqHasException && deqPtrEntry.isVls
   // delay 2 cycle wait exceptionGen out
   deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w))
-  when(deqIsVlsException && deqVlsCanCommit){
-    deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
-    deqVlsExceptionNeedCommit := true.B
-  }.elsewhen(deqVlsExceptionNeedCommit) {
+  when (deqVlsExceptionNeedCommit) {
     // Only assert one cycle to avoid multi message passed to Rab
     deqVlsExceptionNeedCommit := false.B
+  }.elsewhen(deqIsVlsException && deqVlsCanCommit){
+    // Only assert when next
+    deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
+    deqVlsExceptionNeedCommit := true.B
   }
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
