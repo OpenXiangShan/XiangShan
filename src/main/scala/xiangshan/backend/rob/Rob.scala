@@ -556,7 +556,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqVlsExcpLock = RegInit(false.B)
   when(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock) {
     deqVlsExcpLock := true.B
-  }.elsewhen(!(deqIsVlsException && deqVlsCanCommit)) {
+  }.elsewhen(deqPtrVec.head =/= deqPtrVec_next.head) {
     deqVlsExcpLock := false.B
   }
 
