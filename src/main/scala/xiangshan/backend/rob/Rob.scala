@@ -136,6 +136,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
+  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
@@ -769,7 +770,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   // TODO: Check if meet the require that only set scommit when commit scala store uop
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
-  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
