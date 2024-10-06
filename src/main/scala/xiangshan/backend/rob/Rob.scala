@@ -136,6 +136,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
+  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
@@ -259,6 +260,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    */
   val s_idle :: s_walk :: Nil = Enum(2)
   val state = RegInit(s_idle)
+  val state_next = Wire(chiselTypeOf(state))
 
   val tip_computing :: tip_stalled :: tip_walk :: tip_drained :: Nil = Enum(4)
   val tip_state = WireInit(0.U(4.W))
@@ -550,11 +552,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqIsVlsException = deqHasException && deqPtrEntry.isVls
   // delay 2 cycle wait exceptionGen out
   deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w))
-  when(deqIsVlsException && deqVlsCanCommit){
+
+  // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
+  val deqVlsExcpLock = RegInit(false.B)
+  when(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock) {
+    deqVlsExcpLock := true.B
+  }.elsewhen(deqPtrVec.head =/= deqPtrVec_next.head) {
+    deqVlsExcpLock := false.B
+  }
+
+  // Only assert once when deqVlsExcp occurs until condition not assert to avoid multi message passed to RAB
+  when (deqVlsExceptionNeedCommit) {
+    deqVlsExceptionNeedCommit := false.B
+  }.elsewhen(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock){
     deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
     deqVlsExceptionNeedCommit := true.B
-  }.elsewhen(state === s_idle) {
-    deqVlsExceptionNeedCommit := false.B
   }
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
@@ -758,7 +770,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   // TODO: Check if meet the require that only set scommit when commit scala store uop
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE && !robEntries(deqPtrVec(i).value).vls ))
-  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
@@ -777,7 +788,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * (1) redirect: switch to s_walk
    * (2) walk: when walking comes to the end, switch to s_idle
    */
-  val state_next = Mux(
+  state_next := Mux(
     io.redirect.valid || RegNext(io.redirect.valid), s_walk,
     Mux(
       state === s_walk && walkFinished && rab.io.status.walkEnd && vtypeBuffer.io.status.walkEnd, s_idle,
