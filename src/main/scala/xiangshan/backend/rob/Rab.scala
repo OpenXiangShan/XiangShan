@@ -163,7 +163,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
 
   // update diff pointer
-  diffPtrNext := Mux(state === s_idle, diffPtr + newCommitSize, diffPtr)
+  diffPtrNext := diffPtr + newCommitSize
   diffPtr := diffPtrNext
 
   // update vcfg pointer
