@@ -1040,7 +1040,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   asp.io.sbuffer.zipWithIndex.foreach {case (s, idx) => {
-    s.valid := io.sbuffer(idx).fire
+    s.valid := io.sbuffer(idx).fire && io.sbuffer(idx).bits.vecValid
     s.bits  := io.sbuffer(idx).bits
   }}
   asp.io.sqEmpty := io.sqEmpty
