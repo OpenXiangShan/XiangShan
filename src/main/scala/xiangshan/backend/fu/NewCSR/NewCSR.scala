@@ -206,6 +206,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val toDecode = new CSRToDecode
 
     val fetchMalTval = Input(UInt(XLEN.W))
+
+    val distributedWenLegal = Output(Bool())
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -1240,6 +1242,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     senvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeHU || isModeVU) ||
     henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
   )
+
+  io.distributedWenLegal := wenLegal
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
