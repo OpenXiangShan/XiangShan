@@ -651,14 +651,20 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.redirect_meta_NOS := recover_cfi.NOS
   stack.redirect_callAddr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  val update = io.update.bits
-  val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
-  val updateValid = io.update.valid
+  val updateValid = RegNext(io.update.valid, init = false.B)
+  val update = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+  val update_pc = io.update.bits.pc // Move the update pc registers out of predictors.
 
-  stack.commit_valid      := updateValid  
+  // To improve Clock Gating Efficiency
+  update.meta := RegEnable(io.update.bits.meta, io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))
+
+  val updateMeta = update.meta.asTypeOf(new RASMeta)
+
+  stack.commit_valid      := updateValid
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken
-  stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)
+  stack.commit_push_addr := update.ftb_entry.getFallThrough(update_pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)
   stack.commit_meta_TOSW := updateMeta.TOSW
   stack.commit_meta_ssp := updateMeta.ssp
 
