@@ -475,8 +475,14 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
                             (prevCycleDataHash === thisCycleDataHash) &&
                             (PopCount(io.sbuffer(i).bits.mask) === seqKStride)
       } else {
-        val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
-        val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+        val lastLoopVaddr    = WireInit(prevCycleVaddr)
+        val lastLoopDataHash = WireInit(prevCycleDataHash)
+        for ( j <- 0 until i ) {
+          when (io.sbuffer(j).fire) {
+            lastLoopVaddr    := io.sbuffer(j).bits.vaddr
+            lastLoopDataHash := io.sbuffer(j).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+          }
+        }
         seqKStride := thisCycleVaddr - lastLoopVaddr
         seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
                             (lastLoopDataHash === thisCycleDataHash) &&
