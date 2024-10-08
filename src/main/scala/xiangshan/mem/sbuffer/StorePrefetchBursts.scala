@@ -463,41 +463,43 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
   val validKStride = (seqKStride === 1.U || seqKStride === 2.U || seqKStride === 4.U || seqKStride === 8.U)
 
   for (i <- 0 until EnsbufferWidth) {
-    when(io.sbuffer(i).fire) {
+    when (io.sbuffer(i).fire) {
       val thisCycleVaddr    = io.sbuffer(i).bits.vaddr
       val thisCycleDataHash = io.sbuffer(i).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
       prevCycleVaddr    := thisCycleVaddr
       prevCycleDataHash := thisCycleDataHash
 
-      if(i == 0) {
+      if (i == 0) {
         seqKStride := thisCycleVaddr - prevCycleVaddr
         seqPatternVec(i) := ((thisCycleVaddr - prevCycleVaddr) === seqKStride) &&
-                            (prevCycleDataHash === thisCycleDataHash)
-      }else {
+                            (prevCycleDataHash === thisCycleDataHash) &&
+                            (PopCount(io.sbuffer(i).bits.mask) === seqKStride)
+      } else {
         val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
         val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
         seqKStride := thisCycleVaddr - lastLoopVaddr
         seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
-                            (lastLoopDataHash === thisCycleDataHash)
+                            (lastLoopDataHash === thisCycleDataHash) &&
+                            (PopCount(io.sbuffer(i).bits.mask) === seqKStride)
       }
-    }.otherwise {
+    } .otherwise {
       seqPatternVec(i) := true.B
     }
   }
 
-  when(sbufferFire) {
-    when(Cat(seqPatternVec).andR) {
+  when (sbufferFire) {
+    when (Cat(seqPatternVec).andR) {
       seqPatternCnt := Mux(seqPatternCnt >= SEQTHRESHOLD.U, seqPatternCnt, seqPatternCnt + sbufferFireCnt)
-    }.otherwise {
+    } .otherwise {
       seqPatternCnt := 0.U
     }
   }
-  when(seqPatternCnt >= SEQTHRESHOLD.U && validKStride) {
+  when (seqPatternCnt >= SEQTHRESHOLD.U && validKStride) {
     seqStoreDetected := true.B
-  }.otherwise {
+  } .otherwise {
     seqStoreDetected := false.B
   }
-  when(io.sqEmpty) {
+  when (io.sqEmpty) {
     seqStoreDetected := false.B
   }
   io.seqStoreDetected := seqStoreDetected
@@ -540,4 +542,6 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
       }
     }
   }
+
+  XSPerfAccumulate("seqStoreDetected", seqStoreDetected)
 }
