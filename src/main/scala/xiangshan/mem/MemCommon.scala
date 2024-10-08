@@ -81,7 +81,10 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasVLSUParameters {
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
+  // For exception vaddr generate
   val fullva = UInt(XLEN.W)
+  val vaNeedExt = Bool()
+  val isHyper = Bool()
   val paddr = UInt(PAddrBits.W)
   val gpaddr = UInt(XLEN.W)
   val isForVSnonLeafPTE = Bool()
@@ -125,6 +128,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val offset = Vec(2,UInt(4.W))
   val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
   val is_first_ele = Bool()
+  val vecBaseVaddr = UInt(VAddrBits.W)
+  val vecVaddrOffset = UInt(VAddrBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
   // val flowPtr = new VlflowPtr() // VLFlowQueue ptr
   // val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
@@ -163,6 +169,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
     if (latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
+    if (latch) vaNeedExt := RegEnable(input.vaNeedExt, enable) else vaNeedExt := input.vaNeedExt
+    if (latch) isHyper := RegEnable(input.isHyper, enable) else isHyper := input.isHyper
     if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if (latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE
@@ -197,6 +205,9 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) alignedType         := RegEnable(input.alignedType, enable)         else alignedType         := input.alignedType
     if (latch) mbIndex             := RegEnable(input.mbIndex, enable)             else mbIndex             := input.mbIndex
     if (latch) elemIdxInsideVd     := RegEnable(input.elemIdxInsideVd, enable)     else elemIdxInsideVd     := input.elemIdxInsideVd
+    if (latch) vecBaseVaddr        := RegEnable(input.vecBaseVaddr, enable)        else vecBaseVaddr        := input.vecBaseVaddr
+    if (latch) vecVaddrOffset      := RegEnable(input.vecVaddrOffset, enable)      else vecVaddrOffset      := input.vecVaddrOffset
+    if (latch) vecTriggerMask      := RegEnable(input.vecTriggerMask, enable)      else vecTriggerMask      := input.vecTriggerMask
     // if (latch) flowPtr             := RegEnable(input.flowPtr, enable)             else flowPtr             := input.flowPtr
     // if (latch) sflowPtr            := RegEnable(input.sflowPtr, enable)            else sflowPtr            := input.sflowPtr
 
@@ -243,6 +254,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
     if(latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
     if(latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
+    if(latch) vaNeedExt := RegEnable(input.vaNeedExt, enable) else vaNeedExt := input.vaNeedExt
+    if(latch) isHyper := RegEnable(input.isHyper, enable) else isHyper := input.isHyper
     if(latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
     if(latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
     if(latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE

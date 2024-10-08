@@ -443,6 +443,8 @@ object Bundles {
     val isDependOldvd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
 
+    val isVleff = Bool() // vleff
+
     def vtype: VType = {
       val res = Wire(VType())
       res.illegal := this.vill
@@ -726,6 +728,10 @@ object Bundles {
       val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
       val isMasked = Bool()
+      val isStrided = Bool()
+      val isWhole = Bool()
+      val isVecLoad = Bool()
+      val isVlm = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo

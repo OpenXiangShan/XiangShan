@@ -290,7 +290,7 @@ class WithNKBL2
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some((if(p.EnableSv48) p.VAddrBitsSv48 else p.VAddrBitsSv39) - log2Up(p.dcacheParametersOpt.get.blockBytes)),
+          vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),

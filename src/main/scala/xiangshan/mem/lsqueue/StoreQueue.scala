@@ -151,11 +151,13 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr  := req.fullva
-  io.exceptionAddr.gpaddr := req.gpaddr
-  io.exceptionAddr.vstart := req.uop.vpu.vstart
-  io.exceptionAddr.vl     := req.uop.vpu.vl
-  io.exceptionAddr.isForVSnonLeafPTE:= req.isForVSnonLeafPTE
+  io.exceptionAddr.vaddr     := req.fullva
+  io.exceptionAddr.vaNeedExt := req.vaNeedExt
+  io.exceptionAddr.isHyper   := req.isHyper
+  io.exceptionAddr.gpaddr    := req.gpaddr
+  io.exceptionAddr.vstart    := req.uop.vpu.vstart
+  io.exceptionAddr.vl        := req.uop.vpu.vl
+  io.exceptionAddr.isForVSnonLeafPTE := req.isForVSnonLeafPTE
 
   when(req_valid && io.flushFrmMaBuf) {
     req_valid := false.B
@@ -248,14 +250,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VecStorePipelineWidth) {
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits                := DontCare
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.fullva         := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.vaNeedExt      := io.vecFeedback(i).bits.vaNeedExt
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.gpaddr         := io.vecFeedback(i).bits.gpaddr
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.exceptionVec     := io.vecFeedback(i).bits.exceptionVec
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.isForVSnonLeafPTE := io.vecFeedback(i).bits.isForVSnonLeafPTE
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.exceptionVec  := io.vecFeedback(i).bits.exceptionVec
   }
 
 
@@ -275,7 +278,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val atomic = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val prefetch = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // need prefetch when committing this store to sbuffer?
   val isVec = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store instruction
-  //val vec_lastuop = Reg(Vec(StoreQueueSize, Bool())) // last uop of vector store instruction
+  val vecLastFlow = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // last uop the last flow of vector store instruction
   val vecMbCommit = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store committed from merge buffer to rob
   val vecDataValid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store need write to sbuffer
   val hasException = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // store has exception, should deq but not write sbuffer
@@ -385,6 +388,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           uop((index + j.U).value) := io.enq.req(i).bits
           // NOTE: the index will be used when replay
           uop((index + j.U).value).sqIdx := sqIdx + j.U
+          vecLastFlow((index + j.U).value) := Mux((j + 1).U === validVStoreOffset(i), io.enq.req(i).bits.lastUop, false.B)
           allocated((index + j.U).value) := true.B
           datavalid((index + j.U).value) := false.B
           addrvalid((index + j.U).value) := false.B
@@ -535,7 +539,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
       atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
-      hasException(stWbIndexReg) := ExceptionNO.selectByFu(uop(stWbIndexReg).exceptionVec, StaCfg).asUInt.orR || io.storeAddrInRe(i).af
+      hasException(stWbIndexReg) := ExceptionNO.selectByFu(uop(stWbIndexReg).exceptionVec, StaCfg).asUInt.orR ||
+                                    TriggerAction.isDmode(uop(stWbIndexReg).trigger) || io.storeAddrInRe(i).af
       waitStoreS2(stWbIndexReg) := false.B
     }
     // dcache miss info (one cycle later than storeIn)
@@ -545,7 +550,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     // enter exceptionbuffer again
     when (storeAddrInFireReg) {
-      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).af
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).af && !io.storeAddrInRe(i).isvec
       exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := RegEnable(io.storeAddrIn(i).bits, io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss)
       exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec(storeAccessFault) := io.storeAddrInRe(i).af
     }
@@ -910,7 +915,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   exceptionBuffer.io.storeAddrIn.last.valid := io.mmioStout.fire
   exceptionBuffer.io.storeAddrIn.last.bits := DontCare
-  exceptionBuffer.io.storeAddrIn.last.bits.vaddr := vaddrModule.io.rdata.head
+  exceptionBuffer.io.storeAddrIn.last.bits.fullva := vaddrModule.io.rdata.head
+  exceptionBuffer.io.storeAddrIn.last.bits.vaNeedExt := true.B
   exceptionBuffer.io.storeAddrIn.last.bits.uop := uncacheUop
 
   // (4) or vector store:
@@ -1050,27 +1056,36 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ptr                 = rdataPtrExt(i).value
     val mmioStall           = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
     val exceptionVliad      = allocated(ptr) && committed(ptr) && vecMbCommit(ptr) && !mmioStall && isVec(ptr) && vecDataValid(ptr) && hasException(ptr)
-    (exceptionVliad, uop(ptr))
+    (exceptionVliad, uop(ptr), vecLastFlow(ptr))
   }
 
   val vecCommitHasExceptionValid      = vecCommitHasException.map(_._1)
   val vecCommitHasExceptionUop        = vecCommitHasException.map(_._2)
+  val vecCommitHasExceptionLastFlow   = vecCommitHasException.map(_._3)
   val vecCommitHasExceptionValidOR    = vecCommitHasExceptionValid.reduce(_ || _)
   // Just select the last Uop tah has an exception.
   val vecCommitHasExceptionSelectUop  = ParallelPosteriorityMux(vecCommitHasExceptionValid, vecCommitHasExceptionUop)
-  // If the last Uop with an exception is the LastUop of this instruction, the flag is not set.
-  val vecCommitLastUop = vecCommitHasExceptionSelectUop.lastUop
+  // If the last flow with an exception is the LastFlow of this instruction, the flag is not set.
+  // compare robidx to select the last flow
+  require(EnsbufferWidth == 2, "The vector store exception handle process only support EnsbufferWidth == 2 yet.")
+  val robidxEQ = uop(rdataPtrExt(0).value).robIdx === uop(rdataPtrExt(1).value).robIdx
+
+  val vecCommitLastFlow = 
+    // robidx equal => check if 1 is last flow
+    robidxEQ && vecCommitHasExceptionLastFlow(1) || 
+    // robidx not equal => 0 must be the last flow, just check if 1 is last flow when 1 has exception
+    !robidxEQ && vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1)
+  
 
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr                   = rdataPtrExt(i).value
     val mmioStall             = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
-    val vecLastUopCommit      = uop(ptr).lastUop && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
-                                allocated(ptr) && committed(ptr) && vecMbCommit(ptr) && !mmioStall && isVec(ptr) && vecDataValid(ptr)
-    vecLastUopCommit
+    val vecLastFlowCommit      = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) && dataBuffer.io.enq(i).fire
+    vecLastFlowCommit
   }.reduce(_ || _)
 
-  // When a LastUop with an exception instruction is commited, clear the flag.
-  when(!vecExceptionFlag.valid && vecCommitHasExceptionValidOR && !vecCommitLastUop) {
+  // When a LastFlow with an exception instruction is commited, clear the flag.
+  when(!vecExceptionFlag.valid && vecCommitHasExceptionValidOR && !vecCommitLastFlow) {
     vecExceptionFlag.valid  := true.B
     vecExceptionFlag.bits   := vecCommitHasExceptionSelectUop
   }.elsewhen(vecExceptionFlag.valid && vecExceptionFlagCancel) {
@@ -1102,6 +1117,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       io.sbufferVecDifftestInfo(i).bits := difftestBuffer.get.io.deq(i).bits
     }
+
+    // commit cbo.inval to difftest
+    val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
+    cmoInvalEvent.coreid := io.hartId
+    cmoInvalEvent.valid  := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
+    cmoInvalEvent.addr   := cboMmioAddr
   }
 
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
@@ -1120,11 +1141,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr  := exceptionBuffer.io.exceptionAddr.vaddr
-  io.exceptionAddr.gpaddr := exceptionBuffer.io.exceptionAddr.gpaddr
-  io.exceptionAddr.vstart := exceptionBuffer.io.exceptionAddr.vstart
-  io.exceptionAddr.vl     := exceptionBuffer.io.exceptionAddr.vl
-  io.exceptionAddr.isForVSnonLeafPTE:= exceptionBuffer.io.exceptionAddr.isForVSnonLeafPTE
+  io.exceptionAddr.vaddr     := exceptionBuffer.io.exceptionAddr.vaddr
+  io.exceptionAddr.vaNeedExt := exceptionBuffer.io.exceptionAddr.vaNeedExt
+  io.exceptionAddr.isHyper   := exceptionBuffer.io.exceptionAddr.isHyper
+  io.exceptionAddr.gpaddr    := exceptionBuffer.io.exceptionAddr.gpaddr
+  io.exceptionAddr.vstart    := exceptionBuffer.io.exceptionAddr.vstart
+  io.exceptionAddr.vl        := exceptionBuffer.io.exceptionAddr.vl
+  io.exceptionAddr.isForVSnonLeafPTE := exceptionBuffer.io.exceptionAddr.isForVSnonLeafPTE
 
   // vector commit or replay from
   val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))

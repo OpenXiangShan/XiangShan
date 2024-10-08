@@ -144,6 +144,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
 
+  csrMod.io.fromVecExcpMod.busy := io.csrin.get.fromVecExcpMod.busy
+
   csrMod.io.perf  := csrIn.perf
 
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
@@ -154,7 +156,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.platformIRP.VSEIP := false.B // Todo
   csrMod.platformIRP.VSTIP := false.B // Todo
   csrMod.platformIRP.debugIP := csrIn.externalInterrupt.debug
-  csrMod.nonMaskableIRP.NMI := csrIn.externalInterrupt.nmi.nmi
+  csrMod.nonMaskableIRP.NMI_43 := csrIn.externalInterrupt.nmi.nmi_43
+  csrMod.nonMaskableIRP.NMI_31 := csrIn.externalInterrupt.nmi.nmi_31
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
@@ -209,11 +212,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
 
-  exceptionVec(EX_BP    ) := isEbreak
-  exceptionVec(EX_MCALL ) := isEcall && privState.isModeM
-  exceptionVec(EX_HSCALL) := isEcall && privState.isModeHS
-  exceptionVec(EX_VSCALL) := isEcall && privState.isModeVS
-  exceptionVec(EX_UCALL ) := isEcall && privState.isModeHUorVU
+  exceptionVec(EX_BP    ) := DataHoldBypass(isEbreak, false.B, io.in.fire)
+  exceptionVec(EX_MCALL ) := DataHoldBypass(isEcall && privState.isModeM, false.B, io.in.fire)
+  exceptionVec(EX_HSCALL) := DataHoldBypass(isEcall && privState.isModeHS, false.B, io.in.fire)
+  exceptionVec(EX_VSCALL) := DataHoldBypass(isEcall && privState.isModeVS, false.B, io.in.fire)
+  exceptionVec(EX_UCALL ) := DataHoldBypass(isEcall && privState.isModeHUorVU, false.B, io.in.fire)
   exceptionVec(EX_II    ) := csrMod.io.out.bits.EX_II
   exceptionVec(EX_VI    ) := csrMod.io.out.bits.EX_VI
 
@@ -267,7 +270,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   /** initialize NewCSR's io_out_ready from wrapper's io */
   csrMod.io.out.ready := io.out.ready
 
-  io.out.bits.res.redirect.get.valid := isXRet
+  io.out.bits.res.redirect.get.valid := io.out.valid && DataHoldBypass(isXRet, false.B, io.in.fire)
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
@@ -286,7 +289,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   connectNonPipedCtrlSingalForCSR
 
   // Todo: summerize all difftest skip condition
-  csrOut.isPerfCnt  := csrMod.io.out.bits.isPerfCnt && csrModOutValid && func =/= CSROpType.jmp
+  csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && DataHoldBypass(func =/= CSROpType.jmp, false.B, io.in.fire)
   csrOut.fpu.frm    := csrMod.io.status.fpState.frm.asUInt
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt
@@ -358,6 +361,9 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
   val clintTime = Input(ValidIO(UInt(64.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
+  val fromVecExcpMod = Input(new Bundle {
+    val busy = Bool()
+  })
 }
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {

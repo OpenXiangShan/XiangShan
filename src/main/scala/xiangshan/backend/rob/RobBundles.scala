@@ -26,14 +26,14 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType}
 import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan.backend.trace._
 
@@ -105,6 +105,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isRVC = Bool()
     val isVset = Bool()
     val isHls = Bool()
+    val isVls = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -166,6 +167,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
+    robCommitEntry.isVls := robEntry.vls
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
@@ -289,8 +291,19 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
   val trigger = TriggerAction()
+  // if vstart is udpated by vector unit
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
+  val vuopIdx = UopIdx()
+  val isVecLoad = Bool()
+  val isVlm = Bool()
+  val isStrided = Bool()
+  val isIndexed = Bool()
+  val isWhole = Bool()
+  val nf = Nf()
+  val vsew = VSew()
+  val veew = VSew()
+  val vlmul = VLmul()
 
   def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
   def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)

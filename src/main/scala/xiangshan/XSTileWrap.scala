@@ -43,9 +43,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
+  val nmiIntNode = IntIdentityNode()
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
+  tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))

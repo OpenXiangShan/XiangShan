@@ -115,6 +115,7 @@ package object xiangshan {
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
     def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
+    def isFof    (fuOpType: UInt): Bool = isVecLd(fuOpType) && fuOpType(4)
   }
 
   object VstuType {
@@ -584,6 +585,9 @@ package object xiangshan {
     def cbo_inval = "b1110".U
 
     def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
+    def isCboClean(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_clean)
+    def isCboFlush(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_flush)
+    def isCboInval(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_inval)
 
     // atomics
     // bit(1, 0) are size
@@ -618,7 +622,7 @@ package object xiangshan {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
@@ -778,6 +782,7 @@ package object xiangshan {
     def VEC_US_LDST      = "b110001".U // vector unit-strided load/store
     def VEC_S_LDST       = "b110010".U // vector strided load/store
     def VEC_I_LDST       = "b110011".U // vector indexed load/store
+    def VEC_US_FF_LD     = "b110100".U // vector unit-stride fault-only-first load
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW
@@ -895,10 +900,18 @@ package object xiangshan {
       select.foreach(i => new_vec(i) := vec(i))
       new_vec
     }
+    def partialSelect(vec: Vec[Bool], select: Seq[Int], unSelect: Seq[Int]): Vec[Bool] = {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.foreach(_ := false.B)
+      select.diff(unSelect).foreach(i => new_vec(i) := vec(i))
+      new_vec
+    }
     def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
     def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
     def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
       partialSelect(vec, fuConfig.exceptionOut)
+    def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
+      partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
 
   object TopDownCounters extends Enumeration {

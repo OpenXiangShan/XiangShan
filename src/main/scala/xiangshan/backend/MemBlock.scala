@@ -35,7 +35,7 @@ import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
-import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.backend.fu.util.{HasCSRConst, SdtrigExt}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem._
@@ -245,6 +245,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
+  val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
 
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
@@ -260,6 +261,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasL1PrefetchSourceParameter
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters
+  with HasTlbConst
+  with HasCSRConst
   with SdtrigExt
 {
   val io = IO(new Bundle {
@@ -359,6 +362,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val vlMergeBuffer = Module(new VLMergeBufferImp)
   val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
   val vSegmentUnit  = Module(new VSegmentUnit)
+  val vfofBuffer    = Module(new VfofBuffer)
 
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer)
@@ -1433,6 +1437,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
   val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
+  val isFixVlUop    = io.ooo_to_mem.issueVldu.map{x =>
+    x.bits.uop.vpu.isVleff && x.bits.uop.vpu.lastUop && x.valid
+  }
 
   // init port
   /**
@@ -1470,7 +1477,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vlSplit(i).io.redirect <> redirect
     vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
     vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && VlduType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
-                              vlsuCanAccept(i) && !isSegment
+                              vlsuCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
@@ -1478,6 +1485,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       Option("VlSplitConnectLdu")
     )
 
+    //Subsequent instrction will be blocked
+    vfofBuffer.io.in(i).valid := io.ooo_to_mem.issueVldu(i).valid
+    vfofBuffer.io.in(i).bits  := io.ooo_to_mem.issueVldu(i).bits
   }
   (0 until LduCnt).foreach{i=>
     vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
@@ -1533,6 +1543,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vSegmentUnit.io.uopwriteback.valid
       vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid && !vSegmentUnit.io.uopwriteback.valid
       vSegmentUnit.io.uopwriteback.ready := io.mem_to_ooo.writebackVldu(i).ready
+    } else if (i == 1) {
+      io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid || vfofBuffer.io.uopWriteback.valid
+      io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
+        vfofBuffer.io.uopWriteback.valid            -> vfofBuffer.io.uopWriteback.bits,
+        vlMergeBuffer.io.uopWriteback(i).valid      -> vlMergeBuffer.io.uopWriteback(i).bits,
+        vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
+      ))
+      vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vfofBuffer.io.uopWriteback.valid
+      vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid && !vfofBuffer.io.uopWriteback.valid
+      vfofBuffer.io.uopWriteback.ready := io.mem_to_ooo.writebackVldu(i).ready
     } else {
       io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid
       io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
@@ -1542,7 +1562,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready
       vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
     }
+
+    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.uopWriteback(i).valid
+    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.uopWriteback(i).bits
   }
+
+
+  vfofBuffer.io.redirect <> redirect
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
@@ -1662,11 +1688,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     loadMisalignBuffer.io.overwriteExpBuf.vaddr,
     storeMisalignBuffer.io.overwriteExpBuf.vaddr
   )
+  val misalignBufExceptionIsHyper = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
+    loadMisalignBuffer.io.overwriteExpBuf.isHyper,
+    storeMisalignBuffer.io.overwriteExpBuf.isHyper
+  )
   val misalignBufExceptionGpaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
     loadMisalignBuffer.io.overwriteExpBuf.gpaddr,
     storeMisalignBuffer.io.overwriteExpBuf.gpaddr
   )
-
   val misalignBufExceptionIsForVSnonLeafPTE = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
     loadMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE,
     storeMisalignBuffer.io.overwriteExpBuf.isForVSnonLeafPTE
@@ -1686,7 +1715,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val vSegmentExceptionGPAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.gpaddr, vSegmentUnit.io.exceptionInfo.valid)
   val atomicsExceptionIsForVSnonLeafPTE = RegEnable(atomicsUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, atomicsUnit.io.exceptionInfo.valid)
   val vSegmentExceptionIsForVSnonLeafPTE = RegEnable(vSegmentUnit.io.exceptionInfo.bits.isForVSnonLeafPTE, vSegmentUnit.io.exceptionInfo.valid)
-  io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
+
+  val exceptionVaddr = Mux(
     atomicsException,
     atomicsExceptionAddress,
     Mux(misalignBufExceptionOverwrite,
@@ -1696,7 +1726,64 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.exceptionAddr.vaddr
       )
     )
-  ))
+  )
+  // whether vaddr need ext or is hyper inst:
+  // VaNeedExt: atomicsException -> false; misalignBufExceptionOverwrite -> true; vSegmentException -> false
+  // IsHyper: atomicsException -> false; vSegmentException -> false
+  val exceptionVaNeedExt = !atomicsException &&
+    (misalignBufExceptionOverwrite ||
+      (!vSegmentException && lsq.io.exceptionAddr.vaNeedExt))
+  val exceptionIsHyper = !atomicsException &&
+    (misalignBufExceptionOverwrite && misalignBufExceptionIsHyper ||
+      (!vSegmentException && lsq.io.exceptionAddr.isHyper && !misalignBufExceptionOverwrite))
+
+  def GenExceptionVa(mode: UInt, isVirt: Bool, vaNeedExt: Bool,
+                     satp: TlbSatpBundle, vsatp: TlbSatpBundle, hgatp: TlbHgatpBundle,
+                     vaddr: UInt) = {
+    require(VAddrBits >= 50)
+
+    val Sv39 = satp.mode === 8.U
+    val Sv48 = satp.mode === 9.U
+    val Sv39x4 = vsatp.mode === 8.U || hgatp.mode === 8.U
+    val Sv48x4 = vsatp.mode === 9.U || hgatp.mode === 9.U
+    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < ModeM)
+    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < ModeM)
+
+    val s2xlate = MuxCase(noS2xlate, Seq(
+      !isVirt                                    -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U)                       -> onlyStage2,
+      (hgatp.mode === 0.U)                       -> onlyStage1
+    ))
+    val onlyS2 = s2xlate === onlyStage2
+
+    val bareAddr   = ZeroExt(vaddr(PAddrBits - 1, 0), XLEN)
+    val sv39Addr   = SignExt(vaddr.take(39), XLEN)
+    val sv39x4Addr = ZeroExt(vaddr.take(39 + 2), XLEN)
+    val sv48Addr   = SignExt(vaddr.take(48), XLEN)
+    val sv48x4Addr = ZeroExt(vaddr.take(48 + 2), XLEN)
+
+    val ExceptionVa = Wire(UInt(XLEN.W))
+    when (vaNeedExt) {
+      ExceptionVa := Mux1H(Seq(
+        (!(vmEnable || s2xlateEnable)) -> bareAddr,
+        (!onlyS2 && (Sv39 || Sv39x4))  -> sv39Addr,
+        (!onlyS2 && (Sv48 || Sv48x4))  -> sv48Addr,
+        ( onlyS2 && (Sv39 || Sv39x4))  -> sv39x4Addr,
+        ( onlyS2 && (Sv48 || Sv48x4))  -> sv48x4Addr,
+      ))
+    } .otherwise {
+      ExceptionVa := vaddr
+    }
+
+    ExceptionVa
+  }
+
+  io.mem_to_ooo.lsqio.vaddr := RegNext(
+    GenExceptionVa(tlbcsr.priv.dmode, tlbcsr.priv.virt || exceptionIsHyper, exceptionVaNeedExt,
+    tlbcsr.satp, tlbcsr.vsatp, tlbcsr.hgatp, exceptionVaddr)
+  )
+
   // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
   XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
   io.mem_to_ooo.lsqio.vstart := RegNext(Mux(vSegmentException,
@@ -1738,7 +1825,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
     x.externalInterrupt.seip  := outer.plic_int_sink.in.last._1(0)
     x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
-    x.externalInterrupt.nmi.nmi := false.B
+    x.externalInterrupt.nmi.nmi_31 := outer.nmi_int_sink.in.head._1(0)
+    x.externalInterrupt.nmi.nmi_43 := outer.nmi_int_sink.in.head._1(1)
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
   }
@@ -1765,6 +1853,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
   vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict
+  // -------------------------
+  // Vector Segment Triggers
+  // -------------------------
+  vSegmentUnit.io.fromCsrTrigger.tdataVec := tdata
+  vSegmentUnit.io.fromCsrTrigger.tEnableVec := tEnable
+  vSegmentUnit.io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+  vSegmentUnit.io.fromCsrTrigger.debugMode := debugMode
 
   // reset tree of MemBlock
   if (p(DebugOptionsKey).ResetGen) {

@@ -227,6 +227,9 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
+  val trigger = TriggerAction()
+  val vstart         = UInt(elemIdxBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
   // val uopQueuePtr = new VluopPtr
   // val flowPtr = new VlflowPtr
 }
@@ -290,8 +293,10 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val mbIndex     = UInt(vsmBindexBits.W)
   val mask        = UInt(VLENB.W)
   val vaddr       = UInt(XLEN.W)
+  val vaNeedExt   = Bool()
   val gpaddr      = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
+  val vecTriggerMask = UInt((VLEN/8).W)
 }
 
 object MulNum {
@@ -805,10 +810,10 @@ object genVUopOffset extends VLSUConstants {
   def apply(instType: UInt, isfof: Bool, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
     val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
 
-    val fofVUopOffset = (LookupTree(instType,List(
-      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
-      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
-    ))).asUInt
+//    val fofVUopOffset = (LookupTree(instType,List(
+//      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
+//      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
+//    ))).asUInt
 
     val otherVUopOffset = (LookupTree(instType,List(
       "b000".U -> ( uopInsidefield << alignedType                                   ) , // unit-stride
@@ -821,7 +826,8 @@ object genVUopOffset extends VLSUConstants {
       "b111".U -> ( 0.U                                                             )   // segment indexed-ordered
     ))).asUInt
 
-    Mux(isfof, fofVUopOffset, otherVUopOffset)
+//    Mux(isfof, fofVUopOffset, otherVUopOffset)
+    otherVUopOffset
   }
 }
 

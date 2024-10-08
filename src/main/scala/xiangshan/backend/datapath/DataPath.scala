@@ -9,7 +9,7 @@ import utility._
 import utils.SeqUtils._
 import utils._
 import xiangshan._
-import xiangshan.backend.BackendParams
+import xiangshan.backend.{BackendParams, ExcpModToVprf, PcToDataPathIO, VprfToExcpMod}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
@@ -18,9 +18,8 @@ import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemSche
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
-import xiangshan.backend.PcToDataPathIO
 import xiangshan.backend.fu.FuType.is0latency
-import xiangshan.mem.{SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, SqPtr}
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -45,6 +44,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val (fromFpIQ,  toFpIQ,  toFpExu)  = (io.fromFpIQ,  io.toFpIQ,  io.toFpExu)
   private val (fromMemIQ, toMemIQ, toMemExu) = (io.fromMemIQ, io.toMemIQ, io.toMemExu)
   private val (fromVfIQ,  toVfIQ,  toVfExu ) = (io.fromVfIQ,  io.toVfIQ,  io.toVecExu)
+  private val (fromVecExcp, toVecExcp)       = (io.fromVecExcpMod, io.toVecExcpMod)
 
   println(s"[DataPath] IntIQ(${fromIntIQ.size}), FpIQ(${fromFpIQ.size}), VecIQ(${fromVfIQ.size}), MemIQ(${fromMemIQ.size})")
   println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), FpExu(${fromFpIQ.map(_.size).sum}), VecExu(${fromVfIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
@@ -373,6 +373,43 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       v0RfRaddr(portIdx) := v0RFReadArbiter.io.out(portIdx).bits.addr
     else
       v0RfRaddr(portIdx) := 0.U
+  }
+
+  private val vecExcpUseVecRdPorts = Seq(6, 7, 8, 9, 10, 11, 0, 1)
+  private val vecExcpUseVecWrPorts = Seq(1, 4, 5, 3)
+  private val vecExcpUseV0RdPorts = Seq(2, 3)
+  private val vecExcpUsev0WrPorts = Seq(4)
+
+  private var v0RdPortsIter: Iterator[Int] = vecExcpUseV0RdPorts.iterator
+  private val v0WrPortsIter: Iterator[Int] = vecExcpUsev0WrPorts.iterator
+
+  for (i <- fromVecExcp.r.indices) {
+    when (fromVecExcp.r(i).valid && !fromVecExcp.r(i).bits.isV0) {
+      vfRfRaddr(vecExcpUseVecRdPorts(i)) := fromVecExcp.r(i).bits.addr
+    }
+    if (i % maxMergeNumPerCycle == 0) {
+      val v0RdPort = v0RdPortsIter.next()
+      when (fromVecExcp.r(i).valid && fromVecExcp.r(i).bits.isV0) {
+        v0RfRaddr(v0RdPort) := fromVecExcp.r(i).bits.addr
+      }
+    }
+  }
+
+  for (i <- fromVecExcp.w.indices) {
+    when (fromVecExcp.w(i).valid && !fromVecExcp.w(i).bits.isV0) {
+      val vecWrPort = vecExcpUseVecWrPorts(i)
+      vfRfWen.foreach(_(vecWrPort) := true.B)
+      vfRfWaddr(vecWrPort) := fromVecExcp.w(i).bits.newVdAddr
+      vfRfWdata(vecWrPort) := fromVecExcp.w(i).bits.newVdData
+    }
+    if (i % maxMergeNumPerCycle == 0) {
+      when(fromVecExcp.w(i).valid && fromVecExcp.w(i).bits.isV0) {
+        val v0WrPort = v0WrPortsIter.next()
+        v0RfWen.foreach(_(v0WrPort) := true.B)
+        v0RfWaddr(v0WrPort) := fromVecExcp.w(i).bits.newVdAddr
+        v0RfWdata(v0WrPort) := fromVecExcp.w(i).bits.newVdData
+      }
+    }
   }
 
   vlRfWaddr := io.fromVlWb.map(x => RegEnable(x.addr, x.wen)).toSeq
@@ -725,6 +762,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
+  v0RdPortsIter = vecExcpUseV0RdPorts.iterator
+  for (i <- toVecExcp.rdata.indices) {
+    toVecExcp.rdata(i).valid := RegNext(fromVecExcp.r(i).valid)
+    toVecExcp.rdata(i).bits := Mux(
+      RegEnable(!fromVecExcp.r(i).bits.isV0, fromVecExcp.r(i).valid),
+      vfRfRdata(vecExcpUseVecRdPorts(i)),
+      if (i % maxMergeNumPerCycle == 0) v0RfRdata(v0RdPortsIter.next()) else 0.U,
+    )
+  }
+
   XSPerfHistogram(s"IntRegFileRead_hist", PopCount(intRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
   XSPerfHistogram(s"FpRegFileRead_hist", PopCount(fpRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
   XSPerfHistogram(s"VfRegFileRead_hist", PopCount(vfRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 20, 1)
@@ -821,6 +868,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromVfIQ = Flipped(MixedVec(vfSchdParams.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
+  val fromVecExcpMod = Input(new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle))
+
   val toIntIQ = MixedVec(intSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
   val toFpIQ = MixedVec(fpSchdParams.issueBlockParams.map(_.genOGRespBundle))
@@ -828,6 +877,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val toMemIQ = MixedVec(memSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
   val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
+
+  val toVecExcpMod = Output(new VprfToExcpMod(maxMergeNumPerCycle * 2))
 
   val og0Cancel = Output(ExuVec())
 

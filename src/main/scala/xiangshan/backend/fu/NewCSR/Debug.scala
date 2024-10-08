@@ -23,7 +23,6 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val debugMode = io.in.debugMode
 
   private val dcsr = io.in.dcsr
-  private val tcontrol = io.in.tcontrol
   private val tselect = io.in.tselect
   private val tdata1Selected = io.in.tdata1Selected
   private val tdata2Selected = io.in.tdata2Selected
@@ -57,13 +56,13 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val hasDebugEbreakException = isEbreak && ebreakEnterDebugMode
 
   // debug_exception_trigger
-  val mcontrolWireVec = tdata1Vec.map{ mod => {
-    val mcontrolWire = Wire(new Mcontrol)
-    mcontrolWire := mod.DATA.asUInt
-    mcontrolWire
+  val mcontrol6WireVec = tdata1Vec.map{ mod => {
+    val mcontrol6Wire = Wire(new Mcontrol6)
+    mcontrol6Wire := mod.DATA.asUInt
+    mcontrol6Wire
   }}
 
-  val triggerCanRaiseBpExp = Mux(privState.isModeM, tcontrol.MTE.asBool, true.B)
+  val triggerCanRaiseBpExp = io.in.triggerCanRaiseBpExp
   val triggerEnterDebugMode = hasExp && TriggerAction.isDmode(trigger)
 
   // debug_exception_single
@@ -73,38 +72,40 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val hasDebugTrap = hasDebugException || hasDebugIntr
 
   val tselect1H = UIntToOH(tselect.asUInt, TriggerNum).asBools
-  val chainVec = mcontrolWireVec.map(_.CHAIN.asBool)
+  val chainVec = mcontrol6WireVec.map(_.CHAIN.asBool)
   val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
   val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
 
   val triggerUpdate = tdata1Update || tdata2Update
 
-  val mcontrolWdata = Wire(new Mcontrol)
-  mcontrolWdata := tdata1Wdata.DATA.asUInt
+  val mcontrol6Wdata = Wire(new Mcontrol6)
+  mcontrol6Wdata := tdata1Wdata.DATA.asUInt
   val tdata1TypeWdata = tdata1Wdata.TYPE
 
-  val mcontrolSelected = Wire(new Mcontrol)
-  mcontrolSelected := tdata1Selected.DATA.asUInt
+  val mcontrol6Selected = Wire(new Mcontrol6)
+  mcontrol6Selected := tdata1Selected.DATA.asUInt
 
   val frontendTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isFetchTrigger ||
-      mcontrolSelected.isFetchTrigger && triggerUpdate
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isFetchTrigger ||
+      mcontrol6Selected.isFetchTrigger && triggerUpdate
 
   val memTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isMemAccTrigger ||
-      mcontrolSelected.isMemAccTrigger && triggerUpdate
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrol6Wdata.isMemAccTrigger ||
+      mcontrol6Selected.isMemAccTrigger && triggerUpdate
 
-  val triggerEnableVec = tdata1Vec.zip(mcontrolWireVec).map { case(tdata1, mcontrol) =>
+  val triggerEnableVec = tdata1Vec.zip(mcontrol6WireVec).map { case(tdata1, mcontrol6) =>
     tdata1.TYPE.isLegal && (
-      mcontrol.M && privState.isModeM  ||
-        mcontrol.S && privState.isModeHS ||
-        mcontrol.U && privState.isModeHU)
+      mcontrol6.M && privState.isModeM  ||
+        mcontrol6.S && privState.isModeHS ||
+        mcontrol6.U && privState.isModeHU ||
+        mcontrol6.VS && privState.isModeVS ||
+        mcontrol6.VU && privState.isModeVU)
   }
 
-  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isFetchTrigger
   }
-  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isMemAccTrigger
   }
   
@@ -147,11 +148,11 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     val debugMode = Bool()
 
     val dcsr = new DcsrBundle
-    val tcontrol = new TcontrolBundle
     val tselect = new TselectBundle(TriggerNum)
     val tdata1Selected = new Tdata1Bundle
     val tdata2Selected = new Tdata2Bundle
     val tdata1Vec = Vec(TriggerNum, new Tdata1Bundle)
+    val triggerCanRaiseBpExp = Bool()
 
     val tdata1Update = Bool()
     val tdata2Update = Bool()
@@ -186,18 +187,30 @@ object MemType {
   val STORE = false
 }
 
-class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) extends Module with HasXSParameter with SdtrigExt {
-  val io = IO(new Bundle(){
-    val fromCsrTrigger = Input(new CsrTriggerBundle)
 
-    val fromLoadStore = Input(new Bundle {
-      val vaddr = UInt(VAddrBits.W)
-    })
+class BaseTriggerIO(implicit p: Parameters) extends XSBundle{
+  val fromCsrTrigger = Input(new CsrTriggerBundle)
 
-    val toLoadStore = Output(new Bundle{
-      val triggerAction = TriggerAction()
-    })
+  val fromLoadStore = Input(new Bundle {
+    val vaddr = UInt(VAddrBits.W)
+    val isVectorUnitStride = Bool()
+    val mask = UInt((VLEN/8).W)
   })
+
+  val toLoadStore = Output(new Bundle{
+    val triggerAction = TriggerAction()
+    val triggerVaddr  = UInt(VAddrBits.W)
+    val triggerMask  = UInt((VLEN/8).W)
+  })
+}
+
+
+abstract class BaseTrigger()(implicit val p: Parameters) extends Module with HasXSParameter with SdtrigExt {
+  lazy val io = IO(new BaseTriggerIO)
+
+  def getTriggerHitVec(): Vec[Bool]
+  def highBitsEq(): Vec[Bool]
+
   val tdataVec      = io.fromCsrTrigger.tdataVec
   val tEnableVec    = io.fromCsrTrigger.tEnableVec
   val triggerCanRaiseBpExp = io.fromCsrTrigger.triggerCanRaiseBpExp
@@ -207,23 +220,86 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(implicit val p: Parameters) ex
   val triggerTimingVec = VecInit(tdataVec.map(_.timing))
   val triggerChainVec = VecInit(tdataVec.map(_.chain))
 
-  val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  val triggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-
   // Trigger can't hit/fire in debug mode.
-  for (i <- 0 until TriggerNum) {
-    triggerHitVec(i) := !tdataVec(i).select && !debugMode && TriggerCmp(
-      vaddr,
-      tdataVec(i).tdata2,
-      tdataVec(i).matchType,
-      tEnableVec(i) && (if(memType == MemType.LOAD) tdataVec(i).load else tdataVec(i).store)
-    )
-  }
-  TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+  val triggerHitVec = getTriggerHitVec()
+  val triggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  // for vector unit-stride, match Type only support equal
+  val lowBitWidth = log2Up(VLEN/8)
+  val isVectorStride = io.fromLoadStore.isVectorUnitStride
+  val mask = io.fromLoadStore.mask
+
+  val highEq = highBitsEq()
+
+  val lowMatch = tdataVec.map(tdata => UIntToOH(tdata.tdata2(lowBitWidth-1, 0)) & mask)
+  val lowEq  = VecInit(lowMatch.map(lm => lm.orR))
+
+  val hitVecVectorStride  = VecInit(highEq.zip(lowEq).map{case(hi, lo) => hi && lo})
+
+  TriggerCheckCanFire(TriggerNum, triggerCanFireVec, Mux(isVectorStride, hitVecVectorStride, triggerHitVec), triggerTimingVec, triggerChainVec)
+  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
+  val triggerVaddr  = PriorityMux(triggerFireOH, VecInit(tdataVec.map(_.tdata2))).asUInt
+  val triggerMask   = PriorityMux(triggerFireOH, VecInit(tdataVec.map(x => UIntToOH(x.tdata2(lowBitWidth-1, 0))))).asUInt
 
   val actionVec = VecInit(tdataVec.map(_.action))
   val triggerAction = Wire(TriggerAction())
   TriggerUtil.triggerActionGen(triggerAction, triggerCanFireVec, actionVec, triggerCanRaiseBpExp)
 
   io.toLoadStore.triggerAction := triggerAction
+  io.toLoadStore.triggerVaddr  := triggerVaddr
+  io.toLoadStore.triggerMask   := triggerMask
+}
+
+
+class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Parameters) extends BaseTrigger {
+
+  override def getTriggerHitVec(): Vec[Bool] = {
+    val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+    for (i <- 0 until TriggerNum) {
+      triggerHitVec(i) := !tdataVec(i).select && !debugMode && TriggerCmp(
+      vaddr,
+      tdataVec(i).tdata2,
+      tdataVec(i).matchType,
+      tEnableVec(i) && (if(memType == MemType.LOAD) tdataVec(i).load else tdataVec(i).store)
+      )
+    }
+    triggerHitVec
+  }
+
+  override def highBitsEq(): Vec[Bool] = {
+    VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+      !tdata.select && !debugMode && en &&
+        (if(memType == MemType.LOAD) tdata.load else tdata.store) &&
+        (vaddr >> lowBitWidth) === (tdata.tdata2 >> lowBitWidth)
+    })
+  }
+}
+
+class VSegmentTrigger(override implicit val p: Parameters) extends BaseTrigger {
+
+  class VSegmentTriggerIO extends BaseTriggerIO{
+    val memType = Input(Bool())
+  }
+
+  override lazy val io = IO(new VSegmentTriggerIO)
+
+  override def getTriggerHitVec(): Vec[Bool] = {
+    val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+    for (i <- 0 until TriggerNum) {
+      triggerHitVec(i) := !tdataVec(i).select && !debugMode && TriggerCmp(
+        vaddr,
+        tdataVec(i).tdata2,
+        tdataVec(i).matchType,
+        tEnableVec(i) && Mux(io.memType === MemType.LOAD.asBool, tdataVec(i).load, tdataVec(i).store)
+      )
+    }
+    triggerHitVec
+  }
+
+  override def highBitsEq(): Vec[Bool] = {
+    VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+      !tdata.select && !debugMode && en &&
+        Mux(io.memType === MemType.LOAD.asBool, tdata.load, tdata.store) &&
+        (vaddr >> lowBitWidth) === (tdata.tdata2 >> lowBitWidth)
+    })
+  }
 }

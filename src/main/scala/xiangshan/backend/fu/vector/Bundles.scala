@@ -8,6 +8,7 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.VtypeStruct
 import _root_.utils.NamedUInt
+import utility.ZeroExt
 
 object Bundles {
 
@@ -81,6 +82,14 @@ object Bundles {
       res.vlmul := 0.U
       res
     }
+
+    def mu: UInt = 0.U(1.W)
+
+    def ma: UInt = 1.U(1.W)
+
+    def tu: UInt = 0.U(1.W)
+
+    def ta: UInt = 1.U(1.W)
   }
 
   object VsetVType {
@@ -122,11 +131,6 @@ object Bundles {
     }
   }
 
-  def mu: UInt = 0.U(1.W)
-  def ma: UInt = 1.U(1.W)
-  def tu: UInt = 0.U(1.W)
-  def ta: UInt = 1.U(1.W)
-
   // modify the width when support more vector data width
   object VSew extends NamedUInt(2) {
     def e8  : UInt = "b000".U(width.W)
@@ -146,6 +150,18 @@ object Bundles {
     }
   }
 
+  object SewOH extends NamedUInt(4) {
+    def e8  : UInt = "b0001".U(width.W)
+    def e16 : UInt = "b0010".U(width.W)
+    def e32 : UInt = "b0100".U(width.W)
+    def e64 : UInt = "b1000".U(width.W)
+
+    def convertFromVSew(vsew: UInt): UInt = {
+      require(vsew.getWidth >= 2 && vsew.getWidth <= 3)
+      ZeroExt(UIntToOH(vsew), this.width)
+    }
+  }
+
   object VtypeVSew extends NamedUInt(3)
 
   object VLmul extends NamedUInt(3) {
@@ -162,6 +178,11 @@ object Bundles {
     def isReserved(vlmul: UInt) : Bool = {
       require(vlmul.getWidth == 3)
       vlmul === reserved
+    }
+
+    def makeNoLessThanM1(uint: UInt): UInt = {
+      checkInputWidth(uint)
+      Mux(uint(2), m1, uint)
     }
   }
 
