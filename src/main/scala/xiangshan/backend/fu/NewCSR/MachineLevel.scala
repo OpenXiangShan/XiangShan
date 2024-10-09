@@ -14,7 +14,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.NewCSR.CSRConfig._
-import xiangshan.backend.fu.NewCSR.CSRFunc.wNoEffectWhen
+import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
@@ -165,8 +165,12 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
-      regOut := this.perfEvents(num - 3)
+    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasOfFromPerfCntBundle {
+      when(wen){
+        reg.OF := wdata.OF
+      }.elsewhen(ofFromPerfCnt) {
+        reg.OF := ofFromPerfCnt
+      }
     })
       .setAddr(CSRs.mhpmevent3 - 3 + num)
   )
@@ -418,20 +422,6 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
-  // read/write/update mhpmevents -> read/write/update perfEvents
-  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
-    List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
-    List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
-    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
-
-  mhpmevents.foreach { mod =>
-    mod match {
-      case m: HasPerfEventBundle =>
-        m.perfEvents := perfEvents
-      case _ =>
-    }
-  }
-
 }
 
 class MstatusBundle extends CSRBundle {
@@ -613,16 +603,6 @@ class Mtval2Bundle extends FieldInitBundle
 
 class MhpmcounterBundle extends FieldInitBundle
 
-// todo: for the future, delete bypass between mhpmevents and perfEvents
-class MhpmeventBundle extends CSRBundle {
-  val OF    = RW(63).withReset(0.U)
-  val MINH  = RW(62).withReset(0.U)
-  val SINH  = RW(61).withReset(0.U)
-  val UINH  = RW(60).withReset(0.U)
-  val VSINH = RW(59).withReset(0.U)
-  val VUINH = RW(58).withReset(0.U)
-}
-
 class MEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
@@ -660,6 +640,35 @@ class MipToHvip extends IpValidBundle {
 
 class MipToMvip extends IpValidBundle {
   this.SEIP.bits.setRW()
+}
+
+class MhpmeventBundle extends CSRBundle {
+  val OF      = RW(63).withReset(0.U)
+  val MINH    = RW(62).withReset(0.U)
+  val SINH    = RW(61).withReset(0.U)
+  val UINH    = RW(60).withReset(0.U)
+  val VSINH   = RW(59).withReset(0.U)
+  val VUINH   = RW(58).withReset(0.U)
+  val OPTYPE2 = OPTYPE(54, 50, wNoFilter).withReset(OPTYPE.OR)
+  val OPTYPE1 = OPTYPE(49, 45, wNoFilter).withReset(OPTYPE.OR)
+  val OPTYPE0 = OPTYPE(44, 40, wNoFilter).withReset(OPTYPE.OR)
+  val EVENT3  = RW(39, 30).withReset(0.U)
+  val EVENT2  = RW(29, 20).withReset(0.U)
+  val EVENT1  = RW(19, 10).withReset(0.U)
+  val EVENT0  = RW(9, 0).withReset(0.U)
+}
+
+object OPTYPE extends CSREnum with WARLApply {
+  val OR = Value(0.U)
+  val AND = Value(1.U)
+  val XOR = Value(2.U)
+  val ADD = Value(4.U)
+
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(OR, AND, XOR, ADD)
+}
+
+trait HasOfFromPerfCntBundle { self: CSRModule[_] =>
+  val ofFromPerfCnt = IO(Input(Bool()))
 }
 
 trait HasMipToAlias { self: CSRModule[_] =>
