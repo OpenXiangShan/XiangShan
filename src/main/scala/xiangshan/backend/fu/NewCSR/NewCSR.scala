@@ -780,7 +780,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // perf
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
-    (addr === mcountinhibit.addr.U) ||
+    (addr >= mcountinhibit.addr.U) && (addr <= mhpmevents.last.addr.U) ||
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR
   )
