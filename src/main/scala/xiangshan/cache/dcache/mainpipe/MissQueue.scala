@@ -869,6 +869,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
+    val seqStoreDetected = Input(Bool())
     val lqEmpty = Input(Bool())
 
     val prefetch_info = new Bundle {
@@ -941,19 +942,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
 
-  val source_except_load_cnt = RegInit(0.U(10.W))
-  when(VecInit(req_mshr_handled_vec).asUInt.orR || req_pipeline_reg_handled) {
-    when(io.req.bits.isFromLoad) {
-      source_except_load_cnt := 0.U
-    }.otherwise {
-      when(io.req.bits.isFromStore) {
-        source_except_load_cnt := source_except_load_cnt + 1.U
-      }
-    }
-  }
-  val Threshold = 8
-  val memSetPattenDetected = GatedValidRegNext((source_except_load_cnt >= Threshold.U) && io.lqEmpty)
-
+  val memSetPattenDetected = GatedValidRegNext(io.seqStoreDetected && io.lqEmpty)
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
