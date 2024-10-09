@@ -635,7 +635,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasMhpmeventOfBundle =>
-        m.ofVec := VecInit(mhpmevents.map(event => event.rdata.head(1).asBool)).asUInt //todo：fix
+        m.ofVec := VecInit(mhpmevents.map{ event =>
+          val mhpmevent = Wire(new MhpmeventBundle)
+          mhpmevent := event.rdata
+          mhpmevent.OF.asBool
+        }).asUInt
         m.privState := privState
         m.mcounteren := mcounteren.rdata
         m.hcounteren := hcounteren.rdata
@@ -1054,8 +1058,7 @@ class NewCSR(implicit val p: Parameters) extends Module
    * perf_begin
    * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huancun 5)
    */
-  // tmp: mhpmevents is wrapper of perfEvents, read/write/update mhpmevents -> read/write/update perfEvents
-  val csrevents = perfEvents.slice(24, 29)
+  val csrevents = mhpmevents.slice(24, 29).map(_.rdata)
 
   val hcEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
   for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
@@ -1063,19 +1066,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   val hpmHc = HPerfMonitor(csrevents, hcEvents)
-
-  val privState1H = Cat(privState.isModeM, privState.isModeHS, privState.isModeHU, privState.isModeVS, privState.isModeVU)
-  val countingEn = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
-  for (i <-0 until perfCntNum) {
-    countingEn(i) := ((~mhpmevents(i).rdata(62, 58)).asUInt & privState1H).orR
-  }
   val allPerfEvents = io.perf.perfEventsFrontend ++
     io.perf.perfEventsBackend ++
     io.perf.perfEventsLsu ++
     hpmHc.getPerf
 
+  val countingEn        = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
   val ofFromPerfCntVec  = Wire(Vec(perfCntNum, Bool()))
   val lcofiReqVec       = Wire(Vec(perfCntNum, Bool()))
+  
   for(i <- 0 until perfCntNum) {
     mhpmcounters(i) match {
       case m: HasPerfCounterBundle =>
@@ -1084,8 +1083,22 @@ class NewCSR(implicit val p: Parameters) extends Module
         ofFromPerfCntVec(i) := m.toMhpmeventOF
       case _ =>
     }
-    perfEvents(i)  := Mux(mhpmevents(i).w.wen, wdata, (perfEvents(i).head(1).asBool || ofFromPerfCntVec(i)) ## perfEvents(i).tail(1))
-    lcofiReqVec(i) := ofFromPerfCntVec(i) && !mhpmevents(i).rdata.head(1)
+
+    mhpmevents(i) match {
+      case m: HasOfFromPerfCntBundle =>
+        m.ofFromPerfCnt := ofFromPerfCntVec(i)
+      case _ =>
+    }
+    
+    val mhpmevent = Wire(new MhpmeventBundle)
+    mhpmevent := mhpmevents(i).rdata
+    lcofiReqVec(i) := ofFromPerfCntVec(i) && !mhpmevent.OF.asBool
+
+    countingEn(i) := (privState.isModeM && !mhpmevent.MINH) ||
+      (privState.isModeHS && !mhpmevent.SINH)  ||
+      (privState.isModeHU && !mhpmevent.UINH)  ||
+      (privState.isModeVS && !mhpmevent.VSINH) ||
+      (privState.isModeVU && !mhpmevent.VUINH)
   }
 
   val lcofiReq = lcofiReqVec.asUInt.orR
