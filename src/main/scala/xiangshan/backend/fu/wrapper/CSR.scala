@@ -339,7 +339,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory
-      custom.distribute_csr.w.valid := csrWen
+      custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
       custom.distribute_csr.w.bits.addr := addr
       custom.distribute_csr.w.bits.data := wdata
       // rename single step
