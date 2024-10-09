@@ -139,8 +139,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
 
-    core.module.io.perfEvents <> DontCare
-
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
     if (enableL2) {
@@ -157,6 +155,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+
+      core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
@@ -171,6 +171,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
       core.module.io.l2_tlb_req.resp.ready := true.B
+
+      core.module.io.perfEvents <> DontCare
     }
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
