@@ -939,7 +939,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       )
     ),
   needTargetUpdate)
-  io.out.bits.targetPcUpdate := DataHoldBypass(needTargetUpdate, false.B, io.in.fire)
+  io.out.bits.targetPcUpdate := needTargetUpdate
   io.out.bits.isPerfCnt := DataHoldBypass(addrInPerfCnt, false.B, io.in.fire)
 
   io.status.privState := privState
