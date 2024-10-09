@@ -543,7 +543,7 @@ class CtrlBlockImp(
   val dispatchNeedPf = Reg(Vec(RenameWidth, Bool()))
   val dispatchPredAddr = Reg(Vec(RenameWidth, UInt(VAddrBits.W)))
   dispatchFirstValid.zipWithIndex.foreach{ case (v, i) =>
-    v := renameOut(i).valid && dispatch.io.toRenameAllFire && ~s1_s3_redirect.valid
+    v := renameOut(i).fire && ~s1_s3_redirect.valid
     when (v) {
       dispatchNeedPf(i) := stridePredictor.io.spReadPort(i).needPf
       dispatchPredAddr(i) := stridePredictor.io.spReadPort(i).predAddr
@@ -552,7 +552,7 @@ class CtrlBlockImp(
 
   spPCMem.io.fromFrontendFtq := io.frontend.fromFtq
   spPCMem.io.toStridePredictor.take(RenameWidth).zipWithIndex.foreach{ case (toSP, i) =>
-    toSP.ren := renameOut(i).valid && dispatch.io.toRenameAllFire && FuType.isLoad(renameOut(i).bits.fuType) && ~s1_s3_redirect.valid
+    toSP.ren := renameOut(i).fire && FuType.isLoad(renameOut(i).bits.fuType) && ~s1_s3_redirect.valid
     toSP.ftqPtr := renameOut(i).bits.ftqPtr
     toSP.ftqOffset := renameOut(i).bits.ftqOffset
     // for better timing, do not consider redirect here
