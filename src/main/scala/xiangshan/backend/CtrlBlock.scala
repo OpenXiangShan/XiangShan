@@ -564,6 +564,7 @@ class CtrlBlockImp(
   stridePredictor.io.fromSPPcMem <> spPCMem.io.toStridePredictor.takeRight(stridePredictor.io.fromSPPcMem.size)
   stridePredictor.io.spCommitPort.zipWithIndex.foreach{ case (commit, i) =>
     commit.wen := rob.io.commits.isCommit && rob.io.commits.commitValid(i) && rob.io.commits.info(i).commitType === CommitType.LOAD
+    commit.robIdx := rob.io.commits.robIdx(i)
     commit.ftqPtr := rob.io.commits.info(i).ftqIdx
     commit.ftqOffset := rob.io.commits.info(i).ftqOffset
     commit.pfHit := rob.io.commits.info(i).pfHit

@@ -181,6 +181,8 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
     entry            := 0.U.asTypeOf(new StridePredictorEntry)
     entry.valid      := true.B
     entry.tag        := readTagVec(i)
+    entry.headHasCmt := false.B
+    entry.headRobIdx := io.spReadPort(i).robIdx
     entry.lastRobIdx := io.spReadPort(i).robIdx
     entry.inflight   := finalMatchCountVec(i)
   }
@@ -249,6 +251,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             entry.stride := (updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr).asSInt
           }
         }
+        when (updateInfo(i).robIdx === updateEntryVec(i)(j).headRobIdx) {
+          entry.headHasCmt := true.B
+        }
       }
       else {
         when (finalUpdateMatchCountVec(i) === 2.U) {
@@ -270,6 +275,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
               entry.stride := (updateInfo(i + 1).currAddr - updateInfo(i).currAddr).asSInt
             }
           }
+          when (updateInfo(i).robIdx === updateEntryVec(i)(j).headRobIdx || updateInfo(i + 1).robIdx === updateEntryVec(i)(j).headRobIdx) {
+            entry.headHasCmt := true.B
+          }
         }.otherwise {
           entry.prevAddr := updateInfo(i).currAddr
           entry.inflight := updateEntryVec(i)(j).inflight + updateMatchReadCountVec(i) - 1.U
@@ -282,6 +290,9 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
             when (updateEntryVec(i)(j).confidence === 0.U && updateEntryVec(i)(j).prevAddr =/= 0.U) {
               entry.stride := (updateInfo(i).currAddr - updateEntryVec(i)(j).prevAddr).asSInt
             }
+          }
+          when (updateInfo(i).robIdx === updateEntryVec(i)(j).headRobIdx) {
+            entry.headHasCmt := true.B
           }
         }
       }
@@ -310,7 +321,8 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
       val commitOH = updateAddrVec.zip(finalUpdateMatchOHVec).map{ case (addr, matchOH) =>
         addr === i.U && matchOH(j)
       }
-      val commitEn = commitOH.orR
+      val commitEntry = Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
+      val commitEn = commitOH.orR && (commitEntry.headHasCmt || entry.headHasCmt)
       val allocOH = readAddrVec.zip(finalAllocOHVec).map{ case (addr, allocOH) =>
         addr === i.U && allocOH(j)
       }
@@ -327,12 +339,12 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
         entry.valid := false.B
       }
       .elsewhen (commitEn) {
-        val commitEntry = Mux1H(commitOH, commitUpdateEntryVec.map(_(j)))
         entry.stride     := commitEntry.stride
         entry.prevAddr   := commitEntry.prevAddr
         entry.inflight   := commitEntry.inflight
         entry.confidence := commitEntry.confidence
         entry.utility    := commitEntry.utility
+        entry.headHasCmt := true.B
         when (readEn) {
           entry.lastRobIdx := Mux1H(readOH, readUpdateRobIdxVec)
         }
@@ -364,6 +376,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   enqBuffer.lazyZip(io.spCommitPort).lazyZip(io.fromSPPcMem).foreach{ case (enqBuf, commit, pcMem) =>
     enqBuf.valid    := commit.wen
+    enqBuf.robIdx   := commit.robIdx
     enqBuf.pfHit    := commit.pfHit
     enqBuf.currAddr := commit.currAddr
     pcMem.ren       := commit.wen
@@ -390,6 +403,7 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 
   filteredEnqReq.zipWithIndex.foreach{ case (enq, i) =>
     enq.valid    := enqBuffer(i).valid && enqReqMatchVec(i)
+    enq.robIdx   := enqBuffer(i).robIdx
     enq.pc       := io.fromSPPcMem(i).pc
     enq.pfHit    := enqBuffer(i).pfHit
     enq.currAddr := enqBuffer(i).currAddr
@@ -476,7 +490,10 @@ class StridePredictor()(implicit p: Parameters) extends XSModule with StridePred
 class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val valid      = Bool()
   val tag        = UInt(TagWidth.W)
+
+  val headRobIdx = new RobPtr
   val lastRobIdx = new RobPtr
+  val headHasCmt = Bool()
 
   val stride     = SInt(StrideWidth.W)
   val prevAddr   = UInt(VAddrBits.W)
@@ -489,6 +506,7 @@ class StridePredictorEntry()(implicit p: Parameters) extends XSBundle with Strid
 
 class SPCommitBufferEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val valid     = Bool()
+  val robIdx    = new RobPtr
   val pc        = UInt(ValidPcWidth.W)
   val pfHit     = Bool()
   val currAddr  = UInt(VAddrBits.W)
@@ -499,6 +517,7 @@ class SPCommitBufferPtr(entries: Int) extends CircularQueuePtr[SPCommitBufferPtr
 
 class SPEnqBufferEntry()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val valid     = Bool()
+  val robIdx    = new RobPtr
   val pfHit     = Bool()
   val currAddr  = UInt(VAddrBits.W)
 }
@@ -513,6 +532,7 @@ class SPReadPort()(implicit p: Parameters) extends XSBundle with StridePredictor
 
 class SPCommitPort()(implicit p: Parameters) extends XSBundle with StridePredictorParams {
   val wen       = Input(Bool())
+  val robIdx    = Input(new RobPtr)
   val ftqPtr    = Input(new FtqPtr)
   val ftqOffset = Input(UInt(log2Up(PredictWidth).W))
   val pfHit     = Input(Bool())
