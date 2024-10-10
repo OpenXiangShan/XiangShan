@@ -26,6 +26,7 @@ import utils._
 import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.frontend.tracertl.{TraceFakeDynPageTable, TraceRTLChoose}
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
@@ -83,7 +84,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
-  val priv   = csr_dup(0).priv
+  // val priv   = csr_dup(0).priv
   val mPBMTE = csr_dup(0).mPBMTE
   val hPBMTE = csr_dup(0).hPBMTE
   val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed
@@ -361,6 +362,23 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem.a.valid := mem_arb.io.out.valid && !flush
   mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
   mem.d.ready := true.B
+
+  val softPageRamResult = Reg(Vec(MemReqWidth, Vec(2, UInt(256.W))))
+  if (env.TraceRTLMode) {
+    // fake page table ram
+    val softPageRam = Module(new TraceFakeDynPageTable)
+    softPageRam.io.req.valid := mem.a.fire
+    softPageRam.io.req.bits.paddr := mem.a.bits.address
+    val softReqID = RegNext(mem.a.bits.source)
+
+    when (RegNext(mem.a.fire)) {
+      softPageRamResult(softReqID)(0) := softPageRam.io.resp.bits.data(0)
+      softPageRamResult(softReqID)(1) := softPageRam.io.resp.bits.data(1)
+    }
+  } else {
+    softPageRamResult := DontCare
+  }
+
   // mem -> data buffer
   val refill_data = RegInit(VecInit.fill(blockBits / l1BusDataWidth)(0.U(l1BusDataWidth.W)))
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
@@ -370,11 +388,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
   when (mem.d.valid) {
     assert(mem.d.bits.source < MemReqWidth.U)
-    refill_data(refill_helper._4) := mem.d.bits.data
+    refill_data(refill_helper._4) := TraceRTLChoose(mem.d.bits.data,
+      softPageRamResult(mem.d.bits.source)(refill_helper._4))
   }
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
   val refill_data_tmp = WireInit(refill_data)
-  refill_data_tmp(refill_helper._4) := mem.d.bits.data
+  refill_data_tmp(refill_helper._4) := TraceRTLChoose(mem.d.bits.data,
+      softPageRamResult(mem.d.bits.source)(refill_helper._4))
 
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
@@ -505,7 +525,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
       llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id),
       contiguous_pte_to_merge_ptwResp(
-        resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, 
+        resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af,
         true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf
       )
     )

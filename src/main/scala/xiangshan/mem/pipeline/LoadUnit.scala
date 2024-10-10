@@ -1449,7 +1449,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   TraceRTLDontCare(s3_out.bits.uop.exceptionVec)
   if (env.TraceRTLMode) {
-    when (s3_valid) {
+    when (s3_valid && !s3_in.tlbMiss) {
+
       XSError(s3_in.mmio && s3_in.paddr >= 0x80000000L.U, "LoadUnit, paddr should not be mmio")
       XSError(!s3_in.mmio && s3_in.paddr < 0x80000000L.U, "LoadUnit, paddr should be mmio")
     }

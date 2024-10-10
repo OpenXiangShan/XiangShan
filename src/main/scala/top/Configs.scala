@@ -200,7 +200,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           l0ReservedBits = 0,
           spSize = 4,
         ),
-        softTLB = true,
+        softTLB = false,
         L2CacheParamsOpt = Some(L2Param(
           name = "L2",
           ways = 8,

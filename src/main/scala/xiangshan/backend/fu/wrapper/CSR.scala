@@ -248,6 +248,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.mode    := csrMod.io.tlb.hgatp.MODE.asUInt
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
+  if (env.TraceRTLMode) {
+    tlb.satp.changed  := false.B
+    tlb.satp.mode     := 8.U
+    tlb.satp.asid     := 0.U
+    tlb.satp.ppn      := ((0x90000000L + 0x1000L * 3) >> 12).U(44.W)
+    tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
+    tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
+  }
 
   // expose several csr bits for tlb
   tlb.priv.mxr := csrMod.io.tlb.mxr
@@ -258,6 +266,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.virt := csrMod.io.tlb.dvirt
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
+  if (env.TraceRTLMode) {
+    // already enable translate by set ModeU
+    tlb.priv.imode := ModeU
+    tlb.priv.dmode := ModeU
+  }
 
   // Svpbmt extension enable
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE

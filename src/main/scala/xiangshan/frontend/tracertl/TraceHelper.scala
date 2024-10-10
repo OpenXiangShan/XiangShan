@@ -611,3 +611,115 @@ class TraceFakeMMU()(implicit p: Parameters) extends TraceModule {
   io.paddr := atsHelper.paddr
   io.hit   := atsHelper.hit
 }
+
+
+class TraceFakePageTableRespBundle(implicit p: Parameters) extends TraceBundle {
+  val data = Vec(2, UInt(256.W))
+  val addr = UInt(PAddrBits.W)
+}
+
+class TraceDynPageTableHelper extends ExtModule
+  with HasExtModuleInline {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val enable = IO(Input(Bool()))
+  val addr = IO(Input(UInt(64.W)))
+  val data = IO(Output(Vec(512/64, UInt(64.W))))
+
+  def getVerilog: String = {
+    def getDataPort(): String = {
+      (0 until 512/64)
+        .map(i => s"output reg [63:0] data_$i,")
+        .mkString("  ", "\n  ", "\n")
+    }
+    def genLogicDeclare: String = {
+      (0 until 512/64)
+        .map(i => s"logic [63:0] logicData_$i;")
+        .mkString("    ", "\n  ", "\n")
+    }
+    def fromLogictoIO: String = {
+      val assignData: String =
+        (0 until 512/64)
+          .map(i => s"data_$i <= logicData_$i;")
+          .mkString("      ", "\n    ", "\n")
+      s"""
+         |always @(posedge clock) begin
+         |  if (!reset && enable) begin
+         |$assignData
+         |  end
+         |end
+         |"""
+    }
+    def callDPIC: String = {
+      def assignDPIC: String = {
+        (0 until 512/64)
+          .map(i => s"logicData_$i <= trace_dyn_pt_dword_helper(addr_align + $i * 8);")
+          .mkString("      ", "\n      ", "\n")
+      }
+      def assignDummy: String = {
+        (0 until 512/64)
+          .map(i => s"logicData_$i <= 0;")
+          .mkString("    ", "\n    ", "\n")
+      }
+      s"""
+         |always @(negedge clock) begin
+         |  if (!reset && enable) begin
+         |${assignDPIC}
+         |  end
+         |  else begin
+         |${assignDummy}
+         |  end
+         |end
+         """.stripMargin
+    }
+
+
+    s"""
+       |import "DPI-C" function longint trace_dyn_pt_dword_helper(
+       |  input longint addr
+       |);
+       |
+       |module TraceDynPageTableHelper(
+       |  input             clock,
+       |  input             reset,
+       |  input             enable,
+       |${getDataPort()}
+       |  input      [63:0] addr
+       |);
+       |
+       |$genLogicDeclare
+       |
+       |$fromLogictoIO
+       |
+       |  wire [63:0] addr_align = addr & 64'hffffffffffffffe0;
+       |
+       |$callDPIC
+       |
+       |endmodule
+       |
+       |""".stripMargin
+  }
+
+  setInline(s"$desiredName.v", getVerilog)
+}
+
+class TraceFakeDynPageTable()(implicit p: Parameters) extends TraceModule {
+  val io = IO(new Bundle {
+    val req = Flipped(ValidIO(new Bundle {
+      val paddr = UInt(PAddrBits.W)
+    }))
+    val resp = Valid(new TraceFakePageTableRespBundle)
+  })
+
+  val helper = Module(new TraceDynPageTableHelper())
+  helper.clock := clock
+  helper.reset := reset
+
+  helper.enable := io.req.valid
+  helper.addr := io.req.bits.paddr
+
+  io.resp.valid := RegNext(io.req.valid)
+  io.resp.bits.data(0) := Cat(helper.data(3), helper.data(2), helper.data(1), helper.data(0))
+  io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
+  io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
+}

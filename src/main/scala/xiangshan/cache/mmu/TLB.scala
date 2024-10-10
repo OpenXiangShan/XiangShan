@@ -218,41 +218,50 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       } else {
         (ats.io.paddr, ats.io.hit)
       }
-      val paddr = ats_paddr
-      val hit = ats_hit
-      hitVec(idx) := true.B
-      missVec(idx) := false.B
-      pmp_addr(idx) := paddr
+      // val paddr = ats_paddr
+      // val hit = ats_hit
+      if (TraceSoftL1TLB) {
+        hitVec(idx) := true.B
+        missVec(idx) := false.B
+        pmp_addr(idx) := ats_paddr
 
-      resp(idx).valid := req_out_v(idx)
-      resp(idx).bits.paddr.foreach { _ := paddr }
-      resp(idx).bits.gpaddr.foreach { _ := paddr }
+        resp(idx).valid := req_out_v(idx)
+        resp(idx).bits.paddr.foreach { _ := ats_paddr }
+        resp(idx).bits.gpaddr.foreach { _ := ats_paddr }
+
+        when (vmEnable(idx) && resp(idx).valid && !TlbCmd.isExec(req_out(idx).cmd)) {
+          XSError(!ats.io.hit, s"Memory TLB(?)(port ${idx}) should always hit")
+        }
+        XSError(resp(idx).bits.miss, s"TLB $idx should not miss")
+        XSError(resp(idx).bits.ptwBack, s"TLB $idx should not ptwBack")
+
+        io.ptw.req.map(_.valid := false.B)
+        XSError(io.ptw.resp.valid, "When at TraceRTL mode, should not ptw resp")
+      } else if (TraceSoftL1TLBCheck) {
+        // Way 1: use the Dynamic Page Table's function and performance result
+        // Way 2: just use the DPT's performance result, use SoftTLB's result
+
+        when (hitVec(idx) && req_out_v(idx)) {
+          XSError(ats_paddr =/= resp(idx).bits.paddr.head, s"Trace Soft TLB not match with TLB, fix it")
+        }
+      }
       resp(idx).bits.excp.foreach { case excep =>
         excep.gpf := 0.U.asTypeOf(new TlbExceptionBundle)
         excep.pf := 0.U.asTypeOf(new TlbExceptionBundle)
         excep.af := 0.U.asTypeOf(new TlbExceptionBundle)
       }
 
-      when (vmEnable(idx) && resp(idx).valid && !TlbCmd.isExec(req_out(idx).cmd)) {
-        XSError(!ats.io.hit, s"Memory TLB(?)(port ${idx}) should always hit")
-      }
-      XSError(resp(idx).bits.miss, s"TLB $idx should not miss")
-      XSError(resp(idx).bits.ptwBack, s"TLB $idx should not ptwBack")
-
       val result_ok = req_in.map(a => GatedValidRegNext(a.fire))
       if (Block(idx)) {
         XSPerfAccumulate(s"tracetlb_access${idx}",result_ok(idx) && portTranslateEnable(idx))
-        XSPerfAccumulate(s"tracetlb_miss${idx}", result_ok(idx) && !hit)
+        XSPerfAccumulate(s"tracetlb_miss${idx}", result_ok(idx) && !ats_hit)
       } else {
         XSPerfAccumulate("tracetlb_first_access" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && RegEnable(req(idx).bits.debug.isFirstIssue, req(idx).valid))
         XSPerfAccumulate("tracetlb_access" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx))
-        XSPerfAccumulate("tracetlb_first_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !hit && RegEnable(req(idx).bits.debug.isFirstIssue, req(idx).valid))
-        XSPerfAccumulate("tracetlb_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !hit)
+        XSPerfAccumulate("tracetlb_first_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !ats_hit && RegEnable(req(idx).bits.debug.isFirstIssue, req(idx).valid))
+        XSPerfAccumulate("tracetlb_miss" + Integer.toString(idx, 10), result_ok(idx) && portTranslateEnable(idx) && !ats_hit)
       }
     }
-    io.ptw.req.map(_.valid := false.B)
-
-    XSError(io.ptw.resp.valid, "When at TraceRTL mode, should not ptw resp")
   }
 
 
