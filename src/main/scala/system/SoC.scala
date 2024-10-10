@@ -32,8 +32,9 @@ import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
-import coupledL2.EnableCHI
+import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
+import openLLC.OpenLLCParam
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -49,6 +50,13 @@ case class SoCParameters
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank
+  )),
+  OpenLLCParamsOpt: Option[OpenLLCParam] = Some(OpenLLCParam(
+    name = "LLC",
+    ways = 8,
+    sets = 2048,
+    banks = 4,
+    clientCaches = Seq(L2Param())
   )),
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
