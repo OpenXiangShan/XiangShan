@@ -176,6 +176,7 @@ class IOBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.ldout.bits.uop.exceptionVec(loadAccessFault) := nderr
   io.ldout.bits.data          := rdataPartialLoad
   io.ldout.bits.debug.isMMIO  := true.B
+  io.ldout.bits.debug.isNC    := false.B
   io.ldout.bits.debug.paddr   := req.paddr
   io.ldout.bits.debug.vaddr   := req.vaddr
 

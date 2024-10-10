@@ -501,6 +501,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s3_out.uop             := s3_in.uop
   s3_out.data            := DontCare
   s3_out.debug.isMMIO    := s3_in.mmio
+  s3_out.debug.isNC      := s3_in.nc
   s3_out.debug.paddr     := s3_in.paddr
   s3_out.debug.vaddr     := s3_in.vaddr
   s3_out.debug.isPerfCnt := false.B
