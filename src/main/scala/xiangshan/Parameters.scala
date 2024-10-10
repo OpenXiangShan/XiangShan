@@ -860,7 +860,7 @@ trait HasXSParameter {
   def LFSTEnable = true
 
   def PCntIncrStep: Int = 6
-  def numPCntHc: Int = 25
+  def numPCntHc: Int = 12
   def numPCntPtw: Int = 19
 
   def numCSRPCntFrontend = 8
