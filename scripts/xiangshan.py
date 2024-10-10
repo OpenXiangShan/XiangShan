@@ -262,7 +262,7 @@ class XiangShan(object):
         if self.args.numa:
             numa_info = get_free_cores(self.args.threads)
             numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
-        fork_args = "--enable-fork" if self.args.fork else ""
+        fork_args = "--enable-fork -X 10" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
