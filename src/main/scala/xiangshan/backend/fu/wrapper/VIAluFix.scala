@@ -6,7 +6,7 @@ import chisel3.util._
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 import utility.{DelayN, XSError}
 import xiangshan.XSCoreParamsKey
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew, ma}
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew}
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule

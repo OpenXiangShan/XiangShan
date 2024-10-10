@@ -30,13 +30,17 @@ import xiangshan.mem._
 import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
 import coupledL2.{CMOReq, CMOResp}
+import xiangshan.backend.fu.FuType
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
-  val vaddr = Output(UInt(VAddrBits.W))
+  val vaddr = Output(UInt(XLEN.W))
+  val vaNeedExt = Output(Bool())
+  val isHyper = Output(Bool())
   val vstart = Output(UInt((log2Up(VLEN) + 1).W))
   val vl = Output(UInt((log2Up(VLEN) + 1).W))
-  val gpaddr = Output(UInt(GPAddrBits.W))
+  val gpaddr = Output(UInt(XLEN.W))
+  val isForVSnonLeafPTE = Output(Bool())
 }
 
 class FwdEntry extends Bundle {
@@ -55,6 +59,7 @@ class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val needAlloc = Vec(LSQEnqWidth, Input(UInt(2.W)))
   val req       = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
+  val iqAccept  = Input(Vec(LSQEnqWidth, Bool()))
   val resp      = Vec(LSQEnqWidth, Output(new LSIdx))
 }
 
@@ -225,9 +230,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // s3: ptr updated & new address
   // address will be used at the next cycle after exception is triggered
   io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
+  io.exceptionAddr.vaNeedExt := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaNeedExt, loadQueue.io.exceptionAddr.vaNeedExt)
+  io.exceptionAddr.isHyper := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isHyper, loadQueue.io.exceptionAddr.isHyper)
   io.exceptionAddr.vstart := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vstart, loadQueue.io.exceptionAddr.vstart)
   io.exceptionAddr.vl     := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vl, loadQueue.io.exceptionAddr.vl)
   io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
+  io.exceptionAddr.isForVSnonLeafPTE:= Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isForVSnonLeafPTE, loadQueue.io.exceptionAddr.isForVSnonLeafPTE)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
 
   // naive uncache arbiter
@@ -311,23 +319,20 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
   val canAccept = RegInit(false.B)
 
-  val loadEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0))
-  val storeEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(1))
-  val isLastUopVec = io.enq.req.map(_.bits.lastUop)
-  val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
-  val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(loadEnqVec(index), vLoadFlowNumItem, 0.U)}
-  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vStoreFlowNumItem, index) => Mux(storeEnqVec(index), vStoreFlowNumItem, 0.U)}
-  val enqVLoadOffsetNumber = validVLoadFlow.reduce(_ + _)
-  val enqVStoreOffsetNumber = validVStoreFlow.reduce(_ + _)
-  val validVLoadOffset = 0.U +: vLoadFlow.zip(io.enq.needAlloc)
-                                .map{case (flow, needAllocItem) => Mux(needAllocItem(0).asBool, flow, 0.U)}
-                                .slice(0, validVLoadFlow.length - 1)
-  val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc)
-                                .map{case (flow, needAllocItem) => Mux(needAllocItem(1).asBool, flow, 0.U)}
-                                .slice(0, validVStoreFlow.length - 1)
-  val lqAllocNumber = enqVLoadOffsetNumber
-  val sqAllocNumber = enqVStoreOffsetNumber
+  val blockVec = io.enq.iqAccept.map(!_) :+ true.B
+  val numLsElem = io.enq.req.map(_.bits.numLsElem)
+  val needEnqLoadQueue = VecInit(io.enq.req.map(x => FuType.isLoad(x.bits.fuType) || FuType.isVNonsegLoad(x.bits.fuType)))
+  val needEnqStoreQueue = VecInit(io.enq.req.map(x => FuType.isStore(x.bits.fuType) || FuType.isVNonsegStore(x.bits.fuType)))
+  val loadQueueElem = needEnqLoadQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
+  val storeQueueElem = needEnqStoreQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
+  val loadFlowPopCount = 0.U +: loadQueueElem.zipWithIndex.map{ case (l, i) =>
+    loadQueueElem.take(i + 1).reduce(_ + _)
+  }
+  val storeFlowPopCount = 0.U +: storeQueueElem.zipWithIndex.map { case (s, i) =>
+    storeQueueElem.take(i + 1).reduce(_ + _)
+  }
+  val lqAllocNumber = PriorityMux(blockVec.zip(loadFlowPopCount))
+  val sqAllocNumber = PriorityMux(blockVec.zip(storeFlowPopCount))
 
   io.lqFreeCount  := lqCounter
   io.sqFreeCount  := sqCounter
@@ -370,13 +375,14 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val lqOffset = Wire(Vec(io.enq.resp.length, UInt(lqPtr.value.getWidth.W)))
   val sqOffset = Wire(Vec(io.enq.resp.length, UInt(sqPtr.value.getWidth.W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {
-    lqOffset(i) := validVLoadOffset.take(i + 1).reduce(_ + _)
+    lqOffset(i) := loadFlowPopCount(i)
     resp.lqIdx := lqPtr + lqOffset(i)
-    sqOffset(i) := validVStoreOffset.take(i + 1).reduce(_ + _)
+    sqOffset(i) := storeFlowPopCount(i)
     resp.sqIdx := sqPtr + sqOffset(i)
   }
 
   io.enqLsq.needAlloc := RegNext(io.enq.needAlloc)
+  io.enqLsq.iqAccept := RegNext(io.enq.iqAccept)
   io.enqLsq.req.zip(io.enq.req).zip(io.enq.resp).foreach{ case ((toLsq, enq), resp) =>
     val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept
     toLsq.valid := RegNext(do_enq)

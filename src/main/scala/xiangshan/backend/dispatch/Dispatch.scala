@@ -409,7 +409,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 0 until RenameWidth) {
     io.fromRename(i).ready := thisCanActualOut(i) && io.enqRob.canAccept && dqCanAccept
 
-    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.rfWen && (io.fromRename(i).bits.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
+    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.rfWen && !io.fromRename(i).bits.eliminatedMove
     io.allocPregs(i).isFp := io.fromRename(i).valid && io.fromRename(i).bits.fpWen
     io.allocPregs(i).isVec := io.fromRename(i).valid && io.fromRename(i).bits.vecWen
     io.allocPregs(i).isV0 := io.fromRename(i).valid && io.fromRename(i).bits.v0Wen

@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util.Fill
 import xiangshan.backend.fu.NewCSR.CSRFunc._
+import scala.collection.mutable
 
 import scala.language.implicitConversions
 
@@ -126,6 +127,8 @@ class CSREnumType(
 )(
   override val factory: ChiselEnum
 ) extends EnumType(factory) {
+
+  var otherUpdateSeq: mutable.Seq[Tuple2[Bool, Data]] = mutable.Seq()
 
   if (factory.all.isEmpty) {
     factory.asInstanceOf[CSREnum].addMinValue
@@ -313,6 +316,11 @@ class CSREnumType(
     this.asUInt | Fill(this.getWidth, that)
   }
 
+  def addOtherUpdate(cond: Bool, value: CSREnumType): this.type = {
+    this.otherUpdateSeq :+= (cond, value)
+    this
+  }
+
   // override cloneType to make ValidIO etc function return CSREnumType not EnumType
   override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type].setRwType(this.rwType)
 }
@@ -361,8 +369,6 @@ class CSREnum extends ChiselEnum {
   def legalize(enumeration: CSREnumType): CSREnumType = makeType
 
   def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = makeType
-
-  println(s"A new CSREnum is created, factory: $this")
 }
 
 trait RWApply { self: CSREnum =>

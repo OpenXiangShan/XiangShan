@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
+import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecInfo, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
@@ -413,7 +413,6 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
     case(en,fflags) => Mux(en, fflags, 0.U(5.W))
   }.reduce(_ | _)
-  io.out.bits.res.fflags.get := outFFlags
 
 
   val cmpResultOldVd = Wire(UInt(cmpResultWidth.W))
@@ -498,6 +497,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   resultFpMask := Mux(isFclass || isCmp, Fill(16, 1.U(1.W)), Fill(VLEN, 1.U(1.W)))
   // when dest is mask, the result need to be masked by mgtu
   io.out.bits.res.data := Mux(notModifyVd, outOldVd, Mux(outVecCtrl.isDstMask, mgtu.io.out.vd, mgu.io.out.vd) & resultFpMask)
+  io.out.bits.res.fflags.get := Mux(notModifyVd, 0.U(5.W), outFFlags)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 
 }

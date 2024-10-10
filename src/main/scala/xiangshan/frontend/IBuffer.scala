@@ -66,6 +66,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
   val exceptionType = IBufferExceptionType()
+  val exceptionFromBackend = Bool()
   val triggered = TriggerAction()
   val traceInfo = new TraceInstrBundle()
 
@@ -82,6 +83,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
       fetch.crossPageIPFFix(i),
       fetch.illegalInstr(i),
     )
+    exceptionFromBackend := fetch.exceptionFromBackend(i)
     triggered := fetch.triggered(i)
     traceInfo := fetch.traceInfo(i)
     this
@@ -97,6 +99,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.exceptionVec(instrGuestPageFault) := IBufferExceptionType.isGPF(this.exceptionType)
     cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF (this.exceptionType)
     cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
+    cf.exceptionFromBackend := exceptionFromBackend
     cf.trigger := triggered
     cf.pd := pd
     cf.pred_taken := pred_taken

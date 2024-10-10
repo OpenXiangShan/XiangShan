@@ -139,9 +139,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
-    enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegNext(io.wakeUpFromWB)
-    enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegNext(io.wakeUpFromIQ)
-    enqEntry.io.enqDelayIn1.srcLoadDependency := RegNext(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)))
+    enqEntry.io.enqDelayIn1.wakeUpFromWB := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.wakeUpFromIQ := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.srcLoadDependency := RegEnable(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), io.enq(entryIdx).valid)
     enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel)
     enqEntry.io.enqDelayIn1.ldCancel          := RegNext(io.ldCancel)
     // note: these signals with 2 cycle delay should not be enabled by io.enq.valid
@@ -408,8 +408,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.flush                    := io.flush
     in.wakeUpFromWB             := io.wakeUpFromWB
     in.wakeUpFromIQ             := io.wakeUpFromIQ
-    in.vlIsZero                 := io.vlIsZero
-    in.vlIsVlmax                := io.vlIsVlmax
+    in.vlFromIntIsZero          := io.vlFromIntIsZero
+    in.vlFromIntIsVlmax         := io.vlFromIntIsVlmax
+    in.vlFromVfIsZero           := io.vlFromVfIsZero
+    in.vlFromVfIsVlmax          := io.vlFromVfIsVlmax
     in.og0Cancel                := io.og0Cancel
     in.og1Cancel                := io.og1Cancel
     in.ldCancel                 := io.ldCancel
@@ -537,8 +539,10 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // wakeup
   val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val vlIsZero            = Input(Bool())
-  val vlIsVlmax           = Input(Bool())
+  val vlFromIntIsZero     = Input(Bool())
+  val vlFromIntIsVlmax    = Input(Bool())
+  val vlFromVfIsZero      = Input(Bool())
+  val vlFromVfIsVlmax     = Input(Bool())
   val og0Cancel           = Input(ExuVec())
   val og1Cancel           = Input(ExuVec())
   val ldCancel            = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))

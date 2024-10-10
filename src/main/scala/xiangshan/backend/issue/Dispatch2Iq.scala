@@ -858,6 +858,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val isVecUnitType   = isVlsType.zip(isUnitStride).map{ case (isVlsTypeItme, isUnitStrideItem) =>
     isVlsTypeItme && isUnitStrideItem
   }
+  private val isfofFixVlUop   = uop.map{x => x.vpu.isVleff && x.lastUop}
   private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
@@ -917,15 +918,16 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // enqLsq io
   require(enqLsqIO.req.size == enqLsqIO.resp.size)
   for (i <- enqLsqIO.req.indices) {
-    when(!io.in(i).fire/* || io.in(i).bits.uopIdx =/= 0.U*/) {
+    when(!io.in(i).fire /* || io.in(i).bits.uopIdx =/= 0.U*/) {
       enqLsqIO.needAlloc(i) := 0.U
     }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
       enqLsqIO.needAlloc(i) := 2.U // store | vstore
     }.otherwise {
       enqLsqIO.needAlloc(i) := 1.U // load | vload
     }
-    enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i) && !isSegment(i)
+    enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
     enqLsqIO.req(i).bits := io.in(i).bits
+    enqLsqIO.iqAccept(i) := io.in(i).ready
 
     // This is to make it easier to calculate in LSQ.
     // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”

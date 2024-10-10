@@ -45,6 +45,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
@@ -59,6 +60,7 @@ object Bundles {
       this.pc               := source.pc
       this.foldpc           := source.foldpc
       this.exceptionVec     := source.exceptionVec
+      this.isFetchMalAddr   := source.exceptionFromBackend
       this.trigger          := source.trigger
       this.preDecodeInfo    := source.pd
       this.pred_taken       := source.pred_taken
@@ -78,6 +80,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
@@ -173,6 +176,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
@@ -283,7 +287,7 @@ object Bundles {
       this
     }
 
-    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen || v0Wen || vlWen
+    def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
   }
 
   trait BundleSource {
@@ -447,6 +451,8 @@ object Bundles {
 
     val isDependOldvd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
+
+    val isVleff = Bool() // vleff
 
     def vtype: VType = {
       val res = Wire(VType())
@@ -736,6 +742,10 @@ object Bundles {
       val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
       val isMasked = Bool()
+      val isStrided = Bool()
+      val isWhole = Bool()
+      val isVecLoad = Bool()
+      val isVlm = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
@@ -864,14 +874,15 @@ object Bundles {
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
-    val gpaddr = UInt(GPAddrBits.W)
+    val isFetchMalAddr = Bool()
+    val gpaddr = UInt(XLEN.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
     val trigger = TriggerAction()
-
+    val isForVSnonLeafPTE = Bool()
     val traceInfo = new TraceInstrBundle()
   }
 

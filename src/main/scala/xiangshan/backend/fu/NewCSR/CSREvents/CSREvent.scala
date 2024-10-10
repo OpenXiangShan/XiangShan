@@ -54,7 +54,16 @@ trait EventUpdatePrivStateOutput {
 }
 
 trait EventOutputBase {
-  def getBundleByName(name: String): Valid[CSRBundle]
+  import scala.reflect.runtime.{universe => ru}
+
+  def getBundleByName(name: String): Valid[CSRBundle] = {
+    val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
+    val im = mirror.reflect(this)
+    val classSymbol: ru.ClassSymbol = im.symbol.asClass
+    val fieldSymbol = classSymbol.info.decl(ru.TermName(name)).asTerm
+    val fieldMirror: ru.FieldMirror = mirror.reflect(this).reflectField(fieldSymbol)
+    fieldMirror.get.asInstanceOf[Valid[CSRBundle]]
+  }
 }
 
 trait CSREventBase {
@@ -110,8 +119,11 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val trapPc = Input(UInt(VaddrMaxWidth.W))
   val trapPcGPA = Input(UInt(GPAddrBits.W))
   val trapInst = Input(ValidIO(UInt(InstWidth.W)))
+  val fetchMalTval = Input(UInt(XLEN.W))
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
+  val isFetchMalAddr = Input(Bool())
+  val trapIsForVSnonLeafPTE = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -124,14 +136,34 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
 
-  val tcontrol = Input(new TcontrolBundle)
-
-  val pcFromXtvec = Input(UInt(VaddrMaxWidth.W))
+  val pcFromXtvec = Input(UInt(XLEN.W))
 
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
   // from mem
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
+  val memExceptionIsForVSnonLeafPTE = Input(Bool())
+  val virtualInterruptIsHvictlInject = Input(Bool())
+  val hvictlIID = Input(UInt(HIIDWidth.W))
+}
+
+trait EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
+  protected def addUpdateBundleInCSREnumType(updateBundle: ValidIO[CSRBundle]): Unit = {
+    (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
+      if (updateBundle.bits.eventFields.contains(source)) {
+        sink.addOtherUpdate(updateBundle.valid, source)
+      }
+    }
+  }
+}
+
+class TargetPCBundle extends Bundle {
+  val pc = UInt(XLEN.W)
+  val raiseIPF = Bool()
+  val raiseIAF = Bool()
+  val raiseIGPF = Bool()
+
+  def raiseFault = raiseIPF || raiseIAF || raiseIGPF
 }

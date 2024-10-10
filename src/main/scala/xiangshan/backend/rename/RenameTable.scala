@@ -80,9 +80,9 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = if (backendParams.debugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth)))) else None
+    val diffWritePorts = if (backendParams.basicDebugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth)))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_rdata = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0 = if (backendParams.debugEn) reg_t match {
       case Reg_V0 => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
@@ -215,7 +215,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
-    val diffCommits = if (backendParams.debugEn) Some(Input(new DiffCommitIO)) else None
+    val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(IntLogicRegs)))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(IntLogicRegs)))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(FpLogicRegs)))
@@ -235,18 +235,19 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
 
-    // for debug printing
-    val debug_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vec_rat     = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    // for debug assertions
+    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
 
-    val diff_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_vec_rat     = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_v0_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_vl_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    // for difftest
+    val diff_int_rat = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_fp_rat  = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vec_rat = if (backendParams.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_v0_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vl_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   val intRat = Module(new RenameTable(Reg_I))
@@ -282,7 +283,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.debugEn) {
+  if (backendParams.basicDebugEn) {
     for ((diff, i) <- intRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).rfWen
       diff.addr := io.diffCommits.get.info(i).ldest
@@ -315,7 +316,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.debugEn) {
+  if (backendParams.basicDebugEn) {
     for ((diff, i) <- fpRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).fpWen
       diff.addr := io.diffCommits.get.info(i).ldest
@@ -352,7 +353,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.debugEn) {
+  if (backendParams.basicDebugEn) {
     for ((diff, i) <- vecRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).vecWen
       diff.addr := io.diffCommits.get.info(i).ldest
@@ -388,7 +389,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.debugEn) {
+  if (backendParams.basicDebugEn) {
     for ((diff, i) <- v0Rat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).v0Wen
       diff.addr := io.diffCommits.get.info(i).ldest
@@ -424,7 +425,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  if (backendParams.debugEn) {
+  if (backendParams.basicDebugEn) {
     for ((diff, i) <- vlRat.io.diffWritePorts.get.zipWithIndex) {
       diff.wen := io.diffCommits.get.isCommit && io.diffCommits.get.commitValid(i) && io.diffCommits.get.info(i).vlWen
       diff.addr := io.diffCommits.get.info(i).ldest

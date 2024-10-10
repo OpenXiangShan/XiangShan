@@ -216,6 +216,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_hlv       = Wire(Bool())
   val s0_tlb_hlvx      = Wire(Bool())
   val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
+  val s0_tlb_fullva    = Wire(UInt(XLEN.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
 
   if (env.TraceRTLMode) {
@@ -261,6 +262,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val elemIdx       = UInt(elemIdxBits.W)
     val elemIdxInsideVd = UInt(elemIdxBits.W)
     val alignedType   = UInt(alignTypeBits.W)
+    val vecBaseVaddr  = UInt(VAddrBits.W)
 
     // TraceRTL Mode
     val traceInfo = new TraceInstrBundle()
@@ -357,7 +359,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
                                        )
+  io.tlb.req.bits.isPrefetch         := s0_sel_src.prf
   io.tlb.req.bits.vaddr              := s0_tlb_vaddr
+  io.tlb.req.bits.fullva             := s0_tlb_fullva
+  io.tlb.req.bits.checkfullva        := s0_src_select_vec(vec_iss_idx) || s0_src_select_vec(int_iss_idx)
   io.tlb.req.bits.hyperinst          := s0_tlb_hlv
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
@@ -568,6 +573,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.mbIndex             := src.mBIndex
     out.elemIdx             := src.elemIdx
     out.elemIdxInsideVd     := src.elemIdxInsideVd
+    out.vecBaseVaddr        := src.basevaddr
     out.alignedType         := src.alignedType
     out
   }
@@ -650,7 +656,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits),
     io.ldin.bits.uop.traceInfo.memoryAddrVA
   )
-  val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr, int_issue_vaddr)
+  val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr(VAddrBits - 1, 0), int_issue_vaddr)
   s0_tlb_vaddr := Mux(
     s0_src_valid_vec(mab_idx),
     io.misalign_ldin.bits.vaddr,
@@ -660,6 +666,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       int_vec_vaddr
     )
   )
+
+  // only first issue of int / vec load intructions need to check full vaddr
+  s0_tlb_fullva := Mux(s0_src_valid_vec(mab_idx),
+    io.misalign_ldin.bits.fullva,
+    Mux(s0_src_select_vec(vec_iss_idx),
+      io.vecldin.bits.vaddr,
+      Mux(
+        s0_src_select_vec(int_iss_idx),
+        io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), XLEN),
+        s0_dcache_vaddr
+      )
+    )
+  )
+
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx),
     io.fast_rep_in.bits.vaddr,
@@ -710,6 +730,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
   s0_out.vaddr         := s0_dcache_vaddr
+  s0_out.fullva        := s0_tlb_fullva
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
@@ -724,7 +745,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.is128bit        := s0_sel_src.is128bit
   s0_out.isFrmMisAlignBuf    := s0_sel_src.frm_mabuf
   s0_out.uop_unit_stride_fof := s0_sel_src.uop_unit_stride_fof
-  s0_out.paddr         := Mux(s0_src_valid_vec(fast_rep_idx), io.fast_rep_in.bits.paddr, io.prefetch_req.bits.paddr) // only for prefetch and fast_rep
+  s0_out.paddr         := Mux(s0_src_valid_vec(fast_rep_idx), io.fast_rep_in.bits.paddr,
+    Mux(s0_src_select_vec(int_iss_idx) && s0_sel_src.prf_i, 0.U, io.prefetch_req.bits.paddr)) // only for prefetch and fast_rep
   s0_out.tlbNoQuery    := s0_tlb_no_query
   // s0_out.rob_idx_valid   := s0_rob_idx_valid
   // s0_out.inner_idx       := s0_inner_idx
@@ -738,6 +760,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.elemIdxInsideVd := s0_sel_src.elemIdxInsideVd
   s0_out.alignedType    := s0_sel_src.alignedType
   s0_out.mbIndex        := s0_sel_src.mbIndex
+  s0_out.vecBaseVaddr   := s0_sel_src.vecBaseVaddr
   // s0_out.flowPtr         := s0_sel_src.flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned) :=  TraceRTLDontCareValue((!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive)
   s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
@@ -898,8 +921,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
+  s1_out.vaNeedExt         := io.tlb.resp.bits.excp(0).vaNeedExt
+  s1_out.isHyper           := io.tlb.resp.bits.excp(0).isHyper
   s1_out.paddr             := s1_paddr_dup_lsu
   s1_out.gpaddr            := s1_gpaddr_dup_lsu
+  s1_out.isForVSnonLeafPTE := io.tlb.resp.bits.isForVSnonLeafPTE
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
@@ -913,6 +939,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
+    when (!s1_out.isvec && RegNext(io.tlb.req.bits.checkfullva) &&
+      (s1_out.uop.exceptionVec(loadPageFault) ||
+        s1_out.uop.exceptionVec(loadGuestPageFault) ||
+        s1_out.uop.exceptionVec(loadAccessFault))) {
+      s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
+    }
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
@@ -1003,12 +1035,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+  loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   val s1_trigger_action = loadTrigger.io.toLoadStore.triggerAction
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
   val s1_trigger_breakpoint = TriggerAction.isExp(s1_trigger_action)
   s1_out.uop.trigger                  := s1_trigger_action
   s1_out.uop.exceptionVec(breakPoint) := s1_trigger_breakpoint
+  s1_out.vecVaddrOffset := Mux(
+    s1_trigger_debug_mode || s1_trigger_breakpoint,
+    loadTrigger.io.toLoadStore.triggerVaddr - s1_in.vecBaseVaddr,
+    s1_in.vaddr + genVFirstUnmask(s1_in.mask).asUInt - s1_in.vecBaseVaddr
+  )
+  s1_out.vecTriggerMask := Mux(s1_trigger_debug_mode || s1_trigger_breakpoint, loadTrigger.io.toLoadStore.triggerMask, 0.U)
 
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
@@ -1059,7 +1099,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // soft prefetch will not trigger any exception (but ecc error interrupt may
   // be triggered)
-  when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
+  val s2_tlb_unrelated_exceps = s2_in.uop.exceptionVec(loadAddrMisaligned) ||
+                                s2_in.uop.exceptionVec(breakPoint)
+  when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss && !s2_tlb_unrelated_exceps)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
   val s2_exception =  TraceRTLDontCareValue(s2_vecActive &&
@@ -1209,6 +1251,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.handledByMSHR       := s2_cache_handled
   s2_out.miss                := s2_dcache_miss && s2_troublem
   s2_out.feedbacked          := io.feedback_fast.valid
+  s2_out.uop.vpu.vstart      := Mux(s2_in.isLoadReplay || s2_in.isFastReplay, s2_in.uop.vpu.vstart, s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew)
 
   // Generate replay signal caused by:
   // * st-ld violation check
@@ -1428,6 +1471,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3_vecout.flowPtr           := s3_in.flowPtr
   s3_vecout.elemIdx           := s3_in.elemIdx // elemIdx is already saved in flow queue // TODO:
   s3_vecout.elemIdxInsideVd   := s3_in.elemIdxInsideVd
+  s3_vecout.trigger           := s3_in.uop.trigger
+  s3_vecout.vstart            := s3_in.uop.vpu.vstart
+  s3_vecout.vecTriggerMask    := s3_in.vecTriggerMask
   val s3_usSecondInv          = s3_in.usSecondInv
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
@@ -1591,10 +1637,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.mBIndex := s3_vec_mBIndex
   io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
+  io.vecldout.bits.trigger := s3_vecout.trigger
   io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
-  io.vecldout.bits.vaddr := s3_in.vaddr
+  io.vecldout.bits.vaddr := s3_in.fullva
+  io.vecldout.bits.vaNeedExt := s3_in.vaNeedExt
+  io.vecldout.bits.gpaddr := s3_in.gpaddr
+  io.vecldout.bits.isForVSnonLeafPTE := s3_in.isForVSnonLeafPTE
   io.vecldout.bits.mmio := DontCare
+  io.vecldout.bits.vstart := s3_vecout.vstart
+  io.vecldout.bits.vecTriggerMask := s3_vecout.vecTriggerMask
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?

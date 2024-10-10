@@ -21,53 +21,57 @@ class CSRModule[T <: CSRBundle](
   // read data without mask
   val regOut = IO(Output(bundle))
 
-  val reg = (if (bundle.needReset) RegInit(bundle, bundle.init) else Reg(bundle))
+  protected val reg = (if (bundle.needReset) RegInit(bundle, bundle.init) else Reg(bundle))
 
   protected val wen = w.wen
   protected val wdata = w.wdataFields
 
-  reg.elements.foreach { case (str, field: CSREnumType) =>
+  bundle.elements.foreach { case (str, field: CSREnumType) =>
     val wfield = wdata.elements(str).asInstanceOf[CSREnumType]
     field.rwType match {
       case WARLType(wfn, _) =>
-        when(wen && wfield.isLegal)(field := wdata.elements(str))
+        field.addOtherUpdate(wen && wfield.isLegal, wdata.elements(str).asInstanceOf[CSREnumType])
       case WLRLType(wfn, _) =>
-        when(wen && wfield.isLegal)(field := wdata.elements(str))
+        field.addOtherUpdate(wen && wfield.isLegal, wdata.elements(str).asInstanceOf[CSREnumType])
       case RWType() =>
-        when(wen)(field := wdata.elements(str))
+        field.addOtherUpdate(wen, wdata.elements(str).asInstanceOf[CSREnumType])
       case ROType(_) =>
-      case RefROType(ref, rfn) =>
-      case RefRWType(ref) =>
-      case RefWARLType(ref, wfn, rfn) =>
-      case RefWLRLType(ref, wfn, rfn) =>
       case _ =>
     }
   }
 
-  protected val rdataFields = Wire(bundle)
+  reconnectReg()
+
+  val rdataFields = IO(Output(bundle))
   rdataFields :|= regOut
 
   rdata := rdataFields.asUInt
   regOut := reg
 
-  def wfnField(field: CSREnumType, str: String)(wAliasSeq: Seq[CSRAddrWriteBundle[_]]) = {
+  private def wfnField(field: CSREnumType, str: String): Unit = {
     val wfield: CSREnumType = wdata.elements(str).asInstanceOf[CSREnumType]
 
-    when(wen && wfield.isLegal | wAliasSeq.map(x => x.wen && x.wdataFields.asInstanceOf[CSRBundle].elements(str).asInstanceOf[CSREnumType].isLegal).fold(false.B)(_ | _)) {
+    when (wen && wfield.isLegal || field.otherUpdateSeq.map(_._1).fold(false.B)(_ || _)) {
       field := Mux1H(
-        wAliasSeq.map(wAlias => wAlias.wen -> wAlias.wdataFields.asInstanceOf[CSRBundle].elements(str)) :+
-        wen -> wdata.elements(str)
+        field.otherUpdateSeq.map { case (valid, data) =>
+          valid -> data
+        } :+ (wen -> wdata.elements(str)),
       )
+    }.otherwise {
+      field := field
     }
   }
 
-  def wfn(reg: T)(wAliasSeq: Seq[CSRAddrWriteBundle[_]]) = {
+  private def wfn(reg: CSRBundle): Unit = {
     reg.elements.foreach { case (str, field: CSREnumType) =>
       if (!field.isRef) {
-        val fieldWAliasSeq = wAliasSeq.filter(_.wdataFields.asInstanceOf[CSRBundle].elements.contains(str))
-        wfnField(field, str)(fieldWAliasSeq)
+        wfnField(field, str)
       }
     }
+  }
+
+  protected def reconnectReg(): Unit = {
+    this.wfn(this.reg)
   }
 
   def dumpFields: String = {

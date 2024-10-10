@@ -101,7 +101,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_oh = VecInit(ways.map(_.io.resp_hit)).asUInt
   val s1_hit = s1_hit_oh.orR
   val s1_hit_way = OHToUInt(s1_hit_oh)
-  val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction))
+  val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction(isNotS3 = true)))
 
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
@@ -122,9 +122,11 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   io.fauftb_entry_hit_out := s1_hit && fauftb_enable
 
   // Illegal check for FTB entry reading
-  val uftb_read_fallThrough = s1_hit_fauftbentry.getFallThrough(s1_pc_dup(0))
+  val s1_pc_startLower             = Cat(0.U(1.W), s1_pc_dup(0)(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
+  val uftb_entry_endLowerwithCarry = Cat(s1_hit_fauftbentry.carry, s1_hit_fauftbentry.pftAddr)
+  val fallThroughErr = s1_pc_startLower + (PredictWidth).U >= uftb_entry_endLowerwithCarry
   when(io.s1_fire(0) && s1_hit){
-    assert(s1_pc_dup(0) + (FetchWidth * 4).U >= uftb_read_fallThrough, s"FauFTB entry fallThrough address error!")
+    assert(fallThroughErr, s"FauFTB read entry fallThrough address error!")
   }
 
   // assign metas

@@ -3,7 +3,7 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DiffFpWriteback, DiffIntWriteback, DifftestModule, DiffVecWriteback}
+import difftest.{DiffFpWriteback, DiffIntWriteback, DiffVecWriteback, DifftestModule}
 import utility.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.{Redirect, XSBundle, XSModule}
 import xiangshan.SrcType.v0
+import xiangshan.backend.fu.vector.Bundles.Vstart
 
 class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
   val in = Flipped(DecoupledIO(gen))
@@ -96,6 +97,10 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBu
 
   val fromMemExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.memSchdParams.get.genExuOutputDecoupledBundle)
 
+  val fromCSR = Input(new Bundle {
+    val vstart = Vstart()
+  })
+
   val toIntPreg = Flipped(MixedVec(Vec(params.numPregWb(IntData()),
     new RfWritePortWithConfig(params.intPregParams.dataCfg, params.intPregParams.addrWidth))))
 
@@ -104,10 +109,10 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBu
 
   val toVfPreg = Flipped(MixedVec(Vec(params.numPregWb(VecData()),
     new RfWritePortWithConfig(params.vfPregParams.dataCfg, params.vfPregParams.addrWidth))))
-  
+
   val toV0Preg = Flipped(MixedVec(Vec(params.numPregWb(V0Data()),
     new RfWritePortWithConfig(params.v0PregParams.dataCfg, params.v0PregParams.addrWidth))))
-  
+
   val toVlPreg = Flipped(MixedVec(Vec(params.numPregWb(VlData()),
     new RfWritePortWithConfig(params.vlPregParams.dataCfg, params.vlPregParams.addrWidth))))
 
@@ -126,6 +131,10 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vldMgu.zip(fromExuVld).foreach{ case (mgu, exu) =>
     mgu.io.flush := io.flush
     mgu.io.writeback <> exu
+    // Since xs will flush pipe, when vstart is not 0 and execute vector mem inst, the value of vstart in CSR is the
+    // first element of this vector instruction. When exception occurs, the vstart in writeback bundle is the new one,
+    // So this vstart should never be used as the beginning of vector mem operation.
+    mgu.io.writeback.bits.vls.get.vpu.vstart := io.fromCSR.vstart
   }
   val wbReplaceVld = fromExuPre
   val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))

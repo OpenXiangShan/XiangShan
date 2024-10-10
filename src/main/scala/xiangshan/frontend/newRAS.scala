@@ -115,6 +115,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val s3_pushAddr = Input(UInt(VAddrBits.W))
       val spec_pop_addr = Output(UInt(VAddrBits.W))
 
+      val commit_valid      = Input(Bool())
       val commit_push_valid = Input(Bool())
       val commit_pop_valid = Input(Bool())
       val commit_push_addr = Input(UInt(VAddrBits.W))
@@ -503,10 +504,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
 
-      BOS := io.commit_meta_TOSW
-
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
+    }
+
+    when (io.commit_push_valid) {
+      BOS := io.commit_meta_TOSW
+    } .elsewhen(io.commit_valid && (distanceBetween(io.commit_meta_TOSW,BOS) > 2.U)) {
+      BOS := specPtrDec(io.commit_meta_TOSW)
     }
 
     when (io.redirect_valid) {
@@ -580,8 +585,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val s3_jalr_target = io.out.s3.full_pred.jalr_target
   // val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred(2).targets.last
   // val s3_last_target_out = io.out.s3.full_pred(2).targets.last
-  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr
-  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret
+  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
   // assert(is_jalr && is_ret || !is_ret)
   when(s3_is_ret && io.ctrl.ras_enable) {
     io.out.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
@@ -594,8 +599,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire(2))
   val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire(2))
-  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call
-  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret
+  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
 
   val s3_cancel = io.s3_fire(2) && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
   stack.s2_fire := io.s2_fire(2)
@@ -650,6 +655,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
   val updateValid = io.update.valid
 
+  stack.commit_valid      := updateValid  
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken
   stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)

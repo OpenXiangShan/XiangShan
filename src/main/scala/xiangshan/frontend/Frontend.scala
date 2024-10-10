@@ -27,18 +27,32 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.tracertl.ChiselRecordForField._
 
-
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
+  val inner = LazyModule(new FrontendInlined)
+  lazy val module = new FrontendImp(this)
+}
+
+class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
+  val io = IO(wrapper.inner.module.io.cloneType)
+  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  io <> wrapper.inner.module.io
+  io_perf <> wrapper.inner.module.io_perf
+  if (p(DebugOptionsKey).ResetGen) {
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+  }
+}
+
+class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = true
 
   val instrUncache  = LazyModule(new InstrUncache())
   val icache        = LazyModule(new ICache())
 
-  lazy val module = new FrontendImp(this)
+  lazy val module = new FrontendInlinedImp(this)
 }
 
-
-class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
 {
@@ -60,6 +74,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val resetInFrontend = Output(Bool())
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
@@ -131,7 +146,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := RegEnable(io.reset_vector, reset.asBool)
+  bpu.io.reset_vector := io.reset_vector
 
 // pmp
   val PortNumber = ICacheParameters().PortNumber
@@ -378,6 +393,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val frontendBubble = Mux(io.backend.canAccept, DecodeWidth.U - PopCount(ibuffer.io.out.map(_.valid)), 0.U)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
+  io.resetInFrontend := reset.asBool
 
   // PFEvent
   val pfevent = Module(new PFEvent)

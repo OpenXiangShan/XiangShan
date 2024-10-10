@@ -102,8 +102,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     // vl
-    val vlIsZero              = Input(Bool())
-    val vlIsVlmax             = Input(Bool())
+    val vlFromIntIsZero       = Input(Bool())
+    val vlFromIntIsVlmax      = Input(Bool())
+    val vlFromVfIsZero        = Input(Bool())
+    val vlFromVfIsVlmax       = Input(Bool())
     //cancel
     val og0Cancel             = Input(ExuVec())
     val og1Cancel             = Input(ExuVec())
@@ -160,7 +162,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqSuccess            = Bool()
     val srcWakeup             = Vec(params.numRegSrc, Bool())
     val srcWakeupByWB         = Vec(params.numRegSrc, Bool())
-    val vlWakeupByWb          = Bool()
+    val vlWakeupByIntWb       = Bool()
+    val vlWakeupByVfWb        = Bool()
     val srcCancelVec          = Vec(params.numRegSrc, Bool())
     val srcLoadCancelVec      = Vec(params.numRegSrc, Bool())
     val srcLoadDependencyNext = Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -200,9 +203,19 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
     if (params.numRegSrc == 5) {
       // only when numRegSrc == 5 need vl
-      common.vlWakeupByWb     := common.srcWakeupByWB(4)
+      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.map{ bundle => 
+        val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+        bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
+      })
+      var numVecWb = params.backendParam.getVfWBExeGroup.size
+      var numV0Wb = params.backendParam.getV0WBExeGroup.size
+      // int wb is first bit of vlwb, which is after vfwb and v0wb
+      common.vlWakeupByIntWb  := wakeUpFromVl(numVecWb + numV0Wb)
+      // vf wb is second bit of wb
+      common.vlWakeupByVfWb   := wakeUpFromVl(numVecWb + numV0Wb + 1)
     } else {
-      common.vlWakeupByWb     := false.B
+      common.vlWakeupByIntWb  := false.B
+      common.vlWakeupByVfWb   := false.B
     }
   }
 
@@ -280,16 +293,21 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeup = common.srcWakeup(srcIdx)
 
       val ignoreOldVd = Wire(Bool())
-      val vlWakeUpByWb = common.vlWakeupByWb
+      val vlWakeUpByIntWb = common.vlWakeupByIntWb
+      val vlWakeUpByVfWb = common.vlWakeupByVfWb
       val isDependOldvd = entryReg.payload.vpu.isDependOldvd
       val isWritePartVd = entryReg.payload.vpu.isWritePartVd
       val vta = entryReg.payload.vpu.vta
       val vma = entryReg.payload.vpu.vma
       val vm = entryReg.payload.vpu.vm
-      val vlIsZero = commonIn.vlIsZero
-      val vlIsVlmax = commonIn.vlIsVlmax
+      val vlFromIntIsZero = commonIn.vlFromIntIsZero
+      val vlFromIntIsVlmax = commonIn.vlFromIntIsVlmax
+      val vlFromVfIsZero = commonIn.vlFromVfIsZero
+      val vlFromVfIsVlmax = commonIn.vlFromVfIsVlmax
+      val vlIsVlmax = (vlFromIntIsVlmax && vlWakeUpByIntWb) || (vlFromVfIsVlmax && vlWakeUpByVfWb)
+      val vlIsNonZero = (!vlFromIntIsZero && vlWakeUpByIntWb) || (!vlFromVfIsZero && vlWakeUpByVfWb)
       val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
-      val ignoreWhole = !vlIsVlmax && (vm =/= 0.U || vma) && vta
+      val ignoreWhole = (vm =/= 0.U || vma) && vta
       val srcIsVec = SrcType.isVp(srcStatus.srcType)
       if (params.numVfSrc > 0 && srcIdx == 2) {
         /**
@@ -298,7 +316,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
           * 3. when vl = vlmax, we can set srctype to imm when vta is not set
           */
-        ignoreOldVd := srcIsVec && vlWakeUpByWb && !isDependOldvd && !vlIsZero && (ignoreTail || ignoreWhole)
+        ignoreOldVd := !VlduType.isFof(entryReg.payload.fuOpType) && srcIsVec && vlIsNonZero && !isDependOldvd && (ignoreTail || ignoreWhole)
       } else {
         ignoreOldVd := false.B
       }
@@ -471,8 +489,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val vecMemStatusUpdate                             = entryUpdate.status.vecMem.get
     vecMemStatusUpdate                                := vecMemStatus
 
+    val isFirstLoad = entryReg.status.vecMem.get.lqIdx === fromLsq.lqDeqPtr
+
+    val isVleff                                        = entryReg.payload.vpu.isVleff
     // update blocked
-    entryUpdate.status.blocked                        := false.B
+    entryUpdate.status.blocked                        := !isFirstLoad && isVleff
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {

@@ -46,15 +46,8 @@ class InterruptFilter(implicit p: Parameters) extends XSModule {
    * Sort by implemented interrupt default priority
    * index low, priority high
    */
-  val mipFields = mip.asTypeOf(new MipBundle)
-  val mieFields = mie.asTypeOf(new MieBundle)
-  val sipFields = sip.asTypeOf(new SipBundle)
-  val sieFields = sie.asTypeOf(new SieBundle)
-  val hipFields = hip.asTypeOf(new HipBundle)
-  val hieFields = hie.asTypeOf(new HieBundle)
-  val vsipFields = vsip.asTypeOf(new VSipBundle)
-  val vsieFields = vsie.asTypeOf(new VSieBundle)
-  val hidelegFields = hideleg.asTypeOf(new HidelegBundle)
+  val vsipFields = Wire(new VSipBundle); vsipFields := vsip
+  val vsieFields = Wire(new VSieBundle); vsieFields := vsie
 
   private val hsip = hip.asUInt | sip.asUInt
   private val hsie = hie.asUInt | sie.asUInt
@@ -184,9 +177,9 @@ class InterruptFilter(implicit p: Parameters) extends XSModule {
   )
 
   // refactor this code & has some problem
-  val Candidate1: Bool = vsipFields.VSEIP.asBool && vsieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
-  val Candidate2: Bool = vsipFields.VSEIP.asBool && vsieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
-  val Candidate3: Bool = vsipFields.VSEIP.asBool && vsieFields.VSEIE.asBool && !Candidate1 && !Candidate2
+  val Candidate1: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
+  val Candidate2: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
+  val Candidate3: Bool = vsip.SEIP && vsie.SEIE && !Candidate1 && !Candidate2
   val Candidate4: Bool = (hvictl.VTI.asUInt === 0.U) && (vsie & vsip & "hfffffffffffffdff".U).orR
   val Candidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
   val CandidateNoValid: Bool = !Candidate1 && !Candidate2 && !Candidate3 && !Candidate4 && !Candidate5
@@ -302,18 +295,26 @@ class InterruptFilter(implicit p: Parameters) extends XSModule {
 
   val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt
   val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableInterrupt)).asUInt
+
+  // virtual interrupt with hvictl injection
+  val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
+  val SelectCandidate5 = Candidate123LowCandidate45 && Candidate5
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
   val intrVecReg = RegInit(0.U(64.W))
   val nmiReg = RegInit(false.B)
+  val viIsHvictlInjectReg = RegInit(false.B)
   intrVecReg := intrVec
   nmiReg := io.in.nmi
+  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
   val delayedIntrVec = DelayN(intrVecReg, 5)
   val delayedNMI = DelayN(nmiReg, 5)
+  val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR
+  io.out.interruptVec.valid := delayedIntrVec.orR || delayedVIIsHvictlInjectReg
   io.out.interruptVec.bits := delayedIntrVec
   io.out.nmi := delayedNMI
+  io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
 
   dontTouch(hsip)
   dontTouch(hsie)
@@ -328,16 +329,16 @@ class InterruptFilterIO extends Bundle {
     val mstatusMIE  = Bool()
     val sstatusSIE  = Bool()
     val vsstatusSIE = Bool()
-    val mip = UInt(64.W)
-    val mie = UInt(64.W)
-    val mideleg = UInt(64.W)
-    val sip = UInt(64.W)
-    val sie = UInt(64.W)
-    val hip = UInt(64.W)
-    val hie = UInt(64.W)
-    val hideleg = UInt(64.W)
-    val vsip = UInt(64.W)
-    val vsie = UInt(64.W)
+    val mip = new MipBundle
+    val mie = new MieBundle
+    val mideleg = new MidelegBundle
+    val sip = new SipBundle
+    val sie = new SieBundle
+    val hip = new HipBundle
+    val hie = new HieBundle
+    val hideleg = new HidelegBundle
+    val vsip = new VSipBundle
+    val vsie = new VSieBundle
     val hvictl = new HvictlBundle
     val hstatus = new HstatusBundle
     val mtopei = new TopEIBundle
@@ -363,5 +364,6 @@ class InterruptFilterIO extends Bundle {
     val mtopi  = new TopIBundle
     val stopi  = new TopIBundle
     val vstopi = new TopIBundle
+    val virtualInterruptIsHvictlInject = Bool()
   })
 }

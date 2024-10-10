@@ -47,9 +47,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val exceptionAddr = ValidIO(new Bundle {
-      val vaddr = UInt(VAddrBits.W)
-      val gpaddr = UInt(GPAddrBits.W)
+    val exceptionInfo = ValidIO(new Bundle {
+      val vaddr = UInt(XLEN.W)
+      val gpaddr = UInt(XLEN.W)
+      val isForVSnonLeafPTE = Bool()
     })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
@@ -73,6 +74,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val gpaddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
+  val isForVSnonLeafPTE = Reg(Bool())
 
   // dcache response data
   val resp_data = Reg(UInt())
@@ -88,9 +90,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val mask_reg = Reg(UInt(8.W))
   val fuop_reg = Reg(UInt(8.W))
 
-  io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits.vaddr := in.src(0)
-  io.exceptionAddr.bits.gpaddr := gpaddr
+  io.exceptionInfo.valid := atom_override_xtval
+  io.exceptionInfo.bits.vaddr := in.src(0)
+  io.exceptionInfo.bits.gpaddr := gpaddr
+  io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -144,6 +147,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
+    io.dtlb.req.bits.fullva := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
+    io.dtlb.req.bits.checkfullva := true.B
     io.dtlb.resp.ready      := true.B
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.pc
@@ -162,6 +167,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), in.uop.traceInfo.memoryAddrPA)
       gpaddr := io.dtlb.resp.bits.gpaddr(0)
+      isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b

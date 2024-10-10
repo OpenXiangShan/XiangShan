@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import chisel3.experimental.BundleLiterals._
 import utility._
 import utils._
 import xiangshan.backend.decode.{ImmUnion, XDecode}
@@ -37,7 +38,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.backend.fu.NewCSR.{Mcontrol, Tdata1Bundle, Tdata2Bundle}
+import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -118,6 +119,10 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val isMisPred = Bool()
   val shift = UInt((log2Ceil(numBr)+1).W)
   val addIntoHist = Bool()
+  // raise exceptions from backend
+  val backendIGPF = Bool() // instruction guest page fault
+  val backendIPF = Bool() // instruction page fault
+  val backendIAF = Bool() // instruction access fault
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
@@ -130,6 +135,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.topAddr := entry.topAddr
     this
   }
+
+  def hasBackendFault = backendIGPF || backendIPF || backendIAF
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -138,6 +145,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+  val exceptionFromBackend = Bool()
   val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -177,7 +185,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  val debug_globalID = UInt(XLEN.W)
+  // val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
   val lsrc = Vec(4, UInt(LogicRegsWidth.W))
   val ldest = UInt(LogicRegsWidth.W)
@@ -223,7 +231,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
-  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+  def needWriteRf: Bool = rfWen || fpWen || vecWen
   def isHyperInst: Bool = {
     fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
   }
@@ -307,6 +315,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val level = RedirectLevel()
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
+  val fullTarget = UInt(XLEN.W) // only used for tval storage in backend
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
@@ -365,8 +374,9 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val nmi = new NonmaskableInterruptIO()
 }
 
-class NonmaskableInterruptIO(implicit p: Parameters) extends XSBundle {
-  val nmi = Input(Bool())
+class NonmaskableInterruptIO() extends Bundle {
+  val nmi_31 = Input(Bool())
+  val nmi_43 = Input(Bool())
   // reserve for other nmi type
 }
 
@@ -524,6 +534,8 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
+  val mPBMTE = Bool()
+  val hPBMTE = Bool()
 
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
@@ -634,6 +646,40 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
+class AddrTransType(implicit p: Parameters) extends XSBundle {
+  val bare, sv39, sv39x4, sv48, sv48x4 = Bool()
+
+  def checkAccessFault(target: UInt): Bool = bare && target(XLEN - 1, PAddrBits).orR
+  def checkPageFault(target: UInt): Bool =
+    sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt ||
+    sv48 && target(XLEN - 1, 48) =/= VecInit.fill(XLEN - 48)(target(47)).asUInt
+  def checkGuestPageFault(target: UInt): Bool =
+    sv39x4 && target(XLEN - 1, 41).orR || sv48x4 && target(XLEN - 1, 50).orR
+}
+
+object AddrTransType {
+  def apply(bare: Boolean = false,
+            sv39: Boolean = false,
+            sv39x4: Boolean = false,
+            sv48: Boolean = false,
+            sv48x4: Boolean = false)(implicit p: Parameters): AddrTransType =
+    (new AddrTransType).Lit(_.bare -> bare.B,
+                            _.sv39 -> sv39.B,
+                            _.sv39x4 -> sv39x4.B,
+                            _.sv48 -> sv48.B,
+                            _.sv48x4 -> sv48x4.B)
+
+  def apply(bare: Bool, sv39: Bool, sv39x4: Bool, sv48: Bool, sv48x4: Bool)(implicit p: Parameters): AddrTransType = {
+    val addrTransType = Wire(new AddrTransType)
+    addrTransType.bare := bare
+    addrTransType.sv39 := sv39
+    addrTransType.sv39x4 := sv39x4
+    addrTransType.sv48 := sv48
+    addrTransType.sv48x4 := sv48x4
+    addrTransType
+  }
+}
+
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
   val source = Output(new Bundle() {
@@ -711,16 +757,16 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val tdata2    = Output(UInt(64.W))
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: Tdata2Bundle): MatchTriggerIO = {
-    val mcontrol = Wire(new Mcontrol)
-    mcontrol := tdata1.DATA.asUInt
-    this.matchType := mcontrol.MATCH.asUInt
-    this.select    := mcontrol.SELECT.asBool
-    this.timing    := mcontrol.TIMING.asBool
-    this.action    := mcontrol.ACTION.asUInt
-    this.chain     := mcontrol.CHAIN.asBool
-    this.execute   := mcontrol.EXECUTE.asBool
-    this.load      := mcontrol.LOAD.asBool
-    this.store     := mcontrol.STORE.asBool
+    val mcontrol6 = Wire(new Mcontrol6)
+    mcontrol6 := tdata1.DATA.asUInt
+    this.matchType := mcontrol6.MATCH.asUInt
+    this.select    := mcontrol6.SELECT.asBool
+    this.timing    := false.B
+    this.action    := mcontrol6.ACTION.asUInt
+    this.chain     := mcontrol6.CHAIN.asBool
+    this.execute   := mcontrol6.EXECUTE.asBool
+    this.load      := mcontrol6.LOAD.asBool
+    this.store     := mcontrol6.STORE.asBool
     this.tdata2    := tdata2.asUInt
     this
   }

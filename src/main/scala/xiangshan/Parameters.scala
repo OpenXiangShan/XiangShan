@@ -236,6 +236,8 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
+  VFOFBufferSize: Int = 8,
+  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -471,10 +473,10 @@ case class XSCoreParameters
         ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(7, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
+        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
+        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0), VlWB(port = 3, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
       ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(12, 0)))),
@@ -563,6 +565,9 @@ trait HasXSParameter {
   implicit val p: Parameters
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  def PmemRanges = p(SoCParamsKey).PmemRanges
+  def PmemLowBounds = PmemRanges.unzip._1
+  def PmemHighBounds = PmemRanges.unzip._2
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
@@ -607,7 +612,6 @@ trait HasXSParameter {
         coreParams.VAddrBitsSv39
     }
   } // VAddrBits is Virtual Memory addr bits
-  require(PAddrBits == 48 || !EnableSv48) // Paddr bits should be 48 when Sv48 enable
 
   def VAddrMaxBits = {
     if(EnableSv48) {
@@ -721,8 +725,13 @@ trait HasXSParameter {
   def VfPhyRegs = coreParams.vfPreg.numEntries
   def V0PhyRegs = coreParams.v0Preg.numEntries
   def VlPhyRegs = coreParams.vlPreg.numEntries
-  def MaxPhyPregs = IntPhyRegs max VfPhyRegs
-  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(FpPhyRegs) max log2Up(VfPhyRegs)
+  def MaxPhyRegs = Seq(IntPhyRegs, FpPhyRegs, VfPhyRegs, V0PhyRegs, VlPhyRegs).max
+  def IntPhyRegIdxWidth = log2Up(IntPhyRegs)
+  def FpPhyRegIdxWidth = log2Up(FpPhyRegs)
+  def VfPhyRegIdxWidth = log2Up(VfPhyRegs)
+  def V0PhyRegIdxWidth = log2Up(V0PhyRegs)
+  def VlPhyRegIdxWidth = log2Up(VlPhyRegs)
+  def PhyRegIdxWidth = Seq(IntPhyRegIdxWidth, FpPhyRegIdxWidth, VfPhyRegIdxWidth, V0PhyRegIdxWidth, VlPhyRegIdxWidth).max
   def RobSize = coreParams.RobSize
   def RabSize = coreParams.RabSize
   def VTypeBufferSize = coreParams.VTypeBufferSize
@@ -785,6 +794,7 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
+  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward
@@ -872,6 +882,9 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
+
+  // Vector load exception
+  def maxMergeNumPerCycle = 4
 
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4

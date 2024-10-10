@@ -170,6 +170,10 @@ case class FuConfig (
 
   def isCsr: Boolean = fuType == FuType.csr
 
+  def isBrh: Boolean = fuType == FuType.brh
+
+  def isJmp: Boolean = fuType == FuType.jmp
+
   def isFence: Boolean = fuType == FuType.fence
 
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
@@ -756,10 +760,12 @@ object FuConfig {
     piped = false, // Todo: check it
     writeVecRf = true,
     writeV0Rf = true,
+    writeVlRf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
+    trigger = true,
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -778,6 +784,7 @@ object FuConfig {
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
+    trigger = true,
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -794,10 +801,12 @@ object FuConfig {
     piped = false, // Todo: check it
     writeVecRf = true,
     writeV0Rf = true,
+    writeVlRf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
+    trigger = true,
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -816,6 +825,7 @@ object FuConfig {
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, breakPoint),
     flushPipe = true,
     replayInst = true,
+    trigger = true,
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,

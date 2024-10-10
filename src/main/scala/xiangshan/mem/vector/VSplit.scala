@@ -58,7 +58,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s0_nf = Mux(us_whole_reg(s0_fuOpType), 0.U, s0_uop.vpu.nf)
   val s0_vm = s0_uop.vpu.vm
   val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(s0_uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
-  val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
+  val s0_preIsSplit = !isUnitStride(s0_mop)
   val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
@@ -146,6 +146,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.numUops := numUops
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
+    x.rawNf := io.in.bits.uop.vpu.nf
     x.flowMask := flowMask
     x.indexedSrcMask := indexedSrcMask // Only vector indexed instructions uses it
     x.indexedSplitOffset := indexedSplitOffset
@@ -230,8 +231,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
+  io.toMergeBuffer.req.bits.uop.vpu.nf   := s1_in.rawNf
   io.toMergeBuffer.req.bits.mask         := s1_mask
-  io.toMergeBuffer.req.bits.vaddr        := DontCare
+  io.toMergeBuffer.req.bits.vaddr        := s1_in.baseAddr
   io.toMergeBuffer.req.bits.vdIdx        := s1_vdIdx  //TODO vdIdxReg should no longer be useful, don't delete it for now
   io.toMergeBuffer.req.bits.fof          := s1_in.fof
   io.toMergeBuffer.req.bits.vlmax        := s1_in.vlmax
@@ -253,6 +255,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
   io.out.bits.usMask        := usMask
+  io.out.bits.uop.vpu.nf    := s1_in.rawNf
 
   XSPerfAccumulate("split_out",     io.out.fire)
   XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)
@@ -350,7 +353,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usNoSplit        = (issueUsAligned128 || usMaskInSingleUop) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
-  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
+  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx, XLEN)
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
@@ -366,6 +369,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.uop                   := issueUop
     x.uop.exceptionVec      := ExceptionNO.selectByFu(issueUop.exceptionVec, fuCfg)
     x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
+    x.basevaddr             := issueBaseAddr
     x.alignedType           := issueAlignedType
     x.isvec                 := true.B
     x.mask                  := Mux(!issuePreIsSplit, usSplitMask, mask)
@@ -484,7 +488,11 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
-  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect), "VLSplitSkidBuffer")
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in,
+    Mux(splitPipeline.io.out.fire,
+      splitPipeline.io.out.bits.uop.robIdx.needFlush(io.redirect),
+      splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect)),
+    "VSSplitSkidBuffer")
 
   // Split Buffer
   splitBuffer.io.redirect <> io.redirect
@@ -501,7 +509,11 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
-  skidBuffer(splitPipeline.io.out, splitBuffer.io.in, splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect),"VSSplitSkidBuffer")
+  skidBuffer(splitPipeline.io.out, splitBuffer.io.in,
+    Mux(splitPipeline.io.out.fire,
+      splitPipeline.io.out.bits.uop.robIdx.needFlush(io.redirect),
+      splitBuffer.io.in.bits.uop.robIdx.needFlush(io.redirect)),
+    "VSSplitSkidBuffer")
 
   // Split Buffer
   splitBuffer.io.redirect <> io.redirect

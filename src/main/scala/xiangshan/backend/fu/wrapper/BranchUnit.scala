@@ -10,23 +10,24 @@ import xiangshan.frontend.tracertl.TraceRTLChoose
 import xiangshan.{RedirectLevel, XSModule}
 import xiangshan.frontend.tracertl.ChiselRecordForField._
 
-class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
+class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val pc = Input(UInt(len.W))
+    val pc = Input(UInt(VAddrBits.W))
     val taken = Input(Bool())
     val isRVC = Input(Bool())
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
-    val target = Output(UInt(len.W))
+    val target = Output(UInt(XLEN.W))
   })
-  io.target := io.pc + Mux(io.taken,
-    SignExt(ImmUnion.B.toImm32(io.offset), len),
-    Mux(io.isRVC, 2.U, 4.U)
-  )
+  val pcExtend = SignExt(io.pc, VAddrBits + 1)
+  io.target := SignExt(Mux(io.taken,
+  pcExtend + SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1),
+  pcExtend + Mux(io.isRVC, 2.U, 4.U)
+  ), XLEN)
 }
 
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val dataModule = Module(new BranchModule)
-  val addModule = Module(new AddrAddModule(VAddrData().dataWidth))
+  val addModule = Module(new AddrAddModule)
   dataModule.io.src(0) := io.in.bits.data.src(0) // rs1
   dataModule.io.src(1) := io.in.bits.data.src(1) // rs2
   dataModule.io.func := io.in.bits.ctrl.fuOpType
@@ -50,6 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.robIdx := io.in.bits.ctrl.robIdx,
         _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
         _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
+        _.fullTarget := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
         _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
           io.in.bits.ctrl.traceInfo.branchTaken(0) =/= io.in.bits.ctrl.predictInfo.get.taken,
         ),
@@ -57,7 +59,10 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.cfiUpdate.predTaken := dataModule.io.pred_taken,
         _.cfiUpdate.target := addModule.io.target,
         _.cfiUpdate.pc := io.in.bits.data.pc.get,
-        _.traceInfo := io.in.bits.ctrl.traceInfo
+        _.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target),
+        _.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target),
+        _.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target),
+        _.traceInfo := io.in.bits.ctrl.traceInfo,
       )
   }
   if (env.TraceRTLMode) {

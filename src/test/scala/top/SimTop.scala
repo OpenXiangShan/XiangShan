@@ -25,6 +25,7 @@ import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, ChiselMap, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
 
@@ -65,6 +66,7 @@ class SimTop(implicit p: Parameters) extends Module {
   } else {
     soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
   }
+  l_soc.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
 
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100

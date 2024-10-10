@@ -94,7 +94,7 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
   val rand_vaddr = DelayN(io.vaddr, 2)
   val rand_paddr = DelayN(io.paddr, 2)
 
-  io.req.bits.paddr := 0x80000000L.U + rand_offset
+  io.req.bits.paddr := PmemLowBounds.min.U + rand_offset
   io.req.bits.alias := io.req.bits.paddr(13,12)
   io.req.bits.confidence := LFSR64(seed=Some(789L))(4,0) === 0.U
   io.req.bits.is_store := LFSR64(seed=Some(890L))(4,0) === 0.U

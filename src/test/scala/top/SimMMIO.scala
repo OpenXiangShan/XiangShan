@@ -22,10 +22,33 @@ import device._
 import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import difftest._
+import utility.AXI4Error
 
 class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
 
   val node = AXI4MasterNode(List(edge.master))
+
+  val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
+  // val uartRange = AddressSet(0x40600000, 0x3f) // ?
+  val flashRange = AddressSet(0x10000000L, 0xfffffff)
+  val sdRange = AddressSet(0x40002000L, 0xfff)
+  val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
+
+  def subtract(x: AddressSet, y: Seq[AddressSet]): Seq[AddressSet] = {
+    if (y.length == 0) { Seq(x) }
+    else if (y.length == 1) { x.subtract(y.head) }
+    else {
+      x.subtract(y.head).flatMap(remain => subtract(remain, y.tail))
+    }
+  }
+
+  val illegalRange = subtract(AddressSet(0x0, 0x7fffffff), Seq(
+    onChipPeripheralRange,
+    AddressSet(0x40600000L, 0xf), // UART
+    flashRange,
+    sdRange,
+    intrGenRange
+  ))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
@@ -36,6 +59,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   // ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x40002000L, 0xfff))))
   val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x40070000L, 0x0000ffffL))))
+  val error = LazyModule(new AXI4Error(illegalRange))
 
   val axiBus = AXI4Xbar()
 
@@ -44,6 +68,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   flash.node := axiBus
   sd.node := axiBus
   intrGen.node := axiBus
+  error.node := axiBus
 
   axiBus := node
 

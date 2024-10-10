@@ -81,7 +81,6 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
   XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
   XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.s1.entry.tag), "ptw repeater recv resp with wrong tag")
   XSError(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
-  TimeOutAssert(sent && !recv, timeOutThreshold, "Repeater doesn't recv resp in time")
 }
 
 /* dtlb
@@ -332,10 +331,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
-
-  for (i <- 0 until Size) {
-    TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
   }
 
 }
@@ -644,10 +639,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
   for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
-
-  for (i <- 0 until Size) {
-    TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
   }
 }
 

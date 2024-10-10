@@ -272,13 +272,13 @@ jobs:
             --num-cores 2 --emu-optimize "" \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
             --with-dramsim3 --threads 16 \
-            --pgo /nfs/home/share/ci-workloads/linux-hello-smp-newcsr/bbl.bin --llvm-profdata llvm-profdata
+            --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata
       - name: MC Test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/null
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
   simv-basics:
     runs-on: eda
     needs: changes
@@ -315,9 +315,12 @@ jobs:
       - name: V Extension Test - rvv-test
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
-      - name: Simple Test - MicroBench
+      - name: Simple Test - CoreMark 1 iteration
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs coremark-1-iteration"
+      # - name: Simple Test - MicroBench
+      #   run: |
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
       # - name: Basic Test - cputest
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero

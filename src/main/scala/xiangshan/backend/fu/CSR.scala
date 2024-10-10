@@ -30,7 +30,9 @@ import xiangshan.frontend.tracertl.{TraceRTLDontCare, TraceRTLChoose}
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
+import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
+import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 class FpuCsrIO extends Bundle {
@@ -91,14 +93,16 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val vpu = Flipped(new VpuCsrIO)
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
+  val robDeqPtr = Input(new RobPtr)
   // to ROB
   val isXRet = Output(Bool())
-  val trapTarget = Output(UInt(VAddrBits.W))
+  val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
   // from LSQ
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
+  val memExceptionIsForVSnonLeafPTE = Input(Bool())
   // from outside cpu,externalInterrupt
   val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB
@@ -108,6 +112,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  // instruction fetch address translation type
+  val instrAddrTransType = Output(new AddrTransType)
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {

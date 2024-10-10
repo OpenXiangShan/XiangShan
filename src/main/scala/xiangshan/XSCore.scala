@@ -63,8 +63,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock)
 
-  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
-  memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
+  memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
+  memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -82,6 +82,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
+    val resetInFrontend = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -154,6 +155,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
+  backend.io.mem.exceptionAddr.isForVSnonLeafPTE := memBlock.io.mem_to_ooo.lsqio.isForVSnonLeafPTE
   backend.io.mem.debugLS := memBlock.io.debug_ls
   backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
   backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
@@ -162,8 +164,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
-  backend.io.perf.perfEventsFrontend := frontend.getPerf
-  backend.io.perf.perfEventsLsu := memBlock.getPerf
+  backend.io.perf.perfEventsFrontend := frontend.io_perf
+  backend.io.perf.perfEventsLsu := memBlock.io_perf
   backend.io.perf.perfEventsHc := io.perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
@@ -238,8 +240,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.l2 <> DontCare
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
 
+  memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
+  io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
+
   if (debugOpts.ResetGen) {
-    backend.reset := memBlock.reset_backend
+    backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
   }
 }
