@@ -51,7 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.robIdx := io.in.bits.ctrl.robIdx,
         _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
         _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
-        _.bits.fullTarget := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
+        _.fullTarget := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
         _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
           io.in.bits.ctrl.traceInfo.branchTaken(0) =/= io.in.bits.ctrl.predictInfo.get.taken,
         ),

@@ -933,8 +933,16 @@ class NewCSR(implicit val p: Parameters) extends Module
       fromAIA.rdata.valid -> fromAIA.rdata.bits.data
     )), 0.U(64.W), io.in.fire || fromAIA.rdata.valid)
 
-  val traceTargetFromFu = io.in.bits.traceInfo.target
-  val traceTargetFromRob = io.fromRob.trap.bits.traceInfo.target
+  def genTraceTargetPcBundle(target: UInt): TargetPCBundle = {
+    val bundle = Wire(new TargetPCBundle)
+    bundle.pc := target
+    bundle.raiseIPF := false.B
+    bundle.raiseIAF := false.B
+    bundle.raiseIGPF := false.B
+    bundle
+  }
+  val traceTargetFromFu =  genTraceTargetPcBundle(io.in.bits.traceInfo.target)
+  val traceTargetFromRob = genTraceTargetPcBundle(io.fromRob.trap.bits.traceInfo.target)
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,

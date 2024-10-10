@@ -301,6 +301,7 @@ class TLBFakeFA(
     for (d <- 0 until nDups) {
       resp.bits.perm(d).pf := pf
       resp.bits.perm(d).af := false.B
+      resp.bits.perm(d).v := true.B // soft-tlb's valid is always true
       resp.bits.perm(d).d := pte.perm.d
       resp.bits.perm(d).a := pte.perm.a
       resp.bits.perm(d).g := pte.perm.g
