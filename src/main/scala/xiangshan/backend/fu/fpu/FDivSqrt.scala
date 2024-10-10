@@ -104,6 +104,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) 
   io.out.valid := dataModule.out_valid
   connectNonPipedCtrlSingal
 
-  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, dataModule.kill_r || dataModule.kill_w)
-  XSPerfHistogram("fdivSqrtCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
+  XSError(io.in.valid, "should not be used")
+  // val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, dataModule.kill_r || dataModule.kill_w)
+  // XSPerfHistogram("fdivSqrtCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
 }
