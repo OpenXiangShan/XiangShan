@@ -906,8 +906,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
     lsq.io.ncOut(i) <> loadUnits(i).io.lsq.nc_ldin
-    loadUnits(i).io.lsq.nc_ldin.valid := DontCare
-    loadUnits(i).io.lsq.nc_ldin.bits := DontCare
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
     lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword

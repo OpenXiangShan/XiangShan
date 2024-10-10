@@ -162,6 +162,11 @@
    io.ncOut.bits.paddr := req.paddr
    io.ncOut.bits.vaddr := req.vaddr
    io.ncOut.bits.nc := true.B
+   io.ncOut.bits.mask := Mux(req.paddr(3), req.mask(15, 8), req.mask(7, 0))
+   io.ncOut.bits.schedIndex := req.schedIndex
+   io.ncOut.bits.isvec := req.isvec
+   io.ncOut.bits.is128bit := req.is128bit
+   io.ncOut.bits.vecActive := req.vecActive
 
 
    io.exception.valid := io.ncOut.fire
@@ -410,17 +415,17 @@
    val allowEnqueue = !freeList.io.empty
    QueuePerf(LoadNCBufferSize, validCount, !allowEnqueue)
 
-   XSPerfAccumulate("mmioCycle", VecInit(uncacheReqArb.io.in.map(_.fire)).asUInt.orR)
-   XSPerfAccumulate("mmioCnt", io.uncache.req.fire)
-   XSPerfAccumulate("mmio_writeback_success", io.ncOut(0).fire)
-   XSPerfAccumulate("mmio_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready)
+   XSPerfAccumulate("ncReqCycle", VecInit(uncacheReqArb.io.in.map(_.fire)).asUInt.orR)
+   XSPerfAccumulate("ncUncacheReqCnt", io.uncache.req.fire)
+   XSPerfAccumulate("nc_writeback_success", io.ncOut(0).fire)
+   XSPerfAccumulate("nc_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready)
    XSPerfAccumulate("uncache_full_rollback", io.rollback.valid)
 
    val perfEvents: Seq[(String, UInt)] = Seq(
-     ("mmioCycle", VecInit(uncacheReqArb.io.in.map(_.fire)).asUInt.orR),
-     ("mmioCnt", io.uncache.req.fire),
-     ("mmio_writeback_success", io.ncOut(0).fire),
-     ("mmio_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready),
+     ("ncReqCycle", VecInit(uncacheReqArb.io.in.map(_.fire)).asUInt.orR),
+     ("ncUncacheReqCnt", io.uncache.req.fire),
+     ("nc_writeback_success", io.ncOut(0).fire),
+     ("nc_writeback_blocked", io.ncOut(0).valid && !io.ncOut(0).ready),
      ("uncache_full_rollback",  io.rollback.valid)
    )
    // end

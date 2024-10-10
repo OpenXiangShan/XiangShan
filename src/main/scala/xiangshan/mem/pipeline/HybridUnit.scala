@@ -1191,6 +1191,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop.replayInst := s3_rep_frm_fetch
   s3_out.bits.data            := s3_in.data
   s3_out.bits.debug.isMMIO    := s3_in.mmio
+  s3_out.bits.debug.isNC      := s3_in.nc
   s3_out.bits.debug.isPerfCnt := false.B
   s3_out.bits.debug.paddr     := s3_in.paddr
   s3_out.bits.debug.vaddr     := s3_in.vaddr

@@ -181,7 +181,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val ncOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
+    val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
@@ -296,7 +296,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     mmio.valid := io.ldu.ldin(w).valid // from load_s3
     mmio.bits := io.ldu.ldin(w).bits // from load_s3
   }
-  ioBuffer.io.uncache.resp.valid := io.uncache.resp.valid
+  ioBuffer.io.uncache.resp.valid := io.uncache.resp.valid && !io.uncache.resp.bits.nc
   ioBuffer.io.uncache.resp.bits := io.uncache.resp.bits
   //nc
   ncBuffer.io.redirect <> io.redirect
@@ -305,7 +305,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     nc.valid := io.ldu.ldin(w).valid // from load_s3
     nc.bits := io.ldu.ldin(w).bits // from load_s3
   }
-  ncBuffer.io.uncache.resp.valid := io.uncache.resp.valid
+  ncBuffer.io.uncache.resp.valid := io.uncache.resp.valid && io.uncache.resp.bits.nc
   ncBuffer.io.uncache.resp.bits := io.uncache.resp.bits
   //uncache arbiter
   ioBuffer.io.uncache.req.ready := io.uncache.req.ready
