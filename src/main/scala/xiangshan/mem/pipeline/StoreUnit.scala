@@ -131,6 +131,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     dontTouch(io.stin.bits.uop.traceInfo)
   }
 
+  if (env.TraceRTLMode) {
+    XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
+    dontTouch(io.stin.bits.uop.traceInfo)
+  }
+
   // generate addr
   val s0_saddr = TraceRTLChoose(s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits), s0_stin.uop.traceInfo.memoryAddrVA)
   val s0_fullva = Wire(UInt(XLEN.W))
