@@ -1391,7 +1391,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffNonRegInterruptPendingEvent.platformIRPStip  := sstcIRGen.o.STIP
     diffNonRegInterruptPendingEvent.platformIRPVseip := platformIRP.VSEIP || hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt)
     diffNonRegInterruptPendingEvent.platformIRPVstip := sstcIRGen.o.VSTIP
-    diffNonRegInterruptPendingEvent.localCounterOverflowInterruptReq  := lcofiReq
+    diffNonRegInterruptPendingEvent.localCounterOverflowInterruptReq  := mip.regOut.LCOFIP.asBool
 
   }
 }
