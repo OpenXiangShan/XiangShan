@@ -41,7 +41,7 @@ trait StridePredictorParams {
   val UtilityWidth = 2
 
   val CommitUpdateSize = 2
-  val CommitBufferSize = 24
+  val CommitBufferSize = 32
 
   val ConfidenceThreshold = 4
 
