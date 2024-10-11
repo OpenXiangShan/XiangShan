@@ -104,7 +104,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     fp.multiHit := false.B
     fp.fromFtbEntry(e, s1_pc_dup(0))
     for (i <- 0 until numBr) {
-      fp.br_taken_mask(i) := c(i)(1) || e.always_taken(i)
+      fp.br_taken_mask(i) := c(i)(1) || (e.strong_bias(i) && e.brValids(i))
     }
   }
   val s1_hit_full_pred   = Mux1H(s1_hit_oh, s1_possible_full_preds)
@@ -149,9 +149,8 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val u_s0_hit    = u_s0_hit_oh.orR
   val u_s0_br_update_valids =
     VecInit((0 until numBr).map(w =>
-      u.bits.ftb_entry.brValids(w) && u.valid && !u.bits.ftb_entry.always_taken(w) &&
-        !(PriorityEncoder(u.bits.br_taken_mask) < w.U)
-    ))
+      u.bits.ftb_entry.brValids(w) && u.valid && !u.bits.ftb_entry.strong_bias(w) &&
+      !(PriorityEncoder(u.bits.br_taken_mask) < w.U)))
 
   // s1
   val u_s1_valid            = RegNext(u.valid)

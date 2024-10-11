@@ -187,7 +187,9 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
 
   val last_may_be_rvi_call = Bool()
 
-  val always_taken = Vec(numBr, Bool())
+  //Mark the conditional branch for the first jump and the jalr instruction that appears for the first time,
+  //and train the tag/ittage without using its results when strong_bias is true.
+  val strong_bias = Vec(numBr, Bool())
 
   def getSlotForBr(idx: Int): FtbSlot = {
     require(idx <= numBr - 1)
@@ -368,9 +370,9 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     val isRetDiff            = this.isRet === that.isRet
     val isJalrDiff           = this.isJalr === that.isJalr
     val lastMayBeRviCallDiff = this.last_may_be_rvi_call === that.last_may_be_rvi_call
-    val alwaysTakenDiff: IndexedSeq[Bool] =
-      this.always_taken.zip(that.always_taken).map {
-        case (x, y) => x === y
+    val alwaysTakenDiff : IndexedSeq[Bool] =
+      this.strong_bias.zip(that.strong_bias).map{
+        case(x, y) => x === y
       }
     VecInit(
       validDiff,
@@ -793,16 +795,12 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   // always taken logic
   for (i <- 0 until numBr) {
-    for (
-      out_fp & in_fp & s2_hit & s2_ftb_entry <-
-        io.out.s2.full_pred zip io.in.bits.resp_in(0).s2.full_pred zip s2_hit_dup zip s2_ftb_entry_dup
-    )
-      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s2_hit && s2_ftb_entry.always_taken(i)
-    for (
-      out_fp & in_fp & s3_hit & s3_ftb_entry <-
-        io.out.s3.full_pred zip io.in.bits.resp_in(0).s3.full_pred zip s3_hit_dup zip s3_ftb_entry_dup
-    )
-      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
+    for (out_fp & in_fp & s2_hit & s2_ftb_entry <-
+      io.out.s2.full_pred zip io.in.bits.resp_in(0).s2.full_pred zip s2_hit_dup zip s2_ftb_entry_dup)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s2_hit && s2_ftb_entry.strong_bias(i) && s2_ftb_entry.brValids(i)
+    for (out_fp & in_fp & s3_hit & s3_ftb_entry <-
+      io.out.s3.full_pred zip io.in.bits.resp_in(0).s3.full_pred zip s3_hit_dup zip s3_ftb_entry_dup)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.strong_bias(i) && s3_ftb_entry.brValids(i)
   }
 
   // Update logic
