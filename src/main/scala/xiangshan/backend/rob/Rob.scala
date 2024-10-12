@@ -555,7 +555,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
-  when(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock) {
+  val handleVlsExcp = deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock && state === s_idle
+  when(handleVlsExcp) {
     deqVlsExcpLock := true.B
   }.elsewhen(deqPtrVec.head =/= deqPtrVec_next.head) {
     deqVlsExcpLock := false.B
@@ -564,7 +565,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Only assert once when deqVlsExcp occurs until condition not assert to avoid multi message passed to RAB
   when (deqVlsExceptionNeedCommit) {
     deqVlsExceptionNeedCommit := false.B
-  }.elsewhen(deqIsVlsException && deqVlsCanCommit && !deqVlsExcpLock){
+  }.elsewhen(handleVlsExcp){
     deqVlsExceptionCommitSize := deqPtrEntry.realDestSize
     deqVlsExceptionNeedCommit := true.B
   }
