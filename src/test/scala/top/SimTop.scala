@@ -70,9 +70,11 @@ class SimTop(implicit p: Parameters) extends Module {
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
     val memAXI = if(useDRAMSim) soc.memory.cloneType else null
+    val dse_rst = Input(Bool())
   })
 
   simMMIO.io.uart <> io.uart
+  soc.io.dse_rst := io.dse_rst
 
   if(useDRAMSim){
     io.memAXI <> soc.memory

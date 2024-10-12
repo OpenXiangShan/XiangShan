@@ -84,6 +84,7 @@ class XSArgs(object):
         self.diff = args.diff
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
+        self.dse_max_instr = args.dse_max_instr
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -506,6 +507,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
+    parser.add_argument('--dse_max_instr', nargs='?', type=int, help='max instr for dse')
 
     args = parser.parse_args()
 

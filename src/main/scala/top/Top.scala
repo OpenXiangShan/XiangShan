@@ -115,6 +115,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val dseCtrl = LazyModule(new dseCtrlUnit(dseParams()))
   dseCtrl.ctrlnode := misc.peripheralXbar
 
+
   lazy val module = new LazyRawModuleImp(this) {
     ElaborationArtefacts.add("dts", dts)
     ElaborationArtefacts.add("graphml", graphML)
@@ -146,7 +147,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val debug_reset = Output(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
+      val instrCnt = Output(UInt(64.W))
+      val dse_rst = Input(Reset())
     })
+
+    dseCtrl.module.io.clk := io.clock.asClock
+    dseCtrl.module.io.rst := io.dse_rst
+
+    ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }

@@ -9,14 +9,18 @@ import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, Re
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 
-
-case class dseParams(baseAddress: BigInt = 0x70000000)
+object DSEConsts
 {
-  def address = AddressSet(baseAddress, 0xffff)
+  def RobSize = 256
+}
+
+case class dseParams(baseAddress: BigInt = 0x39010000L)
+{
+  def address = AddressSet(baseAddress, 0xff)
   def beatBytes = 8
 }
 
-class dseCtrlUnit(params: dseParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class dseCtrlUnit(params: dseParams)(implicit p: Parameters) extends LazyModule {
   val ctrlnode = TLRegisterNode(
     address = Seq(params.address),
     device = new SimpleDevice("dseCtrl", Nil),
@@ -26,26 +30,33 @@ class dseCtrlUnit(params: dseParams)(implicit p: Parameters) extends LazyModule 
   lazy val module = new dseCtrlUnitImp(this)
 }
 
-class dseCtrlUnitImp(wrapper: dseCtrlUnit) extends LazyRawModuleImp(wrapper) with HasXSParameter {
-  val dse_clk = IO(Input(Clock()))
-  val dse_rst = IO(Input(Bool()))
+class dseCtrlUnitImp(wrapper: dseCtrlUnit) extends LazyRawModuleImp(wrapper)  {
+  import DSEConsts._
 
-  childClock := dse_clk
-  childReset := dse_rst
+  val io = IO(new Bundle{
+    val clk = Input(Clock())
+    val rst = Input(Reset())
+  })
+
+  childClock := io.clk
+  childReset := io.rst
   val ctrlnode = wrapper.ctrlnode
   withClockAndReset(childClock, childReset) {
     val pingpong = RegInit(0.U(1.W))
     val ctrlSel = RegInit(0.U(1.W))
     val robSize0 = RegInit(0.U(log2Up(RobSize + 1).W))
     val robSize1 = RegInit(0.U(log2Up(RobSize + 1).W))
-    val robSize = Wire(0.U(log2Up(RobSize + 1).W))
+    val robSize = Wire(UInt(log2Up(RobSize + 1).W))
 
     ctrlnode.regmap(
       0x00 -> Seq(
-        RegField(1, pingpong),
-        RegField(1, ctrlSel)),
-      0x04 -> Seq(RegField(robSize0.litValue.toInt)),
-      0x08 -> Seq(RegField(robSize1.litValue.toInt))
+        RegField(1, pingpong, RegFieldDesc("pingpong", "pingpong signal")),
+        RegField(1, ctrlSel, RegFieldDesc("ctrlSel", "control signal to select the robSize"))
+      ),
+      0x04 -> Seq(
+        RegField(log2Up(RobSize + 1), robSize0, RegFieldDesc("robSize0", "robSize0")),
+        RegField(log2Up(RobSize + 1), robSize1, RegFieldDesc("robSize1", "robSize1"))
+      ),
     )
 
 

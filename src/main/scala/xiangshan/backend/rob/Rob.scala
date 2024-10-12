@@ -341,7 +341,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
   // for DSE
-  val pRobSize = Wire(UInt(log2Up(RobSize + 1).W))
+  val pRobSize = WireInit(0.U(log2Up(RobSize + 1).W))
   ExcitingUtils.addSink(pRobSize, "DSE_ROBSIZE")
   /**
    * states of Rob
@@ -723,7 +723,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
-  allowEnqueue := numValidEntries + dispatchNum <= (pRobSize.litValue - RenameWidth).U
+  allowEnqueue := numValidEntries + dispatchNum <= pRobSize - RenameWidth.asUInt
 
   val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtr, enqPtr - 1.U)
   val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)
@@ -910,6 +910,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
   val retireCounter = Mux(RegNext(io.commits.isCommit), trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
+  ExcitingUtils.addSource(instrCnt, "DSE_INSTRCNT")
   instrCntReg := instrCnt
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
@@ -919,14 +920,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
    */
   XSDebug(p"enqPtr ${enqPtr} deqPtr ${deqPtr}\n")
   XSDebug("")
-  for(i <- 0 until pRobSize.litValue.toInt){
+  for(i <- 0 until RobSize){
     XSDebug(false, !valid(i), "-")
     XSDebug(false, valid(i) && writebacked(i), "w")
     XSDebug(false, valid(i) && !writebacked(i), "v")
   }
   XSDebug(false, true.B, "\n")
 
-  for(i <- 0 until pRobSize.litValue.toInt) {
+  for(i <- 0 until RobSize) {
     if(i % 4 == 0) XSDebug("")
     XSDebug(false, true.B, "%x ", debug_microOp(i).cf.pc)
     XSDebug(false, !valid(i), "- ")
@@ -1142,7 +1143,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     difftest.io.instrCnt := instrCnt
   }
 
-  val validEntriesBanks = (0 until (pRobSize.litValue.toInt + 63) / 64).map(i => RegNext(PopCount(valid.drop(i * 64).take(64))))
+  val validEntriesBanks = (0 until (RobSize + 63) / 64).map(i => RegNext(PopCount(valid.drop(i * 64).take(64))))
   val validEntries = RegNext(ParallelOperation(validEntriesBanks, (a: UInt, b: UInt) => a +& b))
   val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMove).map{ case (v, m) => v && m })
   val commitLoadVec = VecInit(commitLoadValid)
@@ -1164,10 +1165,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegNext(commitStoreVec)))                        ),
     ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)           ),
     ("rob_walkCycle          ", (state === s_walk || state === s_extrawalk)                           ),
-    ("rob_1_4_valid          ", validEntries <= (pRobSize.litValue.toInt / 4).U                                       ),
-    ("rob_2_4_valid          ", validEntries >  (pRobSize.litValue.toInt / 4).U && validEntries <= (pRobSize.litValue.toInt / 2).U    ),
-    ("rob_3_4_valid          ", validEntries >  (pRobSize.litValue.toInt / 2).U && validEntries <= (pRobSize.litValue.toInt * 3 / 4).U),
-    ("rob_4_4_valid          ", validEntries >  (pRobSize.litValue.toInt * 3 / 4).U                                   ),
+    ("rob_1_4_valid          ", validEntries <= (RobSize / 4).U                                       ),
+    ("rob_2_4_valid          ", validEntries >  (RobSize / 4).U && validEntries <= (RobSize / 2).U    ),
+    ("rob_3_4_valid          ", validEntries >  (RobSize / 2).U && validEntries <= (RobSize * 3 / 4).U),
+    ("rob_4_4_valid          ", validEntries >  (RobSize * 3 / 4).U                                   ),
   )
   generatePerfEvent()
 }
