@@ -374,7 +374,12 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   io.toV0Preg := toV0Preg
   io.toVlPreg := toVlPreg
   io.toCtrlBlock.writeback.zip(wb2Ctrl).foreach { case (sink, source) =>
-    sink.valid := source.valid
+    if (source.bits.params.hasLoadFu) {
+      sink.valid := source.valid && !source.bits.isLoadPf.get
+    }
+    else {
+      sink.valid := source.valid
+    }
     sink.bits := source.bits
     source.ready := true.B
   }

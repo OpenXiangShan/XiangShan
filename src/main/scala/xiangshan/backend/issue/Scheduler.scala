@@ -80,6 +80,9 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     new RfWritePortWithConfig(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth)))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
+  // regfile prefetch
+  val toBypassNetworkBeforeDelay = OptionWrapper(params.LduCnt > 0, MixedVec(params.issueBlockParams.filter(_.isLdAddrIQ).map(_.genLoadIssueDecoupledBundle)))
+
   val vlWriteBackInfo = new Bundle {
     val vlFromIntIsZero  = Input(Bool())
     val vlFromIntIsVlmax = Input(Bool())
@@ -407,6 +410,10 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   io.toDataPathAfterDelay.zipWithIndex.foreach { case (toDpDy, i) =>
     toDpDy <> issueQueues(i).io.deqDelay
   }
+
+  io.toBypassNetworkBeforeDelay.foreach(_.zip(issueQueues.filter(_.params.isLdAddrIQ)).foreach { case (toBy, iq) =>
+    toBy <> iq.io.deqBeforeDly.get
+  })
 
   // Response
   issueQueues.zipWithIndex.foreach { case (iq, i) =>

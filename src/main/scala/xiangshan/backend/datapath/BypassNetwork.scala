@@ -36,6 +36,12 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     )
   }
 
+  val fromLoadIQ: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(MixedVec(
+    memSchdParams.issueBlockParams.filter(_.isLdAddrIQ).map(iq =>
+      MixedVec(iq.exuBlockParams.filter(_.hasLoadFu).map(x => DecoupledIO(x.genExuInputBundle)))
+    )
+  ))
+
   class ToExus extends Bundle {
     val int: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
     val fp : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = fpSchdParams.genExuInputBundle
@@ -180,6 +186,16 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         )
       )
     }
+  }
+
+  // regfile prefetch
+  println(s"[BypassNetwork] toLoadExuNum: ${io.toExus.mem.flatten.filter(_.bits.params.hasLoadFu).size}, fromLoadIQNum: ${io.fromLoadIQ.flatten.size}")
+  io.toExus.mem.flatten.zip(io.fromDataPath.mem.flatten).filter(_._1.bits.params.hasLoadFu).zip(io.fromLoadIQ.flatten).foreach{ case ((toExu, fromDP), fromIQ) =>
+    toExu.valid := fromDP.valid || fromIQ.valid
+    when (!fromDP.valid) {
+      toExu.bits := fromIQ.bits
+    }
+    fromIQ.ready := true.B
   }
 
   // to reg cache

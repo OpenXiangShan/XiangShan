@@ -72,6 +72,9 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val validCntDeqVec = Output(Vec(params.numDeq,UInt(params.numEntries.U.getWidth.W)))
   // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
+  // regfile prefetch
+  val deqBeforeDly = Option.when(params.LduCnt > 0)(params.genIssueDecoupledBundle)
+
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
@@ -796,6 +799,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     sink.valid := source.valid
     sink.bits := source.bits
   }
+  io.deqBeforeDly.foreach(_.zip(deqBeforeDly).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits
+  })
   if(backendParams.debugEn) {
     dontTouch(deqDelay)
     dontTouch(io.deqDelay)
