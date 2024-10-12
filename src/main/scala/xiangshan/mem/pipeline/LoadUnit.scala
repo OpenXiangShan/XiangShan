@@ -1071,6 +1071,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_prf    = s2_in.isPrefetch
   val s2_hw_prf = s2_in.isHWPrefetch
 
+  val s2_isLoadPf = s2_in.uop.isLoadPf
+  // the origin load pf hit
+  val s2_loadPfHit = s2_isLoadPf && s2_in.uop.lqIdx === s0_out.uop.lqIdx && s0_out.uop.pfHit
+
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
@@ -1289,7 +1293,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     !s1_kill &&
     !io.tlb.resp.bits.miss &&
     !io.lsq.forward.dataInvalidFast
-  io.fast_uop.valid := GatedValidRegNext(s1_fast_uop_valid) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio && !(s2_prf && !s2_hw_prf)) && !s2_isvec && !s2_frm_mabuf
+  io.fast_uop.valid := GatedValidRegNext(s1_fast_uop_valid) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio && !(s2_prf && !s2_hw_prf)) && !s2_isvec && !s2_frm_mabuf && !s2_isLoadPf
   io.fast_uop.bits := RegEnable(s1_out.uop, s1_fast_uop_valid)
 
   //
@@ -1370,6 +1374,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vec_mb_nack     := false.B
   XSError(s3_valid && s3_vec_mb_nack, "Merge buffer should always accept vector loads!")
 
+  val s3_isLoadPf = s3_in.uop.isLoadPf
+  // the origin load pf hit
+  val s3_loadPfHit = RegEnable(s2_loadPfHit, s2_fire)
+
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
@@ -1378,10 +1386,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
   // s3 load fast replay
-  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
+  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect) && !s3_isLoadPf
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_frm_mabuf
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_frm_mabuf && !s3_isLoadPf
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
@@ -1418,7 +1426,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
 
   // Int load, if hit, will be writebacked at s3
-  s3_out.valid                := s3_valid && s3_safe_writeback
+  s3_out.valid                := s3_valid && s3_safe_writeback && (!s3_isLoadPf || s3_isLoadPf && s3_loadPfHit)
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.fpWen       := s3_in.uop.fpWen && !s3_exception
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
@@ -1452,7 +1460,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.vecTriggerMask    := s3_in.vecTriggerMask
   val s3_usSecondInv          = s3_in.usSecondInv
 
-  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
+  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception && !s3_isLoadPf
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
@@ -1478,7 +1486,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // feedback: scalar load will send feedback to RS
   //           vector load will send signal to VL Merge Buffer, then send feedback at granularity of uops
-  io.feedback_slow.valid                 := s3_valid && s3_fb_no_waiting && !s3_isvec && !s3_frm_mabuf
+  io.feedback_slow.valid                 := s3_valid && s3_fb_no_waiting && !s3_isvec && !s3_frm_mabuf && !s3_isLoadPf
   io.feedback_slow.bits.hit              := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
   io.feedback_slow.bits.robIdx           := s3_in.uop.robIdx
@@ -1488,7 +1496,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
   // TODO: vector wakeup?
-  io.ldCancel.ld2Cancel := s3_valid && !s3_safe_wakeup && !s3_isvec && !s3_frm_mabuf
+  io.ldCancel.ld2Cancel := s3_valid && (!s3_safe_wakeup || s3_safe_wakeup && s3_isLoadPf && !s3_loadPfHit) && !s3_isvec && !s3_frm_mabuf
 
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
 
@@ -1580,7 +1588,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.valid       := (s3_mmio.valid ||
                           (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
-  io.ldout.bits.uop.pfHit := s3_in.uop.pfHit && s3_valid
+  io.ldout.bits.uop.isLoadPf := s3_valid && s3_isLoadPf
+  io.ldout.bits.uop.pfHit    := s3_valid && s3_in.uop.pfHit
   io.ldout.bits.uop.currAddr := Mux(s3_valid, s3_in.vaddr, 0.U)
   io.ldout.bits.isFromLoadUnit := true.B
 
@@ -1592,7 +1601,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //                         s3_mmio.valid && !s3_mmio.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid
 
   // s3 load fast replay
-  io.fast_rep_out.valid := s3_valid && s3_fast_rep
+  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_isLoadPf
   io.fast_rep_out.bits := s3_in
   io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
 
@@ -1630,13 +1639,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
     //io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
-  io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf
+  io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf && !s3_isLoadPf
   io.misalign_ldout.bits      := io.lsq.ldin.bits
   io.misalign_ldout.bits.data := Mux(s3_in.is128bit, s3_merged_data_frm_cache, s3_picked_data_frm_cache(2))
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
-    io.l2l_fwd_out.valid      := s3_valid && !s3_in.mmio && !s3_rep_info.need_rep
+    io.l2l_fwd_out.valid      := s3_valid && !s3_in.mmio && !s3_rep_info.need_rep && !s3_isLoadPf
     io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0))
     io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err || // ecc delayed error
                                  s3_ldld_rep_inst ||
