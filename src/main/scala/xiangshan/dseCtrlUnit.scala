@@ -44,8 +44,8 @@ class dseCtrlUnitImp(wrapper: dseCtrlUnit) extends LazyRawModuleImp(wrapper)  {
   withClockAndReset(childClock, childReset) {
     val pingpong = RegInit(0.U(1.W))
     val ctrlSel = RegInit(0.U(1.W))
-    val robSize0 = RegInit(0.U(log2Up(RobSize + 1).W))
-    val robSize1 = RegInit(0.U(log2Up(RobSize + 1).W))
+    val robSize0 = RegInit(RobSize.U)
+    val robSize1 = RegInit(RobSize.U)
     val robSize = Wire(UInt(log2Up(RobSize + 1).W))
 
     ctrlnode.regmap(
