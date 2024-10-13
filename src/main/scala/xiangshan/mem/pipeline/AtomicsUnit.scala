@@ -147,7 +147,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
-    io.dtlb.req.bits.fullva := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
+    io.dtlb.req.bits.fullva := TraceRTLChoose(in.src(0), SignExt(in.uop.traceInfo.memoryAddrVA, XLEN))
     io.dtlb.req.bits.checkfullva := true.B
     io.dtlb.resp.ready      := true.B
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)

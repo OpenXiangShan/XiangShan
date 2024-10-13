@@ -941,8 +941,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     bundle.raiseIGPF := false.B
     bundle
   }
-  val traceTargetFromFu =  genTraceTargetPcBundle(io.in.bits.traceInfo.target)
-  val traceTargetFromRob = genTraceTargetPcBundle(io.fromRob.trap.bits.traceInfo.target)
+  val traceTargetFromFu =  genTraceTargetPcBundle(SignExt(io.in.bits.traceInfo.target, XLEN))
+  val traceTargetFromRob = genTraceTargetPcBundle(SignExt(io.fromRob.trap.bits.traceInfo.target, XLEN))
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,

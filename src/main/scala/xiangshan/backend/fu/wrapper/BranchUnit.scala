@@ -51,7 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.robIdx := io.in.bits.ctrl.robIdx,
         _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
         _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
-        _.fullTarget := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
+        _.fullTarget := TraceRTLChoose(addModule.io.target, SignExt(io.in.bits.ctrl.traceInfo.target, XLEN)),
         _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
           io.in.bits.ctrl.traceInfo.branchTaken(0) =/= io.in.bits.ctrl.predictInfo.get.taken,
         ),
@@ -69,7 +69,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
     dontTouch(io.in.bits.ctrl.traceInfo)
     XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
     XSError(io.in.valid && !io.in.bits.ctrl.traceInfo.isWrongPath &&
-      io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= io.in.bits.ctrl.traceInfo.target),
+      io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= SignExt(io.in.bits.ctrl.traceInfo.target, XLEN)),
       "when taken, addMod's target should equal to traceInfo's target")
     // TraceInfo's target is the 'taken' target
   }
