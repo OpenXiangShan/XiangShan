@@ -75,7 +75,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableCHI && enableL2) None else Some(TLIdentityNode())
   val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
+    new XSL1BusErrors(),
+    BusErrorUnitParams(soc.BEURange.base, soc.BEURange.mask.toInt + 1)
   ))
 
   val i_mmio_port = TLTempNode()
