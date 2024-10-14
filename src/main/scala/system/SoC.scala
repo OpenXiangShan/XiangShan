@@ -367,7 +367,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
+  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
   if (enableCHI) { clint.node := device_xbar.get }
   else { clint.node := peripheralXbar.get }
 
@@ -380,7 +380,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     lazy val module = new IntSourceNodeToModuleImp(this)
   }
 
-  val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
+  val plic = LazyModule(new TLPLIC(PLICParams(soc.PLICRange.base), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode
@@ -388,7 +388,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { plic.node := peripheralXbar.get }
 
   val pll_node = TLRegisterNode(
-    address = Seq(AddressSet(0x3a000000L, 0xfff)),
+    address = Seq(soc.PLLRange),
     device = new SimpleDevice("pll_ctrl", Seq()),
     beatBytes = 8,
     concurrency = 1
