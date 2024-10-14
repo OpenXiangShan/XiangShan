@@ -862,10 +862,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   state := stateNext
 
   /**
-   * Asynchronous read operation of CSR. Check whether a read is asynchronous when read-enable is high.
-   * AIA registers are designed to be read asynchronously, so newCSR will wait for response.
+   * Asynchronous access operation of CSR. Check whether an access is asynchronous when read/write-enable is high.
+   * AIA registers are designed to be access asynchronously, so newCSR will wait for response.
    **/
-  private val asyncRead = ren && !(permitMod.io.out.EX_II || permitMod.io.out.EX_VI) && (
+  private val asyncAccess = (wen || ren) && !(permitMod.io.out.EX_II || permitMod.io.out.EX_VI) && (
     mireg.addr.U === addr && miselect.inIMSICRange ||
     sireg.addr.U === addr && ((!V.asUInt.asBool && siselect.inIMSICRange) || (V.asUInt.asBool && vsiselect.inIMSICRange)) ||
     vsireg.addr.U === addr && vsiselect.inIMSICRange
@@ -874,7 +874,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   /** State machine of newCSR */
   switch(state) {
     is(s_idle) {
-      when(valid && asyncRead) {
+      when(valid && asyncAccess) {
         stateNext := s_waitIMSIC
       }.elsewhen(valid && !io.out.ready) {
         stateNext := s_finish
@@ -912,7 +912,7 @@ class NewCSR(implicit val p: Parameters) extends Module
    **/
 
   /** Data that have been read before,and should be stored because output not fired */
-  io.out.valid := state === s_idle && valid && !asyncRead ||
+  io.out.valid := state === s_idle && valid && !asyncAccess ||
                   state === s_waitIMSIC && fromAIA.rdata.valid ||
                   state === s_finish
   io.out.bits.EX_II := DataHoldBypass(permitMod.io.out.EX_II || noCSRIllegal, false.B, io.in.fire) ||
