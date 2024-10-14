@@ -2,7 +2,7 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fudian.FloatPoint
+import floatPoint.FloatPoint
 
 object FPU {
 
