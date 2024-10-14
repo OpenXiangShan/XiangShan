@@ -419,7 +419,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   )
   bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
-    sink.bits.intWen := source.bits.uop.rfWen && FuType.isLoad(source.bits.uop.fuType)
+    sink.bits.intWen := source.bits.uop.rfWen && source.bits.isFromLoadUnit
     sink.bits.pdest := source.bits.uop.pdest
     sink.bits.data := source.bits.data
   }

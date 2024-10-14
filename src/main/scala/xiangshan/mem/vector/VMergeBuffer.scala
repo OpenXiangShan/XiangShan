@@ -461,6 +461,7 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.debug            := 0.U.asTypeOf(new DebugBundle)
     sink.vdIdxInField.get := DontCare
     sink.vdIdx.get        := DontCare
+    sink.isFromLoadUnit   := DontCare
     sink.uop.vpu.vstart   := source.vstart
     sink
   }

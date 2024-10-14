@@ -928,6 +928,7 @@ object Bundles {
     val mask = if (isVector) Some(UInt(VLEN.W)) else None
     val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
     val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
+    val isFromLoadUnit = Bool()
     val debug = new DebugBundle
 
     def isVls = FuType.isVls(uop.fuType)
