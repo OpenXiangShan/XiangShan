@@ -26,6 +26,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
@@ -1358,8 +1359,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
-  s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
-
+  s3_mmio.bits := DelayNWithValid(io.lsq.uncache.bits, io.lsq.uncache.fire, 3)._2
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
@@ -1478,7 +1478,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
 
   // data from load queue refill
-  val s3_ld_raw_data_frm_uncache = RegNextN(io.lsq.ld_raw_data, 3)
+  val s3_ld_raw_data_frm_uncache = DelayNWithValid(io.lsq.ld_raw_data, io.lsq.uncache.fire, 3)._2
   val s3_merged_data_frm_uncache = s3_ld_raw_data_frm_uncache.mergedData()
   val s3_picked_data_frm_uncache = LookupTree(s3_ld_raw_data_frm_uncache.addrOffset, List(
     "b000".U -> s3_merged_data_frm_uncache(63,  0),
@@ -1565,6 +1565,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.valid       := (s3_mmio.valid ||
                           (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
+  io.ldout.bits.uop.fuType := Mux(
+                                  s3_valid && s3_isvec,
+                                  FuType.vldu.U,
+                                  FuType.ldu.U
+  )
 
   // TODO: check this --hx
   // io.ldout.valid       := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && !s3_vecout.isvec ||
@@ -1607,9 +1612,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.vstart := s3_vecout.vstart
   io.vecldout.bits.vecTriggerMask := s3_vecout.vecTriggerMask
 
-  io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
+  io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec //||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
-    io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
+  // Now vector instruction don't support mmio. 
+    // io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
     //io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
   io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf

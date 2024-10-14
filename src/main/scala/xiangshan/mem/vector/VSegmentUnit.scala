@@ -47,6 +47,8 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val vl               = UInt(elemIdxBits.W)
   val uopFlowNum       = UInt(elemIdxBits.W)
   val uopFlowNumMask   = UInt(elemIdxBits.W)
+  val isVSegLoad       = Bool()
+  val isVSegStore      = Bool()
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val exceptionVaddr   = UInt(XLEN.W)
@@ -191,6 +193,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val baseVaddr                       = instMicroOp.baseVaddr
   val alignedType                     = instMicroOp.alignedType
   val fuType                          = instMicroOp.uop.fuType
+  val isVSegLoad                      = instMicroOp.isVSegLoad
+  val isVSegStore                     = instMicroOp.isVSegStore
   val mask                            = instMicroOp.mask
   val exceptionVec                    = instMicroOp.uop.exceptionVec
   val issueEew                        = instMicroOp.uop.vpu.veew
@@ -236,7 +240,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
-  val isVSegLoad        = FuType.isVSegLoad(instMicroOp.uop.fuType)
   val isEnqfof          = io.in.bits.uop.fuOpType === VlduType.vleff && io.in.valid
   val isEnqFixVlUop     = isEnqfof && io.in.bits.uop.vpu.lastUop
 
@@ -356,7 +359,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.exceptionVl.valid     := false.B
     instMicroOp.exceptionVl.bits      := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
-    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && isVSegLoad //FuType.isVLoad(fuType)
+    instMicroOp.isVSegLoad            := FuType.isVSegLoad(io.in.bits.uop.fuType)
+    instMicroOp.isVSegStore           := FuType.isVSegStore(io.in.bits.uop.fuType)
   }
   // latch data
   when(io.in.fire && !isEnqFixVlUop){
@@ -396,13 +401,13 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req                         := DontCare
   io.dtlb.resp.ready                  := true.B
   io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
-  io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad(fuType), TlbCmd.read, TlbCmd.write)
+  io.dtlb.req.bits.cmd                := Mux(isVSegLoad, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.vaddr              := vaddr(VAddrBits - 1, 0)
   io.dtlb.req.bits.fullva             := vaddr
   io.dtlb.req.bits.checkfullva        := true.B
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
-  io.dtlb.req.bits.memidx.is_ld       := FuType.isVLoad(fuType)
-  io.dtlb.req.bits.memidx.is_st       := FuType.isVStore(fuType)
+  io.dtlb.req.bits.memidx.is_ld       := isVSegLoad
+  io.dtlb.req.bits.memidx.is_st       := isVSegStore
   io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
@@ -451,9 +456,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
     val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := missAligned && FuType.isVSegLoad(fuType)  && canTriggerException
-    exceptionVec(storeAddrMisaligned) := missAligned && FuType.isVSegStore(fuType) && canTriggerException
-
+    exceptionVec(loadAddrMisaligned)  := missAligned && isVSegLoad  && canTriggerException
+    exceptionVec(storeAddrMisaligned) := missAligned && isVSegStore && canTriggerException
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
                      exceptionVec(breakPoint) || triggerDebugMode || missAligned
@@ -464,14 +468,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.exception_va  := exception_va
     instMicroOp.exception_gpa := exception_gpa
     // update storeAccessFault bit. Currently, we don't support vector MMIO
-    exceptionVec(loadAccessFault)  := (exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio)   && FuType.isVSegLoad(fuType)  && canTriggerException
-    exceptionVec(storeAccessFault) := (exceptionVec(storeAccessFault) || pmp.st || pmp.mmio)  && FuType.isVSegStore(fuType) && canTriggerException
+    exceptionVec(loadAccessFault)  := (exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio)   && isVSegLoad  && canTriggerException
+    exceptionVec(storeAccessFault) := (exceptionVec(storeAccessFault) || pmp.st || pmp.mmio)  && isVSegStore && canTriggerException
     exceptionVec(breakPoint)       := triggerBreakpoint && canTriggerException
 
-    exceptionVec(storePageFault)      := exceptionVec(storePageFault)      && FuType.isVSegStore(fuType) && canTriggerException
-    exceptionVec(loadPageFault)       := exceptionVec(loadPageFault)       && FuType.isVSegLoad(fuType)  && canTriggerException
-    exceptionVec(storeGuestPageFault) := exceptionVec(storeGuestPageFault) && FuType.isVSegStore(fuType) && canTriggerException
-    exceptionVec(loadGuestPageFault)  := exceptionVec(loadGuestPageFault)  && FuType.isVSegLoad(fuType)  && canTriggerException
+    exceptionVec(storePageFault)      := exceptionVec(storePageFault)      && isVSegStore && canTriggerException
+    exceptionVec(loadPageFault)       := exceptionVec(loadPageFault)       && isVSegLoad  && canTriggerException
+    exceptionVec(storeGuestPageFault) := exceptionVec(storeGuestPageFault) && isVSegStore && canTriggerException
+    exceptionVec(loadGuestPageFault)  := exceptionVec(loadGuestPageFault)  && isVSegLoad  && canTriggerException
 
     when(exception_va || exception_gpa || exception_pa) {
       when(canTriggerException) {
@@ -541,7 +545,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
-  io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
+  io.rdcache.req.valid              := state === s_cache_req && isVSegLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := latchVaddr
   io.rdcache.req.bits.mask          := mask
