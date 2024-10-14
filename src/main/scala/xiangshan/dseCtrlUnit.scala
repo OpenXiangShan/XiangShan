@@ -9,11 +9,6 @@ import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, Re
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 
-object DSEConsts
-{
-  def RobSize = 256
-}
-
 case class dseParams(baseAddress: BigInt = 0x39010000L)
 {
   def address = AddressSet(baseAddress, 0xff)
@@ -30,12 +25,12 @@ class dseCtrlUnit(params: dseParams)(implicit p: Parameters) extends LazyModule 
   lazy val module = new dseCtrlUnitImp(this)
 }
 
-class dseCtrlUnitImp(wrapper: dseCtrlUnit) extends LazyRawModuleImp(wrapper)  {
-  import DSEConsts._
+class dseCtrlUnitImp(wrapper: dseCtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter {
 
   val io = IO(new Bundle{
     val clk = Input(Clock())
     val rst = Input(Reset())
+//    val robSize = Output(UInt(log2Up(RobSize + 1).W))
   })
 
   childClock := io.clk
@@ -65,7 +60,7 @@ class dseCtrlUnitImp(wrapper: dseCtrlUnit) extends LazyRawModuleImp(wrapper)  {
 
 
     // Bore to ROB
-    ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
+     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
   }
 
 }

@@ -287,6 +287,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val robFull = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
+//    val pRobSize = Input(UInt(log2Up(RobSize + 1).W))
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -299,7 +300,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val exceptionPorts = selectWb(fflagsWbSel, _.exists(_.needExceptionGen))
   val exuWbPorts = selectWb(exeWbSel, _.forall(_ != StdExeUnitCfg))
   val stdWbPorts = selectWb(exeWbSel, _.contains(StdExeUnitCfg))
-  println(s"Rob: size $io.pRobSize, numWbPorts: $numWbPorts, commitwidth: $CommitWidth")
+  println(s"Rob: size $RobSize, numWbPorts: $numWbPorts, commitwidth: $CommitWidth")
   println(s"exuPorts: ${exuWbPorts.map(_._1.map(_.name))}")
   println(s"stdPorts: ${stdWbPorts.map(_._1.map(_.name))}")
   println(s"fflags: ${fflagsPorts.map(_._1.map(_.name))}")
@@ -341,8 +342,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
   // for DSE
-  val pRobSize = WireInit(0.U(log2Up(RobSize + 1).W))
-  ExcitingUtils.addSink(pRobSize, "DSE_ROBSIZE")
+   val pRobSize = WireInit(0.U(log2Up(RobSize + 1).W))
+   ExcitingUtils.addSink(pRobSize, "DSE_ROBSIZE")
   /**
    * states of Rob
    */
@@ -723,7 +724,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
-  allowEnqueue := numValidEntries + dispatchNum <= pRobSize - RenameWidth.asUInt
+  allowEnqueue := numValidEntries + dispatchNum <= (pRobSize - RenameWidth.U).asUInt
 
   val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtr, enqPtr - 1.U)
   val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)

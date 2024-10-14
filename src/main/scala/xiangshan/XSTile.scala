@@ -2,7 +2,7 @@ package xiangshan
 
 import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
@@ -12,7 +12,7 @@ import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{TLClientsMerger, TLEdgeBuffer, IntBuffer}
+import utils.{IntBuffer, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -148,6 +148,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val cpu_halt = Output(Bool())
+//      val robSize = Input(UInt(log2Up(RobSize + 1).W))
     })
 
     dontTouch(io.hartId)
@@ -156,6 +157,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     io.cpu_halt := core.module.io.cpu_halt
+
+//    core.module.io.robSize := io.robSize
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }

@@ -249,6 +249,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
+//    val robSize = Input(UInt(log2Up(RobSize + 1).W))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -263,6 +264,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   frontend.io.hartId  := io.hartId
   ctrlBlock.io.hartId := io.hartId
+//  ctrlBlock.io.robSize := io.robSize
   exuBlocks.foreach(_.io.hartId := io.hartId)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId

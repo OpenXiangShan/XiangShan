@@ -112,8 +112,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   // dse ctrl regs
-  val dseCtrl = LazyModule(new dseCtrlUnit(dseParams()))
+  val dseCtrl = LazyModule(new dseCtrlUnit(dseParams())(p.alter((site, here, up) => {
+    case XSCoreParamsKey => tiles.head
+  })))
+
   dseCtrl.ctrlnode := misc.peripheralXbar
+
+
 
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -151,11 +156,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val dse_rst = Input(Reset())
     })
 
-    dseCtrl.module.io.clk := io.clock.asClock
-    dseCtrl.module.io.rst := io.dse_rst
-
-    ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
-
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
 
@@ -189,6 +189,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
+
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := misc.module.reset
@@ -212,6 +213,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
       ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
+
+    dseCtrl.module.io.clk := io.clock.asClock
+    dseCtrl.module.io.rst := io.dse_rst
+//    core_with_l2.head.module.io.robSize := dseCtrl.module.io.robSize
+
+    ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
 
   }
 }
