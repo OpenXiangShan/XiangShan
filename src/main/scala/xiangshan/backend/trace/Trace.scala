@@ -41,9 +41,9 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
 
   for(i <- 0 until CommitWidth) {
     // Trap only occor in block(0).
-    s1_out.trap := RegEnable(s1_in.trap, s1_in.blocks(0).valid && Itype.isTrap(s1_in.blocks(0).bits.tracePipe.itype))
-    s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, !blockCommit)
-    s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, s1_in.blocks(i).valid)
+    s1_out.trap := RegEnable(s1_in.trap, 0.U.asTypeOf(s1_in.trap), s1_in.blocks(0).valid && Itype.isTrap(s1_in.blocks(0).bits.tracePipe.itype))
+    s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, 0.U.asTypeOf(s1_in.blocks(i).valid), !blockCommit)
+    s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, 0.U.asTypeOf(s1_in.blocks(i).bits), s1_in.blocks(i).valid)
   }
 
   /**
@@ -68,11 +68,10 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
 
   toPcMem := s3_in_block
 
-  io.toEncoder := DontCare
   for(i <- 0 until TraceGroupNum) {
     toEncoder.trap := s3_out_trap
-    toEncoder.blocks(i).bits.iaddr.foreach(_ := fromPcMem(i))
     toEncoder.blocks(i).valid := s3_out_block(i).valid
+    toEncoder.blocks(i).bits.iaddr.foreach(_ := Mux(s3_out_block(i).valid, fromPcMem(i), 0.U))
     toEncoder.blocks(i).bits.tracePipe := s3_out_block(i).bits.tracePipe
   }
   if(backendParams.debugEn){
