@@ -27,6 +27,7 @@ import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
@@ -363,6 +364,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits := DontCare
   io.out.bits.uop := in.uop
   io.out.bits.uop.exceptionVec := exceptionVec
+  io.out.bits.uop.fuType := FuType.mou.U
   io.out.bits.data := resp_data
   io.out.bits.debug.isMMIO := is_mmio
   io.out.bits.debug.paddr := paddr
