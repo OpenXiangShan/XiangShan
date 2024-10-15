@@ -104,7 +104,9 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val sNoExcp_useNewVdUntil: UInt = PriorityEncoder(sNoExcp_inRangeVec)
   // The last exception vdIdx, hold 0~8.
   // Need to hold 8.
-  private val sNoExcp_needMergeUntil: UInt = sNoExcp_useNewVdUntil + sNoExcp_vecExcpInfo.bits.nf +& 1.U
+  private val sNoExcp_needMergeUntil: UInt = sNoExcp_useNewVdUntil +
+    Mux(!sNoExcp_vecExcpInfo.bits.isWhole, sNoExcp_vecExcpInfo.bits.nf, 0.U) +&
+    1.U
   // the max vd idx need to write
   private val sNoExcp_maxVdIdx = Mux(
     sNoExcp_vecExcpInfo.valid,
