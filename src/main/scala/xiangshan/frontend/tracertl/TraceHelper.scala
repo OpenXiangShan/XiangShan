@@ -723,3 +723,68 @@ class TraceFakeDynPageTable()(implicit p: Parameters) extends TraceModule {
   io.resp.bits.data(1) := Cat(helper.data(7), helper.data(6), helper.data(5), helper.data(4))
   io.resp.bits.addr := RegEnable(helper.addr, io.req.valid)
 }
+
+class TraceSatpHelper() extends ExtModule
+  with HasExtModuleInline {
+
+  val clock = IO(Input(Clock()))
+  val enable = IO(Input(Bool()))
+  val satp_ppn = IO(Output(UInt(64.W)))
+
+  def getVerilog: String = {
+    s"""
+       |import "DPI-C" function longint trace_get_satp_ppn();
+       |
+       |module TraceSatpHelper(
+       |  input clock,
+       |  input enable,
+       |  output reg [63:0] satp_ppn
+       |);
+       |
+       |logic [63:0] logic_satp_ppn;
+       |
+       |always @(negedge clock) begin
+       |  if (enable) begin
+       |    logic_satp_ppn <= trace_get_satp_ppn();
+       |  end
+       |  else begin
+       |    logic_satp_ppn <= 64'b0;
+       |  end
+       |end
+       |
+       |always @(posedge clock) begin
+       |  if (enable) begin
+       |    satp_ppn <= logic_satp_ppn;
+       |  end
+       |end
+       |
+       |endmodule
+       |
+       |""".stripMargin
+  }
+
+  setInline(s"$desiredName.v", getVerilog)
+}
+
+class TraceSatp()(implicit p: Parameters) extends TraceModule {
+  val io = IO(new Bundle {
+    val satp_ppn = ValidIO(UInt((PAddrBits - 12).W))
+  })
+
+  val helper = Module(new TraceSatpHelper())
+  helper.clock := clock
+  // helper.reset := reset
+
+  val workingState = WireInit(false.B)
+  val startCount = RegInit(0.U(4.W))
+  when (startCount < 10.U) {
+    startCount := startCount + 1.U
+  }
+  when (startCount === 5.U) {
+    workingState := true.B
+  }
+
+  helper.enable := workingState
+  io.satp_ppn.valid := RegNext(helper.enable)
+  io.satp_ppn.bits := helper.satp_ppn
+}

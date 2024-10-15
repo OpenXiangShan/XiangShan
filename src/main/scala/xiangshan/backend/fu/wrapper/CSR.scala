@@ -16,6 +16,7 @@ import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.tracertl.{TraceSatp}
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCircularQueuePtrHelper
@@ -249,10 +250,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
   if (env.TraceRTLMode) {
+    val traceSatpMod = Module(new TraceSatp())
+    val traceSatp = RegEnable(traceSatpMod.io.satp_ppn.bits, 0.U, traceSatpMod.io.satp_ppn.valid)
+
     tlb.satp.changed  := false.B
     tlb.satp.mode     := 8.U
     tlb.satp.asid     := 0.U
-    tlb.satp.ppn      := ((0x90000000L + 0x1000L * 3) >> 12).U(44.W)
+    tlb.satp.ppn      := traceSatp
     tlb.vsatp := 0.U.asTypeOf(tlb.vsatp)
     tlb.hgatp := 0.U.asTypeOf(tlb.hgatp)
   }
