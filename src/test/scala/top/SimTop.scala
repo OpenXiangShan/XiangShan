@@ -28,6 +28,7 @@ import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
+import system.SoCParamsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -42,7 +43,9 @@ class SimTop(implicit p: Parameters) extends Module {
     l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
   }
 
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
+  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2)(p.alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UARTLiteForDTS = false)
+  })))
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.viewAs[AXI4Bundle]
 
