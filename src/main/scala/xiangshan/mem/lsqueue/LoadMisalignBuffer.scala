@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
@@ -35,6 +36,7 @@ import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasLoadHelper
+  with HasTlbConst
 {
   private val enqPortNum = LoadPipelineWidth
   private val maxSplitNum = 2
@@ -574,8 +576,13 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     cross16BytesBoundary && (curPtr === 1.U), 
     splitLoadResp(curPtr).vaddr,
     splitLoadResp(curPtr).fullva))
+  val overwriteGpaddr = GatedRegNext(Mux(
+    cross16BytesBoundary && (curPtr === 1.U), 
+    splitLoadResp(curPtr).gpaddr,
+    Cat(
+      get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva)
+    )))
   val overwriteIsHyper = GatedRegNext(splitLoadResp(curPtr).isHyper)
-  val overwriteGpaddr = GatedRegNext(splitLoadResp(curPtr).gpaddr)
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
