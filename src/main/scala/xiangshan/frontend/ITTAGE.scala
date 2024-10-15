@@ -209,7 +209,7 @@ class ITTageTable
   val s1_valid = RegNext(s0_valid)
 
   val table = Module(new FoldedSRAMTemplate(
-    new ITTageEntry, set=nRows, width=foldedWidth, shouldReset=true, holdRead=true, singlePort=true, useBitmask=true))
+    new ITTageEntry, set=nRows, width=foldedWidth, shouldReset=true, holdRead=true, singlePort=true, useBitmask=true, withClockGate=true))
 
   table.io.r.req.valid := io.req.fire
   table.io.r.req.bits.setIdx := s0_idx

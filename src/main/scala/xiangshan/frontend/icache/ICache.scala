@@ -242,7 +242,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      withClockGate = true
     ))
 
     //meta connection
@@ -371,7 +372,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
         width=ICacheDataSRAMWidth,
         shouldReset = true,
         holdRead = true,
-        singlePort = true
+        singlePort = true,
+        withClockGate = true
       ))
 
       // read
@@ -686,7 +688,8 @@ class SRAMTemplateWithFixedWidth[T <: Data]
 (
   gen: T, set: Int, width: Int, way: Int = 1,
   shouldReset: Boolean = false, holdRead: Boolean = false,
-  singlePort: Boolean = false, bypassWrite: Boolean = false
+  singlePort: Boolean = false, bypassWrite: Boolean = false,
+  withClockGate: Boolean = false
 ) extends Module {
 
   val dataBits  = gen.getWidth
@@ -714,6 +717,7 @@ class SRAMTemplateWithFixedWidth[T <: Data]
       holdRead = holdRead,
       singlePort = singlePort,
       bypassWrite = bypassWrite,
+      withClockGate = withClockGate,
     ))
     // read req
     sramBank.io.r.req.valid       := io.r.req.valid
