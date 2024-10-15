@@ -443,6 +443,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // misalignBuffer will overwrite the source from ldu if it is about to writeback
   ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid || loadMisalignBuffer.io.writeBack.valid
   ldaOut.bits  := ldaWritebackOverride
+  ldaOut.bits.isFromLoadUnit := !(atomicsUnit.io.out.valid || loadMisalignBuffer.io.writeBack.valid)
   atomicsUnit.io.out.ready := ldaOut.ready
   loadUnits.head.io.ldout.ready := ldaOut.ready
   loadMisalignBuffer.io.writeBack.ready := ldaOut.ready
@@ -1183,7 +1184,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         stData(i).ready := true.B
     }
     lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
-
+    lsq.io.std.storeDataIn.foreach(_.bits.isFromLoadUnit := DontCare)
 
 
     // store prefetch train
