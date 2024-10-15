@@ -232,7 +232,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val dirty_fs   = Output(Bool())
   val dirty_vs   = Output(Bool())
   val perfinfo   = new Bundle {
-    val retiredInstr = Output(UInt(3.W))
+    val retiredInstr = Output(UInt(7.W))
   }
 }
 
