@@ -126,9 +126,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     when(wakeUpMask(idx)) {
       ldDp := (if (wakeUpIn.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
     }
-    .elsewhen(allocMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
-      ldDp := 0.U.asTypeOf(ldDp)
-    }
     .elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
       ldDp := VecInit(ldDp.map(x => x << 1))
     }
