@@ -817,7 +817,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(s_wb) {
       when (io.mmioStout.fire || io.vecmmioStout.fire) {
-        uncacheState := s_wait
+        when (uncacheUop.exceptionVec(storeAccessFault)) {
+          uncacheState := s_idle
+        }.otherwise {
+          uncacheState := s_wait
+        }
       }
     }
     is(s_wait) {
