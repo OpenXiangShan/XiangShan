@@ -123,11 +123,13 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), loadCancel))
 
   loadDependency.zipWithIndex.foreach{ case (ldDp, idx) =>
-    when(allocMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
-      ldDp := 0.U.asTypeOf(ldDp)
-    }.elsewhen(wakeUpMask(idx)) {
+    when(wakeUpMask(idx)) {
       ldDp := (if (wakeUpIn.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
-    }.elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
+    }
+    .elsewhen(allocMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
+      ldDp := 0.U.asTypeOf(ldDp)
+    }
+    .elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
       ldDp := VecInit(ldDp.map(x => x << 1))
     }
   }
@@ -139,22 +141,24 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     rename alloc => wakeUp / cancel => ... => wakeUp / cancel => wakeUp
   or
     rename alloc => wbMask  //TODO we still need wbMask because wakeUp signal is partial now
-  the bypass state lasts for a maximum of one cycle, cancel(=> busy) or else(=> regFile)
+  in wakeUpMask, we filter ogCancel and loadTransCancel at the same cycle
    */
   val table = VecInit((0 until numPhyPregs).zip(tableUpdate).map{ case (idx, update) =>
     RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
   }).asUInt
 
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(allocMask(idx) || ldCancelMask(idx)) {
+    when(wakeUpMask(idx) || wbMask(idx)) {
+      update := false.B                                   //ready
+    }
+    .elsewhen(allocMask(idx) || ldCancelMask(idx)) {
       update := true.B                                    //busy
       if (idx == 0 && pregWB.isInstanceOf[IntWB]) {
           // Int RegFile 0 is always ready
           update := false.B
       }
-    }.elsewhen(wakeUpMask(idx) || wbMask(idx)) {
-      update := false.B                                   //ready
-    }.otherwise {
+    }
+    .otherwise {
       update := table(idx)
     }
   }
