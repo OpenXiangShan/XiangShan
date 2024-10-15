@@ -1109,8 +1109,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // interrupt_safe
   for (i <- 0 until RenameWidth) {
-    // We RegNext the updates for better timing.
-    // Note that instructions won't change the system's states in this cycle.
     when(canEnqueue(i)) {
       // For now, we allow non-load-store instructions to trigger interrupts
       // For MMIO instructions, they should not trigger interrupts since they may
