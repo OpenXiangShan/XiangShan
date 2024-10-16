@@ -62,6 +62,10 @@ trait HasMemBlockParameters extends HasXSParameter {
   val MemExuCnt = LduCnt + HyuCnt + StaCnt + StdCnt
   val MemAddrExtCnt = LdExuCnt + StaCnt
   val MemVExuCnt = VlduCnt + VstuCnt
+
+  val AtomicWBPort   = 0
+  val MisalignWBPort = 1
+  val UncacheWBPort  = 2
 }
 
 abstract class MemBlockBundle(implicit val p: Parameters) extends Bundle with HasMemBlockParameters
@@ -431,24 +435,32 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  val ldaWritebackOverride  = Mux(
-    loadMisalignBuffer.io.writeBack.valid,
-    loadMisalignBuffer.io.writeBack.bits,
-    Mux(
-      atomicsUnit.io.out.valid,
-      atomicsUnit.io.out.bits,
-      loadUnits.head.io.ldout.bits
-    ))
-  val ldaOut = Wire(Decoupled(new MemExuOutput))
-  // misalignBuffer will overwrite the source from ldu if it is about to writeback
-  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid || loadMisalignBuffer.io.writeBack.valid
-  ldaOut.bits  := ldaWritebackOverride
-  ldaOut.bits.isFromLoadUnit := !(atomicsUnit.io.out.valid || loadMisalignBuffer.io.writeBack.valid)
-  atomicsUnit.io.out.ready := ldaOut.ready
-  loadUnits.head.io.ldout.ready := ldaOut.ready
-  loadMisalignBuffer.io.writeBack.ready := ldaOut.ready
 
-  val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
+  val ldaExeWbReqs = Wire(Vec(LduCnt, Decoupled(new MemExuOutput)))
+  // atomicsUnit will overwrite the source from ldu if it is about to writeback
+  val atomicWritebackOverride = Mux(
+    atomicsUnit.io.out.valid,
+    atomicsUnit.io.out.bits,
+    loadUnits(AtomicWBPort).io.ldout.bits
+  )
+  ldaExeWbReqs(AtomicWBPort).valid := atomicsUnit.io.out.valid || loadUnits(AtomicWBPort).io.ldout.valid
+  ldaExeWbReqs(AtomicWBPort).bits  := atomicWritebackOverride
+  atomicsUnit.io.out.ready := ldaExeWbReqs(AtomicWBPort).ready
+  loadUnits(AtomicWBPort).io.ldout.ready := ldaExeWbReqs(AtomicWBPort).ready
+
+  // misalignBuffer will overwrite the source from ldu if it is about to writeback
+  val misalignWritebackOverride = Mux(
+     loadMisalignBuffer.io.writeBack.valid,
+     loadMisalignBuffer.io.writeBack.bits,
+     loadUnits(MisalignWBPort).io.ldout.bits
+  )
+  ldaExeWbReqs(MisalignWBPort).valid := loadMisalignBuffer.io.writeBack.valid || loadUnits(MisalignWBPort).io.ldout.valid
+  ldaExeWbReqs(MisalignWBPort).bits  := misalignWritebackOverride
+  loadMisalignBuffer.io.writeBack.ready := ldaExeWbReqs(MisalignWBPort).ready
+  loadUnits(MisalignWBPort).io.ldout.ready := ldaExeWbReqs(MisalignWBPort).ready
+
+  // loadUnit will overwrite the source from uncache if it is about to writeback
+  ldaExeWbReqs(UncacheWBPort) <> loadUnits(UncacheWBPort).io.ldout
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.writebackStd.zip(stdExeUnits).foreach {x =>
@@ -878,7 +890,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
-    lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
+    if (i == UncacheWBPort) {
+      lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
+    } else {
+      lsq.io.ldout(i).ready := true.B
+      loadUnits(i).io.lsq.uncache.valid := false.B
+      loadUnits(i).io.lsq.uncache.bits := DontCare
+    }
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
