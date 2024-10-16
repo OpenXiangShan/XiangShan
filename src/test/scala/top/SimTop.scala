@@ -51,7 +51,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_simAXIMem = AXI4MemorySlave(
     l_soc.misc.memAXI4SlaveNode,
-    16L * 1024 * 1024 * 1024,
+    8190L * 1024 * 1024 * 1024,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
