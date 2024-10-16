@@ -363,7 +363,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits.miss := s1_tlb_miss
 
   // goto misalignBuffer
-  io.misalign_buf.valid := s1_valid && !s1_in.isHWPrefetch && GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && !s1_in.isvec
+  io.misalign_buf.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && !s1_in.isvec
   io.misalign_buf.bits  := io.lsq.bits
 
   // kill dcache write intent request when tlb miss or exception
