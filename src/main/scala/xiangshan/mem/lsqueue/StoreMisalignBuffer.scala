@@ -31,6 +31,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.StaCfg
 
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -457,11 +458,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     } .elsewhen (hasException) {
       unWriteStores := 0.U
       unSentStores := 0.U
-      exceptionVec(storeAddrMisaligned) := exceptionVec(storeAddrMisaligned) || resp.uop.exceptionVec(storeAddrMisaligned)
-      exceptionVec(storePageFault) := exceptionVec(storePageFault) || resp.uop.exceptionVec(storePageFault)
-      exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || resp.uop.exceptionVec(storeAccessFault)
-      exceptionVec(storeGuestPageFault) := exceptionVec(storeGuestPageFault) || resp.uop.exceptionVec(storeGuestPageFault)
-      exceptionVec(breakPoint) := exceptionVec(breakPoint) || resp.uop.exceptionVec(breakPoint)
+      StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitStoreResp.bits.need_rep) {
       unSentStores := unSentStores & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
@@ -571,17 +568,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := 0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  io.writeBack.bits.uop.exceptionVec(storeAddrMisaligned) :=
-    (globalMMIO || globalException) && exceptionVec(storeAddrMisaligned)
-  io.writeBack.bits.uop.exceptionVec(storeAccessFault) :=
-    (globalMMIO || globalException) && exceptionVec(storeAccessFault)
-  io.writeBack.bits.uop.exceptionVec(storePageFault) :=
-    (globalMMIO || globalException) && exceptionVec(storePageFault)
-  io.writeBack.bits.uop.exceptionVec(storeGuestPageFault) :=
-    (globalMMIO || globalException) && exceptionVec(storeGuestPageFault)
-  io.writeBack.bits.uop.exceptionVec(breakPoint) :=
-    (globalMMIO || globalException) && exceptionVec(breakPoint)
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := unalignedStoreData

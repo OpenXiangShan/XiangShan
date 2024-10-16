@@ -31,6 +31,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.LduCfg
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -490,11 +491,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
       unSentLoads := 0.U
-      exceptionVec(loadAddrMisaligned) := exceptionVec(loadAddrMisaligned) || resp.uop.exceptionVec(loadAddrMisaligned)
-      exceptionVec(loadPageFault) := exceptionVec(loadPageFault) || resp.uop.exceptionVec(loadPageFault)
-      exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || resp.uop.exceptionVec(loadAccessFault)
-      exceptionVec(loadGuestPageFault) := exceptionVec(loadGuestPageFault) || resp.uop.exceptionVec(loadGuestPageFault)
-      exceptionVec(breakPoint) := exceptionVec(breakPoint) || resp.uop.exceptionVec(breakPoint)
+      LduCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitLoadResp.bits.rep_info.need_rep) {
       unSentLoads := unSentLoads & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
@@ -552,18 +549,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := 0.U.asTypeOf(ExceptionVec()) // FIXME: is this ok?
-  io.writeBack.bits.uop.exceptionVec(loadAddrMisaligned) :=
-    (globalMMIO || globalException) && exceptionVec(loadAddrMisaligned)
-  io.writeBack.bits.uop.exceptionVec(loadAccessFault) :=
-    (globalMMIO || globalException) && exceptionVec(loadAccessFault)
-  io.writeBack.bits.uop.exceptionVec(loadPageFault) :=
-    (globalMMIO || globalException) && exceptionVec(loadPageFault)
-  io.writeBack.bits.uop.exceptionVec(loadGuestPageFault) :=
-    (globalMMIO || globalException) && exceptionVec(loadGuestPageFault)
-  io.writeBack.bits.uop.exceptionVec(breakPoint) :=
-    (globalMMIO || globalException) && exceptionVec(breakPoint)
-
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := combinedData
