@@ -272,7 +272,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{
         entry.uop.vpu.vta  := VType.tu
-        entry.vl           := vstart
+        entry.vl           := Mux(entry.vl < vstart, entry.vl, vstart)
       }
     }
   }
