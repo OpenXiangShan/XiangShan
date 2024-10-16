@@ -378,8 +378,14 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val old_entry_always_taken    = WireInit(oe)
   val always_taken_modified_vec = Wire(Vec(numBr, Bool())) // whether modified or not
   for (i <- 0 until numBr) {
-    old_entry_always_taken.strong_bias(i) :=
-      oe.strong_bias(i) && io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i)
+    if (i == numBr - 1){
+      //strong bias of jalr should remain unchanged
+      old_entry_always_taken.strong_bias(i) :=
+        oe.strong_bias(i) && io.cfiIndex.valid && io.cfiIndex.bits === oe.brOffset(i) && oe.tailSlot.valid
+    }else{
+      old_entry_always_taken.strong_bias(i) :=
+        oe.strong_bias(i) && io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i)
+    }
     always_taken_modified_vec(i) := oe.strong_bias(i) && oe.brValids(i) && !old_entry_always_taken.strong_bias(i)
   }
   val always_taken_modified = always_taken_modified_vec.reduce(_ || _)
