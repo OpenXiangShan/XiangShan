@@ -32,6 +32,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.LduCfg
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -182,6 +183,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val bufferState = RegInit(s_idle)
   val splitLoadReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitLoadResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LqWriteBundle))))
+  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentLoads = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
 
@@ -475,6 +477,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       splitLoadReqs(0) := lowAddrLoad
       splitLoadReqs(1) := highAddrLoad
     }
+    exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
   }
 
   io.splitLoadReq.valid := req_valid && (bufferState === s_req)
@@ -486,17 +489,20 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.splitLoadReq.bits.uop.fuOpType := Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0))
 
   when (io.splitLoadResp.valid) {
+    val resp = io.splitLoadResp.bits
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isMMIO) {
       unSentLoads := 0.U
-      splitLoadResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := 0.U.asTypeOf(ExceptionVec())
       // delegate to software
-      splitLoadResp(curPtr).uop.exceptionVec(loadAddrMisaligned) := true.B
+      exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
       unSentLoads := 0.U
+      LduCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitLoadResp.bits.rep_info.need_rep) {
       unSentLoads := unSentLoads & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
+      exceptionVec := 0.U.asTypeOf(ExceptionVec())
     }
   }
 
@@ -550,11 +556,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(Mux(
-    globalMMIO || globalException,
-    splitLoadResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  ), LduCfg)
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := combinedData
@@ -579,11 +582,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
   val overwriteExpBuf = GatedValidRegNext(req_valid && globalException)
   val overwriteVaddr = GatedRegNext(Mux(
-    cross16BytesBoundary && (curPtr === 1.U), 
+    cross16BytesBoundary && (curPtr === 1.U),
     splitLoadResp(curPtr).vaddr,
     splitLoadResp(curPtr).fullva))
   val overwriteGpaddr = GatedRegNext(Mux(
-    cross16BytesBoundary && (curPtr === 1.U), 
+    cross16BytesBoundary && (curPtr === 1.U),
     splitLoadResp(curPtr).gpaddr,
     Cat(
       get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva)
