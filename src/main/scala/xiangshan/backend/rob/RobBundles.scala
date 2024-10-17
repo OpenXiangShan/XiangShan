@@ -283,6 +283,9 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   // set 1 if there is 1 exists in exceptionVec
   val hasException = Bool()
+  // This signal is valid iff currentValid is true
+  // 0: is execute exception, 1: is fetch exception
+  val isEnqExcp = Bool()
   val exceptionVec = ExceptionVec()
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
