@@ -491,7 +491,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
@@ -499,15 +499,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)
       else false.B
-    } :+ needV0Dest(i)
+    }
     val vlCond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 4) s === SrcType.vp
       else false.B
-    } :+ needVlDest(i)
-    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
-    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
-    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp) :+ needIntDest(i)
-    val target = io.in(i).bits.lsrc :+ io.in(i).bits.ldest
+    }
+    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp)
+    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp)
+    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp)
+    val target = io.in(i).bits.lsrc
     for ((((((cond1, (condV0, condVl)), cond2), cond3), t), j) <- vecCond.zip(v0Cond.zip(vlCond)).zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
         val indexMatch = in.bits.ldest === t
