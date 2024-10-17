@@ -59,6 +59,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isFetchExcp    = isException && ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && (ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
+  private val isFetchBkpt = isBpExcp && in.isFetchBkpt
+  private val isMemBkpt = isBpExcp && !in.isFetchBkpt
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
@@ -68,14 +70,14 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp
+  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isFetchBkpt
   private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
-  private val tvalFillMemVaddr = isMemExcp
+  private val tvalFillMemVaddr = isMemExcp || isMemBkpt
   private val tvalFillGVA      =
     isHlsExcp && isMemExcp ||
     isLSGuestExcp|| isFetchGuestExcp ||
-    (isFetchExcp || isBpExcp) && fetchIsVirt ||
-    isMemExcp && memIsVirt
+    (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
+    (isMemExcp || isMemBkpt) && memIsVirt
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
