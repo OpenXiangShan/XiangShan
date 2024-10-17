@@ -37,11 +37,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       else if (params.isStAddrIQ)                                                                     //STU
         Seq(io.fromMem.get.slowResp)
       else if (params.isVecLduIQ && params.isVecStuIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
-        Seq(io.vecLdIn.get.resp, io.fromMem.get.slowResp)
-      else if (params.isVecLduIQ)
-        Seq(io.vecLdIn.get.resp)
-      else if (params.isVecStuIQ)
-        Seq(io.fromMem.get.slowResp)
+        Seq(io.vecLdIn.get.resp, io.fromMem.get.slowResp, io.vecLdIn.get.finalIssueResp)
       else Seq()
     if (params.isMemAddrIQ) {
       println(s"[${this.desiredName}] resp: {" +
@@ -575,6 +571,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val lqDeqPtr          = Input(new LqPtr)
   })
   val vecLdIn = OptionWrapper(params.isVecLduIQ, new Bundle {
+    val finalIssueResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
     val resp              = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   })
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
