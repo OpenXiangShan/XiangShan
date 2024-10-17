@@ -1037,7 +1037,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vecCommitHasException = (0 until EnsbufferWidth).map{ i =>
     val ptr                 = rdataPtrExt(i).value
     val mmioStall           = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
-    val exceptionVliad      = allocated(ptr) && committed(ptr) && vecMbCommit(ptr) && !mmioStall && isVec(ptr) && vecDataValid(ptr) && hasException(ptr)
+    val exceptionVliad      = isVec(ptr) && hasException(ptr) && dataBuffer.io.enq(i).fire
     (exceptionVliad, uop(ptr), vecLastFlow(ptr))
   }
 
