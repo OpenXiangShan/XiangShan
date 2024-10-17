@@ -311,8 +311,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
     val inner_l2_pf_enable = Input(Bool())
     val outer_l2_pf_enable = Output(Bool())
-    // val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
-    // val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+    val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -331,8 +331,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.outer_beu_errors_icache)
   dontTouch(io.inner_l2_pf_enable)
   dontTouch(io.outer_l2_pf_enable)
-  // dontTouch(io.inner_hc_perfEvents)
-  // dontTouch(io.outer_hc_perfEvents)
+  dontTouch(io.inner_hc_perfEvents)
+  dontTouch(io.outer_hc_perfEvents)
 
   val redirect = RegNextWithEnable(io.redirect)
 
@@ -1838,7 +1838,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_cpu_halt := io.ooo_to_mem.backendToTopBypass.cpuHalted
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
-  // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
+  io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
   // vector segmentUnit
   vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
