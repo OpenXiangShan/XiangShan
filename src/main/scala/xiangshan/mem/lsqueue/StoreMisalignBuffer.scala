@@ -443,6 +443,10 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitStoreReq.valid := req_valid && (bufferState === s_req)
   io.splitStoreReq.bits  := splitStoreReqs(curPtr)
+  // Restore the information of H extension store
+  // bit encoding: | hsv 1 | store 00 | size(2bit) |
+  val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
+  io.splitStoreReq.bits.uop.fuOpType := Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0))
 
   when (io.splitStoreResp.valid) {
     splitStoreResp(curPtr) := io.splitStoreResp.bits
