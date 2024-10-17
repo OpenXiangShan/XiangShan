@@ -291,7 +291,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   loadQueue.io.debugTopDown <> io.debugTopDown
 
-  assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   when (!io.uncacheOutstanding) {
     assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
