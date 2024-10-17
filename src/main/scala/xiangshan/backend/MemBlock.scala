@@ -1413,8 +1413,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  val vlsuCanAccept = (0 until VlduCnt).map(
-    i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
+  val vLoadCanAccept  = (0 until VlduCnt).map(i =>
+    vlSplit(i).io.in.ready && VlduType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType)
+  )
+  val vStoreCanAccept = (0 until VstuCnt).map(i =>
+    vsSplit(i).io.in.ready && VstuType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType)
   )
   val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
   val isFixVlUop    = io.ooo_to_mem.issueVldu.map{x =>
@@ -1442,8 +1445,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && VstuType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
-                              vlsuCanAccept(i) && !isSegment
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
+                              vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
@@ -1456,8 +1459,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
     vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
-    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && VlduType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
-                              vlsuCanAccept(i) && !isSegment && !isFixVlUop(i)
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
+                              vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
@@ -1480,7 +1483,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   (0 until VlduCnt).foreach{i=>
-    io.ooo_to_mem.issueVldu(i).ready := vlsuCanAccept(i)
+    io.ooo_to_mem.issueVldu(i).ready := vLoadCanAccept(i) || vStoreCanAccept(i)
   }
 
   vlMergeBuffer.io.redirect <> redirect
