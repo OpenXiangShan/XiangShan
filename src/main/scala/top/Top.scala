@@ -112,13 +112,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   // dse ctrl regs
-  val dseCtrl = LazyModule(new dseCtrlUnit(dseParams())(p.alter((site, here, up) => {
+  val dseCtrl = LazyModule(new DSECtrlUnit(DSEParams())(p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
   })))
 
   dseCtrl.ctrlnode := misc.peripheralXbar
-
-
 
 
   lazy val module = new LazyRawModuleImp(this) {

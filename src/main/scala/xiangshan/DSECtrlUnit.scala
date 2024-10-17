@@ -8,24 +8,26 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortParameters, 
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, RegWriteFn}
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
+import javax.swing.SwingWorker
 
-case class dseParams(baseAddress: BigInt = 0x39010000L)
+case class DSEParams(baseAddress: BigInt = 0x39002000L)
 {
-  def address = AddressSet(baseAddress, 0xff)
+  def address = AddressSet(baseAddress, 0x0fff)
   def beatBytes = 8
 }
 
-class dseCtrlUnit(params: dseParams)(implicit p: Parameters) extends LazyModule {
+class DSECtrlUnit(params: DSEParams)(implicit p: Parameters) extends LazyModule {
+
   val ctrlnode = TLRegisterNode(
     address = Seq(params.address),
     device = new SimpleDevice("dseCtrl", Nil),
     beatBytes = params.beatBytes
   )
 
-  lazy val module = new dseCtrlUnitImp(this)
+  lazy val module = new DSECtrlUnitImp(this)
 }
 
-class dseCtrlUnitImp(wrapper: dseCtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter {
+class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter {
 
   val io = IO(new Bundle{
     val clk = Input(Clock())
@@ -37,26 +39,33 @@ class dseCtrlUnitImp(wrapper: dseCtrlUnit)(implicit p: Parameters) extends LazyR
   childReset := io.rst
   val ctrlnode = wrapper.ctrlnode
   withClockAndReset(childClock, childReset) {
-    val pingpong = RegInit(0.U(1.W))
-    val ctrlSel = RegInit(0.U(1.W))
-    val robSize0 = RegInit(RobSize.U)
-    val robSize1 = RegInit(RobSize.U)
-    val robSize = Wire(UInt(log2Up(RobSize + 1).W))
+    val pingpong = RegInit(0.U(64.W))
+    val ctrlSel = RegInit(0.U(64.W))
+    val robSize0 = RegInit(RobSize.U(64.W))
+    val robSize1 = RegInit(RobSize.U(64.W))
+    val robSize = Wire(UInt(64.W))
+
+    val ctrl_config_regs = (
+      Seq(pingpong) ++
+      Seq(ctrlSel)
+    ).map(reg => RegField(64, reg, RegWriteFn(reg)))
+
+    val param_config_regs = (
+      Seq(robSize0) ++
+      Seq(robSize1)
+    ).map(reg => RegField(64, reg, RegWriteFn(reg)))
 
     ctrlnode.regmap(
-      0x00 -> Seq(
-        RegField(1, pingpong, RegFieldDesc("pingpong", "pingpong signal")),
-        RegField(1, ctrlSel, RegFieldDesc("ctrlSel", "control signal to select the robSize"))
-      ),
-      0x04 -> Seq(
-        RegField(log2Up(RobSize + 1), robSize0, RegFieldDesc("robSize0", "robSize0")),
-        RegField(log2Up(RobSize + 1), robSize1, RegFieldDesc("robSize1", "robSize1"))
-      ),
+      0x000 -> RegFieldGroup(
+        "ctrl_config", Some("Pingpong and control select"),
+        ctrl_config_regs),
+      0x100 -> RegFieldGroup(
+        "param_config", Some("ROB size"),
+        param_config_regs),
     )
 
-
     // Mux logic
-    robSize := Mux(ctrlSel.asBool, robSize0, robSize1)
+    robSize := Mux(ctrlSel.orR, robSize1, robSize0)
 
 
     // Bore to ROB
