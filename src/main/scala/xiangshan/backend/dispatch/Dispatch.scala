@@ -195,15 +195,29 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward  = VecInit(io.fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
-
-  val singleStepStatus = RegInit(false.B)
-  val inst0actualOut = io.enqRob.req(0).valid
+  
+  // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
+  val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
+  val singleStepState = RegInit(s_updateRobidx)
+  
+  val robidxStepNext  = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
+  val robidxStepReg   = RegInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
+  val robidxCanCommitStepping = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
+  
   when(!io.singleStep) {
-    singleStepStatus := false.B
-  }.elsewhen(io.singleStep && io.fromRename(0).fire && inst0actualOut) {
-    singleStepStatus := true.B
+    singleStepState := s_updateRobidx
+  }.elsewhen(io.singleStep && io.fromRename(0).fire && io.enqRob.req(0).valid) {
+    singleStepState := s_holdRobidx
+    robidxStepNext := io.fromRename(0).bits.robIdx
   }
-  XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
+  
+  when(singleStepState === s_updateRobidx) {
+    robidxStepReg := robidxStepNext
+    robidxCanCommitStepping := robidxStepNext
+  }.elsewhen(singleStepState === s_holdRobidx) {
+    robidxStepReg := robidxStepReg 
+    robidxCanCommitStepping := robidxStepReg
+  }
 
   val updatedUop = Wire(Vec(RenameWidth, new DynInst))
   val checkpoint_id = RegInit(0.U(64.W))
@@ -233,15 +247,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     } else {
       updatedUop(i).loadWaitBit := isLs(i) && !isStore(i) && io.fromRename(i).bits.loadWaitBit
     }
-
-    // update singleStep
-    // Singlestep should only commit one instruction after dret, and then hart enter debugMode according to singlestep exception.
-    // singleStep exception only enable in uop[1](from cache), or enable in uop[0](from flash).
-    if(i < 2) {
-      updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
-    } else {
-      updatedUop(i).singleStep := false.B
-    }
+    // // update singleStep, singleStep exception only enable in next machine instruction.
+    updatedUop(i).singleStep := io.singleStep && (io.fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
     when (io.fromRename(i).fire) {
       XSDebug(TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
@@ -336,10 +343,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && dqCanAccept
     io.enqRob.req(i).bits := updatedUop(i)
-    if(i < 2){
-      io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
-      io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
-    }
+    io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
+    io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
     XSDebug(io.enqRob.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.pc)} receives nrob ${io.enqRob.resp(i)}\n")
 
     // When previous instructions have exceptions, following instructions should not enter dispatch queues.
