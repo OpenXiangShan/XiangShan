@@ -41,7 +41,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
 }
 
 class GPAMemEntry(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val gpaddr = UInt(GPAddrBits.W)
+  val gpaddr = UInt(XLEN.W)
   val isForVSnonLeafPTE = Bool()
 }
 
