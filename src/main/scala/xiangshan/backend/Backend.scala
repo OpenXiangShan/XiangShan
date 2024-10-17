@@ -592,8 +592,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   for (i <- toMem.indices) {
     for (j <- toMem(i).indices) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.mem(i)(j).bits.loadDependency, io.mem.ldCancel)
+      val needIssueTimeout = memExuBlocksHasLDU(i)(j) || memExuBlocksHasVecLoad(i)(j)
       val issueTimeout =
-        if (memExuBlocksHasLDU(i)(j))
+        if (needIssueTimeout)
           Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
         else
           false.B
@@ -606,6 +607,16 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
+      }
+
+      if (memScheduler.io.vecLoadFinalIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).valid := issueTimeout
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.resp := RespType.block
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
       }
 
       NewPipelineConnect(
