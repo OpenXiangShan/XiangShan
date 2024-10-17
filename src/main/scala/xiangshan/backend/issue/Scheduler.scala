@@ -107,6 +107,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   }
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val vecLoadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
@@ -416,9 +417,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       og1Resp := io.fromDataPath(i)(j).og1resp
     }
     iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
-      if (io.loadFinalIssueResp(i).isDefinedAt(j)) {
+      if (io.loadFinalIssueResp(i).isDefinedAt(j) && iq.params.isLdAddrIQ) {
         finalIssueResp := io.loadFinalIssueResp(i)(j)
-      } else {
+      } else if (io.vecLoadFinalIssueResp(i).isDefinedAt(j) && iq.params.isVecLduIQ) {
+        finalIssueResp := io.vecLoadFinalIssueResp(i)(j)
+      }
+      else {
         finalIssueResp := 0.U.asTypeOf(finalIssueResp)
       }
     })
