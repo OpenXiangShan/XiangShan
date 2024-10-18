@@ -132,6 +132,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val pcGPA = UInt(VaddrMaxWidth.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
+        val isFetchBkpt = Bool()
         val singleStep = Bool()
         val trigger = TriggerAction()
         val crossPageIPFFix = Bool()
@@ -238,6 +239,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
+  val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
 
   // debug_intrrupt
@@ -669,6 +671,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
+        in.isFetchBkpt := trapIsFetchBkpt
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
 
         in.iMode.PRVM := PRVM
