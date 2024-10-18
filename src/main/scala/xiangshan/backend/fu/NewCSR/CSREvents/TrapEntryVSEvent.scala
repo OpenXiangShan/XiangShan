@@ -75,18 +75,20 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchExcp    = isException && Seq(/*EX_IAM, */ EX_IAF, EX_IPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
+  private val isFetchBkpt    = isBpExcp && in.isFetchBkpt
+  private val isMemBkpt      = isBpExcp && !in.isFetchBkpt
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = isFetchExcp && !fetchCrossPage || isBpExcp
+  private val tvalFillPc       = isFetchExcp && !fetchCrossPage || isFetchBkpt
   private val tvalFillPcPlus2  = isFetchExcp && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp
   private val tvalFillGVA      =
-    (isFetchExcp || isBpExcp) && fetchIsVirt ||
-    isMemExcp && memIsVirt
+    (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
+    (isMemExcp || isMemBkpt) && memIsVirt
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
