@@ -252,19 +252,19 @@ class InterruptFilter extends Module {
 
   val mIRVec = Mux(
     privState.isModeM && mstatusMIE || privState < PrivState.ModeM,
-    mip.asUInt & mie.asUInt & (~(mideleg.asUInt)).asUInt,
+    io.out.mtopi.IID.asUInt,
     0.U
   )
 
   val hsIRVec = Mux(
     privState.isModeHS && sstatusSIE || privState < PrivState.ModeHS,
-    hsip & hsie & (~(hideleg.asUInt)).asUInt,
+    io.out.stopi.IID.asUInt,
     0.U
   )
 
   val vsIRVec = Mux(
     privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS,
-    vsip.asUInt & vsie.asUInt,
+    io.out.vstopi.IID.asUInt,
     0.U
   )
 
