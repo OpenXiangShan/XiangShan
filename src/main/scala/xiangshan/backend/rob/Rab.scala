@@ -276,9 +276,9 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   // for difftest
   io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
-  io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
+  io.diffCommits.foreach(_.isCommit := true.B)
   for(i <- 0 until RabCommitWidth * MaxUopSize) {
-    io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
+    io.diffCommits.foreach(_.commitValid(i) := i.U < newCommitSize)
     io.diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
   }
 
