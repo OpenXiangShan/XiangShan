@@ -56,6 +56,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
     val status = Output(new Bundle {
       val walkEnd = Bool()
+      val commitEnd = Bool()
     })
     val toVecExcpMod = Output(new RabToVecExcpMod)
   })
@@ -219,6 +220,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   }
 
   private val walkEndNext = walkSizeNxt === 0.U
+  private val commitEndNext = commitSizeNxt === 0.U
   private val specialWalkEndNext = specialWalkSize <= RabCommitWidth.U
   // when robWalkEndReg is 1, walkSize donot increase and decrease RabCommitWidth per Cycle
   private val walkEndNextCycle = (robWalkEndReg || io.fromRob.walkEnd && io.fromRob.walkSize === 0.U) && (walkSize <= RabCommitWidth.U)
@@ -263,6 +265,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.enqPtrVec := enqPtrVec
 
   io.status.walkEnd := walkEndNext
+  io.status.commitEnd := commitEndNext
 
   for (i <- 0 until RabCommitWidth) {
     io.toVecExcpMod.logicPhyRegMap(i).valid := (state === s_special_walk) && vecLoadExcp.valid &&
