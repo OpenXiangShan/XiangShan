@@ -577,7 +577,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     // sq data write s1
     when (
-      RegNext(io.storeDataIn(i).fire)
+      RegNext(io.storeDataIn(i).fire) && allocated(RegEnable(stWbIndex, io.storeDataIn(i).fire))
       // && !RegNext(io.storeDataIn(i).bits.uop).robIdx.needFlush(io.brqRedirect)
     ) {
       datavalid(RegEnable(stWbIndex, io.storeDataIn(i).fire)) := true.B
@@ -994,7 +994,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       )
     }
     // Note that store data/addr should both be valid after store's commit
-    assert(!dataBuffer.io.enq(i).valid || allvalid(ptr) || doMisalignSt || (allocated(ptr) && vecMbCommit(ptr)))
+    assert(!dataBuffer.io.enq(i).valid || allvalid(ptr) || doMisalignSt || hasException(ptr) || (allocated(ptr) && vecMbCommit(ptr)))
     dataBuffer.io.enq(i).bits.addr     := Mux(doMisalignSt, io.maControl.control.paddr, paddrModule.io.rdata(i))
     dataBuffer.io.enq(i).bits.vaddr    := Mux(doMisalignSt, io.maControl.control.vaddr, vaddrModule.io.rdata(i))
     dataBuffer.io.enq(i).bits.data     := Mux(doMisalignSt, io.maControl.control.wdata, dataModule.io.rdata(i).data)
