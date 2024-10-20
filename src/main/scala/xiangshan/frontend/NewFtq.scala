@@ -378,13 +378,13 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val old_entry_always_taken    = WireInit(oe)
   val always_taken_modified_vec = Wire(Vec(numBr, Bool())) // whether modified or not
   for (i <- 0 until numBr) {
-    if (i == numBr - 1){
-      //strong bias of jalr should remain unchanged
-      old_entry_always_taken.strong_bias(i) :=
-        oe.strong_bias(i) && io.cfiIndex.valid && io.cfiIndex.bits === oe.brOffset(i) && oe.tailSlot.valid
-    }else{
-      old_entry_always_taken.strong_bias(i) :=
-        oe.strong_bias(i) && io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i)
+    when(br_recorded_vec(0)){
+      old_entry_always_taken.strong_bias(0) :=
+        oe.strong_bias(0) && io.cfiIndex.valid && oe.brValids(0) && io.cfiIndex.bits === oe.brOffset(0)
+    }.elsewhen(br_recorded_vec(numBr-1)){
+      old_entry_always_taken.strong_bias(0) := false.B
+      old_entry_always_taken.strong_bias(numBr-1) :=
+        oe.strong_bias(numBr-1) && io.cfiIndex.valid && oe.brValids(numBr-1) && io.cfiIndex.bits === oe.brOffset(numBr-1)
     }
     always_taken_modified_vec(i) := oe.strong_bias(i) && oe.brValids(i) && !old_entry_always_taken.strong_bias(i)
   }
