@@ -312,17 +312,10 @@ class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
   val revoke = Output(Bool())
 }
 
-class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  //  robIdx: Requestor's (a store instruction) rob index for match logic.
-  val robIdx = new RobPtr
-
-  //  paddr: requestor's (a store instruction) physical address for match logic.
-  val paddr  = UInt(PAddrBits.W)
-
-  //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask = UInt((VLEN/8).W)
-
-  // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
+class StoreNukeQueryBundle(implicit p: Parameters) extends XSBundle {
+  val robIdx    = new RobPtr
+  val paddr     = UInt(PAddrBits.W)
+  val mask      = UInt((VLEN/8).W)
   val matchLine = Bool()
 }
 

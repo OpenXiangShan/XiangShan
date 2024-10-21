@@ -57,7 +57,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
-    val stld_nuke_query = Valid(new StoreNukeQueryIO)
+    val stld_nuke_query = Valid(new StoreNukeQueryBundle)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0

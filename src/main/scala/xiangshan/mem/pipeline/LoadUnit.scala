@@ -163,7 +163,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
     // schedule error query
-    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
 
     // queue-based replay
     val replay       = Flipped(Decoupled(new LsPipelineBundle))
