@@ -358,37 +358,32 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   // old dcache: optimize data sram read fanout
   // val bankedDcacheData = Vec(DCacheBanks, UInt(64.W))
   // val bank_oh = UInt(DCacheBanks.W)
-
-  // new dcache
-  val respDcacheData = UInt(VLEN.W)
-  val forwardMask = Vec(VLEN/8, Bool())
-  val forwardData = Vec(VLEN/8, UInt(8.W))
-  val uop = new DynInst // for data selection, only fwen and fuOpType are used
-  val addrOffset = UInt(4.W) // for data selection
-
+  val uop                 = new DynInst // for data selection, only fwen and fuOpType are used
+  val respDcacheData      = UInt(VLEN.W)
+  val forwardMask         = Vec(VLEN/8, Bool())
+  val forwardData         = Vec(VLEN/8, UInt(8.W))
+  val addrOffset          = UInt(4.W) // for data selection
   // forward tilelink D channel
-  val forward_D = Bool()
-  val forwardData_D = Vec(VLEN/8, UInt(8.W))
-
+  val forwardDchannel     = Bool()
+  val forwardDataDchannel = Vec(VLEN/8, UInt(8.W))
   // forward mshr data
-  val forward_mshr = Bool()
-  val forwardData_mshr = Vec(VLEN/8, UInt(8.W))
-
-  val forward_result_valid = Bool()
+  val forwardMSHR         = Bool()
+  val forwardDataMSHR     = Vec(VLEN/8, UInt(8.W))
+  val forwardResultValid  = Bool()
 
   def mergeTLData(): UInt = {
     // merge TL D or MSHR data at load s2
-    val dcache_data = respDcacheData
-    val use_D = forward_D && forward_result_valid
-    val use_mshr = forward_mshr && forward_result_valid
+    val dcacheData = respDcacheData
+    val useDchannel = forwardDchannel && forwardResultValid
+    val useMSHR = forwardMSHR && forwardResultValid
     Mux(
-      use_D || use_mshr,
+      useDchannel || useMSHR,
       Mux(
-        use_D,
-        forwardData_D.asUInt,
-        forwardData_mshr.asUInt
+        useDchannel,
+        forwardDataDchannel.asUInt,
+        forwardDataMSHR.asUInt
       ),
-      dcache_data
+      dcacheData
     )
   }
 

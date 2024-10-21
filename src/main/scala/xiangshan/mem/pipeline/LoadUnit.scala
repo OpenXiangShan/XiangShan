@@ -1473,11 +1473,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // data from dcache hit
   val s3_ld_raw_data_frm_cache = Wire(new LoadDataFromDcacheBundle)
   s3_ld_raw_data_frm_cache.respDcacheData       := io.dcache.resp.bits.data
-  s3_ld_raw_data_frm_cache.forward_D            := s2_fwd_frm_d_chan
-  s3_ld_raw_data_frm_cache.forwardData_D        := s2_fwd_data_frm_d_chan
-  s3_ld_raw_data_frm_cache.forward_mshr         := s2_fwd_frm_mshr
-  s3_ld_raw_data_frm_cache.forwardData_mshr     := s2_fwd_data_frm_mshr
-  s3_ld_raw_data_frm_cache.forward_result_valid := s2_fwd_data_valid
+  s3_ld_raw_data_frm_cache.forwardDchannel      := s2_fwd_frm_d_chan
+  s3_ld_raw_data_frm_cache.forwardDataDchannel  := s2_fwd_data_frm_d_chan
+  s3_ld_raw_data_frm_cache.forwardMSHR          := s2_fwd_frm_mshr
+  s3_ld_raw_data_frm_cache.forwardDataMSHR      := s2_fwd_data_frm_mshr
+  s3_ld_raw_data_frm_cache.forwardResultValid   := s2_fwd_data_valid
 
   s3_ld_raw_data_frm_cache.forwardMask          := RegEnable(s2_fwd_mask, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData          := RegEnable(s2_fwd_data, s2_valid)
