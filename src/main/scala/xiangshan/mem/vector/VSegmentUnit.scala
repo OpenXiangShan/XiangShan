@@ -456,7 +456,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
-                     exceptionVec(breakPoint) || triggerDebugMode || missAligned
+                     triggerBreakpoint || triggerDebugMode || missAligned
     exception_gpa := exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
     exception_pa  := pmp.st || pmp.ld || pmp.mmio
 
@@ -703,6 +703,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }.otherwise{
     writebackOut.uop                    := uopq(deqPtr.value).uop
     writebackOut.uop.vpu                := instMicroOp.uop.vpu
+    writebackOut.uop.trigger            := instMicroOp.uop.trigger
     writebackOut.uop.exceptionVec       := instMicroOp.uop.exceptionVec
     writebackOut.mask.get               := instMicroOp.mask
     writebackOut.data                   := data(deqPtr.value)
