@@ -498,28 +498,28 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).valid             := s2_oldestSel(i).valid
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
-    replay_req(i).bits.isvec        := s2_vecReplay.isvec
-    replay_req(i).bits.isLastElem   := s2_vecReplay.isLastElem
+    replay_req(i).bits.isVector     := s2_vecReplay.isvec
+    replay_req(i).bits.lastElem   := s2_vecReplay.isLastElem
     replay_req(i).bits.is128bit     := s2_vecReplay.is128bit
-    replay_req(i).bits.uop_unit_stride_fof := s2_vecReplay.uop_unit_stride_fof
+    replay_req(i).bits.unitStrideFof := s2_vecReplay.uop_unit_stride_fof
     replay_req(i).bits.usSecondInv  := s2_vecReplay.usSecondInv
     replay_req(i).bits.elemIdx      := s2_vecReplay.elemIdx
     replay_req(i).bits.alignedType  := s2_vecReplay.alignedType
-    replay_req(i).bits.mbIndex      := s2_vecReplay.mbIndex
+    replay_req(i).bits.mbIdx        := s2_vecReplay.mbIndex
     replay_req(i).bits.elemIdxInsideVd := s2_vecReplay.elemIdxInsideVd
-    replay_req(i).bits.reg_offset   := s2_vecReplay.reg_offset
+    replay_req(i).bits.regOffset   := s2_vecReplay.reg_offset
     replay_req(i).bits.vecActive    := s2_vecReplay.vecActive
-    replay_req(i).bits.is_first_ele := s2_vecReplay.is_first_ele
+    replay_req(i).bits.firstEle := s2_vecReplay.is_first_ele
     replay_req(i).bits.mask         := s2_vecReplay.mask
     replay_req(i).bits.vaddr        := vaddrModule.io.rdata(i)
     replay_req(i).bits.isFirstIssue := false.B
     replay_req(i).bits.isLoadReplay := true.B
     replay_req(i).bits.replayCarry  := s2_replayCarry
-    replay_req(i).bits.mshrid       := s2_replayMSHRId
+    replay_req(i).bits.mshrId       := s2_replayMSHRId
     replay_req(i).bits.replacementUpdated := s2_replacementUpdated
     replay_req(i).bits.missDbUpdated := s2_missDbUpdated
-    replay_req(i).bits.forward_tlDchannel := s2_replayCauses(dcacheMiss)
-    replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
+    replay_req(i).bits.forwardTLDchannel := s2_replayCauses(dcacheMiss)
+    replay_req(i).bits.schedIdx   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
 
     when (replay_req(i).fire) {
@@ -577,7 +577,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     //  Allocated ready
     val offset = PopCount(newEnqueue.take(w))
-    val enqIndex = Mux(enq.bits.isLoadReplay, enq.bits.schedIndex, freeList.io.allocateSlot(offset))
+    val enqIndex = Mux(enq.bits.isLoadReplay, enq.bits.schedIdx, freeList.io.allocateSlot(offset))
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := true.B
 
@@ -593,18 +593,18 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       allocated(enqIndex) := true.B
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop
-      vecReplay(enqIndex).isvec := enq.bits.isvec
-      vecReplay(enqIndex).isLastElem := enq.bits.isLastElem
+      vecReplay(enqIndex).isvec := enq.bits.isVector
+      vecReplay(enqIndex).isLastElem := enq.bits.lastElem
       vecReplay(enqIndex).is128bit := enq.bits.is128bit
-      vecReplay(enqIndex).uop_unit_stride_fof := enq.bits.uop_unit_stride_fof
+      vecReplay(enqIndex).uop_unit_stride_fof := enq.bits.unitStrideFof
       vecReplay(enqIndex).usSecondInv := enq.bits.usSecondInv
       vecReplay(enqIndex).elemIdx := enq.bits.elemIdx
       vecReplay(enqIndex).alignedType:= enq.bits.alignedType
-      vecReplay(enqIndex).mbIndex := enq.bits.mbIndex
+      vecReplay(enqIndex).mbIndex := enq.bits.mbIdx
       vecReplay(enqIndex).elemIdxInsideVd := enq.bits.elemIdxInsideVd
-      vecReplay(enqIndex).reg_offset := enq.bits.reg_offset
+      vecReplay(enqIndex).reg_offset := enq.bits.regOffset
       vecReplay(enqIndex).vecActive := enq.bits.vecActive
-      vecReplay(enqIndex).is_first_ele := enq.bits.is_first_ele
+      vecReplay(enqIndex).is_first_ele := enq.bits.firstEle
       vecReplay(enqIndex).mask         := enq.bits.mask
 
       vaddrModule.io.wen(w)   := true.B
@@ -643,7 +643,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       }
 
       // special case: dcache miss
-      when (replayInfo.causeVec(dcacheMiss) && enq.bits.handledByMSHR) {
+      when (replayInfo.causeVec(dcacheMiss) && enq.bits.mshrHandled) {
         blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
                               !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
       }
@@ -663,7 +663,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       replacementUpdated(enqIndex) := enq.bits.replacementUpdated
       missDbUpdated(enqIndex) := enq.bits.missDbUpdated
       // update mshr_id only when the load has already been handled by mshr
-      when(enq.bits.handledByMSHR) {
+      when(enq.bits.mshrHandled) {
         missMSHRId(enqIndex) := replayInfo.mshr_id
       }
       dataInLastBeatReg(enqIndex) := dataInLastBeat
@@ -671,13 +671,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
 
     //
-    val schedIndex = enq.bits.schedIndex
+    val schedIdx = enq.bits.schedIdx
     when (enq.valid && enq.bits.isLoadReplay) {
       when (!needReplay(w) || hasExceptions(w)) {
-        allocated(schedIndex) := false.B
-        freeMaskVec(schedIndex) := true.B
+        allocated(schedIdx) := false.B
+        freeMaskVec(schedIdx) := true.B
       } .otherwise {
-        scheduled(schedIndex) := false.B
+        scheduled(schedIdx) := false.B
       }
     }
   }

@@ -256,7 +256,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   exceptionBuffer.io.redirect <> io.redirect
   for (i <- 0 until LoadPipelineWidth) {
-    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isvec // from load_s3
+    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isVector // from load_s3
     exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
   // vlsu exception!

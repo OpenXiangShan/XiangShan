@@ -209,9 +209,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
   val s0_src_valid_vec = WireInit(VecInit(Seq(
-    io.ldu_io.replay.valid && io.ldu_io.replay.bits.forward_tlDchannel,
+    io.ldu_io.replay.valid && io.ldu_io.replay.bits.forwardTLDchannel,
     io.ldu_io.fast_rep_in.valid,
-    io.ldu_io.replay.valid && !io.ldu_io.replay.bits.forward_tlDchannel && !s0_rep_stall,
+    io.ldu_io.replay.valid && !io.ldu_io.replay.bits.forwardTLDchannel && !s0_rep_stall,
     io.ldu_io.prefetch_req.valid && io.ldu_io.prefetch_req.bits.confidence > 0.U,
     io.lsin.valid, // int flow first issue or software prefetch
     io.vec_stu_io.in.valid,
@@ -328,7 +328,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
-    s0_sched_idx     := src.schedIndex
+    s0_sched_idx     := src.schedIdx
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
@@ -338,7 +338,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
     s0_rep_carry     := src.replayCarry
-    s0_mshrid        := src.mshrid
+    s0_mshrid        := src.mshrId
     s0_isFirstIssue  := false.B
     s0_fast_rep      := false.B
     s0_ld_rep        := true.B
@@ -346,7 +346,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
-    s0_sched_idx     := src.schedIndex
+    s0_sched_idx     := src.schedIdx
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
@@ -467,21 +467,20 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.isHWPrefetch  := s0_hw_prf
   s0_out.isFastReplay  := s0_fast_rep
   s0_out.isLoadReplay  := s0_ld_rep
-  s0_out.isFastPath    := s0_l2l_fwd
-  s0_out.mshrid        := s0_mshrid
-  s0_out.isvec         := s0_isvec
-  s0_out.isLastElem    := s0_isLastElem
+  s0_out.mshrId        := s0_mshrid
+  s0_out.isVector         := s0_isvec
+  s0_out.lastElem    := s0_isLastElem
   s0_out.vecActive           := s0_vecActive
   // s0_out.sflowPtr      := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned)  := !s0_addr_aligned && s0_ld_flow
   s0_out.uop.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned && !s0_ld_flow
-  s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
+  s0_out.forwardTLDchannel := s0_src_select_vec(super_rep_idx)
   when(io.tlb.req.valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }.otherwise{
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_uop.debugInfo.tlbFirstReqTime
   }
-  s0_out.schedIndex     := s0_sched_idx
+  s0_out.schedIdx     := s0_sched_idx
 
   // load fast replay
   io.ldu_io.fast_rep_in.ready := (s0_can_go && io.ldu_io.dcache.req.ready && s0_src_ready_vec(fast_rep_idx))
@@ -539,8 +538,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_can_go     = s2_ready
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
   val s1_ld_flow    = RegNext(s0_ld_flow)
-  val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
-  val s1_isLastElem = RegEnable(s0_out.isLastElem, false.B, s0_fire)
+  val s1_isvec      = RegEnable(s0_out.isVector, false.B, s0_fire)
+  val s1_isLastElem = RegEnable(s0_out.lastElem, false.B, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   when (s0_fire) { s1_valid := true.B }
@@ -548,10 +547,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   .elsewhen (s1_kill) { s1_valid := false.B }
   s1_in   := RegEnable(s0_out, s0_fire)
 
-  val s1_fast_rep_dly_err = RegNext(io.ldu_io.fast_rep_in.bits.delayedLoadError)
+  val s1_fast_rep_dly_err = RegNext(io.ldu_io.fast_rep_in.bits.delayedError)
   val s1_fast_rep_kill    = s1_fast_rep_dly_err && s1_in.isFastReplay
   val s1_l2l_fwd_dly_err  = RegNext(io.ldu_io.l2l_fwd_in.dly_ld_err)
-  val s1_l2l_fwd_kill     = s1_l2l_fwd_dly_err && s1_in.isFastPath
+  val s1_l2l_fwd_kill     = s1_l2l_fwd_dly_err
   val s1_late_kill        = s1_fast_rep_kill || s1_l2l_fwd_kill
   val s1_vaddr_hi         = Wire(UInt())
   val s1_vaddr_lo         = Wire(UInt())
@@ -638,7 +637,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
-  s1_out.lateKill          := s1_late_kill
+  s1_out.delayedError          := s1_late_kill
   s1_out.rep_info.causeVec(nuke)     := s1_nuke && !s1_sw_prf
 
   // store trigger
@@ -648,7 +647,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   storeTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
-  storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isVector && s1_in.is128bit
   storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   when (s1_ld_flow) {
@@ -677,7 +676,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
-  loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isVector && s1_in.is128bit
   loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   when (s1_ld_flow) {
@@ -748,8 +747,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.ldu_io.forward_mshr.valid  := s1_valid && s1_out.forward_tlDchannel && s1_ld_flow
-  io.ldu_io.forward_mshr.mshrid := s1_out.mshrid
+  io.ldu_io.forward_mshr.valid  := s1_valid && s1_out.forwardTLDchannel && s1_ld_flow
+  io.ldu_io.forward_mshr.mshrid := s1_out.mshrId
   io.ldu_io.forward_mshr.paddr  := s1_out.paddr
 
   io.ldu_io.wakeup.valid := s0_fire && s0_ld_flow && (s0_src_select_vec(super_rep_idx) || s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(lsq_rep_idx) || s0_src_select_vec(int_iss_idx))
@@ -777,7 +776,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.vec_stu_io.lsq.valid     := s1_valid && !s1_ld_flow && !s1_prf && s1_isvec
   io.vec_stu_io.lsq.bits          := s1_out
   io.vec_stu_io.lsq.bits.miss     := s1_tlb_miss
-  io.vec_stu_io.lsq.bits.isLastElem := s1_isLastElem
+  io.vec_stu_io.lsq.bits.lastElem := s1_isLastElem
 
   io.stu_io.st_mask_out.valid       := s1_valid && !s1_ld_flow && !s1_prf
   io.stu_io.st_mask_out.bits.mask   := s1_out.mask
@@ -825,7 +824,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   when (s2_ld_flow) {
-    when (!s2_in.lateKill) {
+    when (!s2_in.delayedError) {
       s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld) && s2_vecActive
       // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
       when (s2_prf || s2_in.tlbMiss) {
@@ -842,7 +841,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_st_exception = ExceptionNO.selectByFu(s2_exception_vec, StaCfg).asUInt.orR && !s2_ld_flow
   val s2_exception    = s2_ld_exception || s2_st_exception
 
-  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.ldu_io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
+  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.ldu_io.tl_d_channel.forward(s1_valid && s1_out.forwardTLDchannel, s1_out.mshrId, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.ldu_io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
 
@@ -914,12 +913,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_troublem        = !s2_exception &&
                            !s2_ld_mmio &&
                            !s2_prf &&
-                           !s2_in.lateKill &&
+                           !s2_in.delayedError &&
                            s2_ld_flow
 
   io.ldu_io.dcache.resp.ready := true.B
   io.stu_io.dcache.resp.ready := true.B
-  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_ld_mmio || s2_prf || s2_in.lateKill) && s2_ld_flow
+  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_ld_mmio || s2_prf || s2_in.delayedError) && s2_ld_flow
   assert(!(s2_valid && (s2_dcache_should_resp && !io.ldu_io.dcache.resp.valid)), "DCache response got lost")
 
   // fast replay require
@@ -983,7 +982,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSDebug(s2_fire && s2_ld_flow, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_in.uop.pc,
     io.ldu_io.lsq.forward.forwardData.asUInt, io.ldu_io.lsq.forward.forwardMask.asUInt,
-    s2_in.forwardData.asUInt, s2_in.forwardMask.asUInt
+    s2_fwd_data.asUInt, s2_fwd_mask.asUInt
   )
 
   //
@@ -994,9 +993,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.atomic           := s2_st_atomic
   s2_out.uop.flushPipe    := false.B
   s2_out.uop.exceptionVec := s2_exception_vec
-  s2_out.forwardMask      := s2_fwd_mask
-  s2_out.forwardData      := s2_fwd_data
-  s2_out.handledByMSHR    := s2_cache_handled
+  s2_out.mshrHandled    := s2_cache_handled
   s2_out.miss             := s2_dcache_miss && s2_troublem
   s2_out.feedbacked       := io.feedback_fast.valid && !io.feedback_fast.bits.hit
 
@@ -1137,7 +1134,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsq.ldin.valid := s3_valid &&
                               (!s3_fast_rep || !io.ldu_io.fast_rep_out.ready) &&
                               !s3_in.feedbacked &&
-                              !s3_in.lateKill &&
+                              !s3_in.delayedError &&
                               s3_ld_flow
   io.ldu_io.lsq.ldin.bits := s3_in
   io.ldu_io.lsq.ldin.bits.miss := s3_in.miss
@@ -1149,12 +1146,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   val s3_dly_ld_err =
     if (EnableAccurateLoadError) {
-      (s3_in.lateKill || io.ldu_io.dcache.resp.bits.error_delayed) && RegNext(io.csrCtrl.cache_error_enable)
+      (s3_in.delayedError || io.ldu_io.dcache.resp.bits.error_delayed) && RegNext(io.csrCtrl.cache_error_enable)
     } else {
       WireInit(false.B)
     }
   io.ldu_io.s3_dly_ld_err := false.B // s3_dly_ld_err && s3_valid
-  io.ldu_io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
+  io.ldu_io.fast_rep_out.bits.delayedError := s3_dly_ld_err
   io.ldu_io.lsq.ldin.bits.dcacheRequireReplay  := s3_dcache_rep
 
   val s3_vp_match_fail = RegNext(io.ldu_io.lsq.forward.matchInvalid || io.ldu_io.sbuffer.matchInvalid) && s3_troublem
@@ -1216,7 +1213,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // feedback slow
   s3_fast_rep := RegNext(s2_fast_rep) &&
                  !s3_in.feedbacked &&
-                 !s3_in.lateKill &&
+                 !s3_in.delayedError &&
                  !s3_rep_frm_fetch &&
                  !s3_exception
 
@@ -1283,7 +1280,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
-    io.ldu_io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill && s3_ld_flow
+    io.ldu_io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.delayedError && s3_ld_flow
     io.ldu_io.l2l_fwd_out.data       := s3_ld_data_frm_cache
     io.ldu_io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
   } else {
@@ -1364,7 +1361,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.lsin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_vaddr(VAddrBits-1, 12) === io.lsin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
   XSPerfAccumulate("s0_addr_spec_failed_once",     s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.lsin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
-  XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forward_tlDchannel)
+  XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forwardTLDchannel)
   XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
   XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_prf && s0_src_select_vec(int_iss_idx))
   XSPerfAccumulate("s0_hardware_prefetch_blocked", io.ldu_io.prefetch_req.valid && !s0_hw_prf_select)
@@ -1394,7 +1391,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.ldu_io.dcache.resp.bits.miss) // prefetch req miss in l1
   XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.ldu_io.dcache.resp.bits.miss) // prefetch req hit in l1
   XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.ldu_io.dcache.resp.bits.miss && !io.ldu_io.dcache.s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
-  XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forward_tlDchannel)
+  XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forwardTLDchannel)
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fire && s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)
 
