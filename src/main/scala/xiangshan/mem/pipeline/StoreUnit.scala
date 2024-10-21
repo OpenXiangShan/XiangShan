@@ -52,7 +52,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val feedback_slow   = ValidIO(new RSFeedback)
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
-    val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
+    val prefetch_train  = ValidIO(new LsPrefetchTrainBundle())
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
@@ -468,8 +468,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // override miss bit
   io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid)
   // TODO: add prefetch and access bit
-  io.prefetch_train.bits.meta_prefetch := false.B
-  io.prefetch_train.bits.meta_access := false.B
+  io.prefetch_train.bits.metaPrefetch := false.B
+  io.prefetch_train.bits.metaAccess := false.B
 
   // Pipeline
   // --------------------------------------------------------------------------------

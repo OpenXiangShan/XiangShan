@@ -29,6 +29,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.Bundles._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 import xiangshan.mem.prefetch.PrefetchReqBundle
@@ -213,7 +214,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     this.paddr := input.paddr
     this.vaddr := input.vaddr
     this.isStore := true.B
-    this.isPrefetch := true.B
+    this.isHWPrefetch := true.B
   }
 
   def fromL1PrefetchReqBundle(input: L1PrefetchReq) = {
@@ -223,98 +224,34 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     this.isStore    := input.is_store
     this.pfSource   := input.pf_source
     this.confidence := input.confidence
-    this.isPrefetch := true.B
+    this.isHWPrefetch := true.B
   }
 }
 
-class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
-  val meta_prefetch = UInt(L1PfSourceBits.W)
-  val meta_access = Bool()
+class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
+  val metaPrefetch = UInt(L1PfSourceBits.W)
+  val metaAccess   = Bool()
 
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
-    if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
-    if (latch) fullva := RegEnable(input.fullva, enable) else fullva := input.fullva
-    if (latch) vaNeedExt := RegEnable(input.vaNeedExt, enable) else vaNeedExt := input.vaNeedExt
-    if (latch) isStore := RegEnable(input.isStore, enable) else isStore := input.isStore
-    if (latch) isHyper := RegEnable(input.isHyper, enable) else isHyper := input.isHyper
-    if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
-    if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
-    if (latch) isForVSnonLeafPTE := RegEnable(input.isForVSnonLeafPTE, enable) else isForVSnonLeafPTE := input.isForVSnonLeafPTE
-    if (latch) mask := RegEnable(input.mask, enable) else mask := input.mask
-    if (latch) data := RegEnable(input.data, enable) else data := input.data
-    if (latch) uop := RegEnable(input.uop, enable) else uop := input.uop
-    if (latch) wlineflag := RegEnable(input.wlineflag, enable) else wlineflag := input.wlineflag
-    if (latch) miss := RegEnable(input.miss, enable) else miss := input.miss
-    if (latch) tlbMiss := RegEnable(input.tlbMiss, enable) else tlbMiss := input.tlbMiss
-    if (latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
-    if (latch) af := RegEnable(input.af, enable) else af := input.af
-    if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
-    if (latch) isIq := RegEnable(input.isIq, enable) else isIq := input.isIq
-    if (latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
-    if (latch) isMisalignBuf := RegEnable(input.isMisalignBuf, enable) else isMisalignBuf := input.isMisalignBuf
-    if (latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
-    if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
-    if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
-    if (latch) schedIdx := RegEnable(input.schedIdx, enable) else schedIdx := input.schedIdx
-    if (latch) tlbNoQuery := RegEnable(input.tlbNoQuery, enable) else tlbNoQuery := input.tlbNoQuery
-    if (latch) isVector             := RegEnable(input.isVector, enable)               else isVector               := input.isVector
-    if (latch) lastElem          := RegEnable(input.lastElem, enable)          else lastElem          := input.lastElem
-    if (latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
-    if (latch) vecActive           := RegEnable(input.vecActive, enable)           else vecActive           := input.vecActive
-    if (latch) firstEle        := RegEnable(input.firstEle, enable)        else firstEle        := input.firstEle
-    if (latch) unitStrideFof := RegEnable(input.unitStrideFof, enable) else unitStrideFof := input.unitStrideFof
-    if (latch) usSecondInv         := RegEnable(input.usSecondInv, enable)         else usSecondInv         := input.usSecondInv
-    if (latch) regOffset          := RegEnable(input.regOffset, enable)          else regOffset          := input.regOffset
-    if (latch) elemIdx             := RegEnable(input.elemIdx, enable)             else elemIdx             := input.elemIdx
-    if (latch) alignedType         := RegEnable(input.alignedType, enable)         else alignedType         := input.alignedType
-    if (latch) mbIdx             := RegEnable(input.mbIdx, enable)             else mbIdx             := input.mbIdx
-    if (latch) elemIdxInsideVd     := RegEnable(input.elemIdxInsideVd, enable)     else elemIdxInsideVd     := input.elemIdxInsideVd
-    if (latch) vecBaseVaddr        := RegEnable(input.vecBaseVaddr, enable)        else vecBaseVaddr        := input.vecBaseVaddr
-    if (latch) vecVaddrOffset      := RegEnable(input.vecVaddrOffset, enable)      else vecVaddrOffset      := input.vecVaddrOffset
-    if (latch) vecTriggerMask      := RegEnable(input.vecTriggerMask, enable)      else vecTriggerMask      := input.vecTriggerMask
-    if (latch) isAtomic            := RegEnable(input.isAtomic, enable) else isAtomic := input.isAtomic
-
-    meta_prefetch := DontCare
-    meta_access := DontCare
-    src               := DontCare
-    forwardTLDchannel := DontCare
-    mshrHandled       := DontCare
-    mshrId            := DontCare
-    replayCarry       := DontCare
-    atomic            := DontCare
-    isLoadReplay      := DontCare
-    isFastReplay      := DontCare
-    isUncache         := DontCare
-    replacementUpdated := DontCare
-    missDbUpdated     := DontCare
-    delayedError      := DontCare
-    feedbacked        := DontCare
-    ldCancel          := DontCare
-    dataWenDup        := DontCare
-    causeVec          := DontCare
-    lastBeat          := DontCare
-    tlbHandled        := DontCare
-    tlbId             := DontCare
-    dataInvalidSqIdx  := DontCare
-    addrInvalidSqIdx  := DontCare
-    flowNum           := DontCare
-    pfSource          := DontCare
-    confidence        := DontCare
+    val inputReg = latch match {
+      case true   => RegEnable(input, enable)
+      case false  => input
+    }
+    connectSamePort(this, inputReg)
+    this.metaPrefetch := DontCare
+    this.metaAccess   := DontCare
   }
 
-  def asPrefetchReqBundle(): PrefetchReqBundle = {
+  def toPrefetchReqBundle(): PrefetchReqBundle = {
     val res = Wire(new PrefetchReqBundle)
     res.vaddr       := this.vaddr
     res.paddr       := this.paddr
     res.pc          := this.uop.pc
     res.miss        := this.miss
-    res.pfHitStream := isFromStream(this.meta_prefetch)
-
+    res.pfHitStream := isFromStream(this.metaPrefetch)
     res
   }
 }
-
-class StPrefetchTrainBundle(implicit p: Parameters) extends LdPrefetchTrainBundle {}
 
 class SqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   val need_rep = Bool()

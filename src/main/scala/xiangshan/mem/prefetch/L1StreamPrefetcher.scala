@@ -8,7 +8,7 @@ import utils._
 import utility._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
-import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
+import xiangshan.mem.{L1PrefetchReq, LsPrefetchTrainBundle}
 import xiangshan.mem.trace._
 import xiangshan.mem.L1PrefetchSource
 
@@ -85,7 +85,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     }else {
       decr_mode := INIT_DEC_MODE.B
     }
-    
+
 
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
@@ -126,7 +126,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
     res.source.value := source
 
     res.trigger_pc := t_pc
-    res.trigger_va := t_va 
+    res.trigger_va := t_va
 
     val region_bits = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
