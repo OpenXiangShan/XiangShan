@@ -64,6 +64,7 @@ class CtrlBlockImp(
   with HasXSParameter
   with HasCircularQueuePtrHelper
   with HasPerfEvents
+  with HasCriticalErrors
 {
   val pcMemRdIndexes = new NamedIndexes(Seq(
     "redirect"  -> 1,
@@ -616,6 +617,7 @@ class CtrlBlockImp(
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+  rob.io.criticalError := io.robio.criticalError
   rob.io.debugEnqLsq := io.debugEnqLsq
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
@@ -667,6 +669,9 @@ class CtrlBlockImp(
 
   val perfEvents = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
+
+  val criticalErrors = rob.getCriticalErrors
+  generateCriticalErrors()
 }
 
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -724,6 +729,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val vtype = Output(ValidIO(VType()))
       val hasVsetvl = Output(Bool())
     }
+    val criticalError = Input(Bool())
   }
 
   val toDecode = new Bundle {

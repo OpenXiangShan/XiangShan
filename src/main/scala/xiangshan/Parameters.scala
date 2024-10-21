@@ -47,7 +47,7 @@ import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
-import scala.math.{max, min}
+import scala.math.{max, min, pow}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -868,6 +868,8 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
+  def printCriticalError = false
+  def maxCommitStuck = pow(2, 21).toInt
 
   // Vector load exception
   def maxMergeNumPerCycle = 4
