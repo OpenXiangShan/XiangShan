@@ -197,7 +197,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
-    val maControl   = Flipped(new StoreMaBufToSqControlIO)
+    val maControl   = Flipped(new StoreMaBufToSqCtrlIO)
   })
 
   println("StoreQueue: size:" + StoreQueueSize)

@@ -98,7 +98,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       val gpaddr = UInt(XLEN.W)
       val isForVSnonLeafPTE = Bool()
     })
-    val sqControl       = new StoreMaBufToSqControlIO
+    val sqControl       = new StoreMaBufToSqCtrlIO
   })
 
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
