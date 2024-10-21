@@ -862,7 +862,7 @@ object Bundles {
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
-    val isFetchBkpt = Bool()
+    val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
     val gpaddr = UInt(XLEN.W)
     val singleStep = Bool()

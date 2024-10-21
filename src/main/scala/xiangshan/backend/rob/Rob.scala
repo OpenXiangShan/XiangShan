@@ -605,8 +605,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
-  io.exception.bits.isFetchBkpt := RegEnable(
-    exceptionDataRead.bits.isEnqExcp && exceptionDataRead.bits.exceptionVec(ExceptionNO.EX_BP),
+  // fetch trigger fire or execute ebreak
+  io.exception.bits.isPcBkpt := RegEnable(
+    exceptionDataRead.bits.exceptionVec(ExceptionNO.EX_BP) && (
+      exceptionDataRead.bits.isEnqExcp ||
+      exceptionDataRead.bits.trigger === TriggerAction.None
+    ),
     exceptionHappen,
   )
   io.exception.bits.isFetchMalAddr := RegEnable(exceptionDataRead.bits.isFetchMalAddr && deqHasException, exceptionHappen)
