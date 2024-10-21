@@ -935,14 +935,14 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.ldu_io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.ldu_io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
-  io.ldu_io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.ldu_io.lsq.ldld_nuke_query.req.bits.dataValid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // st-ld violation require
   io.ldu_io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query
   io.ldu_io.lsq.stld_nuke_query.req.bits.uop        := s2_in.uop
   io.ldu_io.lsq.stld_nuke_query.req.bits.mask       := s2_in.mask
   io.ldu_io.lsq.stld_nuke_query.req.bits.paddr      := s2_in.paddr
-  io.ldu_io.lsq.stld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.ldu_io.lsq.stld_nuke_query.req.bits.dataValid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -1139,7 +1139,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s3_vp_match_fail = RegNext(io.ldu_io.lsq.forward.resp.matchInvalid || io.ldu_io.sbuffer.resp.matchInvalid) && s3_troublem
   val s3_ldld_rep_inst =
       io.ldu_io.lsq.ldld_nuke_query.resp.valid &&
-      io.ldu_io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
+      io.ldu_io.lsq.ldld_nuke_query.resp.bits.replayFromFetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in)

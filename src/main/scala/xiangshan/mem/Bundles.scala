@@ -294,25 +294,21 @@ class LoadForwardIO(implicit p: Parameters) extends XSBundle {
 //
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
-class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle { // provide lqIdx
-  val uop = new DynInst
-  // mask: load's data mask.
-  val mask = UInt((VLEN/8).W)
-
-  // paddr: load's paddr.
-  val paddr      = UInt(PAddrBits.W)
-  // dataInvalid: load data is invalid.
-  val data_valid = Bool()
+class LoadNukeQueryReqBundle(implicit p: Parameters) extends XSBundle { // provide lqIdx
+  val uop         = new DynInst
+  val mask        = UInt((VLEN/8).W)
+  val paddr       = UInt(PAddrBits.W)
+  val dataValid   = Bool()
 }
 
-class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
-  // rep_frm_fetch: ld-ld violation check success, replay from fetch.
-  val rep_frm_fetch = Bool()
+class LoadNukeQueryRespBundle(implicit p: Parameters) extends XSBundle {
+  // replayFromFetch: ld-ld violation check success, replay from fetch.
+  val replayFromFetch = Bool()
 }
 
 class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  val req    = Decoupled(new LoadNukeQueryReq)
-  val resp   = Flipped(Valid(new LoadNukeQueryResp))
+  val req    = Decoupled(new LoadNukeQueryReqBundle)
+  val resp   = Flipped(Valid(new LoadNukeQueryRespBundle))
   val revoke = Output(Bool())
 }
 

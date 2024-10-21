@@ -156,13 +156,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      datavalid(enqIndex) := enq.bits.dataValid
     }
   }
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
-    query.bits.rep_frm_fetch := RegNext(false.B)
+    query.bits.replayFromFetch := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate
