@@ -162,6 +162,11 @@
    io.ncOut.bits.paddr := req.paddr
    io.ncOut.bits.vaddr := req.vaddr
    io.ncOut.bits.nc := true.B
+   io.ncOut.bits.mask := Mux(req.paddr(3), req.mask(15, 8), req.mask(7, 0))
+   io.ncOut.bits.schedIndex := req.schedIndex
+   io.ncOut.bits.isvec := req.isvec
+   io.ncOut.bits.is128bit := req.is128bit
+   io.ncOut.bits.vecActive := req.vecActive
 
 
    io.exception.valid := io.ncOut.fire
