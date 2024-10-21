@@ -35,6 +35,7 @@ import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbHintReq, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.mem.mdp._
+import xiangshan.mem.ReplayCauseNO._
 
 class HybridUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
@@ -203,7 +204,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_rep_stall           = io.lsin.valid && isAfter(io.ldu_io.replay.bits.uop.robIdx, io.lsin.bits.uop.robIdx)
   private val SRC_NUM = 8
   private val Seq(
-    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx, 
+    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
     int_iss_idx, vec_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -637,8 +638,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
-  s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.lateKill          := s1_late_kill
+  s1_out.rep_info.causeVec(nuke)     := s1_nuke && !s1_sw_prf
 
   // store trigger
   val storeTrigger = Module(new MemTrigger(MemType.STORE))
@@ -904,7 +905,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                         // TODO: Fix me when vector instruction
                         (s2_in.paddr(PAddrBits-1, 3) === io.ldu_io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
                         (s2_in.mask & io.ldu_io.stld_nuke_query(w).bits.mask).orR // data mask contain
-                      })).asUInt.orR && s2_ld_flow || s2_in.rep_info.nuke
+                      })).asUInt.orR && s2_ld_flow || s2_in.rep_info.causeVec(nuke)
 
   val s2_cache_handled   = io.ldu_io.dcache.resp.bits.handled
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) &&
@@ -1005,16 +1006,16 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // * dcache replay
   // * forward data invalid
   // * dcache miss
-  s2_out.rep_info.mem_amb         := s2_mem_amb && s2_troublem
-  s2_out.rep_info.tlb_miss        := s2_tlb_miss && s2_troublem
-  s2_out.rep_info.fwd_fail        := s2_fwd_fail && s2_troublem
-  s2_out.rep_info.dcache_rep      := s2_mq_nack && s2_troublem
-  s2_out.rep_info.dcache_miss     := s2_dcache_miss && s2_troublem
-  s2_out.rep_info.bank_conflict   := s2_bank_conflict && s2_troublem
-  s2_out.rep_info.wpu_fail        := s2_wpu_pred_fail && s2_troublem
-  s2_out.rep_info.rar_nack        := s2_rar_nack && s2_troublem
-  s2_out.rep_info.raw_nack        := s2_raw_nack && s2_troublem
-  s2_out.rep_info.nuke            := s2_nuke && s2_troublem
+  s2_out.rep_info.causeVec(memoryAmbiguous) := s2_mem_amb && s2_troublem
+  s2_out.rep_info.causeVec(tlbMiss)         := s2_tlb_miss && s2_troublem
+  s2_out.rep_info.causeVec(forwardFail)     := s2_fwd_fail && s2_troublem
+  s2_out.rep_info.causeVec(dcacheReplay)    := s2_mq_nack && s2_troublem
+  s2_out.rep_info.causeVec(dcacheMiss)      := s2_dcache_miss && s2_troublem
+  s2_out.rep_info.causeVec(bankConflict)    := s2_bank_conflict && s2_troublem
+  s2_out.rep_info.causeVec(wpuPredictFail)  := s2_wpu_pred_fail && s2_troublem
+  s2_out.rep_info.causeVec(rarNack)         := s2_rar_nack && s2_troublem
+  s2_out.rep_info.causeVec(rawNack)         := s2_raw_nack && s2_troublem
+  s2_out.rep_info.causeVec(nuke)            := s2_nuke && s2_troublem
   s2_out.rep_info.full_fwd        := s2_data_fwded
   s2_out.rep_info.data_inv_sq_idx := Mux(io.ldu_io.vec_forward.dataInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.dataInvalidSqIdx)
   s2_out.rep_info.addr_inv_sq_idx := Mux(io.ldu_io.vec_forward.addrInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.addrInvalidSqIdx)
@@ -1163,11 +1164,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && s3_troublem
+  s3_rep_info.causeVec(dcacheMiss) := s3_in.rep_info.causeVec(dcacheMiss) && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_flushPipe = s3_ldld_rep_inst
-  val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
-  val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
+  val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.causeVec.asUInt)
+  val s3_force_rep     = s3_sel_rep_cause(tlbMiss) &&
                          !s3_in.uop.exceptionVec(loadAddrMisaligned) &&
                          s3_troublem
 
@@ -1175,9 +1176,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s3_st_exception = ExceptionNO.selectByFu(s3_in.uop.exceptionVec, StaCfg).asUInt.orR && !s3_ld_flow
   val s3_exception    = s3_ld_exception || s3_st_exception
   when ((s3_ld_exception || s3_dly_ld_err || s3_rep_frm_fetch) && !s3_force_rep) {
-    io.ldu_io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
+    io.ldu_io.lsq.ldin.bits.rep_info.causeVec := 0.U.asTypeOf(s3_rep_info.causeVec.cloneType)
   } .otherwise {
-    io.ldu_io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
+    io.ldu_io.lsq.ldin.bits.rep_info.causeVec := VecInit(s3_sel_rep_cause.asBools)
   }
 
   // Int flow, if hit, will be writebacked at s3

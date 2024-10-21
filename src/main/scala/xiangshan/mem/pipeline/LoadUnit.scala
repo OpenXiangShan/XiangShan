@@ -35,6 +35,7 @@ import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 import xiangshan.mem.mdp._
+import xiangshan.mem.ReplayCauseNO._
 
 class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters
@@ -53,7 +54,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   // data in last beat
   val last_beat       = Bool()
   // replay cause
-  val cause           = Vec(LoadReplayCauses.allCauses, Bool())
+  val causeVec        = ReplayCauseVec()
   // performance debug information
   val debug           = new PerfDebugInfo
   // tlb hint
@@ -61,17 +62,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   val tlb_full        = Bool()
 
   // alias
-  def mem_amb       = cause(LoadReplayCauses.C_MA)
-  def tlb_miss      = cause(LoadReplayCauses.C_TM)
-  def fwd_fail      = cause(LoadReplayCauses.C_FF)
-  def dcache_rep    = cause(LoadReplayCauses.C_DR)
-  def dcache_miss   = cause(LoadReplayCauses.C_DM)
-  def wpu_fail      = cause(LoadReplayCauses.C_WF)
-  def bank_conflict = cause(LoadReplayCauses.C_BC)
-  def rar_nack      = cause(LoadReplayCauses.C_RAR)
-  def raw_nack      = cause(LoadReplayCauses.C_RAW)
-  def nuke          = cause(LoadReplayCauses.C_NK)
-  def need_rep      = cause.asUInt.orR
+  def need_rep      = causeVec.asUInt.orR
 }
 
 
@@ -902,8 +893,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
-  s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.delayedLoadError  := s1_dly_err
+  s1_out.rep_info.causeVec(nuke) := s1_nuke && !s1_sw_prf
 
   when (!s1_dly_err) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -1135,7 +1126,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                           isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                           s2_nuke_paddr_match(w) && // paddr match
                           (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
-                        })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.nuke
+                        })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.causeVec(nuke)
 
   val s2_cache_handled   = io.dcache.resp.bits.handled
   val s2_cache_tag_error = GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
@@ -1230,16 +1221,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * dcache replay
   // * forward data invalid
   // * dcache miss
-  s2_out.rep_info.mem_amb         := s2_mem_amb && s2_troublem
-  s2_out.rep_info.tlb_miss        := s2_tlb_miss && s2_troublem
-  s2_out.rep_info.fwd_fail        := s2_fwd_fail && s2_troublem
-  s2_out.rep_info.dcache_rep      := s2_mq_nack && s2_troublem
-  s2_out.rep_info.dcache_miss     := s2_dcache_miss && s2_troublem
-  s2_out.rep_info.bank_conflict   := s2_bank_conflict && s2_troublem
-  s2_out.rep_info.wpu_fail        := s2_wpu_pred_fail && s2_troublem
-  s2_out.rep_info.rar_nack        := s2_rar_nack && s2_troublem
-  s2_out.rep_info.raw_nack        := s2_raw_nack && s2_troublem
-  s2_out.rep_info.nuke            := s2_nuke && s2_troublem
+  s2_out.rep_info.causeVec(memoryAmbiguous) := s2_mem_amb && s2_troublem
+  s2_out.rep_info.causeVec(tlbMiss)         := s2_tlb_miss && s2_troublem
+  s2_out.rep_info.causeVec(forwardFail)     := s2_fwd_fail && s2_troublem
+  s2_out.rep_info.causeVec(dcacheReplay)    := s2_mq_nack && s2_troublem
+  s2_out.rep_info.causeVec(dcacheMiss)      := s2_dcache_miss && s2_troublem
+  s2_out.rep_info.causeVec(bankConflict)    := s2_bank_conflict && s2_troublem
+  s2_out.rep_info.causeVec(wpuPredictFail)  := s2_wpu_pred_fail && s2_troublem
+  s2_out.rep_info.causeVec(rarNack)         := s2_rar_nack && s2_troublem
+  s2_out.rep_info.causeVec(rawNack)         := s2_raw_nack && s2_troublem
+  s2_out.rep_info.causeVec(nuke)            := s2_nuke && s2_troublem
   s2_out.rep_info.full_fwd        := s2_data_fwded
   s2_out.rep_info.data_inv_sq_idx := io.lsq.forward.dataInvalidSqIdx
   s2_out.rep_info.addr_inv_sq_idx := io.lsq.forward.addrInvalidSqIdx
@@ -1395,12 +1386,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_flushPipe = s3_ldld_rep_inst
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
+  val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.causeVec.asUInt)
 
   when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
-    io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
+    io.lsq.ldin.bits.rep_info.causeVec := 0.U.asTypeOf(s3_rep_info.causeVec.cloneType)
   } .otherwise {
-    io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
+    io.lsq.ldin.bits.rep_info.causeVec := VecInit(s3_sel_rep_cause.asBools)
   }
 
   // Int load, if hit, will be writebacked at s3
@@ -1646,7 +1637,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.debug_ls.s3_isReplayRS :=  RegNext(io.feedback_fast.valid && !io.feedback_fast.bits.hit) || (io.feedback_slow.valid && !io.feedback_slow.bits.hit)
   io.debug_ls.s3_isReplaySlow := io.lsq.ldin.valid && io.lsq.ldin.bits.rep_info.need_rep
   io.debug_ls.s3_isReplay := s3_valid && s3_rep_info.need_rep // include fast+slow+rs replay
-  io.debug_ls.replayCause := s3_rep_info.cause
+  io.debug_ls.replayCause := s3_rep_info.causeVec
   io.debug_ls.replayCnt := 1.U
 
   // Topdown
