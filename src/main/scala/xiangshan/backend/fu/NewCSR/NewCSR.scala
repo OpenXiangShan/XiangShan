@@ -915,13 +915,20 @@ class NewCSR(implicit val p: Parameters) extends Module
    **/
 
   /** Data that have been read before,and should be stored because output not fired */
-  io.out.valid := state === s_idle && valid && !asyncAccess ||
-                  state === s_waitIMSIC && fromAIA.rdata.valid ||
+  val normalCSRValid = state === s_idle && valid && !asyncAccess
+  val waitIMSICValid = state === s_waitIMSIC && fromAIA.rdata.valid
+
+  io.out.valid := normalCSRValid ||
+                  waitIMSICValid ||
                   state === s_finish
-  io.out.bits.EX_II := DataHoldBypass(permitMod.io.out.EX_II || noCSRIllegal, false.B, io.in.fire) ||
-                       DataHoldBypass(imsic_EX_II, false.B, fromAIA.rdata.valid)
-  io.out.bits.EX_VI := DataHoldBypass(permitMod.io.out.EX_VI, false.B, io.in.fire) ||
-                       DataHoldBypass(imsic_EX_VI, false.B, fromAIA.rdata.valid)
+  io.out.bits.EX_II := DataHoldBypass(Mux1H(Seq(
+    normalCSRValid -> (permitMod.io.out.EX_II || noCSRIllegal),
+    waitIMSICValid -> imsic_EX_II,
+  )), false.B, normalCSRValid || waitIMSICValid)
+  io.out.bits.EX_VI := DataHoldBypass(Mux1H(Seq(
+    normalCSRValid -> permitMod.io.out.EX_VI,
+    waitIMSICValid -> imsic_EX_VI,
+  )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := DataHoldBypass(flushPipe, false.B, io.in.fire)
 
   /** Prepare read data for output */
