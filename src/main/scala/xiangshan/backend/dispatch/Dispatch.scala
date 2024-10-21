@@ -24,12 +24,11 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.MemCoreTopDownIO
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.FuType
-
+import xiangshan.mem.mdp._
+import xiangshan.mem.MemCoreTopDownIO
 case class DispatchParameters
 (
   IntDqSize: Int,

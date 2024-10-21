@@ -30,7 +30,7 @@ import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
-import xiangshan.mem.L1PrefetchFuzzer
+import xiangshan.mem.{MemBlock, L1PrefetchFuzzer}
 import scala.collection.mutable.ListBuffer
 import xiangshan.cache.mmu.TlbRequestIO
 
