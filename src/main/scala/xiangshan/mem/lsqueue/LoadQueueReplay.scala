@@ -141,7 +141,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
 
     // from load unit s3
-    val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
+    val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle)))
 
     // from sta s1
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -234,7 +234,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
    */
   val canEnqueue = io.enq.map(_.valid)
   val cancelEnq = io.enq.map(enq => enq.bits.uop.robIdx.needFlush(io.redirect))
-  val needReplay = io.enq.map(enq => enq.bits.rep_info.need_rep)
+  val needReplay = io.enq.map(enq => enq.bits.needReplay)
   val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.exceptionVec, LduCfg).asUInt.orR && !enq.bits.tlbMiss)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
@@ -344,7 +344,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val needCancel = Wire(Vec(LoadQueueReplaySize, Bool()))
   // generate enq mask
   val enqIndexOH = Wire(Vec(LoadPipelineWidth, UInt(LoadQueueReplaySize.W)))
-  val s0_loadEnqFireMask = io.enq.map(x => x.fire && !x.bits.isLoadReplay && x.bits.rep_info.need_rep).zip(enqIndexOH).map(x => Mux(x._1, x._2, 0.U))
+  val s0_loadEnqFireMask = io.enq.map(x => x.fire && !x.bits.isLoadReplay && x.bits.needReplay).zip(enqIndexOH).map(x => Mux(x._1, x._2, 0.U))
   val s0_remLoadEnqFireVec = s0_loadEnqFireMask.map(x => VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(x)(rem))))
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
@@ -616,9 +616,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
        * used for feedback and replay
        */
       // set flags
-      val replayInfo = enq.bits.rep_info
-      val dataInLastBeat = replayInfo.last_beat
-      cause(enqIndex) := replayInfo.causeVec.asUInt
+      val enqBits = enq.bits
+      val dataInLastBeat = enqBits.lastBeat
+      cause(enqIndex) := enqBits.causeVec.asUInt
 
 
       // init
@@ -626,45 +626,44 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       strict(enqIndex)       := false.B
 
       // update blocking pointer
-      when (replayInfo.causeVec(bankConflict) ||
-            replayInfo.causeVec(nuke) ||
-            replayInfo.causeVec(dcacheReplay) ||
-            replayInfo.causeVec(wpuPredictFail)) {
+      when (enqBits.causeVec(bankConflict) ||
+            enqBits.causeVec(nuke) ||
+            enqBits.causeVec(dcacheReplay) ||
+            enqBits.causeVec(wpuPredictFail)) {
         // normal case: bank conflict or schedule error or dcache replay
         // can replay next cycle
         blocking(enqIndex) := false.B
       }
 
       // special case: tlb miss
-      when (replayInfo.causeVec(tlbMiss)) {
-        blocking(enqIndex) := !replayInfo.tlb_full &&
-          !(io.tlb_hint.resp.valid && (io.tlb_hint.resp.bits.id === replayInfo.tlb_id || io.tlb_hint.resp.bits.replay_all))
-        tlbHintId(enqIndex) := replayInfo.tlb_id
+      when (enqBits.causeVec(tlbMiss)) {
+        blocking(enqIndex) := enqBits.tlbHandled &&
+          !(io.tlb_hint.resp.valid && (io.tlb_hint.resp.bits.id === enqBits.tlbId || io.tlb_hint.resp.bits.replay_all))
+        tlbHintId(enqIndex) := enqBits.tlbId
       }
 
       // special case: dcache miss
-      when (replayInfo.causeVec(dcacheMiss) && enq.bits.mshrHandled) {
-        blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
-                              !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
+      when (enqBits.causeVec(dcacheMiss) && enq.bits.mshrHandled) {
+        blocking(enqIndex) := !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === enqBits.mshrId) // no refill in this cycle
       }
 
       // special case: st-ld violation
-      when (replayInfo.causeVec(memoryAmbiguous)) {
-        blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
+      when (enqBits.causeVec(memoryAmbiguous)) {
+        blockSqIdx(enqIndex) := enqBits.addrInvalidSqIdx
         strict(enqIndex) := enq.bits.uop.loadWaitStrict
       }
 
       // special case: data forward fail
-      when (replayInfo.causeVec(forwardFail)) {
-        blockSqIdx(enqIndex) := replayInfo.data_inv_sq_idx
+      when (enqBits.causeVec(forwardFail)) {
+        blockSqIdx(enqIndex) := enqBits.dataInvalidSqIdx
       }
       // extra info
-      replayCarryReg(enqIndex) := replayInfo.rep_carry
+      replayCarryReg(enqIndex) := enqBits.replayCarry
       replacementUpdated(enqIndex) := enq.bits.replacementUpdated
       missDbUpdated(enqIndex) := enq.bits.missDbUpdated
       // update mshr_id only when the load has already been handled by mshr
       when(enq.bits.mshrHandled) {
-        missMSHRId(enqIndex) := replayInfo.mshr_id
+        missMSHRId(enqIndex) := enqBits.mshrId
       }
       dataInLastBeatReg(enqIndex) := dataInLastBeat
       //dataInLastBeatReg(enqIndex) := Mux(io.l2_hint.bits.isKeyword, !dataInLastBeat, dataInLastBeat)
@@ -762,15 +761,15 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val enqNumber               = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay))
   val deqNumber               = PopCount(io.replay.map(_.fire))
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
-  val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(tlbMiss)))
-  val replayMemAmbCount       = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(memoryAmbiguous)))
-  val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(nuke)))
-  val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(rarNack)))
-  val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(rawNack)))
-  val replayBankConflictCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(bankConflict)))
-  val replayDCacheReplayCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(dcacheReplay)))
-  val replayForwardFailCount  = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(forwardFail)))
-  val replayDCacheMissCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.causeVec(dcacheMiss)))
+  val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(tlbMiss)))
+  val replayMemAmbCount       = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(memoryAmbiguous)))
+  val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(nuke)))
+  val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(rarNack)))
+  val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(rawNack)))
+  val replayBankConflictCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(bankConflict)))
+  val replayDCacheReplayCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(dcacheReplay)))
+  val replayForwardFailCount  = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(forwardFail)))
+  val replayDCacheMissCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.causeVec(dcacheMiss)))
   XSPerfAccumulate("enq", enqNumber)
   XSPerfAccumulate("deq", deqNumber)
   XSPerfAccumulate("deq_block", deqBlockCount)

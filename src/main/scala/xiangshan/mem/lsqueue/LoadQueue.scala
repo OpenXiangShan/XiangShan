@@ -163,7 +163,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+        val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // from load_s3
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1

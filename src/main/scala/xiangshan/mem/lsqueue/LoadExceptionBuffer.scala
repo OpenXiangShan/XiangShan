@@ -36,13 +36,13 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
 
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))
-    val req           = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
+    val req           = Vec(enqPortNum, Flipped(Valid(new LsPipelineBundle)))
     val flushFrmMaBuf = Input(Bool())
     val exceptionAddr = new ExceptionAddrIO
   })
 
   val req_valid = RegInit(false.B)
-  val req = Reg(new LqWriteBundle)
+  val req = Reg(new LsPipelineBundle)
 
   // enqueue
   // s1:
@@ -70,7 +70,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
     req_valid := req_valid || true.B
   }
 
-  def selectOldest[T <: LqWriteBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     if (valid.length == 0 || valid.length == 1) {
       (valid, bits)

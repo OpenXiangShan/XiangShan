@@ -42,7 +42,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3
-    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
+    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
     // global
@@ -243,7 +243,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
     when (io.ldin(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      val need_rep = io.ldin(i).bits.rep_info.need_rep
+      val need_rep = io.ldin(i).bits.needReplay
 
       when (!need_rep) {
       // update control flag
@@ -263,13 +263,13 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
            })
 
         //
-        when (io.ldin(i).bits.data_wen_dup(1)) {
+        when (io.ldin(i).bits.dataWenDup(1)) {
           uop(loadWbIndex) := io.ldin(i).bits.uop
         }
-        when (io.ldin(i).bits.data_wen_dup(4)) {
+        when (io.ldin(i).bits.dataWenDup(4)) {
           uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
         }
-        uop(loadWbIndex).debugInfo := io.ldin(i).bits.rep_info.debug
+        uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
 
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
