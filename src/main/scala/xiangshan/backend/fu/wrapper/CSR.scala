@@ -18,7 +18,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.frontend.FtqPtr
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
-  with HasCircularQueuePtrHelper
+  with HasCircularQueuePtrHelper with HasCriticalErrors
 {
   val csrIn = io.csrio.get
   val csrOut = io.csrio.get
@@ -288,6 +288,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.cfiUpdate.isMisPred := true.B
 
   connectNonPipedCtrlSingalForCSR
+
+  override val criticalErrors = csrMod.getCriticalErrors
+  generateCriticalErrors()
 
   // Todo: summerize all difftest skip condition
   csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && DataHoldBypass(func =/= CSROpType.jmp, false.B, io.in.fire)

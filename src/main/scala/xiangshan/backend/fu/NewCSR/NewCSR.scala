@@ -6,7 +6,7 @@ import difftest._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt, HPerfMonitor, PerfEvent}
+import utility._
 import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
@@ -111,6 +111,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with DebugLevel
   with CSRCustom
   with CSRPMP
+  with HasCriticalErrors
   with IpIeAliasConnect
 {
 
@@ -311,6 +312,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
   when(nonMaskableIRP.NMI_31) {
     nmip.NMI_31 := true.B
+  }
 
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
@@ -1272,6 +1274,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   io.distributedWenLegal := wenLegal
+
+  val criticalErrors = Seq(
+    ("csr_dbltrp_inMN", !mnstatus.regOut.NMIE.asBool && hasTrap),
+  )
+  generateCriticalErrors()
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

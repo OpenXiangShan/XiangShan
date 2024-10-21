@@ -164,6 +164,8 @@ case class FuConfig (
       vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
+  def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
+
   def isMul: Boolean = fuType == FuType.mul
 
   def isDiv: Boolean = fuType == FuType.div

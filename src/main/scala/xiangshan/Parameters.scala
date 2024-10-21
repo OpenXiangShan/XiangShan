@@ -868,6 +868,8 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
+  def printCriticalError = false
+  def maxCommitStuck = 21
 
   // Vector load exception
   def maxMergeNumPerCycle = 4

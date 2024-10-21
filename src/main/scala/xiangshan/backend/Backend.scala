@@ -20,13 +20,14 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import device.MsiInfoBundle
+import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
-import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
+import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataConfig._
@@ -183,7 +184,8 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
 
 class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter
-  with HasPerfEvents {
+  with HasPerfEvents
+  with HasCriticalErrors {
   implicit private val params: BackendParams = wrapper.params
 
   val io = IO(new BackendIO()(p, wrapper.params))
@@ -805,7 +807,23 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   csrio.perf.perfEventsBackend := VecInit(perfEvents.map(_._2.asTypeOf(new PerfEvent)))
-  generatePerfEvent()
+
+  val ctrlBlockError = ctrlBlock.getCriticalErrors
+  val intExuBlockError = intExuBlock.getCriticalErrors
+  val criticalErrors = ctrlBlockError ++ intExuBlockError
+
+  if (printCriticalError) {
+    for (((name, error), _) <- criticalErrors.zipWithIndex) {
+      XSError(error, s"critical error: $name \n")
+    }
+  }
+
+  // expand to collect frontend/memblock/L2 critical errors
+  val backendCriticalError = criticalErrors.map(_._2).reduce(_ || _)
+
+  ctrlBlock.io.robio.criticalError := backendCriticalError
+  io.toTop.cpuCriticalError := backendCriticalError
+
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -905,6 +923,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
 
 class BackendToTopBundle extends Bundle {
   val cpuHalted = Output(Bool())
+  val cpuCriticalError = Output(Bool())
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {

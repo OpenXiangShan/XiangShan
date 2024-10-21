@@ -459,7 +459,8 @@ class MstatusBundle extends CSRBundle {
   val MBE  = CSRROField     (37).withReset(0.U)
   val GVA  = CSRRWField     (38).withReset(0.U)
   val MPV  = VirtMode       (39).withReset(0.U)
-  val MDT  = CSRRWField     (42).withReset(1.U)
+  // as current test not support clean mdt , we set mstatus->mdt = 0 to allow exception in m-mode
+  val MDT  = CSRRWField     (42).withReset(0.U)
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
