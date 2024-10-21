@@ -89,7 +89,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val req             = Vec(enqPortNum, Flipped(Valid(new LsPipelineBundle)))
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
-    val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
+    val splitStoreResp  = Flipped(Valid(new LsPipelineBundle))
     val writeBack       = Decoupled(new MemExuOutput)
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
@@ -155,7 +155,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val s_idle :: s_split :: s_req :: s_resp :: s_cal :: s_sq_req :: s_wb :: s_wait :: Nil = Enum(8)
   val bufferState = RegInit(s_idle)
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
-  val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new SqWriteBundle))))
+  val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val unSentStores  = RegInit(0.U(maxSplitNum.W))
   val unWriteStores = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
@@ -164,8 +164,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val globalException = RegInit(false.B)
   val globalMMIO = RegInit(false.B)
 
-  val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.need_rep
-  val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.need_rep
+  val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.needReplay
+  val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.needReplay
 
   switch(bufferState) {
     is (s_idle) {
@@ -193,7 +193,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           bufferState := s_wb
           globalException := hasException
           globalMMIO := isMMIO
-        } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & ~clearOh).orR) {
+        } .elsewhen(io.splitStoreResp.bits.needReplay || (unSentStores & ~clearOh).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
@@ -242,7 +242,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SB -> 0.U,
     SH -> 1.U,
     SW -> 3.U,
-    SD -> 7.U 
+    SD -> 7.U
   )) + req.vaddr(4, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
@@ -459,7 +459,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     } .elsewhen (hasException) {
       unWriteStores := 0.U
       unSentStores := 0.U
-    } .elsewhen (!io.splitStoreResp.bits.need_rep) {
+    } .elsewhen (!io.splitStoreResp.bits.needReplay) {
       unSentStores := unSentStores & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
     }
@@ -553,7 +553,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.sqControl.control.writeSb := bufferState === s_sq_req
   io.sqControl.control.wdata   := splitStoreData(curPtr).wdata
   io.sqControl.control.wmask   := splitStoreData(curPtr).wmask
-  // the paddr and vaddr is not corresponding to the exact addr of 
+  // the paddr and vaddr is not corresponding to the exact addr of
   io.sqControl.control.paddr   := splitStoreResp(curPtr).paddr
   io.sqControl.control.vaddr   := splitStoreResp(curPtr).vaddr
   io.sqControl.control.last    := !((unWriteStores & ~UIntToOH(curPtr)).orR)
@@ -582,7 +582,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.vaddr := req.vaddr
 
   io.sqControl.control.removeSq := req_valid && (bufferState === s_wait) && !(globalMMIO || globalException) && (io.rob.scommit =/= 0.U)
-  
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush && (bufferState =/= s_idle)) {

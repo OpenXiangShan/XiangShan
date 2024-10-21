@@ -31,6 +31,7 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
+import xiangshan.mem.ReplayCauseNo._
 
 class StoreUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -43,7 +44,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val issue           = Valid(new MemExuInput)
     // misalignBuffer issue path
     val misalign_stin   = Flipped(Decoupled(new LsPipelineBundle))
-    val misalign_stout  = Valid(new SqWriteBundle)
+    val misalign_stout  = Valid(new LsPipelineBundle)
     val tlb             = new TlbRequestIO()
     val dcache          = new DCacheStoreIO
     val pmp             = Flipped(new PMPRespBundle())
@@ -439,7 +440,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.bits.paddr := s2_out.paddr
   s2_misalign_stout.bits.gpaddr := s2_out.gpaddr
   s2_misalign_stout.bits.isForVSnonLeafPTE := s2_out.isForVSnonLeafPTE
-  s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
+  s2_misalign_stout.bits.causeVec(tlbMiss) := RegEnable(s1_tlb_miss, s1_fire)
   s2_misalign_stout.bits.uop.exceptionVec := s2_out.uop.exceptionVec
   io.misalign_stout := s2_misalign_stout
 

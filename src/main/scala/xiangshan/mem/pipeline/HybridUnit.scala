@@ -62,8 +62,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val dcache        = new DCacheLoadIO
 
       // data path
-      val sbuffer       = new LoadForwardQueryIO
-      val vec_forward   = new LoadForwardQueryIO
+      val sbuffer       = new LoadForwardIO
+      val vec_forward   = new LoadForwardIO
       val lsq           = new LoadToLsqIO
       val tl_d_channel  = Input(new DcacheToLduForwardIO)
       val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
@@ -597,31 +597,16 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.dcache.s1_kill_data_read   := s1_kill || s1_tlb_miss
 
   // store to load forwarding
-  io.ldu_io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
-  io.ldu_io.sbuffer.vaddr := s1_vaddr
-  io.ldu_io.sbuffer.paddr := s1_paddr_dup_lsu
-  io.ldu_io.sbuffer.uop   := s1_in.uop
-  io.ldu_io.sbuffer.sqIdx := s1_in.uop.sqIdx
-  io.ldu_io.sbuffer.mask  := s1_in.mask
-  io.ldu_io.sbuffer.pc    := s1_in.uop.pc // FIXME: remove it
-
-  io.ldu_io.vec_forward.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
-  io.ldu_io.vec_forward.vaddr := s1_vaddr
-  io.ldu_io.vec_forward.paddr := s1_paddr_dup_lsu
-  io.ldu_io.vec_forward.uop   := s1_in.uop
-  io.ldu_io.vec_forward.sqIdx := s1_in.uop.sqIdx
-  io.ldu_io.vec_forward.mask  := s1_in.mask
-  io.ldu_io.vec_forward.pc    := s1_in.uop.pc // FIXME: remove it
-
-  io.ldu_io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
-  io.ldu_io.lsq.forward.vaddr     := s1_vaddr
-  io.ldu_io.lsq.forward.paddr     := s1_paddr_dup_lsu
-  io.ldu_io.lsq.forward.uop       := s1_in.uop
-  io.ldu_io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
-  io.ldu_io.lsq.forward.sqIdxMask := 0.U
-  io.ldu_io.lsq.forward.mask      := s1_in.mask
-  io.ldu_io.lsq.forward.pc        := s1_in.uop.pc // FIXME: remove it
-
+  io.ldu_io.lsq.forward.req.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
+  io.ldu_io.lsq.forward.req.bits.vaddr     := s1_vaddr
+  io.ldu_io.lsq.forward.req.bits.paddr     := s1_paddr_dup_lsu
+  io.ldu_io.lsq.forward.req.bits.uop       := s1_in.uop
+  io.ldu_io.lsq.forward.req.bits.sqIdx     := s1_in.uop.sqIdx
+  io.ldu_io.lsq.forward.req.bits.sqIdxMask := 0.U
+  io.ldu_io.lsq.forward.req.bits.mask      := s1_in.mask
+  io.ldu_io.lsq.forward.req.bits.pc        := s1_in.uop.pc // FIXME: remove it
+  io.ldu_io.vec_forward.req := io.ldu_io.lsq.forward.req
+  io.ldu_io.sbuffer.req := io.ldu_io.lsq.forward.req
   // st-ld violation query
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.ldu_io.stld_nuke_query(w).valid && // query valid
@@ -739,10 +724,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // to enable load-load, sqIdxMask must be calculated based on lsin.uop
   // If the timing here is not OK, load-load forwarding has to be disabled.
   // Or we calculate sqIdxMask at RS??
-  io.ldu_io.lsq.forward.sqIdxMask := s1_sqIdx_mask
+  io.ldu_io.lsq.forward.req.bits.sqIdxMask := s1_sqIdx_mask
   if (EnableLoadToLoadForward) {
     when (s1_try_ptr_chasing) {
-      io.ldu_io.lsq.forward.sqIdxMask := UIntToMask(io.lsin.bits.uop.sqIdx.value, StoreQueueSize)
+      io.ldu_io.lsq.forward.req.bits.sqIdxMask := UIntToMask(io.lsin.bits.uop.sqIdx.value, StoreQueueSize)
     }
   }
 
@@ -865,10 +850,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                          !s2_ld_flow
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
-                         io.ldu_io.lsq.forward.addrInvalid
+                         io.ldu_io.lsq.forward.resp.addrInvalid
 
   val s2_tlb_miss      = s2_in.tlbMiss
-  val s2_fwd_fail      = io.ldu_io.lsq.forward.dataInvalid || io.ldu_io.vec_forward.dataInvalid
+  val s2_fwd_fail      = io.ldu_io.lsq.forward.resp.dataInvalid || io.ldu_io.vec_forward.resp.dataInvalid
   val s2_dcache_miss   = io.ldu_io.dcache.resp.bits.miss &&
                          !s2_fwd_frm_d_chan_or_mshr &&
                          !s2_full_fwd
@@ -963,24 +948,24 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // lsq has higher priority than sbuffer
   val s2_fwd_mask = Wire(Vec((VLEN/8), Bool()))
   val s2_fwd_data = Wire(Vec((VLEN/8), UInt(8.W)))
-  s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.ldu_io.lsq.forward.dataInvalid && !io.ldu_io.vec_forward.dataInvalid
+  s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.ldu_io.lsq.forward.resp.dataInvalid && !io.ldu_io.vec_forward.resp.dataInvalid
   // generate XLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
-    s2_fwd_mask(i) := io.ldu_io.lsq.forward.forwardMask(i) || io.ldu_io.sbuffer.forwardMask(i) || io.ldu_io.vec_forward.forwardMask(i)
+    s2_fwd_mask(i) := io.ldu_io.lsq.forward.resp.forwardMask(i) || io.ldu_io.sbuffer.resp.forwardMask(i) || io.ldu_io.vec_forward.resp.forwardMask(i)
     s2_fwd_data(i) := Mux(
-      io.ldu_io.lsq.forward.forwardMask(i),
-      io.ldu_io.lsq.forward.forwardData(i),
+      io.ldu_io.lsq.forward.resp.forwardMask(i),
+      io.ldu_io.lsq.forward.resp.forwardData(i),
       Mux(
-        io.ldu_io.vec_forward.forwardMask(i),
-        io.ldu_io.vec_forward.forwardData(i),
-        io.ldu_io.sbuffer.forwardData(i)
+        io.ldu_io.vec_forward.resp.forwardMask(i),
+        io.ldu_io.vec_forward.resp.forwardData(i),
+        io.ldu_io.sbuffer.resp.forwardData(i)
       )
     )
   }
 
   XSDebug(s2_fire && s2_ld_flow, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_in.uop.pc,
-    io.ldu_io.lsq.forward.forwardData.asUInt, io.ldu_io.lsq.forward.forwardMask.asUInt,
+    io.ldu_io.lsq.forward.resp.forwardData.asUInt, io.ldu_io.lsq.forward.resp.forwardMask.asUInt,
     s2_fwd_data.asUInt, s2_fwd_mask.asUInt
   )
 
@@ -1012,8 +997,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.causeVec(rarNack)         := s2_rar_nack && s2_troublem
   s2_out.causeVec(rawNack)         := s2_raw_nack && s2_troublem
   s2_out.causeVec(nuke)            := s2_nuke && s2_troublem
-  s2_out.dataInvalidSqIdx := Mux(io.ldu_io.vec_forward.dataInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.dataInvalidSqIdx)
-  s2_out.addrInvalidSqIdx := Mux(io.ldu_io.vec_forward.addrInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.addrInvalidSqIdx)
+  s2_out.dataInvalidSqIdx := Mux(io.ldu_io.vec_forward.resp.dataInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.resp.dataInvalidSqIdx)
+  s2_out.addrInvalidSqIdx := Mux(io.ldu_io.vec_forward.resp.addrInvalid, s2_out.uop.sqIdx, io.ldu_io.lsq.forward.resp.addrInvalidSqIdx)
   s2_out.replayCarry       := io.ldu_io.dcache.resp.bits.replayCarry
   s2_out.mshrId         := io.ldu_io.dcache.resp.bits.mshr_id
   s2_out.lastBeat       := s2_in.paddr(log2Up(refillBytes))
@@ -1062,7 +1047,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_valid &&
     !s1_kill &&
     !io.tlb.resp.bits.miss &&
-    !io.ldu_io.lsq.forward.dataInvalidFast
+    !io.ldu_io.lsq.forward.resp.dataInvalidFast
   ) && (s2_valid && !s2_out.needReplay && !s2_ld_mmio && s2_ld_flow) && !s2_isvec
   io.ldu_io.fast_uop.bits := RegNext(s1_out.uop)
 
@@ -1151,7 +1136,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.fast_rep_out.bits.delayedError := s3_dly_ld_err
   io.ldu_io.lsq.ldin.bits.dcacheRequireReplay  := s3_dcache_rep
 
-  val s3_vp_match_fail = RegNext(io.ldu_io.lsq.forward.matchInvalid || io.ldu_io.sbuffer.matchInvalid) && s3_troublem
+  val s3_vp_match_fail = RegNext(io.ldu_io.lsq.forward.resp.matchInvalid || io.ldu_io.sbuffer.resp.matchInvalid) && s3_troublem
   val s3_ldld_rep_inst =
       io.ldu_io.lsq.ldld_nuke_query.resp.valid &&
       io.ldu_io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&

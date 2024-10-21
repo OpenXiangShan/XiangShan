@@ -31,7 +31,7 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))
     val dcache = new DCacheLineIO
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardIO))
   })
 
   assert(!(io.in(1).valid && !io.in(0).valid))
@@ -93,14 +93,14 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
 
   // do forwarding here
   for (i <- 0 until LoadPipelineWidth) {
-    val addr_match = word_addr(io.forward(i).paddr) === word_addr(req.addr)
-    val mask = io.forward(i).mask & req.mask(7, 0)
+    val addr_match = word_addr(io.forward(i).req.bits.paddr) === word_addr(req.addr)
+    val mask = io.forward(i).req.bits.mask & req.mask(7, 0)
     val mask_match = mask =/= 0.U
     val need_forward = state =/= s_invalid && addr_match && mask_match
 
-    io.forward(i).forwardMask := Mux(need_forward, VecInit(mask.asBools),
+    io.forward(i).resp.forwardMask := Mux(need_forward, VecInit(mask.asBools),
       VecInit(0.U(8.W).asBools))
-    io.forward(i).forwardData := VecInit((0 until 8) map {i => req.data((i + 1) * 8 - 1, i * 8)})
+    io.forward(i).resp.forwardData := VecInit((0 until 8) map {i => req.data((i + 1) * 8 - 1, i * 8)})
   }
 
   XSInfo(io.in(0).fire, "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)

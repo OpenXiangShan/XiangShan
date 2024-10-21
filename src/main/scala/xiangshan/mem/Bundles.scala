@@ -253,55 +253,38 @@ class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   }
 }
 
-class SqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
-  val need_rep = Bool()
+class LoadForwardReqBundle(implicit p: Parameters) extends XSBundle {
+  val uop           = new DynInst
+  val vaddr         = UInt(VAddrBits.W)
+  val paddr         = UInt(PAddrBits.W)
+  val mask          = UInt((VLEN/8).W)
+  val pc            = UInt(VAddrBits.W) //for debug
+  val sqIdx         = new SqPtr
+  val sqIdxMask     = UInt(StoreQueueSize.W)
 }
-
-class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
-  val vaddr = Output(UInt(VAddrBits.W))
-  val paddr = Output(UInt(PAddrBits.W))
-  val mask = Output(UInt((VLEN/8).W))
-  val uop = Output(new DynInst) // for replay
-  val pc = Output(UInt(VAddrBits.W)) //for debug
-  val valid = Output(Bool())
-
-  val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
-  val forwardMask = Input(Vec((VLEN/8), Bool())) // resp to load_s2
-  val forwardData = Input(Vec((VLEN/8), UInt(8.W))) // resp to load_s2
-
-  // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
-  val sqIdx = Output(new SqPtr)
-
+class LoadForwardRespBundle(implicit p: Parameters) extends XSBundle {
+  val forwardMaskFast   = Vec((VLEN/8), Bool())
+  val forwardMask       = Vec((VLEN/8), Bool())
+  val forwardData       = Vec((VLEN/8), UInt(8.W))
   // dataInvalid suggests store to load forward found forward should happen,
   // but data is not available for now. If dataInvalid, load inst should
-  // be replayed from RS. Feedback type should be RSFeedbackType.dataInvalid
-  val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
-
+  // be replayed from Iq. Feedback type should be RSFeedbackType.dataInvalid
+  val dataInvalid       = Bool()
+  val dataInvalidFast   = Bool()
+  val dataInvalidSqIdx  = new SqPtr
   // matchInvalid suggests in store to load forward logic, paddr cam result does
   // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
   // should be raised to flush SQ and committed sbuffer.
-  val matchInvalid = Input(Bool()) // resp to load_s2
-
+  val matchInvalid      = Bool()
   // addrInvalid suggests store to load forward found forward should happen,
   // but address (SSID) is not available for now. If addrInvalid, load inst should
-  // be replayed from RS. Feedback type should be RSFeedbackType.addrInvalid
-  val addrInvalid = Input(Bool())
+  // be replayed from Iq. Feedback type should be RSFeedbackType.addrInvalid
+  val addrInvalid       = Bool()
+  val addrInvalidSqIdx  = new SqPtr
 }
-
-// LoadForwardQueryIO used in load pipeline
-//
-// Difference between PipeLoadForwardQueryIO and LoadForwardQueryIO:
-// PipeIO use predecoded sqIdxMask for better forward timing
-class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO {
-  // val sqIdx = Output(new SqPtr) // for debug, should not be used in pipeline for timing reasons
-  // sqIdxMask is calcuated in earlier stage for better timing
-  val sqIdxMask = Output(UInt(StoreQueueSize.W))
-
-  // dataInvalid: addr match, but data is not valid for now
-  val dataInvalidFast = Input(Bool()) // resp to load_s1
-  // val dataInvalid = Input(Bool()) // resp to load_s2
-  val dataInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
-  val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
+class LoadForwardIO(implicit p: Parameters) extends XSBundle {
+  val req  = Valid(new LoadForwardReqBundle)
+  val resp = Input(new LoadForwardRespBundle)
 }
 
 // Query load queue for ld-ld violation
