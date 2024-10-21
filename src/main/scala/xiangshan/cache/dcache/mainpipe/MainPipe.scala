@@ -329,7 +329,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_match = ParallelORR(s1_tag_match_way)
 
-  val s1_hit_tag = Mux(s1_tag_match, ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => tag_resp(w))), get_tag(s1_req.addr))
+  val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
   val s1_encTag = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => enc_tag_resp(w)))
   val s1_flag_error = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
@@ -361,9 +361,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
-  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
+  val s1_tag = s1_hit_tag
 
-  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  val s1_coh = s1_hit_coh
 
   XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)
@@ -403,8 +403,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_can_go_to_mq_dup = (0 until 3).map(_ => RegEnable(s1_pregen_can_go_to_mq, s1_fire))
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
-  val s2_tag = RegEnable(s1_tag, s1_fire)
-  val s2_coh = RegEnable(s1_coh, s1_fire)
+  val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
+  val s2_coh = Mux(s2_need_replacement, s2_repl_coh, RegEnable(s1_coh, s1_fire))
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
@@ -607,7 +607,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     })
   }
 
-  
+
   io.lrsc_locked_block.valid := lrsc_valid_dup(1)
   io.lrsc_locked_block.bits  := lrsc_addr_dup
   io.block_lr := GatedValidRegNext(lrsc_valid)
@@ -1418,11 +1418,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   req.ready := s0_can_go
 
-  io.meta_read.valid := req.valid && s1_ready && !set_conflict
+  io.meta_read.valid := req.valid && !set_conflict
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
   io.meta_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
-  io.tag_read.valid := req.valid && s1_ready && !set_conflict && !s0_req.replace
+  io.tag_read.valid := req.valid && !set_conflict && !s0_req.replace
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
