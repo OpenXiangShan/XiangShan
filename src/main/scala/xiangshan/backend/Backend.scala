@@ -609,6 +609,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     for (j <- toMem(i).indices) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.mem(i)(j).bits.loadDependency, io.mem.ldCancel)
       val needIssueTimeout = memExuBlocksHasLDU(i)(j) || memExuBlocksHasVecLoad(i)(j)
+      val prefetchLoadCancel = toMem(i)(j).valid && !toMem(i)(j).ready && toMem(i)(j).bits.isLoadPf.getOrElse(false.B)
       val issueTimeout =
         if (needIssueTimeout)
           Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
@@ -640,13 +641,17 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         Mux(
           bypassNetwork.io.toExus.mem(i)(j).fire,
           bypassNetwork.io.toExus.mem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
-          toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || issueTimeout
+          toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || issueTimeout || prefetchLoadCancel
         ),
         Option("bypassNetwork2toMemExus")
       )
 
+      if (backendParams.debugEn) {
+        dontTouch(prefetchLoadCancel)
+      }
+
       if (memScheduler.io.memAddrIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
-        memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire && FuType.isLoad(toMem(i)(j).bits.fuType)
+        memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire && FuType.isLoad(toMem(i)(j).bits.fuType) && !toMem(i)(j).bits.isLoadPf.getOrElse(false.B)
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
         memScheduler.io.memAddrIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
