@@ -104,7 +104,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     fp.multiHit := false.B
     fp.fromFtbEntry(e, s1_pc_dup(0))
     for (i <- 0 until numBr) {
-      fp.br_taken_mask(i) := c(i)(1) || (e.strong_bias(i) && e.brValids(i))
+      fp.br_taken_mask(i) := c(i)(1) || e.strong_bias(i)
     }
   }
   val s1_hit_full_pred   = Mux1H(s1_hit_oh, s1_possible_full_preds)

@@ -797,10 +797,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   for (i <- 0 until numBr) {
     for (out_fp & in_fp & s2_hit & s2_ftb_entry <-
       io.out.s2.full_pred zip io.in.bits.resp_in(0).s2.full_pred zip s2_hit_dup zip s2_ftb_entry_dup)
-      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s2_hit && s2_ftb_entry.strong_bias(i) && s2_ftb_entry.brValids(i)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s2_hit && s2_ftb_entry.strong_bias(i)
     for (out_fp & in_fp & s3_hit & s3_ftb_entry <-
       io.out.s3.full_pred zip io.in.bits.resp_in(0).s3.full_pred zip s3_hit_dup zip s3_ftb_entry_dup)
-      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.strong_bias(i) && s3_ftb_entry.brValids(i)
+      out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.strong_bias(i)
   }
 
   // Update logic
