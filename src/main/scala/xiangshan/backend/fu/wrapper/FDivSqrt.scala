@@ -60,6 +60,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   io.out.bits.res.fflags.get := fflagsData
   io.out.bits.res.data       := resultData
 
-  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, false.B)
-  XSPerfHistogram("fdivSqrtCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
+  val exeFdivCycleCounter = StartStopCounter(io.in.fire && !fdiv.io.is_sqrt_i, io.out.valid, 1, false.B)
+  XSPerfHistogram("fdivCycle", exeFdivCycleCounter, io.out.fire, 0, 24, 1)
+  val exeFsqrtCycleCounter = StartStopCounter(io.in.fire && fdiv.io.is_sqrt_i, io.out.valid, 1, false.B)
+  XSPerfHistogram("fsqrtCycle", exeFsqrtCycleCounter, io.out.fire, 0, 24, 1)
 }
