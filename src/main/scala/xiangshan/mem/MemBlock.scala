@@ -227,6 +227,8 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
   override def shouldBeInlined: Boolean = true
 
+  val memExuBlock = LazyModule(new MemExuBlock)
+
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
   val ptw = LazyModule(new L2TLBWrapper())
@@ -347,11 +349,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.error.valid := false.B
   }
 
+  val memExuBlockImp = outer.memExuBlock.module
+
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
-  val stData = stdExeUnits.map(_.io.out)
+
+
+  val stData = memExuBlockImp.io.toBackend.writebackStd
+
   val exeUnits = loadUnits ++ storeUnits
   // val vlWrapper = Module(new VectorLoadWrapper)
   // val vsUopQueue = Module(new VsUopQueue)
@@ -452,9 +458,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
-  io.mem_to_ooo.writebackStd.zip(stdExeUnits).foreach {x =>
-    x._1.bits  := x._2.io.out.bits
-    x._1.valid := x._2.io.out.fire
+  io.mem_to_ooo.writebackStd.zip(memExuBlockImp.io.toBackend.writebackStd).foreach {x =>
+    x._1.bits  := x._2.bits
+    x._1.valid := x._2.fire
   }
   io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
@@ -732,6 +738,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
     vSegmentFlag := false.B
   }
+
+  // MemExuBlock
+  memExuBlockImp.io.fromCtrl.redirect <> redirect
+  memExuBlockImp.io.fromCtrl.csrCtrl <> csrCtrl
+  memExuBlockImp.io.fromCtrl.hartId := io.hartId
+  memExuBlockImp.io.fromCtrl.trigger.tdataVec := tdata
+  memExuBlockImp.io.fromCtrl.trigger.tEnableVec := tEnable
+  memExuBlockImp.io.fromCtrl.trigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+  memExuBlockImp.io.fromCtrl.trigger.debugMode := debugMode
+  memExuBlockImp.io.fromBackend.issueStd <> io.ooo_to_mem.issueStd
 
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
@@ -1109,14 +1125,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
   io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
-
-  // StoreUnit
-  for (i <- 0 until StdCnt) {
-    stdExeUnits(i).io.flush <> redirect
-    stdExeUnits(i).io.in.valid := io.ooo_to_mem.issueStd(i).valid
-    io.ooo_to_mem.issueStd(i).ready := stdExeUnits(i).io.in.ready
-    stdExeUnits(i).io.in.bits := io.ooo_to_mem.issueStd(i).bits
-  }
 
   for (i <- 0 until StaCnt) {
     val stu = storeUnits(i)

@@ -48,7 +48,7 @@ object LqPtr {
   }
 }
 
-trait HasLoadHelper { this: XSModule =>
+trait HasLoadHelper extends HasXSParameter {
   def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
     val fpWen = uop.fpWen
     LookupTree(uop.fuOpType, List(

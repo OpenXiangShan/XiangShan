@@ -46,6 +46,8 @@ import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+import xiangshan.mem.{MemUnitParams, MemIssueParams, MemWBPortMap, MemIssueType}
+import xiangshan.mem.{StoreDataUnit}
 
 import scala.math.{max, min}
 
@@ -493,6 +495,19 @@ case class XSCoreParameters
     )
   }
 
+  val memUnitParams = Seq(
+    MemUnitParams(name = "STD0", unitType = StoreDataUnit(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "IQ", issueType = MemIssueType.StoreData, wbPort = MemWBPortMap(0, Some("iqOut")))
+      ),
+    ),
+    MemUnitParams(name = "STD1", unitType = StoreDataUnit(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "IQ", issueType = MemIssueType.StoreData, wbPort = MemWBPortMap(0, Some("iqOut")))
+      )
+    ),
+  )
+
   def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
 
   def iqWakeUpParams = {
@@ -752,6 +767,7 @@ trait HasXSParameter {
   def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
   def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
+  def memUnitParams = coreParams.memUnitParams
   def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
