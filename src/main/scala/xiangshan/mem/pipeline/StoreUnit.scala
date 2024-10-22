@@ -275,7 +275,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
   val s1_vaNeedExt = io.tlb.resp.bits.excp(0).vaNeedExt
   val s1_isHyper   = io.tlb.resp.bits.excp(0).isHyper
-  val s1_paddr     = TraceRTLChoose(io.tlb.resp.bits.paddr(0), s1_in.uop.traceInfo.memoryAddrPA)
+  // val s1_paddr     = TraceRTLChoose(io.tlb.resp.bits.paddr(0), s1_in.uop.traceInfo.memoryAddrPA)
+  val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss

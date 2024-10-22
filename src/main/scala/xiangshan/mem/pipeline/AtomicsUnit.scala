@@ -165,7 +165,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     have_sent_first_tlb_req := true.B
 
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
-      paddr := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), in.uop.traceInfo.memoryAddrPA)
+      // paddr := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), in.uop.traceInfo.memoryAddrPA)
+      paddr := io.dtlb.resp.bits.paddr(0)
       gpaddr := io.dtlb.resp.bits.gpaddr(0)
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
