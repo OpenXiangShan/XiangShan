@@ -41,6 +41,10 @@ class MemUnit(val params: MemUnitParams)(implicit p: Parameters) extends LazyMod
   implicit val unitParams: MemUnitParams = params
   lazy val module: MemUnitImp = unitParams.unitType match {
     case StoreDataUnit() => new StoreDataUnitImp(this)
+    case StoreAddrUnit() => new HybridUnitImp(this)
+    case LoadUnit()      => new HybridUnitImp(this)
+    case HybridUnit()    => new HybridUnitImp(this)
+    case AtomicsUnit()   => new AtomicsUnitImp(this)
     case _ => null
   }
 }

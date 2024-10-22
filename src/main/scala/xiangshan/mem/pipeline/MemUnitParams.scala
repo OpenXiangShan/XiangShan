@@ -27,6 +27,10 @@ import javax.sound.midi.Sequence
 sealed trait MemUnitType
 
 case class StoreDataUnit() extends MemUnitType
+case class StoreAddrUnit() extends MemUnitType
+case class LoadUnit() extends  MemUnitType
+case class HybridUnit() extends MemUnitType
+case class AtomicsUnit() extends MemUnitType
 
 case class MemUnitParams(
   name:             String        = "MemUnit",
@@ -37,6 +41,14 @@ case class MemUnitParams(
 ) {
 
   def isStoreDataUnit: Boolean = unitType == StoreDataUnit()
+
+  def isStoreAddrUnit: Boolean = unitType == StoreAddrUnit()
+
+  def isLoadUnit: Boolean = unitType == LoadUnit()
+
+  def isHybridUnit: Boolean = unitType == HybridUnit()
+
+  def isAtomicsUnit: Boolean = unitType == AtomicsUnit()
 
   def exceptionOut: Seq[Int] = issueParams.map(_.exceptionOut).reduce(_++_).distinct
 
@@ -107,6 +119,10 @@ case class MemUnitParams(
 
   def unitTypeString: String = unitType match {
     case StoreDataUnit() => "Store Data"
+    case StoreAddrUnit() => "Store Addr"
+    case LoadUnit()      => "Load"
+    case HybridUnit()    => "Hybrid"
+    case AtomicsUnit()   => "Atomics"
     case _               => "unknown"
   }
 }
