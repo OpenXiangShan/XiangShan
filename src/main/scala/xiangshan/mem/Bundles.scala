@@ -255,6 +255,12 @@ object Bundles {
     }
   }
 
+  class LsPrefetchTrainIO(implicit p: Parameters) extends XSBundle {
+    val req = ValidIO(new LsPrefetchTrainBundle)
+    val s1PrefetchSpec = Output(Bool())
+    val s2PrefetchSpec = Output(Bool())
+  }
+
   class LoadForwardReqBundle(implicit p: Parameters) extends XSBundle {
     val uop           = new DynInst
     val vaddr         = UInt(VAddrBits.W)
