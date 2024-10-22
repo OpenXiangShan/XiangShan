@@ -299,8 +299,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
     val onlyS1 = s2xlate === onlyStage1 || s2xlate === noS2xlate
-    val pbmtRes = Mux(hPBMTE, pbmt, 0.U)
-    val gpbmtRes = Mux(mPBMTE, g_pbmt, 0.U)
+    val pbmtRes = pbmt
+    val gpbmtRes = g_pbmt
     val res = MuxLookup(s2xlate, 0.U)(Seq(
       onlyStage1 -> pbmtRes,
       onlyStage2 -> gpbmtRes,
