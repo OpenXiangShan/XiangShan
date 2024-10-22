@@ -873,7 +873,7 @@ trait HasXSParameter {
   def TraceEnableWrongPathEmu = true
   def TraceWrongPathEmuWhenConvergence = true
   def TraceSoftL1TLB = false
-  def TraceSoftL1TLBCheck = true
+  def TraceSoftL1TLBCheck = false
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25
