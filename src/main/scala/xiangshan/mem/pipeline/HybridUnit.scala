@@ -21,8 +21,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
@@ -31,11 +31,12 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.mem.ReplayCauseNO._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbHintReq, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.mem.mdp._
-import xiangshan.mem.ReplayCauseNO._
 
 class HybridUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper

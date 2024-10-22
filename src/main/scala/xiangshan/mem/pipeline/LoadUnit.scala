@@ -36,6 +36,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 import xiangshan.mem.mdp._
 import xiangshan.mem.ReplayCauseNO._
+import xiangshan.mem.Bundles._
 
 class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters

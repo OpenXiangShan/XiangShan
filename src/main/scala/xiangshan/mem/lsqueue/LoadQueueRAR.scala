@@ -24,6 +24,7 @@ import xiangshan.cache._
 import utils._
 import utility._
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.mem.Bundles._
 
 class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasDCacheParameters

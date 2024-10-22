@@ -19,15 +19,16 @@ package xiangshan.mem
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.ExceptionNO._
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters

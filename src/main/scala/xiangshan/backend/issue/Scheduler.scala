@@ -13,10 +13,11 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
-import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr, LqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
 import xiangshan.backend.regcache.RegCacheTagTable
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, SqPtr, LqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReq
 
 sealed trait SchedulerType
 
@@ -450,10 +451,10 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // Connect each replace RCIdx to IQ
   if (params.needWriteRegCache) {
-    val iqReplaceRCIdxVec = issueQueues.filter(_.params.needWriteRegCache).flatMap{ iq => 
+    val iqReplaceRCIdxVec = issueQueues.filter(_.params.needWriteRegCache).flatMap{ iq =>
       iq.params.allExuParams.zip(iq.io.replaceRCIdx.get).filter(_._1.needWriteRegCache).map(_._2)
     }
-    iqReplaceRCIdxVec.zip(io.fromDataPath.replaceRCIdx.get).foreach{ case (iq, in) => 
+    iqReplaceRCIdxVec.zip(io.fromDataPath.replaceRCIdx.get).foreach{ case (iq, in) =>
       iq := in
     }
 

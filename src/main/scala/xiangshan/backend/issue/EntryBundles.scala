@@ -12,7 +12,8 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReq
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
@@ -175,11 +176,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.deqSuccess         := (if (params.isVecMemIQ) status.issued else true.B) &&
       commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
     common.srcWakeup          := common.srcWakeupByWB.zip(hasIQWakeupGet.srcWakeupByIQ).map { case (x, y) => x || y.asUInt.orR }
-    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
+    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle =>
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
                                     if (params.numRegSrc == 5) {
-                                      bundle.bits.wakeUp(psrcSrcTypeVec.take(3), bundle.valid) :+ 
-                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid) :+ 
+                                      bundle.bits.wakeUp(psrcSrcTypeVec.take(3), bundle.valid) :+
+                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid) :+
                                       bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
                                     }
                                     else
@@ -203,7 +204,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
     if (params.numRegSrc == 5) {
       // only when numRegSrc == 5 need vl
-      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.map{ bundle => 
+      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.map{ bundle =>
         val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
         bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
       })
@@ -233,8 +234,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map{(bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
       if (params.numRegSrc == 5) {
-        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
-        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
+        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
         bundle.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
       }
       else
@@ -539,7 +540,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   def EnqDelayWakeupConnect(enqDelayIn: EnqDelayInBundle, enqDelayOut: EnqDelayOutBundle, status: Status, delay: Int)(implicit p: Parameters, params: IssueBlockParams) = {
     enqDelayOut.srcWakeUpByWB.zipWithIndex.foreach { case (wakeup, i) =>
-      wakeup := enqDelayIn.wakeUpFromWB.map{ x => 
+      wakeup := enqDelayIn.wakeUpFromWB.map{ x =>
         if (i == 3)
           x.bits.wakeUpV0((status.srcStatus(i).psrc, status.srcStatus(i).srcType), x.valid)
         else if (i == 4)
@@ -553,8 +554,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map{ x =>
         val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
         if (params.numRegSrc == 5) {
-          x.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
-          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+          x.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
+          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
           x.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
         }
         else

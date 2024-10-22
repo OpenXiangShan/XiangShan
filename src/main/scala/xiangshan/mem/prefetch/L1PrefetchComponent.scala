@@ -4,14 +4,15 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.util._
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utils._
 import utility._
-import xiangshan.cache.HasDCacheParameters
-import xiangshan.cache.mmu._
-import xiangshan.mem.{L1PrefetchReq, LsPrefetchTrainBundle}
+import xiangshan._
+import xiangshan.mem.Bundles._
+import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.trace._
 import xiangshan.mem.L1PrefetchSource
+import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.mmu._
 
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related

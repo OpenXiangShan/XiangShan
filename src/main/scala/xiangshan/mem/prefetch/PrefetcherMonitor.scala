@@ -3,10 +3,11 @@ package xiangshan.mem.prefetch
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan._
-import xiangshan.mem.{LsPrefetchTrainBundle, L1PrefetchReq}
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.mem.{L1PrefetchReq}
+import xiangshan.mem.Bundles.MemWaitUpdateReq
 
 trait HasPrefetcherMonitorHelper {
   val TIMELY_CHECK_INTERVAL = 1000

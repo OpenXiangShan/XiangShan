@@ -21,9 +21,10 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
@@ -35,7 +36,7 @@ trait HasL1PrefetchSourceParameter {
   def L1_HW_PREFETCH_STRIDE = 2.U
   def L1_HW_PREFETCH_STREAM = 3.U
   def L1_HW_PREFETCH_STORE  = 4.U
-  
+
   // ------------------------------------------------------------------------------------------------------------------------
   // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
   // ------------------------------------------------------------------------------------------------------------------------

@@ -31,7 +31,8 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
-import xiangshan.mem.ReplayCauseNo._
+import xiangshan.mem.Bundles._
+import xiangshan.mem.ReplayCauseNO._
 
 class StoreUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters

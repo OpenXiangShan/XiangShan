@@ -20,15 +20,16 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
+import freechips.rocketchip.util._
 import utils._
 import utility._
-import xiangshan.cache._
-import xiangshan.mem._
-import xiangshan.backend.Bundles.DynInst
 import difftest._
-import freechips.rocketchip.util._
+import xiangshan._
+import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.FuType._
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())

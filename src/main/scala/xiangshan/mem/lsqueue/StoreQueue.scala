@@ -25,15 +25,16 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
+import xiangshan.ExceptionNO._
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
-import xiangshan.ExceptionNO._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import coupledL2.{CMOReq, CMOResp}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](

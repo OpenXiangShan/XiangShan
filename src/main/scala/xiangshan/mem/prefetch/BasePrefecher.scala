@@ -21,9 +21,10 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.{LsPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.backend._
+import xiangshan.mem.{L1PrefetchReq}
+import xiangshan.mem.Bundles._
+import xiangshan.cache.mmu.TlbRequestIO
 
 class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val addr = UInt(PAddrBits.W)
