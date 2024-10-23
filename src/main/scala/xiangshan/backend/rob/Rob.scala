@@ -1040,9 +1040,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     when(xret){
       robEntries(i).traceBlockInPipe.itype := Itype.ExpIntReturn
-    }.elsewhen(Itype.isBranchType(robEntries(i).traceBlockInPipe.itype)){
-      // BranchType code(itype = 5) must be correctly replaced!
-      robEntries(i).traceBlockInPipe.itype := Mux(taken, Itype.Taken, Itype.NonTaken)
+    }.elsewhen(Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
+      // BranchType code(notaken itype = 4) must be correctly replaced!
+      robEntries(i).traceBlockInPipe.itype := Itype.Taken
     }
   }
 
