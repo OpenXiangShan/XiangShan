@@ -60,8 +60,31 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   io.out.bits.res.fflags.get := fflagsData
   io.out.bits.res.data       := resultData
 
-  val exeFdivCycleCounter = StartStopCounter(io.in.fire && !fdiv.io.is_sqrt_i, io.out.valid, 1, false.B)
-  XSPerfHistogram("fdivCycle", exeFdivCycleCounter, io.out.fire, 0, 24, 1)
-  val exeFsqrtCycleCounter = StartStopCounter(io.in.fire && fdiv.io.is_sqrt_i, io.out.valid, 1, false.B)
-  XSPerfHistogram("fsqrtCycle", exeFsqrtCycleCounter, io.out.fire, 0, 24, 1)
+  val simFormat0 = (fdiv.io.fp_format_i === 0.U)
+  val simFormat1 = (fdiv.io.fp_format_i === 1.U)
+  val simFormat2 = (fdiv.io.fp_format_i === 2.U)
+  val simFormat3 = (fdiv.io.fp_format_i === 3.U)
+  val exeFdivCycleCounter = StartStopCounter(io.in.fire && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFsqrtCycleCounter = StartStopCounter(io.in.fire && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFdivFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFdivFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFdivFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFdivFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFsqrtFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFsqrtFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFsqrtFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val exeFsqrtFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+
+  XSPerfHistogram("fdivCycle", exeFdivCycleCounter, io.out.fire && (exeFdivCycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fsqrtCycle", exeFsqrtCycleCounter, io.out.fire && (exeFsqrtCycleCounter =/= 0.U), 0, 24, 1)
+
+  XSPerfHistogram("fdivFM0Cycle", exeFdivFM0CycleCounter, io.out.fire && (exeFdivFM0CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fdivFM1Cycle", exeFdivFM1CycleCounter, io.out.fire && (exeFdivFM1CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fdivFM2Cycle", exeFdivFM2CycleCounter, io.out.fire && (exeFdivFM2CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fdivFM3Cycle", exeFdivFM3CycleCounter, io.out.fire && (exeFdivFM3CycleCounter =/= 0.U), 0, 24, 1)
+
+  XSPerfHistogram("fsqrtFM0Cycle", exeFsqrtFM0CycleCounter, io.out.fire && (exeFsqrtFM0CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fsqrtFM1Cycle", exeFsqrtFM1CycleCounter, io.out.fire && (exeFsqrtFM1CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fsqrtFM2Cycle", exeFsqrtFM2CycleCounter, io.out.fire && (exeFsqrtFM2CycleCounter =/= 0.U), 0, 24, 1)
+  XSPerfHistogram("fsqrtFM3Cycle", exeFsqrtFM3CycleCounter, io.out.fire && (exeFsqrtFM3CycleCounter =/= 0.U), 0, 24, 1)
 }

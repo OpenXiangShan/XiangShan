@@ -54,4 +54,9 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, kill_w || kill_r)
   XSPerfHistogram("divCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
+
+  val exeWCycleCounter = StartStopCounter(io.in.fire && ctrlReg.isW, io.out.valid, 1, kill_w || kill_r)
+  XSPerfHistogram("divWCycle", exeWCycleCounter, io.out.fire, 0, 24, 1)
+  val exeDCycleCounter = StartStopCounter(io.in.fire && !ctrlReg.isW, io.out.valid, 1, kill_w || kill_r)
+  XSPerfHistogram("divDCycle", exeDCycleCounter, io.out.fire, 0, 24, 1)
 }
