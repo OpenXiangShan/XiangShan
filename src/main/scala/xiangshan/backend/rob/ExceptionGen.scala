@@ -145,8 +145,8 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         current.veew      := Mux(isVecUpdate, s1_out_bits.veew,       current.veew)
         current.vlmul     := Mux(isVecUpdate, s1_out_bits.vlmul,      current.vlmul)
       }
+      current.isEnqExcp := false.B
     }
-    current.isEnqExcp := false.B
   }.elsewhen (s1_out_valid && !s1_flush) {
     currentValid := true.B
     current := s1_out_bits
