@@ -9,6 +9,7 @@ class TraceParams(
   val HasEncoder     : Boolean,
   val TraceEnable    : Boolean,
   val TraceGroupNum  : Int,
+  val IaddrWidth     : Int,
   val PrivWidth      : Int,
   val ItypeWidth     : Int,
   val IlastsizeWidth : Int,
