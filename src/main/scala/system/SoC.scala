@@ -101,9 +101,9 @@ trait HasSoCParameter {
   // Parameters for trace extension
   val TraceTraceGroupNum          = tiles.head.traceParams.TraceGroupNum
   val TraceCauseWidth             = tiles.head.XLEN
-  val TraceTvalWidth              = tiles.head.XLEN
+  val TraceTvalWidth              = tiles.head.traceParams.IaddrWidth
   val TracePrivWidth              = tiles.head.traceParams.PrivWidth
-  val TraceIaddrWidth             = tiles.head.XLEN
+  val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
   val TraceItypeWidth             = tiles.head.traceParams.ItypeWidth
   val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2)
   val TraceIlastsizeWidth         = tiles.head.traceParams.IlastsizeWidth
