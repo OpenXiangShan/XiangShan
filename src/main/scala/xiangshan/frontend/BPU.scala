@@ -169,7 +169,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
 
-  val update = Flipped(Valid(new BranchPredictionUpdate))
+  val update = Flipped(DecoupledIO(new BranchPredictionUpdate))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
   val redirectFromIFU = Input(Bool())
 }
@@ -193,6 +193,8 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s1_ready := true.B
   io.s2_ready := true.B
   io.s3_ready := true.B
+
+  io.update.ready := true.B
 
   val s0_pc_dup   = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
   val s1_pc_dup   = s0_pc_dup.zip(io.s0_fire).map {case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire)}
@@ -442,6 +444,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s3_fire_dup(2) && s3_redirect_dup(2)
   io.bpu_to_ftq.resp.bits  := predictors.io.out
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr_dup(2)
+
+  io.ftq_to_bpu.update.ready := predictors.io.update.ready
 
   val full_pred_diff = WireInit(false.B)
   val full_pred_diff_stage = WireInit(0.U)
@@ -758,10 +762,16 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map {case (hr, r) => hr := r}
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
+  // predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
+  val predictors_valid = RegInit(false.B)
+  predictors.io.update.valid := predictors_valid && predictors.io.update.ready
   predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
   predictors.io.update.bits.ghist := RegEnable(
     getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr), io.ftq_to_bpu.update.valid)
+
+  io.ftq_to_bpu.update.ready := predictors.io.update.valid || !predictors_valid
+  when(io.ftq_to_bpu.update.valid)        { predictors_valid := true.B  }
+    .elsewhen(predictors.io.update.valid) { predictors_valid := false.B }
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
