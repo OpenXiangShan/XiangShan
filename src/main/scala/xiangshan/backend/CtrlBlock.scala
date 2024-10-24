@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend
 
@@ -324,20 +324,66 @@ class CtrlBlockImp(
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
   // add decode Buf for in.ready better timing
+  /**
+   * Decode buffer: when decode.io.in cannot accept all insts, use this buffer to temporarily store insts that cannot
+   * be sent to DecodeStage.
+   *
+   * Decode buffer is a "DecodeWidth"-element long register Vector of StaticInst (in decodeBufBits), with valid signals
+   * (in decodeBufValid). At the same time, fetch insts input from frontend and their valid bits. All valid elements
+   * in these two vector of insts are at the beginning, with all invalid vector elements followed.
+   *
+   * After dealing with redirection, try to use all insts in decode buffer to fulfill decoder.io.in. If decode buffer
+   * has no valid insts, use insts from frontend to supply decoder.
+   */
+
+  /** Insts to be decoded, Registers in vector of DecodeWidth */
   val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
+
+  /** Valid receiving signals of instructions to be decoded, Registers in vector of DecodeWidth */
   val decodeBufValid = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
+
+  /** Insts input from frontend, in vector of DecodeWidth */
   val decodeFromFrontend = io.frontend.cfVec
+
+  /** Insts in buffer that is not ready but valid in decodeBufValid */
   val decodeBufNotAccept = VecInit(decodeBufValid.zip(decode.io.in).map(x => x._1 && !x._2.ready))
+
+  /** Number of insts in decode buffer that is accepted. All accepted insts are before the first unaccepted one. */
   val decodeBufAcceptNum = PriorityMuxDefault(decodeBufNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
+
+  /** Input valid insts from frontend that is not ready to be accepted, or decoder prefer insts in decode buffer */
   val decodeFromFrontendNotAccept = VecInit(decodeFromFrontend.zip(decode.io.in).map(x => decodeBufValid(0) || x._1.valid && !x._2.ready))
+
+  /** Number of input insts that is accepted.
+   * All accepted insts are before the first unaccepted one. */
   val decodeFromFrontendAcceptNum = PriorityMuxDefault(decodeFromFrontendNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
+
   if (backendParams.debugEn) {
     dontTouch(decodeBufNotAccept)
     dontTouch(decodeBufAcceptNum)
     dontTouch(decodeFromFrontendNotAccept)
     dontTouch(decodeFromFrontendAcceptNum)
   }
-  val a = decodeBufNotAccept.drop(2)
+
+  /**
+   * State machine of "decodeBufValid(i)":
+   *   redirect || decodeBufValid(i) is the last accepted instr in decodeBuf:
+   *     false
+   *   decodeBufValid(i) is true, decodeBufNotAccept.drop(i) has some true signals
+   *     (decodeBufAcceptNum > DecodeWidth-1-i) ? false
+   *                                     if not : decodeBufValid(i+decodeBufAcceptNum)
+   *     Pop "decodeBufAcceptNum" insts out of the decodeBufValid, and move others forward
+   *   decodeBufValid(0) is false, decodeFromFrontendNotAccept.drop(i) has some true signals
+   *     (decodeFromFrontendAcceptNum > DecodeWidth-1-i) ? false
+   *                                              if not : decodeFromFrontend(i+decodeFromFrontendAcceptNum).valid
+   *     Get first "decodeFromFrontendAcceptNum" insts from decodeFromFrontend, and move others to decodeBufValid
+   *
+   * State machine of "decodeBufBits(i)":
+   *   decodeBufValid(i) is true, decodeBufNotAccept.drop(i) has some true signals
+   *     decodeBufBits(i+decodeBufAcceptNum)
+   *   decodeBufValid(0) is false, decodeFromFrontendNotAccept.drop(i) has some true signals
+   *     decodeFromFrontend(i+decodeFromFrontendAcceptNum)
+   */
   for (i <- 0 until DecodeWidth) {
     // decodeBufValid update
     when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
@@ -354,13 +400,30 @@ class CtrlBlockImp(
       decodeBufBits(i).connectCtrlFlow(decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).bits)
     }
   }
+  /** Insts input from frontend, in vector of DecodeWidth */
   val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new StaticInst))
   decodeConnectFromFrontend.zip(decodeFromFrontend).map(x => x._1.connectCtrlFlow(x._2.bits))
+
+  /**
+   * DecodeStage's input:
+   *   decode.io.in(i).valid:
+   *     decodeBufValid(0) is true : decodeBufValid(i)            | from decode buffer
+   *                         false : decodeFromFrontend(i).valid  | from frontend
+   *
+   *   decodeFromFrontend(i).ready:
+   *     decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+   *     valid instr in input, no instr in decode buffer, decodeFromFrontend(i) is valid, no redirection
+   *
+   *   decode.io.in(i).bits:
+   *     decodeBufValid(i) is true : decodeBufBits(i)             | from decode buffer
+   *                         false : decodeConnectFromFrontend(i) | from frontend
+   */
   decode.io.in.zipWithIndex.foreach { case (decodeIn, i) =>
     decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
     decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
+  /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
   io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts

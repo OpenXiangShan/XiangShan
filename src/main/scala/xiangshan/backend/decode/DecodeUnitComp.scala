@@ -1,19 +1,19 @@
 /***************************************************************************************
-  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-  * Copyright (c) 2020-2021 Peng Cheng Laboratory
-  *
-  * XiangShan is licensed under Mulan PSL v2.
-  * You can use this software according to the terms and conditions of the Mulan PSL v2.
-  * You may obtain a copy of Mulan PSL v2 at:
-  *          http://license.coscl.org.cn/MulanPSL2
-  *
-  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-  *
-  * See the Mulan PSL v2 for more details.
-  ***************************************************************************************/
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.decode
 
@@ -83,24 +83,28 @@ trait VectorConstants {
   val MAX_INDEXED_LS_UOPNUM = 64
 }
 
+class DecodeUnitCompInput(implicit p: Parameters) extends XSBundle {
+  val simpleDecodedInst = new DecodedInst
+  val uopInfo = new UopInfo
+}
+
+class DecodeUnitCompOutput(implicit p: Parameters) extends XSBundle {
+  val complexDecodedInsts = Vec(RenameWidth, DecoupledIO(new DecodedInst))
+}
+
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   val redirect = Input(Bool())
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val vtypeBypass = Input(new VType)
   // When the first inst in decode vector is complex inst, pass it in
-  val in = Flipped(DecoupledIO(new Bundle {
-    val simpleDecodedInst = new DecodedInst
-    val uopInfo = new UopInfo
-  }))
-  val out = new Bundle {
-    val complexDecodedInsts = Vec(RenameWidth, DecoupledIO(new DecodedInst))
-  }
+  val in = Flipped(DecoupledIO(new DecodeUnitCompInput))
+  val out = new DecodeUnitCompOutput
   val complexNum = Output(UInt(3.W))
 }
 
 /**
-  * @author zly
-  */
+ * @author zly
+ */
 class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnitConstants with VectorConstants {
   val io = IO(new DecodeUnitCompIO)
 
@@ -1945,11 +1949,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // therefore, blockback and flush pipe
   fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
 
+  /** Generate output insts and valid signals */
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
     outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
   }
 
+  /** Generate number of valid output insts */
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
   inReady := state === s_idle || state === s_active && thisAllOut
 

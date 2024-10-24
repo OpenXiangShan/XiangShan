@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.decode
 
@@ -39,7 +39,7 @@ import yunsuan.{VfaluType, VfcvtType}
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
  */
-abstract trait DecodeConstants {
+trait DecodeConstants {
   // This X should be used only in 1-bit signal. Otherwise, use BitPat("b???") to align with the width of UInt.
   def X = BitPat("b0")
   def N = BitPat("b0")
@@ -507,8 +507,8 @@ object ZicondDecode extends DecodeConstants {
 }
 
 /**
-  * "Zimop" Extension for May-Be-Operations
-  */
+ * "Zimop" Extension for May-Be-Operations
+ */
 object ZimopDecode extends DecodeConstants {
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     // temp use addi to decode MOP_R and MOP_RR
@@ -656,10 +656,10 @@ case class Imm_VSETVLI() extends Imm(11){
     instr(30, 20)
   }
   /**
-    * get VType from extended imm
-    * @param extedImm
-    * @return VType
-    */
+   * get VType from extended imm
+   * @param extedImm
+   * @return VType
+   */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
     vtype := extedImm(10, 0).asTypeOf(new InstVType)
@@ -677,10 +677,10 @@ case class Imm_VSETIVLI() extends Imm(15){
     Cat(uimm5, vtype8)
   }
   /**
-    * get VType from extended imm
-    * @param extedImm
-    * @return VType
-    */
+   * get VType from extended imm
+   * @param extedImm
+   * @return VType
+   */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
     vtype := extedImm(9, 0).asTypeOf(new InstVType)
@@ -758,18 +758,22 @@ case class Imm_LUI_LOAD() {
 /**
  * IO bundle for the Decode unit
  */
+
+class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
+  val ctrlFlow = Input(new StaticInst)
+  val vtype = Input(new VType)
+  val vstart = Input(Vl())
+}
+
 class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
   val decodedInst = Output(new DecodedInst)
   val isComplex = Output(Bool())
   val uopInfo = Output(new UopInfo)
 }
+
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle {
-    val ctrlFlow = Input(new StaticInst)
-    val vtype = Input(new VType)
-    val vstart = Input(Vl())
-  }
-//  val vconfig = Input(UInt(XLEN.W))
+  val enq = new DecodeUnitEnqIO
+  //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val fromCSR = Input(new CSRToDecode)
