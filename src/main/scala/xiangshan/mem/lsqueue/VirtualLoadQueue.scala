@@ -28,6 +28,7 @@ import utility._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.backend.fu.FuType
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -177,7 +178,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
           // init
           addrvalid((index + j.U).value) := false.B
           datavalid((index + j.U).value) := false.B
-          isvec((index + j.U).value) := enqInstr.isVecLoad
+          isvec((index + j.U).value) := FuType.isVLoad(io.enq.req(i).bits.fuType)
           veccommitted((index + j.U).value) := false.B
 
           debug_mmio((index + j.U).value) := false.B

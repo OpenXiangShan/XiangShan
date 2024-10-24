@@ -933,6 +933,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
     // But, the 'numLsElem' that is not a vector is set to 0 when passed to IQ
     enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
+    enqLsqIO.req(i).bits.exceptionVec := 0.U.asTypeOf(ExceptionVec())
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
 
