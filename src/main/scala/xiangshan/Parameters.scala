@@ -566,6 +566,7 @@ case class XSCoreParameters
     HasEncoder     = true,
     TraceEnable    = true,
     TraceGroupNum  = 3,
+    IaddrWidth     = GPAddrBitsSv48x4,
     PrivWidth      = 3,
     ItypeWidth     = 4,
     IlastsizeWidth = 1,
@@ -917,9 +918,9 @@ trait HasXSParameter {
   def HasEncoder             = coreParams.traceParams.HasEncoder
   def TraceEnable            = coreParams.traceParams.TraceEnable
   def CauseWidth             = XLEN
-  def TvalWidth              = XLEN
+  def TvalWidth              = coreParams.traceParams.IaddrWidth
   def PrivWidth              = coreParams.traceParams.PrivWidth
-  def IaddrWidth             = XLEN
+  def IaddrWidth             = coreParams.traceParams.IaddrWidth
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
   def IretireWidthInPipe     = log2Up(RenameWidth * 2)
   def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
