@@ -299,9 +299,12 @@ class ITTageTable
   // only when ctr is null
   update_wdata.target := Mux(io.update.bits.alloc || ctr_null(old_ctr), update_target, io.update.bits.old_target)
 
+  io.update.ready := !update_buff_valid
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
   XSPerfAccumulate("ittage_us_tick_reset", io.update.bits.reset_u)
+  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_table_update_buff_valid", update_buff_valid)
 
   if (BPUDebug && debug) {
     val u = io.update.bits
