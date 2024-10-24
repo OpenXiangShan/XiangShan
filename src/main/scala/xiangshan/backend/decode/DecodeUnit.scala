@@ -950,7 +950,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     // opfff
     FADD_S, FSUB_S, FADD_D, FSUB_D,
     FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
-    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
+    FMAX_H, FMIN_S, FMAX_S, FMIN_D, FMAX_D,
     FMUL_S, FMUL_D,
     FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
