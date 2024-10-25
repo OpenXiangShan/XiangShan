@@ -47,7 +47,7 @@ import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 import xiangshan.mem.{MemUnitParams, MemIssueParams, MemWBPortMap, MemIssueType}
-import xiangshan.mem.{StoreDataUnit, HybridUnit, AtomicsUnit}
+import xiangshan.mem.{StoreDataUnit, StoreAddrUnit, LoadUnit, HybridUnit, AtomicsUnit}
 
 import scala.math.{max, min}
 
@@ -503,7 +503,7 @@ case class XSCoreParameters
     ),
     MemUnitParams(name = "STD1", unitType = StoreDataUnit(), dataBits = 64,
       issueParams = Seq(
-        MemIssueParams(name = "IQStd", issueType = MemIssueType.StoreData, trigger = true, wbPort = MemWBPortMap(0, Some("stdOut")))
+        MemIssueParams(name = "IQStd", issueType = MemIssueType.StoreData, wbPort = MemWBPortMap(0, Some("stdOut")))
       )
     ),
     MemUnitParams(name = "STA0", unitType = StoreAddrUnit(), dataBits = 128,
@@ -512,55 +512,51 @@ case class XSCoreParameters
         MemIssueParams(name = "Vector",      issueType = MemIssueType.VectorStore, trigger = true, wbPort = MemWBPortMap(1, Some("vecOut"))),
         MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true, wbPort = MemWBPortMap(2, Some("mabOut"))),
         MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Prefetch)
-      )
+      ),
       hasPrefetch = true
     ),
     MemUnitParams(name = "STA1", unitType = StoreAddrUnit(), dataBits = 128,
       issueParams = Seq(
         MemIssueParams(name = "IQSta",       issueType = MemIssueType.StoreAddr,   trigger = true, wbPort = MemWBPortMap(0, Some("iqOut"))),
         MemIssueParams(name = "Vector",      issueType = MemIssueType.VectorStore, trigger = true, wbPort = MemWBPortMap(1, Some("vecOut"))),
-        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true),
         MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Prefetch)
-      )
+      ),
       hasPrefetch = true
     ),
     MemUnitParams(name = "LOAD0", unitType = LoadUnit(), dataBits = 128,
       issueParams = Seq(
-        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
-        MemIssueParams(name = "FastReplay",  issueType = MemIssueType.FastReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
-        MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.LoadReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
+        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true, wbPort = MemWBPortMap(0, Some("MabOut"))),
+        MemIssueParams(name = "FastReplay",  issueType = MemIssueType.FastReplay,  trigger = true, wbPort = MemWBPortMap(2, Some("ldOut"))),
+        MemIssueParams(name = "Uncache",     issueType = MemIssueType.Uncache),
+        MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.LoadReplay,  trigger = true, wbPort = MemWBPortMap(1, Some("ldOut"))),
         MemIssueParams(name = "Vector",      issueType = MemIssueType.VectorLoad,  trigger = true, wbPort = MemWBPortMap(1, Some("vecOut"))),
-        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true, wbPort = MemWBPortMap(2, Some("MabOut"))),
-        MemIssueParams(name = "Uncache",     issueType = MemIssueType.Uncache)
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(1, Some("ldOut"))),
         MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Prefetch),
       ),
       hasPrefetch = true
     ),
     MemUnitParams(name = "LOAD1", unitType = LoadUnit(), dataBits = 128,
       issueParams = Seq(
-        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "FastReplay",  issueType = MemIssueType.FastReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.LoadReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "Vector",      issueType = MemIssueType.VectorLoad,  trigger = true, wbPort = MemWBPortMap(1, Some("vecOut"))),
-        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true),
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Prefetch),
       ),
       hasPrefetch = true
     ),
     MemUnitParams(name = "LOAD2", unitType = LoadUnit(), dataBits = 128,
       issueParams = Seq(
-        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "FastReplay",  issueType = MemIssueType.FastReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.LoadReplay,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
-        MemIssueParams(name = "Vector",      issueType = MemIssueType.VectorLoad,  trigger = true, wbPort = MemWBPortMap(1, Some("vecOut"))),
-        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.MisalignBuf, trigger = true),
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.ScalarLoad,  trigger = true, wbPort = MemWBPortMap(0, Some("ldOut"))),
         MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Prefetch),
       ),
       hasPrefetch = true
     ),
     MemUnitParams(name = "ATOMICS0", unitType = AtomicsUnit(), dataBits = 64,
       issueParams = Seq(
-        MemIssueParams(name = "IQ",          issueType = MemIssueType.Atomic,      tirgger = true, wbPort = MemWBPortMap(0, Some("amoOut")))
+        MemIssueParams(name = "IQ",          issueType = MemIssueType.Atomic,      trigger = true, wbPort = MemWBPortMap(0, Some("amoOut")))
       ),
     ),
   )
