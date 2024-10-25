@@ -381,8 +381,12 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   io.victim.vSetIdx.valid := acquireArb.io.out.fire
   io.victim.vSetIdx.bits  := acquireArb.io.out.bits.vSetIdx
   val waymask = UIntToOH(mshr_resp.bits.waymask)
-  val fetch_resp_valid = mshr_resp.valid && last_fire_r && !io.flush && !io.fencei
-  val write_sram_valid = fetch_resp_valid && !corrupt_r
+  // NOTE: when flush/fencei, missUnit will still send response to mainPipe/prefetchPipe
+  //       this is intentional to fix timing (io.flush -> mainPipe/prefetchPipe s2_miss -> s2_ready -> ftq ready)
+  //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
+  val fetch_resp_valid = mshr_resp.valid && last_fire_r
+  // NOTE: but we should not write meta/dataArray when flush/fencei
+  val write_sram_valid = fetch_resp_valid && !corrupt_r && !io.flush && !io.fencei
 
   // write SRAM
   io.meta_write.bits.generate(tag     = getPhyTagFromBlk(mshr_resp.bits.blkPaddr),
