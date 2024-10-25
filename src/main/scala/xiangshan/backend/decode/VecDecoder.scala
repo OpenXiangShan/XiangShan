@@ -511,9 +511,15 @@ object VecDecoder extends DecodeConstants {
     FCVT_LU_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.vfcvt_xufv,  T, F, F, UopSplitType.SCA_SIM),
     FCVT_S_D  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.vfncvt_ffw,  F, T, F, UopSplitType.SCA_SIM),
     FCVT_D_S  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.vfwcvt_ffv,  F, T, F, UopSplitType.SCA_SIM),
+    //Scala Half-Precision Float Convert Inst.
+    FCVT_H_S  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.fcvt_h_s,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_S_H  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.fcvt_s_h,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_H_D  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.fcvt_h_d,  F, T, F, UopSplitType.SCA_SIM),
+    FCVT_D_H  -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, VfcvtType.fcvt_d_h,  F, T, F, UopSplitType.SCA_SIM),
     // Scalar Float Point f2i MV Inst.
     FMV_X_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     FMV_X_W -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
+    FMV_X_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     // donot wflags
     FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.falu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
     FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.falu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
@@ -757,10 +763,10 @@ object VecDecoder extends DecodeConstants {
     VSOXEI32_V    -> VST(SrcType.vp,  VstuType.vsoxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     VSOXEI64_V    -> VST(SrcType.vp,  VstuType.vsoxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     // 7.7. Unit-stride Fault-Only-First Loads
-    VLE8FF_V      -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE16FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE32FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
-    VLE64FF_V     -> VLD(SrcType.X,   VlduType.vleff, ff = T),
+    VLE8FF_V      -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE16FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE32FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
+    VLE64FF_V     -> VLD(SrcType.X,   VlduType.vleff, uopSplitType = UopSplitType.VEC_US_FF_LD, ff = T),
     // 7.8. Vector Load/Store Segment Instructions
     // 7.8.1. Vector Unit-Stride Segment Loads and Stores
     // TODO

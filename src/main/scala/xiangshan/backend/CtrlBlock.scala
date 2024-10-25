@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst, TrapInstInfo}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -140,7 +140,7 @@ class CtrlBlockImp(
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
     x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
-      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+      (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
@@ -295,10 +295,16 @@ class CtrlBlockImp(
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
   private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr, s2_robFlushPc)
+  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.pc, s2_robFlushPc)
+  val s5_trapTargetIAF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIAF, false.B)
+  val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
+  val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIAF := RegEnable(s5_trapTargetIAF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIPF := RegEnable(s5_trapTargetIPF, s5_flushFromRobValidAhead)
+    io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
   }
 
   for (i <- 0 until DecodeWidth) {
@@ -310,12 +316,12 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
-  decode.io.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.commitVType := rob.io.toDecode.commitVType
-  decode.io.walkVType := rob.io.toDecode.walkVType
+  decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
+  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
+  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
+  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
-  decode.io.vtypeRedirect := s1_s3_redirect.valid
 
   // add decode Buf for in.ready better timing
   val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
@@ -421,7 +427,6 @@ class CtrlBlockImp(
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodedInst)))
-
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
@@ -487,6 +492,7 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
+  rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
@@ -582,6 +588,7 @@ class CtrlBlockImp(
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
+  rob.io.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
   io.redirect := s1_s3_redirect
 
@@ -600,11 +607,11 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat    .foreach(_ := rat.io.diff_int_rat.get)
-  io.debug_fp_rat     .foreach(_ := rat.io.diff_fp_rat.get)
-  io.debug_vec_rat    .foreach(_ := rat.io.diff_vec_rat.get)
-  io.debug_v0_rat.foreach(_ := rat.io.diff_v0_rat.get)
-  io.debug_vl_rat.foreach(_ := rat.io.diff_vl_rat.get)
+  io.diff_int_rat.foreach(_ := rat.io.diff_int_rat.get)
+  io.diff_fp_rat .foreach(_ := rat.io.diff_fp_rat.get)
+  io.diff_vec_rat.foreach(_ := rat.io.diff_vec_rat.get)
+  io.diff_v0_rat .foreach(_ := rat.io.diff_v0_rat.get)
+  io.diff_vl_rat .foreach(_ := rat.io.diff_vl_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
@@ -621,6 +628,32 @@ class CtrlBlockImp(
   decode.io.vstart := io.toDecode.vstart
   // backend to rob
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
+
+  io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
+
+  io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
+  io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo
+  // T  : rat receive rabCommit
+  // T+1: rat return oldPdest
+  io.toVecExcpMod.ratOldPest match {
+    case fromRat =>
+      (0 until RabCommitWidth).foreach { idx =>
+        fromRat.v0OldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).v0Wen
+        )
+        fromRat.v0OldVdPdest(idx).bits := rat.io.v0_old_pdest(idx)
+        fromRat.vecOldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).vecWen
+        )
+        fromRat.vecOldVdPdest(idx).bits := rat.io.vec_old_pdest(idx)
+      }
+  }
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -661,6 +694,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
   }
+  val toCSR = new Bundle {
+    val trapInstInfo = Output(ValidIO(new TrapInstInfo))
+  }
   val intIQValidNumVec = Input(MixedVec(params.genIntIQValidNumBundle))
   val fpIQValidNumVec = Input(MixedVec(params.genFpIQValidNumBundle))
   val fromWB = new Bundle {
@@ -695,6 +731,16 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vstart = Input(Vl())
   }
 
+  val fromVecExcpMod = Input(new Bundle {
+    val busy = Bool()
+  })
+
+  val toVecExcpMod = Output(new Bundle {
+    val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
+    val excpInfo = ValidIO(new VecExcpInfo)
+    val ratOldPest = new RatToVecExcpMod
+  })
+
   val perfInfo = Output(new Bundle{
     val ctrlInfo = new Bundle {
       val robFull   = Bool()
@@ -703,11 +749,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vec_rat     = if (params.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_v0_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vl_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_int_rat = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_fp_rat  = if (params.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vec_rat = if (params.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_v0_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())

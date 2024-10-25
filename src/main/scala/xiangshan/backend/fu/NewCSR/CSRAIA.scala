@@ -13,12 +13,12 @@ import scala.collection.immutable.SeqMap
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x30.U ||
+      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
       value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.miselect)
 
@@ -40,12 +40,12 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 
   val siselect = Module(new CSRModule("Siselect", new SISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x30.U ||
+      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
       value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.siselect)
 
@@ -67,11 +67,10 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 
   val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.vsiselect)
 
@@ -224,15 +223,15 @@ object SISelectField extends ISelectField(
 )
 
 class VSISelectBundle extends CSRBundle {
-  val ALL = VSISelectField(log2Up(0x1FF), 0, null)
+  val ALL = VSISelectField(log2Up(0x1FF), 0, null).withReset(0.U)
 }
 
 class MISelectBundle extends CSRBundle {
-  val ALL = MISelectField(log2Up(0xFF), 0, null)
+  val ALL = MISelectField(log2Up(0xFF), 0, null).withReset(0.U)
 }
 
 class SISelectBundle extends CSRBundle {
-  val ALL = SISelectField(log2Up(0xFF), 0, null)
+  val ALL = SISelectField(log2Up(0xFF), 0, null).withReset(0.U)
 }
 
 class TopIBundle extends CSRBundle {

@@ -115,6 +115,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val s3_pushAddr = Input(UInt(VAddrBits.W))
       val spec_pop_addr = Output(UInt(VAddrBits.W))
 
+      val commit_valid      = Input(Bool())
       val commit_push_valid = Input(Bool())
       val commit_pop_valid = Input(Bool())
       val commit_push_addr = Input(UInt(VAddrBits.W))
@@ -140,6 +141,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val NOS = Output(new RASPtr)
       val BOS = Output(new RASPtr)
 
+      val spec_near_overflow = Output(Bool())
+
       val debug = new RASDebug
     })
 
@@ -155,7 +158,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val TOSW = RegInit(RASPtr(false.B, 0.U))
     val BOS = RegInit(RASPtr(false.B, 0.U))
 
-    val spec_overflowed = RegInit(false.B)
+    val spec_near_overflowed = RegInit(false.B)
 
     val writeBypassEntry = Reg(new RASEntry)
     val writeBypassNos = Reg(new RASPtr)
@@ -220,11 +223,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     def specPtrInc(ptr: RASPtr) = ptr + 1.U
     def specPtrDec(ptr: RASPtr) = ptr - 1.U
 
-
-
-
-
-
     when (io.redirect_valid && io.redirect_isCall) {
       writeBypassValidWire := true.B
       writeBypassValid := true.B
@@ -241,8 +239,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     } .otherwise {
       writeBypassValidWire := writeBypassValid
     }
-
-
 
     val topEntry = getTop(ssp, sctr, TOSR, TOSW, true)
     val topNos = getTopNos(TOSR, true)
@@ -380,8 +376,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     s3_missPushAddr := io.s3_meta.TOSW
     s3_missPushNos := io.s3_meta.TOSR
 
-
-
     realWriteEntry := Mux(io.redirect_isCall, realWriteEntry_next,
       Mux(io.s3_missed_push, s3_missPushEntry,
       realWriteEntry_next))
@@ -412,13 +406,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         ssp := ptrInc(currentSsp)
         sctr := 0.U
       }
-      // if we are draining the capacity of spec queue, force move BOS forward
-      when (specPtrInc(currentTOSW) === BOS) {
-        BOS := specPtrInc(BOS)
-        spec_overflowed := true.B;
-      }
     }
-    XSPerfAccumulate("spec_overflowed", TOSW.value === BOS.value)
 
     when (io.spec_push_valid) {
       specPush(io.spec_push_addr, ssp, sctr, TOSR, TOSW, topEntry)
@@ -498,8 +486,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     val commit_push_addr = spec_queue(io.commit_meta_TOSW.value).retAddr
 
-
-
     when (io.commit_push_valid) {
       val nsp_update = Wire(UInt(log2Up(rasSize).W))
       when (io.commit_meta_ssp =/= nsp) {
@@ -517,14 +503,15 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).retAddr := commit_push_addr
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
-      // when overflow, BOS may be forced move forward, do not revert those changes
-      when (!spec_overflowed || isAfter(io.commit_meta_TOSW, BOS)) {
-        BOS := io.commit_meta_TOSW
-        spec_overflowed := false.B
-      }
 
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
+    }
+
+    when (io.commit_push_valid) {
+      BOS := io.commit_meta_TOSW
+    } .elsewhen(io.commit_valid && (distanceBetween(io.commit_meta_TOSW,BOS) > 2.U)) {
+      BOS := specPtrDec(io.commit_meta_TOSW)
     }
 
     when (io.redirect_valid) {
@@ -541,6 +528,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
+    when(distanceBetween(TOSW,BOS) > (rasSpecSize - 4).U){
+      spec_near_overflowed  := true.B
+    }.otherwise{
+      spec_near_overflowed  := false.B
+    }
+
+    io.spec_near_overflow   := spec_near_overflowed
+    XSPerfAccumulate("spec_near_overflow", spec_near_overflowed)
     io.debug.commit_stack.zipWithIndex.foreach{case (a, i) => a := commit_stack(i)}
     io.debug.spec_nos.zipWithIndex.foreach{case (a, i) => a := spec_nos(i)}
     io.debug.spec_queue.zipWithIndex.foreach{ case (a, i) => a := spec_queue(i)}
@@ -590,8 +585,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val s3_jalr_target = io.out.s3.full_pred.jalr_target
   // val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred(2).targets.last
   // val s3_last_target_out = io.out.s3.full_pred(2).targets.last
-  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr
-  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret
+  val s3_is_jalr = io.in.bits.resp_in(0).s3.full_pred(2).is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
   // assert(is_jalr && is_ret || !is_ret)
   when(s3_is_ret && io.ctrl.ras_enable) {
     io.out.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
@@ -604,8 +599,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire(2))
   val s3_popped_in_s2 = RegEnable(s2_spec_pop,  io.s2_fire(2))
-  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call
-  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret
+  val s3_push = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_pop  = io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
 
   val s3_cancel = io.s3_fire(2) && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
   stack.s2_fire := io.s2_fire(2)
@@ -626,6 +621,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val last_stage_meta = Wire(new RASMeta)
   last_stage_meta.ssp := s3_meta.ssp
   last_stage_meta.TOSW := s3_meta.TOSW
+
+  io.s1_ready   := !stack.spec_near_overflow
 
   io.out.last_stage_spec_info.sctr  := s3_meta.sctr
   io.out.last_stage_spec_info.ssp := s3_meta.ssp
@@ -658,6 +655,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val updateMeta = io.update.bits.meta.asTypeOf(new RASMeta)
   val updateValid = io.update.valid
 
+  stack.commit_valid      := updateValid  
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid := updateValid && update.is_ret_taken
   stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)

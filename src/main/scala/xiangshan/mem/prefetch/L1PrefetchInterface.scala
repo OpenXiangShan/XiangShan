@@ -31,13 +31,19 @@ trait HasL1PrefetchSourceParameter {
   // l1 prefetch source related
   def L1PfSourceBits = 3
   def L1_HW_PREFETCH_NULL = 0.U
-  def L1_HW_PREFETCH_STRIDE = 1.U
-  def L1_HW_PREFETCH_STREAM = 2.U
-  def L1_HW_PREFETCH_STORE  = 3.U
+  def L1_HW_PREFETCH_CLEAR = 1.U // used to be a prefetch, clear by demand request
+  def L1_HW_PREFETCH_STRIDE = 2.U
+  def L1_HW_PREFETCH_STREAM = 3.U
+  def L1_HW_PREFETCH_STORE  = 4.U
+  
+  // ------------------------------------------------------------------------------------------------------------------------
+  // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
+  // ------------------------------------------------------------------------------------------------------------------------
 
-  def isFromL1Prefetch(value: UInt) = value =/= L1_HW_PREFETCH_NULL
-  def isFromStride(value: UInt)     = value === L1_HW_PREFETCH_STRIDE
-  def isFromStream(value: UInt)     = value === L1_HW_PREFETCH_STREAM
+  def isPrefetchRelated(value: UInt) = value >= L1_HW_PREFETCH_CLEAR
+  def isFromL1Prefetch(value: UInt)  = value >  L1_HW_PREFETCH_CLEAR
+  def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
+  def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
 }
 
 class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
@@ -88,7 +94,7 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
   val rand_vaddr = DelayN(io.vaddr, 2)
   val rand_paddr = DelayN(io.paddr, 2)
 
-  io.req.bits.paddr := 0x80000000L.U + rand_offset
+  io.req.bits.paddr := PmemLowBounds.min.U + rand_offset
   io.req.bits.alias := io.req.bits.paddr(13,12)
   io.req.bits.confidence := LFSR64(seed=Some(789L))(4,0) === 0.U
   io.req.bits.is_store := LFSR64(seed=Some(890L))(4,0) === 0.U

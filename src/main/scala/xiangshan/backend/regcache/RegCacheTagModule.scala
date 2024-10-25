@@ -93,7 +93,6 @@ class RegCacheTagModule
     }
     .elsewhen (io.cancelVec(i)) {
       v(i)   := false.B
-      loadDependency(i) := 0.U.asTypeOf(loadDependency(i))
     }
     .elsewhen (loadDependency(i).map(x => x.orR).reduce(_ || _)) {
       loadDependency(i) := loadDependency(i).map(l => l << 1)

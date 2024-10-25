@@ -43,6 +43,7 @@ import huancun._
 import huancun.debug._
 import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
+import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
@@ -67,8 +68,10 @@ case class XSCoreParameters
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
-  VAddrBits: Int = 39,
-  GPAddrBits: Int = 41,
+  VAddrBitsSv39: Int = 39,
+  GPAddrBitsSv39x4: Int = 41,
+  VAddrBitsSv48: Int = 48,
+  GPAddrBitsSv48x4: Int = 50,
   HasFPU: Boolean = true,
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
@@ -85,6 +88,7 @@ case class XSCoreParameters
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableFauFTB: Boolean = true,
+  EnableSv48: Boolean = true,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -232,6 +236,8 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
+  VFOFBufferSize: Int = 8,
+  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -241,11 +247,14 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = false,
   EnableUncacheWriteOutstanding: Boolean = false,
+  EnableHardwareStoreMisalign: Boolean = true,
+  EnableHardwareLoadMisalign: Boolean = true,
   EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = false,
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
+  HasCMO: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
@@ -274,7 +283,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -283,7 +292,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
@@ -292,7 +301,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
@@ -301,7 +310,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
@@ -310,7 +319,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = false
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -416,7 +425,7 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = fpPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.VecDqDeqWidth,
+      numUopIn = dpParams.FpDqDeqWidth,
     )
   }
 
@@ -450,31 +459,31 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(7, 2)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(6, 2)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), FpWB(5, 0)), Seq(Seq(IntRD(8, 0))), true, 2),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(6, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(7, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0), VlWB(port = 3, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(12, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
       IssueBlockParams(Seq(
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(3, 2), FpRD(13, 0)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+      ), numEntries = 16, numEnq = 1, numComp = 15),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
       numDeqOutside = 0,
@@ -527,6 +536,10 @@ case class XSCoreParameters
     ),
     iqWakeUpParams,
   )
+
+  // Parameters for trace extension.
+  // Trace parameters is useful for XSTOP.
+  val TraceGroupNum          = 3 // Width to Encoder
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -551,8 +564,11 @@ trait HasXSParameter {
   implicit val p: Parameters
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  def PmemRanges = p(SoCParamsKey).PmemRanges
+  def PmemLowBounds = PmemRanges.unzip._1
+  def PmemHighBounds = PmemRanges.unzip._2
   final val PageOffsetWidth = 12
-  def NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
+  def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
@@ -569,20 +585,40 @@ trait HasXSParameter {
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension
+  def EnableSv48 = coreParams.EnableSv48
   def HasDiv = coreParams.HasDiv
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  def GPAddrBits = coreParams.GPAddrBits
+  def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
+  def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
+  def GPAddrBits = {
+    if (EnableSv48)
+      coreParams.GPAddrBitsSv48x4
+    else
+      coreParams.GPAddrBitsSv39x4
+  }
   def VAddrBits = {
-    if(HasHExtension){
-      coreParams.GPAddrBits
-    }else{
-      coreParams.VAddrBits
+    if (HasHExtension) {
+      if (EnableSv48)
+        coreParams.GPAddrBitsSv48x4
+      else
+        coreParams.GPAddrBitsSv39x4
+    } else {
+      if (EnableSv48)
+        coreParams.VAddrBitsSv48
+      else
+        coreParams.VAddrBitsSv39
     }
   } // VAddrBits is Virtual Memory addr bits
 
-  def VAddrMaxBits = coreParams.VAddrBits max coreParams.GPAddrBits
+  def VAddrMaxBits = {
+    if(EnableSv48) {
+      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
+    } else {
+      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
+    }
+  }
 
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
@@ -688,8 +724,13 @@ trait HasXSParameter {
   def VfPhyRegs = coreParams.vfPreg.numEntries
   def V0PhyRegs = coreParams.v0Preg.numEntries
   def VlPhyRegs = coreParams.vlPreg.numEntries
-  def MaxPhyPregs = IntPhyRegs max VfPhyRegs
-  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(FpPhyRegs) max log2Up(VfPhyRegs)
+  def MaxPhyRegs = Seq(IntPhyRegs, FpPhyRegs, VfPhyRegs, V0PhyRegs, VlPhyRegs).max
+  def IntPhyRegIdxWidth = log2Up(IntPhyRegs)
+  def FpPhyRegIdxWidth = log2Up(FpPhyRegs)
+  def VfPhyRegIdxWidth = log2Up(VfPhyRegs)
+  def V0PhyRegIdxWidth = log2Up(V0PhyRegs)
+  def VlPhyRegIdxWidth = log2Up(VlPhyRegs)
+  def PhyRegIdxWidth = Seq(IntPhyRegIdxWidth, FpPhyRegIdxWidth, VfPhyRegIdxWidth, V0PhyRegIdxWidth, VlPhyRegIdxWidth).max
   def RobSize = coreParams.RobSize
   def RabSize = coreParams.RabSize
   def VTypeBufferSize = coreParams.VTypeBufferSize
@@ -752,6 +793,7 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
+  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward
@@ -760,11 +802,14 @@ trait HasXSParameter {
   def EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   def EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   def EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  def EnableHardwareStoreMisalign = coreParams.EnableHardwareStoreMisalign
+  def EnableHardwareLoadMisalign = coreParams.EnableHardwareLoadMisalign
   def EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
   def EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def HasCMO = coreParams.HasCMO && p(EnableCHI)
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
@@ -815,7 +860,7 @@ trait HasXSParameter {
   def LFSTEnable = true
 
   def PCntIncrStep: Int = 6
-  def numPCntHc: Int = 25
+  def numPCntHc: Int = 12
   def numPCntPtw: Int = 19
 
   def numCSRPCntFrontend = 8
@@ -824,7 +869,13 @@ trait HasXSParameter {
   def numCSRPCntHc       = 5
   def printEventCoding   = true
 
+  // Vector load exception
+  def maxMergeNumPerCycle = 4
+
   // Parameters for Sdtrig extension
   protected def TriggerNum = 4
   protected def TriggerChainMaxLength = 2
+
+  // Parameters for Trace extension
+  def TraceGroupNum          = coreParams.TraceGroupNum
 }

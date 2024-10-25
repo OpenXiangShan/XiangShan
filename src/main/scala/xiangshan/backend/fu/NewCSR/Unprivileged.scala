@@ -21,7 +21,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val OF = WARL(2, wNoFilter)
     val DZ = WARL(3, wNoFilter)
     val NV = WARL(4, wNoFilter)
-    val FRM = WARL(7, 5, wNoFilter)
+    val FRM = WARL(7, 5, wNoFilter).withReset(0.U)
   }) with HasRobCommitBundle {
     val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRFFlagsBundle)))
     val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
@@ -30,8 +30,17 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val fflagsRdata = IO(Output(Fflags()))
     val frmRdata = IO(Output(Frm()))
 
+    for (wAlias <- Seq(wAliasFflags, wAliasFfm)) {
+      for ((name, field) <- wAlias.wdataFields.elements) {
+        reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+          wAlias.wen && field.asInstanceOf[CSREnumType].isLegal,
+          field.asInstanceOf[CSREnumType]
+        )
+      }
+    }
+
     // write connection
-    this.wfn(reg)(Seq(wAliasFflags, wAliasFfm))
+    reconnectReg()
 
     when (robCommit.fflags.valid) {
       reg.NX := robCommit.fflags.bits(0) || reg.NX
@@ -82,8 +91,17 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val vxsat = IO(Output(Vxsat()))
     val vxrm  = IO(Output(Vxrm()))
 
+    for (wAlias <- Seq(wAliasVxsat, wAlisaVxrm)) {
+      for ((name, field) <- wAlias.wdataFields.elements) {
+        reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+          wAlias.wen && field.asInstanceOf[CSREnumType].isLegal,
+          field.asInstanceOf[CSREnumType]
+        )
+      }
+    }
+
     // write connection
-    this.wfn(reg)(Seq(wAliasVxsat, wAlisaVxrm))
+    reconnectReg()
 
     when(robCommit.vxsat.valid) {
       reg.VXSAT := reg.VXSAT.asBool || robCommit.vxsat.bits.asBool

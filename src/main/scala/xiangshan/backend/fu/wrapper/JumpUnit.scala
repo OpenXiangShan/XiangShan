@@ -37,11 +37,15 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.robIdx := io.in.bits.ctrl.robIdx
   redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
+  redirect.fullTarget := jumpDataModule.io.target
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
   redirect.cfiUpdate.target := jumpDataModule.io.target
   redirect.cfiUpdate.pc := io.in.bits.data.pc.get
   redirect.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken
+  redirect.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
+  redirect.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
+  redirect.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready

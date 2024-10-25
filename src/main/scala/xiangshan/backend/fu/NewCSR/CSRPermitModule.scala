@@ -20,7 +20,8 @@ class CSRPermitModule extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  private val (mret, sret, dret) = (
+  private val (mnret, mret, sret, dret) = (
+    io.in.mnret,
     io.in.mret,
     io.in.sret,
     io.in.dret,
@@ -121,6 +122,10 @@ class CSRPermitModule extends Module {
   private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
 
   private val rwIllegal = csrIsRO && wen
+
+  private val mnret_EX_II = mnret && !privState.isModeM
+  private val mnret_EX_VI = false.B
+  private val mnretIllegal = mnret_EX_VI || mnret_EX_II
 
   private val mret_EX_II = mret && !privState.isModeM
   private val mret_EX_VI = false.B
@@ -226,8 +231,7 @@ class CSRPermitModule extends Module {
    * Sm/Ssstateen end
    */
 
-  private val rwStimecmp_EX_II = csrAccess && ((privState.isModeHS && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.vstimecmp.U ||
-    ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_II = csrAccess && !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
   private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
     wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
 
@@ -248,9 +252,8 @@ class CSRPermitModule extends Module {
 
   private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
     ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-    (privState.isModeVS && vsiselect > 0x1FF.U)) && addr === CSRs.sireg.U
-  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U ||
-    vsiselect >= 0x80.U && vsiselect <= 0xFF.U && vsiselect(0).asBool) || privState.isModeVU) && addr === CSRs.sireg.U
+    (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U)) && addr === CSRs.sireg.U
 
   private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
 
@@ -262,16 +265,17 @@ class CSRPermitModule extends Module {
 
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
-    rwIllegal || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
+    rwIllegal || mnret_EX_II || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
     rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
     rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
-    mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
+    mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
 
-  io.out.hasLegalWen  := wen  && !(io.out.EX_II || io.out.EX_VI)
-  io.out.hasLegalMret := mret && !mretIllegal
-  io.out.hasLegalSret := sret && !sretIllegal
-  io.out.hasLegalDret := dret && !dretIllegal
+  io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
+  io.out.hasLegalMNret := mnret && !mnretIllegal
+  io.out.hasLegalMret  := mret  && !mretIllegal
+  io.out.hasLegalSret  := sret  && !sretIllegal
+  io.out.hasLegalDret  := dret  && !dretIllegal
 
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
@@ -288,6 +292,7 @@ class CSRPermitIO extends Bundle {
     }
     val privState = new PrivState
     val debugMode = Bool()
+    val mnret = Bool()
     val mret = Bool()
     val sret = Bool()
     val dret = Bool()
@@ -338,10 +343,11 @@ class CSRPermitIO extends Bundle {
   })
 
   val out = Output(new Bundle {
-    val hasLegalWen  = Bool()
-    val hasLegalMret = Bool()
-    val hasLegalSret = Bool()
-    val hasLegalDret = Bool()
+    val hasLegalWen   = Bool()
+    val hasLegalMNret = Bool()
+    val hasLegalMret  = Bool()
+    val hasLegalSret  = Bool()
+    val hasLegalDret  = Bool()
     val hasLegalWriteFcsr = Bool()
     val hasLegalWriteVcsr = Bool()
     val EX_II = Bool()

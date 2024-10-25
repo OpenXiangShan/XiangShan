@@ -62,8 +62,11 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when (!menvcfg.STCE.asBool && !privState.isModeM && accessStimecmp) {
+    when (!menvcfg.STCE.asBool) {
       regOut.STCE := 0.U
+    }
+    when (!menvcfg.PBMTE) {
+      regOut.PBMTE := 0.U
     }
   })
     .setAddr(CSRs.henvcfg)
@@ -259,6 +262,7 @@ class HedelegBundle extends ExceptionBundle {
   this.EX_LGPF  .setRO().withReset(0.U)
   this.EX_VI    .setRO().withReset(0.U)
   this.EX_SGPF  .setRO().withReset(0.U)
+  this.EX_DBLTRP.setRO().withReset(0.U) // double trap is not delegatable
 }
 
 class HidelegBundle extends InterruptBundle {
@@ -335,6 +339,7 @@ class HEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }
+  this.PBMTE.setRW().withReset(0.U)
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>
@@ -343,6 +348,4 @@ trait HypervisorBundle { self: CSRModule[_] =>
 
 trait HasHypervisorEnvBundle { self: CSRModule[_] =>
   val menvcfg = IO(Input(new MEnvCfg))
-  val privState = IO(Input(new PrivState))
-  val accessStimecmp = IO(Input(Bool()))
 }

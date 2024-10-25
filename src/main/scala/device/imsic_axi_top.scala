@@ -66,6 +66,8 @@ class imsic_axi_top(
 
 class imsic_bus_top(
   useTL: Boolean = false,
+  baseAddress: (BigInt, BigInt), /* (M-mode, S/VS-mode) */
+  maxHarts: Int = 512,
   AXI_ID_WIDTH: Int = 5,
   AXI_ADDR_WIDTH: Int = 32,
   NR_INTP_FILES: Int = 7,
@@ -78,22 +80,43 @@ class imsic_bus_top(
   private val INTP_FILE_WIDTH = log2Ceil(NR_INTP_FILES)
   private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
 
-  private val tuple_axi4_tl = Option.when(useTL) {
-    val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        "tl",
-        sourceId = IdRange(0, 1)
-      ))
-    ))))
-    val axi4nodes = Seq.fill(2)(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+  private val m_base = baseAddress._1;
+  private val m_size = maxHarts * 0x1000;
+  private val s_base = baseAddress._2;
+  private val s_size = maxHarts * 0x8000;
+
+  println(f"IMSIC: address-mapping for ${maxHarts} HARTs")
+  println(f"IMSIC:   M-mode:    [0x${m_base}%08X, 0x${m_base + m_size - 1}%08X]")
+  println(f"IMSIC:   S/VS-mode: [0x${s_base}%08X, 0x${s_base + s_size - 1}%08X]")
+
+  private val axi4nodes = Seq(
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       Seq(AXI4SlaveParameters(
-        Seq(AddressSet(0x0, (1L << AXI_ADDR_WIDTH) - 1)),
+        Seq(AddressSet(m_base, m_size - 1)),
         regionType = RegionType.UNCACHED,
         supportsWrite = TransferSizes(1, 4),
         supportsRead = TransferSizes(1, 4),
         interleavedId = Some(0)
       )),
       beatBytes = 4
+    ))),
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      Seq(AXI4SlaveParameters(
+        Seq(AddressSet(s_base, s_size - 1)),
+        regionType = RegionType.UNCACHED,
+        supportsWrite = TransferSizes(1, 4),
+        supportsRead = TransferSizes(1, 4),
+        interleavedId = Some(0)
+      )),
+      beatBytes = 4
+    ))))
+
+  val tl = Option.when(useTL) {
+    val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        "tl",
+        sourceId = IdRange(0, 16)
+      ))
     ))))
     axi4nodes zip tlnodes foreach { case (axi4node, tlnode) =>
       axi4node :=
@@ -104,16 +127,28 @@ class imsic_bus_top(
         TLToAXI4() :=
         TLWidthWidget(4) :=
         TLFIFOFixer() :=
+        TLBuffer() :=
         tlnode
     }
 
-    (axi4nodes, tlnodes)
+    tlnodes
   }
 
-  val axi4 = tuple_axi4_tl.map(_._1)
-  private val tl = tuple_axi4_tl.map(_._2)
   val tl_m = tl.map(x => InModuleBody(x(0).makeIOs()))
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
+
+  val axiMasterNode = Option.when(!useTL) {
+    val node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      Seq(AXI4MasterParameters(
+        name = "s_axi_",
+        id = IdRange(0, 1 << AXI_ID_WIDTH)
+      ))
+    )))
+    val xbar = AXI4Xbar(TLArbiter.lowestIndexFirst)
+    axi4nodes.foreach { _ := xbar }
+    xbar := AXI4Buffer() := node
+    node
+  }
 
   class imsic_bus_top_imp(wrapper: imsic_bus_top) extends LazyModuleImp(wrapper) {
     // imsic csr top io
@@ -121,8 +156,7 @@ class imsic_bus_top(
     val o_msi_info_vld = IO(Output(Bool()))
 
     // axi4lite io
-    val m_s = Option.when(!useTL)(IO(Flipped(new VerilogAXI4LiteRecord(AXI_ADDR_WIDTH, 32, AXI_ID_WIDTH))))
-    val s_s = Option.when(!useTL)(IO(Flipped(new VerilogAXI4LiteRecord(AXI_ADDR_WIDTH, 32, AXI_ID_WIDTH))))
+    val axi4lite = Option.when(!useTL)(IO(Flipped(new VerilogAXI4LiteRecord(AXI_ADDR_WIDTH, 32, AXI_ID_WIDTH))))
 
     // imsic axi top
     val u_imsic_axi_top = Module(new imsic_axi_top)
@@ -137,14 +171,14 @@ class imsic_bus_top(
     o_msi_info_vld := u_imsic_axi_top.io.o_msi_info_vld
 
     // connection: axi4lite
-    m_s.foreach(_ <> u_imsic_axi_top.io.m_s)
-    s_s.foreach(_ <> u_imsic_axi_top.io.s_s)
+    axi4lite.foreach {
+      _.viewAs[AXI4LiteBundle].connectToAXI4(wrapper.axiMasterNode.get.out.head._1)
+    }
 
     // connection: axi4
-    wrapper.axi4.foreach { axi4 =>
-      axi4.map(_.in.head._1) zip Seq(u_imsic_axi_top.io.m_s, u_imsic_axi_top.io.s_s) foreach {
+    wrapper.axi4nodes.map(_.in.head._1) zip
+      Seq(u_imsic_axi_top.io.m_s, u_imsic_axi_top.io.s_s) foreach {
         case (axi4, axi4lite) => axi4lite.viewAs[AXI4LiteBundle].connectFromAXI4(axi4)
-      }
     }
   }
 

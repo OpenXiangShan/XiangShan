@@ -81,7 +81,7 @@ class XSArgs(object):
         self.config = args.config
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
-        self.with_chiseldb = 0 if args.no_db else None
+        self.with_chiseldb = 0 if args.no_db else 1
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -262,7 +262,7 @@ class XiangShan(object):
         if self.args.numa:
             numa_info = get_free_cores(self.args.threads)
             numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
-        fork_args = "--enable-fork" if self.args.fork else ""
+        fork_args = "--enable-fork -X 10" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
@@ -319,7 +319,8 @@ class XiangShan(object):
             return 0
 
     def __get_ci_cputest(self, name=None):
-        base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
+        # base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
+        base_dir = "/nfs/home/share/ci-workloads/nexus-am-workloads/tests/cputest"
         cputest = os.listdir(base_dir)
         cputest = filter(lambda x: x.endswith(".bin"), cputest)
         cputest = map(lambda x: os.path.join(base_dir, x), cputest)
@@ -329,7 +330,7 @@ class XiangShan(object):
         base_dir = os.path.join(self.args.rvtest_home, "isa/build")
         riscv_tests = os.listdir(base_dir)
         riscv_tests = filter(lambda x: x.endswith(".bin"), riscv_tests)
-        all_rv_tests = ["rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud"]
+        all_rv_tests = ["rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud", "rv64mi"]
         riscv_tests = filter(lambda x: x[:6] in all_rv_tests, riscv_tests)
         riscv_tests = map(lambda x: os.path.join(base_dir, x), riscv_tests)
         return riscv_tests
@@ -339,15 +340,15 @@ class XiangShan(object):
         workloads = [
             "bitmanip/bitMisc.bin",
             "crypto/crypto-riscv64-noop.bin",
-            "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
-            "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
-            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
-            "ext_intr/amtest-riscv64-xs.bin",
-            "cache-alias/aliastest-riscv64-xs.bin",
+            # "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
+            # "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
+            # "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/external_intr-riscv64-xs.bin",
+            "nexus-am-workloads/tests/aliastest/aliastest-riscv64-xs.bin",
             "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
-            "pmp/pmp-am/amtest-riscv64-xs.bin",
-            "pmp/hugepage-pmp-atom/amtest-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/pmp_test-riscv64-xs.bin",
+            "nexus-am-workloads/amtest/sv39_hp_atom_test-riscv64-xs.bin",
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
@@ -400,7 +401,7 @@ class XiangShan(object):
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
-            "dualcoretest/ldvio-riscv64-xs.bin"
+            "nexus-am-workloads/tests/dualcoretest/ldvio-riscv64-xs.bin"
         ]
         mc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return mc_tests
@@ -414,8 +415,9 @@ class XiangShan(object):
         return tests
 
     def __am_apps_path(self, bench):
-        filename = f"{bench}-riscv64-noop.bin"
-        return [os.path.join(self.args.am_home, "apps", bench, "build", filename)]
+        base_dir = '/nfs/home/share/ci-workloads/nexus-am-workloads/apps'
+        filename = f"{bench}-riscv64-xs.bin"
+        return [os.path.join(base_dir, bench, filename)]
 
     def __get_ci_workloads(self, name):
         workloads = {
@@ -425,7 +427,6 @@ class XiangShan(object):
             "linux-hello-smp-opensbi": "fw_payload.bin",
             "linux-hello-new": "bbl.bin",
             "linux-hello-smp-new": "bbl.bin",
-            "linux-hello-smp-newcsr": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
@@ -476,6 +477,7 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest
         }
@@ -502,6 +504,7 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest
         }
@@ -538,8 +541,9 @@ def get_free_cores(n):
                 continue
             window_usage = core_usage[i * n : i * n + n]
             if sum(window_usage) < 30 * n and True not in map(lambda x: x > 90, window_usage):
-                return (((i * n) % 128)// 64, i * n, i * n + n - 1)
+                return (((i * n) % num_logical_core) // (num_logical_core // 2), i * n, i * n + n - 1)
         print(f"No free {n} cores found. CPU usage: {core_usage}\n")
+        time.sleep(random.uniform(1, 60))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Python wrapper for XiangShan')

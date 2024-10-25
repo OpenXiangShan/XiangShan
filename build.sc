@@ -30,6 +30,7 @@ import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import scala.util.matching.Regex
 
 val defaultScalaVersion = "2.13.14"
@@ -143,6 +144,16 @@ object coupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChis
 
 }
 
+object openNCB extends SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "openLLC" / "openNCB"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip
+  )
+
+}
+
 object openLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
 
   override def millSourcePath = os.pwd / "openLLC"
@@ -152,6 +163,9 @@ object openLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
   def rocketModule: ScalaModule = rocketchip
 
   def utilityModule: ScalaModule = utility
+
+  def openNCBModule: ScalaModule = openNCB
+
 }
 
 object difftest extends HasChisel {
@@ -253,14 +267,14 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     countSep = "",
     tagModifier = (tag: String) => "[Rr]elease.*".r.findFirstMatchIn(tag) match {
       case Some(_) => "Kunminghu-Release-" + LocalDateTime.now().format(
-                                 DateTimeFormatter.ofPattern("MMM-dd-yyyy"))
+                                 DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en")))
       case None => "Kunminghu-dev"
     },
     /* add "username, buildhost, buildtime" for non-release version */
     untaggedSuffix = " (%s@%s) # %s".format(
       System.getProperty("user.name"),
       java.net.InetAddress.getLocalHost().getHostName(),
-      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy"))),
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
   override def resources = T.sources {

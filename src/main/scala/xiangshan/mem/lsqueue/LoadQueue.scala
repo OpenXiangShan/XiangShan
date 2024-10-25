@@ -82,8 +82,9 @@ trait HasLoadHelper { this: XSModule =>
     val fpWen    = uop.fpWen
     val result = Cat(
       (fuOpType === LSUOpType.lw && fpWen),
+      (fuOpType === LSUOpType.lh && fpWen),
       (fuOpType === LSUOpType.lw && !fpWen) || (fuOpType === LSUOpType.hlvw),
-      (fuOpType === LSUOpType.lh)           || (fuOpType === LSUOpType.hlvh),
+      (fuOpType === LSUOpType.lh && !fpWen) || (fuOpType === LSUOpType.hlvh),
       (fuOpType === LSUOpType.lb)           || (fuOpType === LSUOpType.hlvb),
       (fuOpType === LSUOpType.ld)           || (fuOpType === LSUOpType.hlvd),
       (fuOpType === LSUOpType.lwu)          || (fuOpType === LSUOpType.hlvwu) || (fuOpType === LSUOpType.hlvxwu),
@@ -103,14 +104,15 @@ trait HasLoadHelper { this: XSModule =>
       SignExt(rdata(7, 0) , XLEN),
       SignExt(rdata(15, 0) , XLEN),
       SignExt(rdata(31, 0) , XLEN),
+      FPU.box(rdata, FPU.H),
       FPU.box(rdata, FPU.S)
     )
     Mux1H(select, selData)
   }
 
   def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
-    require(addrOffset.getWidth == 4)
-    VecInit((0 until 16).map{ case i =>
+    require(addrOffset.getWidth == 3)
+    VecInit((0 until 8).map{ case i =>
       addrOffset === i.U
     })
   }
@@ -188,6 +190,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
+    val flushFrmMaBuf = Input(Bool())
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -198,8 +201,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqEmpty = Output(Bool())
 
     val lqDeqPtr = Output(new LqPtr)
-
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
     val debugTopDown = new LoadQueueTopDownIO
   })
@@ -263,6 +264,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(LoadPipelineWidth + i).valid                 := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits                  := DontCare
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr            := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.fullva           := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaNeedExt        := io.vecFeedback(i).bits.vaNeedExt
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.gpaddr           := io.vecFeedback(i).bits.gpaddr
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx       := io.vecFeedback(i).bits.uopidx
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx       := io.vecFeedback(i).bits.robidx
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart   := io.vecFeedback(i).bits.vstart
@@ -271,6 +275,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   // mmio non-data error exception
   exceptionBuffer.io.req.last := uncacheBuffer.io.exception
+  exceptionBuffer.io.req.last.bits.vaNeedExt := true.B
+  exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
@@ -282,7 +288,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.ld_raw_data  <> io.ld_raw_data
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
-  uncacheBuffer.io.trigger    <> io.trigger
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3

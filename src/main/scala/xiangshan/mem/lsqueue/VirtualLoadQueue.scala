@@ -106,7 +106,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   // update enqueue pointer
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(io.enq.canAccept && io.enq.sqCanAccept && canEnqueue(index), vLoadFlowNumItem, 0.U)}
+  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(canEnqueue(index), vLoadFlowNumItem, 0.U)}
   val validVLoadOffset = vLoadFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVLoadOffsetRShift = 0.U +: validVLoadOffset.take(validVLoadFlow.length - 1)
 
@@ -209,7 +209,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VirtualLoadQueueSize) {
     val cmt = io.vecCommit
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
     }
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
 
@@ -247,17 +247,19 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
       when (!need_rep) {
       // update control flag
-        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss
+        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss || io.ldin(i).bits.isSWPrefetch
         datavalid(loadWbIndex) :=
           (if (EnableFastForward) {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
              !io.ldin(i).bits.miss && // dcache miss
-             !io.ldin(i).bits.dcacheRequireReplay // do not writeback if that inst will be resend from rs
+             !io.ldin(i).bits.dcacheRequireReplay || // do not writeback if that inst will be resend from rs
+              io.ldin(i).bits.isSWPrefetch
            } else {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
-             !io.ldin(i).bits.miss
+             !io.ldin(i).bits.miss ||
+              io.ldin(i).bits.isSWPrefetch
            })
 
         //

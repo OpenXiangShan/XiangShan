@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.{HasPerfEvents, OptionWrapper}
+import utility.HasPerfEvents
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
@@ -80,8 +81,10 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
   val vlWriteBackInfo = new Bundle {
-    val vlIsZero = Input(Bool())
-    val vlIsVlmax = Input(Bool())
+    val vlFromIntIsZero  = Input(Bool())
+    val vlFromIntIsVlmax = Input(Bool())
+    val vlFromVfIsZero   = Input(Bool())
+    val vlFromVfIsVlmax  = Input(Bool())
   }
 
   val fromSchedulers = new Bundle {
@@ -104,6 +107,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   }
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val vecLoadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
@@ -132,7 +136,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
   }) else None
-  val fromOg2 = if(params.isVfSchd) Some(MixedVec(params.issueBlockParams.map(x => Flipped(x.genOG2RespBundle)))) else None
+  val fromOg2Resp = if(params.needOg2Resp) Some(MixedVec(params.issueBlockParams.filter(_.needOg2Resp).map(x => Flipped(x.genOG2RespBundle)))) else None
 }
 
 abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
@@ -376,13 +380,18 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
-    iq.io.ldCancel := io.ldCancel
+    if (iq.params.needLoadDependency)
+      iq.io.ldCancel := io.ldCancel
+    else
+      iq.io.ldCancel := 0.U.asTypeOf(io.ldCancel)
   }
 
   // connect the vl writeback informatino to the issue queues
   issueQueues.zipWithIndex.foreach { case(iq, i) =>
-    iq.io.vlIsVlmax := io.vlWriteBackInfo.vlIsVlmax
-    iq.io.vlIsZero := io.vlWriteBackInfo.vlIsZero
+    iq.io.vlFromIntIsVlmax := io.vlWriteBackInfo.vlFromIntIsVlmax
+    iq.io.vlFromIntIsZero := io.vlWriteBackInfo.vlFromIntIsZero
+    iq.io.vlFromVfIsVlmax := io.vlWriteBackInfo.vlFromVfIsVlmax
+    iq.io.vlFromVfIsZero := io.vlWriteBackInfo.vlFromVfIsZero
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
@@ -408,9 +417,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       og1Resp := io.fromDataPath(i)(j).og1resp
     }
     iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
-      if (io.loadFinalIssueResp(i).isDefinedAt(j)) {
+      if (io.loadFinalIssueResp(i).isDefinedAt(j) && iq.params.isLdAddrIQ) {
         finalIssueResp := io.loadFinalIssueResp(i)(j)
-      } else {
+      } else if (io.vecLoadFinalIssueResp(i).isDefinedAt(j) && iq.params.isVecLduIQ) {
+        finalIssueResp := io.vecLoadFinalIssueResp(i)(j)
+      }
+      else {
         finalIssueResp := 0.U.asTypeOf(finalIssueResp)
       }
     })
@@ -424,14 +436,16 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.vecLoadIssueResp.foreach(_.zipWithIndex.foreach { case (resp, deqIdx) =>
       resp := io.vecLoadIssueResp(i)(deqIdx)
     })
-    if(params.isVfSchd) {
-      iq.io.og2Resp.get.zipWithIndex.foreach { case (og2Resp, exuIdx) =>
-        og2Resp := io.fromOg2.get(i)(exuIdx)
-      }
-    }
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
     iq.io.replaceRCIdx.foreach(x => x := 0.U.asTypeOf(x))
+  }
+  if (params.needOg2Resp) {
+    issueQueues.filter(_.params.needOg2Resp).zip(io.fromOg2Resp.get).foreach{ case (iq, og2RespVec) =>
+      iq.io.og2Resp.get.zip(og2RespVec).foreach{ case (iqOg2Resp, og2Resp) =>
+        iqOg2Resp := og2Resp
+      }
+    }
   }
 
   // Connect each replace RCIdx to IQ
@@ -478,6 +492,9 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
+    if (!iq.params.needLoadDependency) {
+      iq.io.enq.map(x => x.bits.srcLoadDependency := 0.U.asTypeOf(x.bits.srcLoadDependency))
+    }
     val intWBIQ = params.schdType match {
       case IntScheduler() => wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1)
       case FpScheduler() => wakeupFromFpWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromFpWBPort.keys.toSeq.contains(x._2)).map(_._1)
@@ -526,6 +543,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
+    if (!iq.params.needLoadDependency) {
+      iq.io.enq.map(x => x.bits.srcLoadDependency := 0.U.asTypeOf(x.bits.srcLoadDependency))
+    }
     iq.io.wakeupFromWB.zip(
       wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1) ++
       wakeupFromFpWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromFpWBPort.keys.toSeq.contains(x._2)).map(_._1) ++

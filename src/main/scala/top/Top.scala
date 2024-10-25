@@ -25,7 +25,10 @@ import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
-import openLLC.DummyLLC
+import coupledL2.tl2chi.CHILogger
+import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
+import openLLC.TargetBinder._
+import cc.xiangshan.openncb._
 import utility._
 import system._
 import device._
@@ -34,10 +37,12 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import scala.collection.mutable.{Map}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -95,7 +100,33 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
-  val chi_dummyllc_opt = Option.when(enableCHI)(LazyModule(new DummyLLC(numRNs = NumCores)(p)))
+  val chi_llcBridge_opt = Option.when(enableCHI)(
+    LazyModule(new OpenNCB()(p.alter((site, here, up) => {
+      case NCBParametersKey => new NCBParameters(
+        axiMasterOrder      = EnumAXIMasterOrder.WriteAddress,
+        readCompDMT         = false,
+        writeCancelable     = false,
+        writeNoError        = true,
+        axiBurstAlwaysIncr  = true
+      )
+    })))
+  )
+
+  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI)(
+    LazyModule(new OpenNCB()(p.alter((site, here, up) => {
+      case NCBParametersKey => new NCBParameters(
+        axiMasterOrder              = EnumAXIMasterOrder.None,
+        readCompDMT                 = false,
+        writeCancelable             = false,
+        writeNoError                = true,
+        asEndpoint                  = false,
+        acceptOrderEndpoint         = true,
+        acceptMemAttrDevice         = true,
+        readReceiptAfterAcception   = true,
+        axiBurstAlwaysIncr          = true
+      )
+    })))
+  ))
 
   // receive all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
@@ -106,11 +137,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(pf) => Some(BundleBridgeSource(() => new PrefetchRecv))
     case None => None
   }
+  val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, NumCores, (new NonmaskableInterruptIO).elements.size))
+  val nmi = InModuleBody(nmiIntNode.makeIOs())
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_node := misc.clint.intnode
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
+    core_with_l2(i).nmi_int_node := nmiIntNode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     if (!enableCHI) {
       misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache
@@ -161,10 +195,18 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  chi_dummyllc_opt match {
-    case Some(llc) =>
-      misc.soc_xbar.get := llc.axi4node
+  chi_llcBridge_opt match {
+    case Some(ncb) =>
+      misc.soc_xbar.get := ncb.axi4node
     case None =>
+  }
+
+  chi_mmioBridge_opt.foreach { e =>
+    e match {
+      case Some(ncb) =>
+        misc.soc_xbar.get := ncb.axi4node
+      case None =>
+    }
   }
 
   class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
@@ -212,11 +254,18 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
-      val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
+      val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+    val chi_openllc_opt = Option.when(enableCHI)(
+      withClockAndReset(io.clock.asClock, io.reset) {
+        Module(new OpenLLC()(p.alter((site, here, up) => {
+          case OpenLLCParamKey => soc.OpenLLCParamsOpt.get
+        })))
+      }
+    )
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -244,9 +293,28 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
       core.module.io.reset_vector := io.riscv_rst_vec(i)
-      chi_dummyllc_opt.foreach { case llc =>
-        llc.module.io.rn(i) <> core.module.io.chi.get
-        core.module.io.nodeID.get := i.U // TODO
+    }
+
+    withClockAndReset(io.clock.asClock, io.reset) {
+      Option.when(enableCHI)(true.B).foreach { _ =>
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
+          val llcLogger = CHILogger(s"L2[${i}]_LLC", true)
+          dontTouch(core.module.io.chi.get)
+          bind(
+            route(
+              core.module.io.chi.get, Map((AddressSet(0x0L, 0x00007fffffffL), NumCores + i)) ++ AddressSet(0x0L,
+              0xffffffffffffL).subtract(AddressSet(0x0L, 0x00007fffffffL)).map(addr => (addr, NumCores * 2)).toMap
+            ),
+            Map((NumCores + i) -> mmioLogger.io.up, (NumCores * 2) -> llcLogger.io.up)
+          )
+          chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
+          chi_openllc_opt.get.io.rn(i) <> llcLogger.io.down
+        }
+        val memLogger = CHILogger(s"LLC_MEM", true)
+        chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
+        chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
+        chi_openllc_opt.get.io.nodeID := (NumCores * 2).U
       }
     }
 
@@ -316,7 +384,7 @@ object TopMain extends App {
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-  val enableDifftest = config(DebugOptionsKey).EnableDifftest
+  val enableDifftest = config(DebugOptionsKey).EnableDifftest || config(DebugOptionsKey).AlwaysBasicDiff
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)

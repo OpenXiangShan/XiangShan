@@ -102,7 +102,7 @@ make idea
 * Set environment variable `NEMU_HOME` to the **absolute path** of the [NEMU project](https://github.com/OpenXiangShan/NEMU).
 * Set environment variable `NOOP_HOME` to the **absolute path** of the XiangShan project.
 * Set environment variable `AM_HOME` to the **absolute path** of the [AM project](https://github.com/OpenXiangShan/nexus-am).
-* Install `mill`. Refer to [the Manual section in this guide](https://com-lihaoyi.github.io/mill/mill/Intro_to_Mill.html#_installation).
+* Install `mill`. Refer to [the Manual section in this guide](https://mill-build.org/mill/0.11.11/Scala_Installation_IDE_Support.html#_bootstrap_scripts).
 * Clone this project and run `make init` to initialize submodules.
 
 ### Run with simulator

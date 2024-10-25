@@ -26,18 +26,32 @@ import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
-
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
+  val inner = LazyModule(new FrontendInlined)
+  lazy val module = new FrontendImp(this)
+}
+
+class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
+  val io = IO(wrapper.inner.module.io.cloneType)
+  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  io <> wrapper.inner.module.io
+  io_perf <> wrapper.inner.module.io_perf
+  if (p(DebugOptionsKey).ResetGen) {
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+  }
+}
+
+class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = true
 
   val instrUncache  = LazyModule(new InstrUncache())
   val icache        = LazyModule(new ICache())
 
-  lazy val module = new FrontendImp(this)
+  lazy val module = new FrontendInlinedImp(this)
 }
 
-
-class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasPerfEvents
 {
@@ -47,6 +61,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO()
     val backend = new FrontendToCtrlIO
+    val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
@@ -58,6 +73,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val resetInFrontend = Output(Bool())
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
@@ -89,7 +105,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := RegEnable(io.reset_vector, reset.asBool)
+  bpu.io.reset_vector := io.reset_vector
 
 // pmp
   val PortNumber = ICacheParameters().PortNumber
@@ -120,8 +136,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  icache.io.prefetch <> ftq.io.toPrefetch
-
+  icache.io.ftqPrefetch <> ftq.io.toPrefetch
+  icache.io.softPrefetch <> io.softPrefetch
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
@@ -155,8 +171,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.toIbuffer    <> ibuffer.io.in
 
   ftq.io.fromBackend <> io.backend.toFtq
-  io.backend.fromFtq <> ftq.io.toBackend
-  io.backend.fromIfu <> ifu.io.toBackend
+  io.backend.fromFtq := ftq.io.toBackend
+  io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
@@ -331,9 +347,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
-  val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  val frontendBubble = Mux(io.backend.canAccept, DecodeWidth.U - PopCount(ibuffer.io.out.map(_.valid)), 0.U)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
+  io.resetInFrontend := reset.asBool
 
   // PFEvent
   val pfevent = Module(new PFEvent)

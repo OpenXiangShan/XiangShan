@@ -71,6 +71,24 @@ package object xiangshan {
     def FMVXF = BitPat("b1_1000_0000") //for fmv_x_d & fmv_x_w
   }
 
+  object I2fType {
+    // move/cvt ## i64/i32(input) ## f64/f32/f16(output) ## hassign
+    def fcvt_h_wu = BitPat("b0_0_00_0")
+    def fcvt_h_w  = BitPat("b0_0_00_1")
+    def fcvt_h_lu = BitPat("b0_1_00_0")
+    def fcvt_h_l  = BitPat("b0_1_00_1")
+
+    def fcvt_s_wu = BitPat("b0_0_01_0")
+    def fcvt_s_w  = BitPat("b0_0_01_1")
+    def fcvt_s_lu = BitPat("b0_1_01_0")
+    def fcvt_s_l  = BitPat("b0_1_01_1")
+
+    def fcvt_d_wu = BitPat("b0_0_10_0")
+    def fcvt_d_w  = BitPat("b0_0_10_1")
+    def fcvt_d_lu = BitPat("b0_1_10_0")
+    def fcvt_d_l  = BitPat("b0_1_10_1")
+
+  }
   object VlduType {
     // bit encoding: | vector or scala (2bit) || mop (2bit) | lumop(5bit) |
     // only unit-stride use lumop
@@ -97,6 +115,7 @@ package object xiangshan {
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
     def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
+    def isFof    (fuOpType: UInt): Bool = isVecLd(fuOpType) && fuOpType(4)
   }
 
   object VstuType {
@@ -139,6 +158,7 @@ package object xiangshan {
     def isFmv(bits: UInt): Bool = bits(0) & !bits(2)
     def FMX_D_X    = "b0_01_11".U
     def FMX_W_X    = "b0_01_10".U
+    def FMX_H_X   =  "b0_01_01".U
   }
 
   object CommitType {
@@ -168,6 +188,7 @@ package object xiangshan {
   object ExceptionVec {
     val ExceptionVecSize = 24
     def apply() = Vec(ExceptionVecSize, Bool())
+    def apply(init: Bool) = VecInit(Seq.fill(ExceptionVecSize)(init))
   }
 
   object PMAMode {
@@ -208,24 +229,28 @@ package object xiangshan {
 
 
   object CSROpType {
-    def jmp  = "b010_000".U
-    def wfi  = "b100_000".U
-    def wrt  = "b001_001".U
-    def set  = "b001_010".U
-    def clr  = "b001_011".U
-    def wrti = "b001_101".U
-    def seti = "b001_110".U
-    def clri = "b001_111".U
-    def ro   = "b001_000".U
+    //               | func3|
+    def jmp   = "b010_000".U
+    def wfi   = "b100_000".U
+    def wrt   = "b001_001".U
+    def set   = "b001_010".U
+    def clr   = "b001_011".U
+    def wrti  = "b001_101".U
+    def seti  = "b001_110".U
+    def clri  = "b001_111".U
 
     def isSystemOp (op: UInt): Bool = op(4)
     def isWfi      (op: UInt): Bool = op(5)
     def isCsrAccess(op: UInt): Bool = op(3)
     def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
     def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
+    def isCSRRW    (op: UInt): Bool = op(3) && op(1, 0) === "b01".U
+    def isCSRRSorRC(op: UInt): Bool = op(3) && op(1)
 
     def getCSROp(op: UInt) = op(1, 0)
     def needImm(op: UInt) = op(2)
+
+    def getFunc3(op: UInt) = op(2, 0)
   }
 
   // jump
@@ -560,6 +585,9 @@ package object xiangshan {
     def cbo_inval = "b1110".U
 
     def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
+    def isCboClean(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_clean)
+    def isCboFlush(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_flush)
+    def isCboInval(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_inval)
 
     // atomics
     // bit(1, 0) are size
@@ -594,7 +622,7 @@ package object xiangshan {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
@@ -754,6 +782,7 @@ package object xiangshan {
     def VEC_US_LDST      = "b110001".U // vector unit-strided load/store
     def VEC_S_LDST       = "b110010".U // vector strided load/store
     def VEC_I_LDST       = "b110011".U // vector indexed load/store
+    def VEC_US_FF_LD     = "b110100".U // vector unit-stride fault-only-first load
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW
@@ -862,7 +891,8 @@ package object xiangshan {
       illegalInstr,
       instrPageFault,
       instrGuestPageFault,
-      virtualInstr
+      virtualInstr,
+      breakPoint
     )
     def partialSelect(vec: Vec[Bool], select: Seq[Int]): Vec[Bool] = {
       val new_vec = Wire(ExceptionVec())
@@ -870,10 +900,18 @@ package object xiangshan {
       select.foreach(i => new_vec(i) := vec(i))
       new_vec
     }
+    def partialSelect(vec: Vec[Bool], select: Seq[Int], unSelect: Seq[Int]): Vec[Bool] = {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.foreach(_ := false.B)
+      select.diff(unSelect).foreach(i => new_vec(i) := vec(i))
+      new_vec
+    }
     def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
     def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
     def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
       partialSelect(vec, fuConfig.exceptionOut)
+    def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
+      partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
 
   object TopDownCounters extends Enumeration {

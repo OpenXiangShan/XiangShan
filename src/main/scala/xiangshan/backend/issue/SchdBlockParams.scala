@@ -91,6 +91,8 @@ case class SchdBlockParams(
     if (bjIssueQueues.map(x => x.numEnq).sum > 0) numUopIn else 0
   }
 
+  def needOg2Resp: Boolean = isVfSchd || isMemSchd && issueBlockParams.map(_.needOg2Resp).reduce(_ || _)
+
   def needSrcFrm: Boolean = issueBlockParams.map(_.needSrcFrm).reduce(_ || _)
 
   def needSrcVxrm: Boolean = issueBlockParams.map(_.needSrcVxrm).reduce(_ || _)

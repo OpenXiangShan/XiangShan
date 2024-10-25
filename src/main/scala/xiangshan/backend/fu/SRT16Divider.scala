@@ -100,7 +100,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     state := state
   }
 
-  io.in_ready := state(s_idle)
+  // io.in_ready := state(s_idle)
   aInverter := -Mux(state(s_idle), a, quotIterReg) // 64, 0
   dInverter := -Mux(state(s_idle), d, quotM1IterReg) // 64, 0
 

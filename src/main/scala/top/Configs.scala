@@ -31,6 +31,7 @@ import system._
 import utility._
 import utils._
 import huancun._
+import openLLC.{OpenLLCParam}
 import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
@@ -190,12 +191,15 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
         ),
         l2tlbParameters = L2TLBParameters(
-          l1Size = 4,
-          l2nSets = 4,
-          l2nWays = 4,
-          l3nSets = 4,
-          l3nWays = 8,
-          spSize = 2,
+          l3Size = 4,
+          l2Size = 4,
+          l1nSets = 4,
+          l1nWays = 4,
+          l1ReservedBits = 1,
+          l0nSets = 4,
+          l0nWays = 8,
+          l0ReservedBits = 0,
+          spSize = 4,
         ),
         L2CacheParamsOpt = Some(L2Param(
           name = "L2",
@@ -207,6 +211,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
           )),
+          hasCMO = p.HasCMO && site(EnableCHI),
         )),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
@@ -286,7 +291,7 @@ class WithNKBL2
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes)),
+          vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),
@@ -294,6 +299,7 @@ class WithNKBL2
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        hasCMO = p.HasCMO && site(EnableCHI),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -335,6 +341,17 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         simulation = !site(DebugOptionsKey).FPGAPlatform,
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
+      )),
+      OpenLLCParamsOpt = Some(OpenLLCParam(
+        name = "LLC",
+        ways = ways,
+        sets = sets,
+        banks = banks,
+        fullAddressBits = 48,
+        clientCaches = tiles.map { core =>
+          val l2params = core.L2CacheParamsOpt.get
+          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
+        }
       ))
     )
 })
@@ -412,5 +429,22 @@ class KunminghuV2Config(n: Int = 1) extends Config(
 class XSNoCTopConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
+
+class FpgaDefaultConfig(n: Int = 1) extends Config(
+  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
   })
 )

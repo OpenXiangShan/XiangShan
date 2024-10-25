@@ -32,6 +32,9 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenUSWholeEmul}
 import xiangshan.mem.GenRealFlowNum
+import xiangshan.backend.trace._
+import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
+import xiangshan.backend.fu.util.CSRConst
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -45,6 +48,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val rabCommits = Input(new RabCommitIO)
+    // from csr
+    val singleStep = Input(Bool())
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
@@ -78,10 +83,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val snptIsFull= Input(Bool())
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
     // perf only
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
@@ -114,7 +119,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
-    case Reg_I => x.rfWen && x.ldest =/= 0.U
+    case Reg_I => x.rfWen
     case Reg_F => x.fpWen
     case Reg_V => x.vecWen
     case Reg_V0 => x.v0Wen
@@ -131,7 +136,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   def needDestRegWalk[T <: RabCommitInfo](reg_t: RegType, x: T): Bool = {
     reg_t match {
-      case Reg_I => x.rfWen && x.ldest =/= 0.U
+      case Reg_I => x.rfWen
       case Reg_F => x.fpWen
       case Reg_V => x.vecWen
       case Reg_V0 => x.v0Wen
@@ -156,7 +161,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
   compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
-    sink.valid := source.valid
+    sink.valid := source.valid && !io.singleStep
     sink.bits := source.bits
   }
   val needRobFlags = compressUnit.io.out.needRobFlags
@@ -190,7 +195,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.hasException  :=  DontCare
     uop.useRegCache   := DontCare
     uop.regCacheIdx   := DontCare
+    uop.traceBlockInPipe := DontCare
   })
+  private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
+  private val isCsr        = Wire(Vec(RenameWidth, Bool()))
+  private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
+  private val isRoCsrr     = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -217,6 +227,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
     isVlsTypeItme && isUnitStrideItem
   }
+  private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
   private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
@@ -229,7 +240,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     )
   }
   uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
+    u.numLsElem := Mux(io.in(i).valid & isVlsType(i) && !isfofFixVlUop(i), numLsElem(i), 0.U)
   }
 
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
@@ -264,6 +275,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
+
+    // read only CSRR instruction support: remove blockBackward and waitForward
+    inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
+    isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
+    isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
+    isRoCsrr(i) := isCsrr(i) && LookupTreeDefault(
+      inst(i).CSRIDX, false.B, CSRConst.roCsrrAddr.map(_.U -> true.B))
+
+    /*
+     * For read-only CSRs, CSRR instructions do not need to wait forward instructions to finish.
+     * For all CSRs, CSRR instructions do not need to block backward instructions for issuing.
+     * Signal "isCsrr" contains not only alias instruction CSRR, but also other csr instructions which
+     *   do not require write to any CSR.
+     */
+    uops(i).waitForward := io.in(i).bits.waitForward && !isRoCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
@@ -304,7 +331,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)
-    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || uops(i).trigger.getFrontendCanFire
+    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numUops := 0.U
       uops(i).numWB := 0.U
@@ -401,6 +428,46 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   /**
+   * trace begin
+   */
+  val inVec = io.in.map(_.bits)
+  val canRobCompressVec = inVec.map(_.canRobCompress)
+  val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
+  val halfWordNumVec = (0 until RenameWidth).map{
+    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
+      case (mask, isRVC) => Mux(mask, Mux(isRVC, 1.U, 2.U), 0.U)
+    }
+  }
+
+  for (i <- 0 until RenameWidth) {
+    // iretire
+    uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
+      halfWordNumVec(i).reduce(_ +& _),
+      Mux(isRVCVec(i), 1.U, 2.U)
+    )
+
+    // ilastsize
+    val j = i
+    val lastIsRVC = WireInit(false.B)
+    (j until RenameWidth).map { j =>
+      when(compressMasksVec(i)(j)) {
+        lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
+      }
+    }
+
+    uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
+      Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
+      Mux(isRVCVec(i), Ilastsize.HalfWord, Ilastsize.Word)
+    )
+
+    // itype
+    uops(i).traceBlockInPipe.itype := Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+  }
+  /**
+   * trace end
+   */
+
+  /**
     * How to set psrc:
     * - bypass the pdest to psrc if previous instructions write to the same ldest as lsrc
     * - default: psrc from RAT
@@ -493,7 +560,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   io.out.map{ x =>
-    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || x.bits.trigger.getFrontendCanFire
+    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(x.bits.trigger)
   }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)

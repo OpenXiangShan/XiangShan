@@ -14,7 +14,7 @@ object Dispatch2IqMain extends App {
 
   Generator.execute(
     firrtlOpts,
-    soc.core_with_l2(0).core.backend.intScheduler.get.dispatch2Iq.module,
+    soc.core_with_l2(0).core.backend.inner.intScheduler.get.dispatch2Iq.module,
     firtoolOpts
   )
 }

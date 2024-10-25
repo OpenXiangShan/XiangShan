@@ -155,11 +155,11 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
     wdata.getLocal lazyZip
       (toMip.getLocal lazyZip toMvip.getLocal lazyZip toHvip.getLocal) lazyZip
-      (mideleg.getLocal lazyZip hideleg.getLocal lazyZip mvien.getLocal) foreach {
-        case (wLCIP, (toMipLCIP, toMvipLCIP, toHvipLCIP), (midelegBit, hidelegBit, mvienBit)) =>
-          toMipLCIP .valid := wen &&  midelegBit &&  hidelegBit
-          toMvipLCIP.valid := wen && !midelegBit &&  hidelegBit &&  mvienBit
-          toHvipLCIP.valid := wen &&                !hidelegBit &&  mvienBit
+      (mideleg.getLocal lazyZip hideleg.getLocal lazyZip mvien.getLocal lazyZip hvien.getLocal) foreach {
+        case (wLCIP, (toMipLCIP, toMvipLCIP, toHvipLCIP), (midelegBit, hidelegBit, mvienBit, hvienBit)) =>
+          toMipLCIP .valid := wen &&  hidelegBit &&  midelegBit
+          toMvipLCIP.valid := wen &&  hidelegBit && !midelegBit &&  mvienBit
+          toHvipLCIP.valid := wen && !hidelegBit &&                 hvienBit
           toMipLCIP .bits := wLCIP
           toMvipLCIP.bits := wLCIP
           toHvipLCIP.bits := wLCIP

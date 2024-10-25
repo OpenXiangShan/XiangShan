@@ -24,7 +24,6 @@ case class IssueBlockParams(
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,
   VLEN                 : Int = 128,
-  vaddrBits            : Int = 39,
   // calculate in scheduler
   var idxInSchBlk      : Int = 0,
 )(
@@ -55,15 +54,17 @@ case class IssueBlockParams(
 
   def isHyAddrIQ: Boolean = inMemSchd && HyuCnt > 0
 
-  def isVecLduIQ: Boolean = inMemSchd && VlduCnt > 0
+  def isVecLduIQ: Boolean = inMemSchd && (VlduCnt + VseglduCnt) > 0
 
-  def isVecStuIQ: Boolean = inMemSchd && VstuCnt > 0
+  def isVecStuIQ: Boolean = inMemSchd && (VstuCnt + VsegstuCnt) > 0
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
   def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
 
   def needFeedBackLqIdx: Boolean = isVecMemIQ || isLdAddrIQ
+
+  def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
@@ -195,6 +196,10 @@ case class IssueBlockParams(
 
   def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
 
+  def VseglduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegldu)).sum
+
+  def VsegstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegstu)).sum
+
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
   def numWriteRegCache: Int = exuBlockParams.map(x => if (x.needWriteRegCache) 1 else 0).sum
@@ -202,6 +207,8 @@ case class IssueBlockParams(
   def needWriteRegCache: Boolean = numWriteRegCache > 0
 
   def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
+
+  def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
   /**
     * Get the regfile type that this issue queue need to read
@@ -341,6 +348,10 @@ case class IssueBlockParams(
 
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
     MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
+  }
+
+  def genIssueValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIssueBundle]] = {
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => ValidIO(new IssueQueueIssueBundle(this, x))))
   }
 
   def genWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {

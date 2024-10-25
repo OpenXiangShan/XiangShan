@@ -31,17 +31,44 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   protected val in = io.in.bits
   protected val out = io.out.bits
 
-  // vsew is the lowest 2 bits of fuOpType
-  private val isImm = IF2VectorType.isImm(in.ctrl.fuOpType(4, 2))
-  // when needDup is true, the scalar data is duplicated in vector register
-  private val needDup = IF2VectorType.needDup(in.ctrl.fuOpType(4, 2))
-  // when isFmv is true, the high bits of the scalar data is 1
-  private val isFmv = IF2VectorType.isFmv(in.ctrl.fuOpType(4, 2))
+  private val isFliH = in.ctrl.fuOpType(7) &&  in.ctrl.fuOpType(6) && !in.ctrl.fuOpType(5)
+  private val isFliS = in.ctrl.fuOpType(7) && !in.ctrl.fuOpType(6) && !in.ctrl.fuOpType(5)
+  private val isFliD = in.ctrl.fuOpType(7) && !in.ctrl.fuOpType(6) &&  in.ctrl.fuOpType(5)
+  private val isFli = isFliH || isFliS || isFliD
 
-  private val isFp = IF2VectorType.isFp(in.ctrl.fuOpType(4, 2))
+  private val FliData = Wire(UInt(XLEN.W))
+
+  private val FliHTable = Module(new FliHTable)
+  private val FliSTable = Module(new FliSTable)
+  private val FliDTable = Module(new FliDTable)
+
+  FliHTable.src := in.ctrl.fuOpType(4, 0)
+  FliSTable.src := in.ctrl.fuOpType(4, 0)
+  FliDTable.src := in.ctrl.fuOpType(4, 0)
+
+  FliData := Mux1H(
+    Seq(
+      isFliH,
+      isFliS,
+      isFliD
+    ),
+    Seq(
+      Cat(~0.U(48.W), FliHTable.out),
+      Cat(~0.U(32.W), FliSTable.out, 0.U(16.W)),
+      Cat(FliDTable.out, 0.U(48.W)))
+  )
+
+  // vsew is the lowest 2 bits of fuOpType
+  private val isImm = Mux(isFli, 0.U, IF2VectorType.isImm(in.ctrl.fuOpType(4, 2))).asBool
+  // when needDup is true, the scalar data is duplicated in vector register
+  private val needDup = Mux(isFli, 0.U, IF2VectorType.needDup(in.ctrl.fuOpType(4, 2))).asBool
+  // when isFmv is true, the high bits of the scalar data is 1
+  private val isFmv = Mux(isFli, 0.U, IF2VectorType.isFmv(in.ctrl.fuOpType(4, 2))).asBool
+
+  private val isFp = Mux(isFli, 0.U, IF2VectorType.isFp(in.ctrl.fuOpType(4, 2))).asBool
 
   // imm use src(1), scalar use src(0)
-  private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
+  private val scalaData = Mux(isFli, FliData, Mux(isImm, in.data.src(1), in.data.src(0)))
   // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
   private val dataWidth = cfg.destDataBits

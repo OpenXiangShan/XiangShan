@@ -25,8 +25,10 @@ import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
+import system.SoCParamsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -41,13 +43,15 @@ class SimTop(implicit p: Parameters) extends Module {
     l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
   }
 
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
+  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2)(p.alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UARTLiteForDTS = false)
+  })))
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.viewAs[AXI4Bundle]
 
   val l_simAXIMem = AXI4MemorySlave(
     l_soc.misc.memAXI4SlaveNode,
-    16L * 1024 * 1024 * 1024,
+    8190L * 1024 * 1024 * 1024,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
@@ -61,6 +65,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.pll0_lock := true.B
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
+  l_soc.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
 
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100

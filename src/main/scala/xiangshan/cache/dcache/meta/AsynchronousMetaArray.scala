@@ -48,7 +48,7 @@ class FlagMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
   val flag = Bool()
 }
 
-class L1CohMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
+class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = false)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, new Meta)))
@@ -79,11 +79,15 @@ class L1CohMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) ex
             bypass_data := s1_way_wdata(way)(wport)
           }
         )
-        resp(way) := Mux(
-          RegEnable(read_way_bypass, read.valid),
-          RegEnable(bypass_data, read_way_bypass),
-          RegEnable(meta_array(read.bits.idx)(way), read.valid)
-        )
+        if (bypassRead) {
+          resp(way) := Mux(
+            RegEnable(read_way_bypass, read.valid),
+            RegEnable(bypass_data, read_way_bypass),
+            RegEnable(meta_array(read.bits.idx)(way), read.valid)
+          )
+        } else {
+          resp(way) := meta_array(RegEnable(read.bits.idx, read.valid))(way)
+        }
       })
   }
 

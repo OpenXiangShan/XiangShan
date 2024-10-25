@@ -16,7 +16,7 @@ object DataConfig {
   case class FpData() extends DataConfig("fp", 64)
   case class VecData() extends DataConfig("vec", 128)
   case class ImmData(len: Int) extends DataConfig("int", len)
-  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", VAddrBits)
+  case class VAddrData()(implicit p: Parameters) extends DataConfig("vaddr", 48 + 2) // Todo: associate it with the width of vaddr
   case class V0Data() extends DataConfig("v0", 128)
   case class VlData() extends DataConfig("vl", log2Up(VecData().dataWidth) + 1 ) // 8
   case class FakeIntData() extends DataConfig("fakeint", 64)
@@ -34,11 +34,16 @@ object DataConfig {
 
   def VAddrBits(implicit p: Parameters): Int = {
     def coreParams = p(XSCoreParamsKey)
-    def HasHExtension = coreParams.HasHExtension
-    if(HasHExtension){
-      coreParams.GPAddrBits
-    }else{
-      coreParams.VAddrBits
+    if (coreParams.HasHExtension) {
+      if (coreParams.EnableSv48)
+        coreParams.GPAddrBitsSv48x4
+      else
+        coreParams.GPAddrBitsSv39x4
+    } else {
+      if (coreParams.EnableSv48)
+        coreParams.VAddrBitsSv48
+      else
+        coreParams.VAddrBitsSv39
     }
     // VAddrBits is Virtual Memory addr bits
   }

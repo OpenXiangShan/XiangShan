@@ -227,6 +227,9 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
+  val trigger = TriggerAction()
+  val vstart         = UInt(elemIdxBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
   // val uopQueuePtr = new VluopPtr
   // val flowPtr = new VlflowPtr
 }
@@ -289,7 +292,11 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)
   val mask        = UInt(VLENB.W)
-  val vaddr       = UInt(VAddrBits.W)
+  val vaddr       = UInt(XLEN.W)
+  val vaNeedExt   = Bool()
+  val gpaddr      = UInt(GPAddrBits.W)
+  val isForVSnonLeafPTE = Bool()
+  val vecTriggerMask = UInt((VLEN/8).W)
 }
 
 object MulNum {
@@ -730,8 +737,8 @@ object genVWdata {
 }
 
 object genUSSplitAddr{
-  def apply(addr: UInt, index: UInt): UInt = {
-    val tmpAddr = Cat(addr(38, 4), 0.U(4.W))
+  def apply(addr: UInt, index: UInt, width: Int): UInt = {
+    val tmpAddr = Cat(addr(width - 1, 4), 0.U(4.W))
     val nextCacheline = tmpAddr + 16.U
     LookupTree(index, List(
       0.U -> tmpAddr,
@@ -803,10 +810,10 @@ object genVUopOffset extends VLSUConstants {
   def apply(instType: UInt, isfof: Bool, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
     val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
 
-    val fofVUopOffset = (LookupTree(instType,List(
-      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
-      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
-    ))).asUInt
+//    val fofVUopOffset = (LookupTree(instType,List(
+//      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
+//      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
+//    ))).asUInt
 
     val otherVUopOffset = (LookupTree(instType,List(
       "b000".U -> ( uopInsidefield << alignedType                                   ) , // unit-stride
@@ -819,7 +826,8 @@ object genVUopOffset extends VLSUConstants {
       "b111".U -> ( 0.U                                                             )   // segment indexed-ordered
     ))).asUInt
 
-    Mux(isfof, fofVUopOffset, otherVUopOffset)
+//    Mux(isfof, fofVUopOffset, otherVUopOffset)
+    otherVUopOffset
   }
 }
 
@@ -849,6 +857,57 @@ object genVFirstUnmask extends VLSUConstants {
       (v, i.U)
     }
     PriorityMuxDefault(select, 0.U)
+  }
+}
+
+class skidBufferConnect[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val in = Flipped(DecoupledIO(gen.cloneType))
+    val flush = Input(Bool())
+    val out = DecoupledIO(gen.cloneType)
+  })
+
+  skidBuffer.connect(io.in, io.out, io.flush)
+}
+
+object skidBuffer{
+  /*
+  * Skid Buffer used to break timing path of ready
+  * */
+  def connect[T <: Data](
+                          in: DecoupledIO[T],
+                          out: DecoupledIO[T],
+                          flush: Bool
+                        ): T = {
+    val empty :: skid :: Nil = Enum(2)
+    val state      = RegInit(empty)
+    val stateNext  = WireInit(empty)
+    val dataBuffer = RegEnable(in.bits, (!out.ready && in.fire))
+
+    when(state === empty){
+      stateNext := Mux(!out.ready && in.fire && !flush, skid, empty)
+    }.elsewhen(state === skid){
+      stateNext := Mux(out.ready || flush, empty, skid)
+    }
+    state     := stateNext
+
+    in.ready  := state === empty
+    out.bits  := Mux(state === skid, dataBuffer, in.bits)
+    out.valid := in.valid || (state === skid)
+
+    dataBuffer
+  }
+  def apply[T <: Data](
+                        in: DecoupledIO[T],
+                        out: DecoupledIO[T],
+                        flush: Bool,
+                        moduleName: String
+                      ): Unit = {
+    val buffer = Module(new skidBufferConnect(in.bits))
+    buffer.suggestName(moduleName)
+    buffer.io.in <> in
+    buffer.io.flush := flush
+    out <> buffer.io.out
   }
 }
 

@@ -22,6 +22,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
+import xiangshan.backend.trace._
 
 object Bundles {
   /**
@@ -39,28 +40,32 @@ object Bundles {
   }
   // frontend -> backend
   class StaticInst(implicit p: Parameters) extends XSBundle {
-    val instr           = UInt(32.W)
-    val pc              = UInt(VAddrBits.W)
-    val foldpc          = UInt(MemPredPCWidth.W)
-    val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
-    val preDecodeInfo   = new PreDecodeInfo
-    val pred_taken      = Bool()
-    val crossPageIPFFix = Bool()
-    val ftqPtr          = new FtqPtr
-    val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val instr            = UInt(32.W)
+    val pc               = UInt(VAddrBits.W)
+    val foldpc           = UInt(MemPredPCWidth.W)
+    val exceptionVec     = ExceptionVec()
+    val isFetchMalAddr   = Bool()
+    val trigger          = TriggerAction()
+    val preDecodeInfo    = new PreDecodeInfo
+    val pred_taken       = Bool()
+    val crossPageIPFFix  = Bool()
+    val ftqPtr           = new FtqPtr
+    val ftqOffset        = UInt(log2Up(PredictWidth).W)
+    val isLastInFtqEntry = Bool()
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
       this.pc               := source.pc
       this.foldpc           := source.foldpc
       this.exceptionVec     := source.exceptionVec
+      this.isFetchMalAddr   := source.exceptionFromBackend
       this.trigger          := source.trigger
       this.preDecodeInfo    := source.pd
       this.pred_taken       := source.pred_taken
       this.crossPageIPFFix  := source.crossPageIPFFix
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
+      this.isLastInFtqEntry := source.isLastInFtqEntry
     }
   }
 
@@ -72,7 +77,8 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
-    val trigger         = new TriggerCf
+    val isFetchMalAddr  = Bool()
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -109,6 +115,7 @@ object Bundles {
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
+    val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
@@ -138,6 +145,24 @@ object Bundles {
     }
   }
 
+  class TrapInstInfo(implicit p: Parameters) extends XSBundle {
+    val instr = UInt(32.W)
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Up(PredictWidth).W)
+
+    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool ={
+      val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
+      sameFlush || isAfter(this.ftqPtr, ftqPtr)
+    }
+
+    def fromDecodedInst(decodedInst: DecodedInst): this.type = {
+      this.instr     := decodedInst.instr
+      this.ftqPtr    := decodedInst.ftqPtr
+      this.ftqOffset := decodedInst.ftqOffset
+      this
+    }
+  }
+
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
@@ -146,8 +171,9 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val isFetchMalAddr  = Bool()
     val hasException    = Bool()
-    val trigger         = new TriggerCf
+    val trigger         = TriggerAction()
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()
     val crossPageIPFFix = Bool()
@@ -194,6 +220,7 @@ object Bundles {
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
     val dirtyVs         = Bool()
+    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
@@ -227,7 +254,8 @@ object Bundles {
     def isWFI: Bool = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
 
     def isSvinvalBegin(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && !flush
-    def isSvinval(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.sfence && !flush
+    def isSvinval(flush: Bool) = FuType.isFence(fuType) &&
+      Cat(Seq(FenceOpType.sfence, FenceOpType.hfence_v, FenceOpType.hfence_g).map(_ === fuOpType)).orR && !flush
     def isSvinvalEnd(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && flush
     def isNotSvinval = !FuType.isFence(fuType)
 
@@ -252,7 +280,7 @@ object Bundles {
       this
     }
 
-    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen || v0Wen || vlWen
+    def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
   }
 
   trait BundleSource {
@@ -417,6 +445,8 @@ object Bundles {
     val isDependOldvd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
 
+    val isVleff = Bool() // vleff
+
     def vtype: VType = {
       val res = Wire(VType())
       res.illegal := this.vill
@@ -451,6 +481,11 @@ object Bundles {
       this.vsew  := source.vsew
       this.vlmul := source.vlmul
     }
+  }
+
+  class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
+    val scalaNeedFrm = Bool()
+    val vectorNeedFrm = Bool()
   }
 
   // DynInst --[IssueQueue]--> DataPath
@@ -601,7 +636,7 @@ object Bundles {
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
-    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -684,7 +719,7 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val trigger      = if (params.trigger)      Some(new TriggerCf)           else None
+    val trigger      = if (params.trigger)      Some(TriggerAction())           else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     // vldu used only
@@ -695,6 +730,10 @@ object Bundles {
       val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
       val isMasked = Bool()
+      val isStrided = Bool()
+      val isWhole = Bool()
+      val isVecLoad = Bool()
+      val isVlm = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
@@ -823,13 +862,16 @@ object Bundles {
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
-    val gpaddr = UInt(GPAddrBits.W)
+    val isPcBkpt = Bool()
+    val isFetchMalAddr = Bool()
+    val gpaddr = UInt(XLEN.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
-    val trigger  = new TriggerCf
+    val trigger = TriggerAction()
+    val isForVSnonLeafPTE = Bool()
   }
 
   object UopIdx {
@@ -887,6 +929,7 @@ object Bundles {
     val mask = if (isVector) Some(UInt(VLEN.W)) else None
     val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
     val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
+    val isFromLoadUnit = Bool()
     val debug = new DebugBundle
 
     def isVls = FuType.isVls(uop.fuType)

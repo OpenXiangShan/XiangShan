@@ -51,16 +51,16 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
-    when (b.fallThruError) {
-      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
-      val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
-      this.nextStartAddr :=
-        Cat(nextBlockHigher,
-          startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
-          startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
-          0.U(instOffsetBits.W)
-        )
-    }
+    // when (b.fallThruError) {
+    //   val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
+    //   val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
+    //   this.nextStartAddr :=
+    //     Cat(nextBlockHigher,
+    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
+    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
+    //       0.U(instOffsetBits.W)
+    //     )
+    // }
     this
   }
   override def toPrintable: Printable = {
@@ -92,6 +92,9 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
+  val backendIpf          = Bool()
+  val backendIgpf         = Bool()
+  val backendIaf          = Bool()
 }
 
 
@@ -119,20 +122,38 @@ object ExceptionType {
   def af    : UInt = "b11".U // instruction access fault
   def width : Int  = 2
 
+  def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
+    assert(
+      PopCount(VecInit(has_pf, has_gpf, has_af)) <= 1.U,
+      "ExceptionType.fromOH receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
+      has_pf, has_gpf, has_af
+    )
+    // input is at-most-one-hot encoded, so we don't worry about priority here.
+    MuxCase(none, Seq(
+      has_pf  -> pf,
+      has_gpf -> gpf,
+      has_af  -> af
+    ))
+  }
+
+  // raise pf/gpf/af according to ftq(backend) request
+  def fromFtq(req: FtqToICacheRequestBundle): UInt = {
+    fromOH(
+      req.backendIpf,
+      req.backendIgpf,
+      req.backendIaf
+    )
+  }
+
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): UInt = {
     require(useDup >= 0 && useDup < resp.excp.length)
-    assert(
-      PopCount(VecInit(resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr)) <= 1.U,
-      "tlb resp has more than 1 exception, af=%d, pf=%d, gpf=%d",
-      resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr
+    // itlb is guaranteed to respond at most one exception
+    fromOH(
+      resp.excp(useDup).pf.instr,
+      resp.excp(useDup).gpf.instr,
+      resp.excp(useDup).af.instr
     )
-    // itlb is guaranteed to respond at most one exception, so we don't worry about priority here.
-    MuxCase(none, Seq(
-      resp.excp(useDup).pf.instr  -> pf,
-      resp.excp(useDup).gpf.instr -> gpf,
-      resp.excp(useDup).af.instr  -> af
-    ))
   }
 
   // raise af if pmp check failed
@@ -228,13 +249,17 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val valid     = UInt(PredictWidth.W)
   val enqEnable = UInt(PredictWidth.W)
   val pd        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val exceptionFromBackend = Vec(PredictWidth, Bool())
   val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
-  val triggered    = Vec(PredictWidth, new TriggerCf)
+  val illegalInstr = Vec(PredictWidth, Bool())
+  val triggered    = Vec(PredictWidth, TriggerAction())
+  val isLastInFtqEntry = Vec(PredictWidth, Bool())
+
+  val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
+  val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
 }
 
@@ -524,7 +549,7 @@ object selectByTaken {
   }
 }
 
-class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
+class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
   val slot_valids = Vec(totalSlot, Bool())
@@ -580,7 +605,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // the vec indicating if ghr should shift on each branch
   def shouldShiftVec =
     VecInit(br_valids.zipWithIndex.map{ case (v, i) =>
-      v && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
+      v && hit && !real_br_taken_mask().take(i).reduceOption(_||_).getOrElse(false.B)})
 
   def lastBrPosOH =
     VecInit((!hit || !br_valids.reduce(_||_)) +: // not hit or no brs in entry
@@ -595,7 +620,11 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b && hit}.reduce(_||_)
 
   def target(pc: UInt): UInt = {
-    selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
+    if (isNotS3){
+      selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
+    }else {
+      selectByTaken(taken_mask_on_slot, hit && !fallThroughErr, allTarget(pc))
+    }
   }
 
   // allTarget return a Vec of all possible target of a BP stage
@@ -669,13 +698,14 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val topAddr = UInt(VAddrBits.W)
 }
 
-class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
+// 
+class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
   val pc    = Vec(numDup, UInt(VAddrBits.W))
   val valid = Vec(numDup, Bool())
   val hasRedirect  = Vec(numDup, Bool())
   val ftq_idx = new FtqPtr
-  val full_pred    = Vec(numDup, new FullBranchPrediction)
+  val full_pred    = Vec(numDup, new FullBranchPrediction(isNotS3))
 
 
   def target(pc: UInt) = VecInit(full_pred.map(_.target(pc)))
@@ -700,9 +730,9 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val s1 = new BranchPredictionBundle
-  val s2 = new BranchPredictionBundle
-  val s3 = new BranchPredictionBundle
+  val s1 = new BranchPredictionBundle(isNotS3 = true)
+  val s2 = new BranchPredictionBundle(isNotS3 = true)
+  val s3 = new BranchPredictionBundle(isNotS3 = false)
 
   val s1_uftbHit = Bool()
   val s1_uftbHasIndirect = Bool()

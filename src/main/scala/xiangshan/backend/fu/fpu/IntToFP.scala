@@ -56,7 +56,7 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   mux.exc := 0.U
 
   when(s2_wflags){
-    val i2fResults = for(t <- FPU.ftypes) yield {
+    val i2fResults = for(t <- FPU.ftypes.take(2)) yield {
       val i2f = Module(new fudian.IntToFP(t.expWidth, t.precision))
       i2f.io.sign := ~s2_typ(0)
       i2f.io.long := s2_typ(1)

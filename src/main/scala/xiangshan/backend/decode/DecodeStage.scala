@@ -28,6 +28,8 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
+import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
+import xiangshan.frontend.FtqPtr
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -40,7 +42,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val canAccept = Output(Bool())
-    val vtypeRedirect = Input(Bool())
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
     // to Rename
@@ -55,19 +56,27 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+
     // vtype update
-    val isResumeVType = Input(Bool())
-    val commitVType = new Bundle {
-      val vtype = Flipped(Valid(new VType))
-      val hasVsetvl = Input(Bool())
+    val fromRob = new Bundle {
+      val isResumeVType = Input(Bool())
+      val walkToArchVType = Input(Bool())
+      val commitVType = new Bundle {
+        val vtype = Flipped(Valid(new VType))
+        val hasVsetvl = Input(Bool())
+      }
+      val walkVType = Flipped(Valid(new VType))
     }
-    val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
       val out = new StallReasonIO(DecodeWidth)
     }
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
+
+    val toCSR = new Bundle {
+      val trapInstInfo = ValidIO(new TrapInstInfo)
+    }
   })
 
   // io alias
@@ -97,6 +106,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
 
+  val isIllegalInstVec = VecInit((outValids lazyZip outReadys lazyZip io.out.map(_.bits)).map {
+    case (valid, ready, decodedInst) =>
+      valid && ready && (decodedInst.exceptionVec(ExceptionNO.EX_II) || decodedInst.exceptionVec(ExceptionNO.EX_VI))
+  })
+  val hasIllegalInst = Cat(isIllegalInstVec).orR
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(io.out.map(_.bits)), 0.U.asTypeOf(new DecodedInst))
+
   val complexNum = Wire(UInt(3.W))
   // (0, 1, 2, 3, 4, 5) + complexNum
   val complexNumAddLocation: Vec[UInt] = VecInit((0 until DecodeWidth).map(x => (x.U +& complexNum)))
@@ -111,9 +127,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
   // when io.redirect is True, never update vtype
   vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset && !io.redirect
-  vtypeGen.io.redirect := io.vtypeRedirect
-  vtypeGen.io.commitVType := io.commitVType
-  vtypeGen.io.walkVType := io.walkVType
+  vtypeGen.io.walkToArchVType := io.fromRob.walkToArchVType
+  vtypeGen.io.commitVType := io.fromRob.commitVType
+  vtypeGen.io.walkVType := io.fromRob.walkVType
   vtypeGen.io.vsetvlVType := io.vsetvlVType
 
   //Comp 1
@@ -122,7 +138,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoderComp.io.vtypeBypass := vtypeGen.io.vtype
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
-  decoderComp.io.in.valid := complexValid && !io.isResumeVType
+  decoderComp.io.in.valid := complexValid && !io.fromRob.isResumeVType
   decoderComp.io.in.bits.simpleDecodedInst := complexInst
   decoderComp.io.in.bits.uopInfo := complexUopInfo
   decoderComp.io.out.complexDecodedInsts.zipWithIndex.foreach { case (out, i) => out.ready := io.out(i).ready }
@@ -139,7 +155,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
 
-  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.isResumeVType
+  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
 
   io.canAccept := canAccept
 
@@ -147,7 +163,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     in.ready := !io.redirect && (
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
-    ) && !(hasVectorInst && io.isResumeVType)
+    ) && !io.fromRob.isResumeVType
   }
 
   val finalDecodedInst = Wire(Vec(DecodeWidth, new DecodedInst))
@@ -159,7 +175,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
 
   io.out.zipWithIndex.foreach { case (inst, i) =>
-    inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.isResumeVType)
+    inst.valid := finalDecodedInstValid(i) && !io.fromRob.isResumeVType
     inst.bits := finalDecodedInst(i)
     inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
     inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))
@@ -180,6 +196,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
         "DecodeOut: can't wirte two regfile in one uop/instruction")
     }
   )
+
   for (i <- 0 until DecodeWidth) {
 
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
@@ -217,6 +234,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
                io.stallReason.out.backReason.bits,
                in)
   }
+
+  io.toCSR.trapInstInfo.valid := hasIllegalInst && !io.redirect
+  io.toCSR.trapInstInfo.bits.fromDecodedInst(illegalInst)
 
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))

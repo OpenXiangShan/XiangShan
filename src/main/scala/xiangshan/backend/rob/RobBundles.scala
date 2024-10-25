@@ -26,14 +26,16 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
+import xiangshan.backend.fu.vector.Bundles.{Nf, VLmul, VSew, VType}
 import xiangshan.backend.rename.SnapshotGenerator
+import xiangshan.backend.trace._
 
 import scala.collection.immutable.Nil
 
@@ -62,7 +64,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val loadWaitBit = Bool()    // for perfEvents
     val eliminatedMove = Bool() // for perfEvents
     // data end
-
+    
+    // trace
+    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
     // status begin
     val valid = Bool()
     val fflags = UInt(5.W)
@@ -79,8 +83,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
+    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
+    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
 
@@ -101,6 +105,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isRVC = Bool()
     val isVset = Bool()
     val isHls = Bool()
+    val isVls = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -110,11 +115,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val loadWaitBit = Bool() // for perfEvents
     val isMove = Bool()      // for perfEvents
     val needFlush = Bool()
+    // trace
+    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
+    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
+    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
     val dirtyFs = Bool()
@@ -137,6 +144,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.eliminatedMove := robEnq.eliminatedMove
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
+    // trace
+    robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.debug_pc.foreach(_ := robEnq.pc)
     robEntry.debug_instr.foreach(_ := robEnq.instr)
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
@@ -158,6 +167,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
+    robCommitEntry.isVls := robEntry.vls
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
@@ -167,6 +177,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
+    robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
@@ -211,7 +222,7 @@ object RobPtr {
 
 class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
-  val trapTarget = Input(UInt(VAddrBits.W))
+  val trapTarget = Input(new TargetPCBundle)
   val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
 
@@ -221,13 +232,14 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val dirty_fs   = Output(Bool())
   val dirty_vs   = Output(Bool())
   val perfinfo   = new Bundle {
-    val retiredInstr = Output(UInt(3.W))
+    val retiredInstr = Output(UInt(7.W))
   }
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val lcommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
+  val pendingUncacheld = Output(Bool())
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   // set when vector store at the head of ROB
@@ -271,20 +283,35 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   // set 1 if there is 1 exists in exceptionVec
   val hasException = Bool()
+  // This signal is valid iff currentValid is true
+  // 0: is execute exception, 1: is fetch exception
+  val isEnqExcp = Bool()
   val exceptionVec = ExceptionVec()
+  val isFetchMalAddr = Bool()
   val flushPipe = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
-  val trigger = new TriggerCf
+  val trigger = TriggerAction()
+  // if vstart is udpated by vector unit
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
+  val vuopIdx = UopIdx()
+  val isVecLoad = Bool()
+  val isVlm = Bool()
+  val isStrided = Bool()
+  val isIndexed = Bool()
+  val isWhole = Bool()
+  val nf = Nf()
+  val vsew = VSew()
+  val veew = VSew()
+  val vlmul = VLmul()
 
-  def has_exception = hasException || flushPipe || singleStep || replayInst || trigger.canFire
-  def not_commit = hasException || singleStep || replayInst || trigger.canFire
+  def has_exception = hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)
+  def not_commit = hasException || singleStep || replayInst || TriggerAction.isDmode(trigger)
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = hasException || singleStep || trigger.canFire
+  def can_writeback = hasException || singleStep || TriggerAction.isDmode(trigger)
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {

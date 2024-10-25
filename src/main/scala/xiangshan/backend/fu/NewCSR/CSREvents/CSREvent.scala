@@ -15,15 +15,19 @@ trait CSREvents { self: NewCSR =>
 
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
 
+  val trapEntryMNEvent = Module(new TrapEntryMNEventModule())
+
   val trapEntryHSEvent = Module(new TrapEntryHSEventModule)
 
   val trapEntryVSEvent = Module(new TrapEntryVSEventModule)
 
-  val mretEvent = Module(new MretEventModule)
+  val mretEvent  = Module(new MretEventModule)
 
-  val sretEvent = Module(new SretEventModule)
+  val mnretEvent = Module(new MNretEventModule)
 
-  val dretEvent = Module(new DretEventModule)
+  val sretEvent  = Module(new SretEventModule)
+
+  val dretEvent  = Module(new DretEventModule)
 
   val events: Seq[Module with CSREventBase] = Seq(
     trapEntryDEvent,
@@ -50,7 +54,16 @@ trait EventUpdatePrivStateOutput {
 }
 
 trait EventOutputBase {
-  def getBundleByName(name: String): Valid[CSRBundle]
+  import scala.reflect.runtime.{universe => ru}
+
+  def getBundleByName(name: String): Valid[CSRBundle] = {
+    val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
+    val im = mirror.reflect(this)
+    val classSymbol: ru.ClassSymbol = im.symbol.asClass
+    val fieldSymbol = classSymbol.info.decl(ru.TermName(name)).asTerm
+    val fieldMirror: ru.FieldMirror = mirror.reflect(this).reflectField(fieldSymbol)
+    fieldMirror.get.asInstanceOf[Valid[CSRBundle]]
+  }
 }
 
 trait CSREventBase {
@@ -65,7 +78,7 @@ trait CSREventBase {
     hgatp: HgatpBundle,
     addr: UInt,
   ) = {
-    require(addr.getWidth >= 41)
+    require(addr.getWidth >= 50)
 
     val isBare =
       transMode.isModeM ||
@@ -84,13 +97,17 @@ trait CSREventBase {
 
     val bareAddr   = ZeroExt(addr(PAddrWidth - 1, 0), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-    val sv39Addr   = SignExt(addr(38, 0), XLEN)
-    val sv39x4Addr = SignExt(addr(40, 0), XLEN)
+    val sv39Addr   = SignExt(addr.take(39), XLEN)
+    val sv39x4Addr = ZeroExt(addr.take(39 + 2), XLEN)
+    val sv48Addr   = SignExt(addr.take(48), XLEN)
+    val sv48x4Addr = ZeroExt(addr.take(48 + 2), XLEN)
 
     val trapAddr = Mux1H(Seq(
-      isBare -> bareAddr,
-      isSv39 -> sv39Addr,
+      isBare   -> bareAddr,
+      isSv39   -> sv39Addr,
       isSv39x4 -> sv39x4Addr,
+      isSv48   -> sv48Addr,
+      isSv48x4 -> sv48x4Addr,
     ))
 
     trapAddr
@@ -101,8 +118,13 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val causeNO = Input(new CauseBundle)
   val trapPc = Input(UInt(VaddrMaxWidth.W))
   val trapPcGPA = Input(UInt(GPAddrBits.W))
+  val trapInst = Input(ValidIO(UInt(InstWidth.W)))
+  val fetchMalTval = Input(UInt(XLEN.W))
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
+  val isFetchMalAddr = Input(Bool())
+  val isFetchBkpt = Input(Bool())
+  val trapIsForVSnonLeafPTE = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -115,14 +137,34 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
 
-  val tcontrol = Input(new TcontrolBundle)
-
-  val pcFromXtvec = Input(UInt(VaddrMaxWidth.W))
+  val pcFromXtvec = Input(UInt(XLEN.W))
 
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
   // from mem
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
+  val memExceptionIsForVSnonLeafPTE = Input(Bool())
+  val virtualInterruptIsHvictlInject = Input(Bool())
+  val hvictlIID = Input(UInt(HIIDWidth.W))
+}
+
+trait EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
+  protected def addUpdateBundleInCSREnumType(updateBundle: ValidIO[CSRBundle]): Unit = {
+    (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
+      if (updateBundle.bits.eventFields.contains(source)) {
+        sink.addOtherUpdate(updateBundle.valid, source)
+      }
+    }
+  }
+}
+
+class TargetPCBundle extends Bundle {
+  val pc = UInt(XLEN.W)
+  val raiseIPF = Bool()
+  val raiseIAF = Bool()
+  val raiseIGPF = Bool()
+
+  def raiseFault = raiseIPF || raiseIAF || raiseIGPF
 }
