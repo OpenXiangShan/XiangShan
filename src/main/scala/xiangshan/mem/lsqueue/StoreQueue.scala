@@ -384,7 +384,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           pending((index + j.U).value) := false.B
           prefetch((index + j.U).value) := false.B
           mmio((index + j.U).value) := false.B
-          isVec((index + j.U).value) := enqInstr.isVecStore // check vector store by the encoding of inst
+          isVec((index + j.U).value) :=  FuType.isVStore(io.enq.req(i).bits.fuType)
           vecMbCommit((index + j.U).value) := false.B
           vecDataValid((index + j.U).value) := false.B
           hasException((index + j.U).value) := false.B

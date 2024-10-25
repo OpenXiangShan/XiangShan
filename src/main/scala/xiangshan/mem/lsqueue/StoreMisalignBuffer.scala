@@ -569,7 +569,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       curPtr := curPtr + 1.U
     }
   }
-
   io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare

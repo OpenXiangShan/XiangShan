@@ -586,7 +586,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     splitLoadResp(curPtr).vaddr,
     splitLoadResp(curPtr).fullva))
   val overwriteGpaddr = GatedRegNext(Mux(
-    cross16BytesBoundary && (curPtr === 1.U), 
+    cross16BytesBoundary && (curPtr === 1.U),
     splitLoadResp(curPtr).gpaddr,
     Cat(
       get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva)
