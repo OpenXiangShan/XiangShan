@@ -121,4 +121,4 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   }
 
 }
-*/
+ */
