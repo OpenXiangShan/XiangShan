@@ -132,6 +132,30 @@ object Bundles {
       this.flowNum := input.flowNum.getOrElse(0.U.asTypeOf(this.flowNum))
     }
 
+    def toMemExuInputBundle(): MemExuInput = {
+      val res = Wire(new MemExuInput)
+      res   := 0.U.asTypeOf(res)
+      res.uop     := this.uop
+      res.src(0)  := this.src(0)
+      res.src(1)  := this.src(1)
+      res.isFirstIssue := this.isFirstIssue
+      res
+    }
+
+    def fromMemExuOutputBundle(input: MemExuOutput, isVector: Boolean = false) = {
+      this          := 0.U.asTypeOf(this)
+      this.uop      := input.uop
+      this.vaddr    := input.debug.vaddr
+      this.paddr    := input.debug.paddr
+      this.data     := input.data
+      this.mmio     := input.debug.isMMIO
+      this.isStore  := !input.isFromLoadUnit
+
+      if (isVector) {
+        this.mask := input.mask.get
+      }
+    }
+
     def toMemExuOutputBundle(isVector: Boolean = false): MemExuOutput = {
       val res = Wire(new MemExuOutput(isVector = isVector))
       res.uop  := this.uop
@@ -143,9 +167,10 @@ object Bundles {
       res.debug.isPerfCnt := false.B
       res
     }
+
     def fromVecPipeBundle(input: VecPipeBundle, isStore: Boolean = false): LsPipelineBundle = {
       val res = Wire(new LsPipelineBundle)
-      res                 := DontCare
+      res                 := 0.U.asTypeOf(res)
       res.uop             := input.uop
       res.vaddr           := input.vaddr
       res.vecBaseVaddr    := input.basevaddr
