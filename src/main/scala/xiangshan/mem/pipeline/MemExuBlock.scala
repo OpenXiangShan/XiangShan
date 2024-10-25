@@ -156,7 +156,7 @@ class MemExuBlockIO(implicit p: Parameters) extends MemBlockBundle {
   val toMissQueue = Vec(LdExuCnt, ValidIO(new MissQueueForwardReqBundle))
   val toPrefetch  = new Bundle() {
     val ifetch  = Vec(LdExuCnt, ValidIO(new SoftIfetchPrefetchBundle))
-    val train   = Vec(LdExuCnt, new LsPrefetchTrainIO)
+    val train   = Vec(LdExuCnt + StaCnt, new LsPrefetchTrainIO)
     val trainL1 = Vec(LdExuCnt, new LsPrefetchTrainIO)
   }
   val flushSbuffer = new SbufferFlushBundle
@@ -366,6 +366,26 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       sink.bits.isAtomic       := false.B
       sink.bits.isHWPrefetch   := true.B
   }
+
+  // prefetch train: [[MemUnit]] -> [[Prefetch]]
+  val memUnitPrefetchTrains = totalMemUnits.map(_.io.toPrefetch.train.get)
+  val prefetchTrains = toPrefetch.train
+  require(memUnitPrefetchTrains.length == prefetchTrains.length,
+          "The number of memUnitPrefetchTrains should be match prefetchTrains!")
+  prefetchTrains <> memUnitPrefetchTrains
+
+  val memUnitPrefetchTrainL1s = totalLoadUnits.map(_.io.toPrefetch.trainL1.get)
+  val prefetchTrainL1s = toPrefetch.trainL1
+  require(memUnitPrefetchTrainL1s.length == prefetchTrainL1s.length,
+          "The number of memUnitPrefetchTrainL1s should be match prefetchTrainL1s!")
+  prefetchTrainL1s <> memUnitPrefetchTrainL1s
+
+  val memUnitPrefetchIFetchs = totalLoadUnits.map(_.io.toPrefetch.ifetch.get)
+  val prefetchTrainIFetchs = toPrefetch.ifetch
+  require(memUnitPrefetchIFetchs.length == prefetchTrainIFetchs.length,
+          "The number of memUnitPrefetchTrainL1s should be match prefetchTrainIFetchs!")
+  prefetchTrainIFetchs <> memUnitPrefetchIFetchs
+
 
   // misalign issue: [[StoreMisalignBuffer]] -> [[StaUnits]]
   val storeMisalignBufIssue = Seq(storeMisalignBuffer.io.splitStoreReq)
