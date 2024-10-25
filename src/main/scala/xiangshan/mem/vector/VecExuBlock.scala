@@ -33,6 +33,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem._
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
@@ -49,7 +50,7 @@ class toMemExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockP
   val vectorDataOut = Vec(VstuCnt, ValidIO(new MemExuOutput(isVector = true)))
 }
 
-class VecExuBlockIO(implicit p: Paramters) extends XSBundle with HasMemBlockParameters {
+class VecExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockParameters {
   // from
   val fromCtrl = new Bundle() {
     val hartId    = Input(UInt(hartIdLen.W))
@@ -72,8 +73,8 @@ class VecExuBlockIO(implicit p: Paramters) extends XSBundle with HasMemBlockPara
     val writebackVldu = Vec(VlduCnt, DecoupledIO(new MemExuOutput(isVector = true)))
   }
   val toLsq = new Bundle() {
-    val ldvecFeedback = Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO))
-    val stvecFeedback = Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO))
+    val ldvecFeedback = Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToLsqIO))
+    val stvecFeedback = Vec(VecStorePipelineWidth, ValidIO(new FeedbackToLsqIO))
     val vstd = Vec(VstuCnt, ValidIO(new MemExuOutput(isVector = true)))
   }
   val toMemExuBlock = new toMemExuBlockIO
@@ -99,7 +100,9 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   private val (fromBackend, toBackend) = (io.fromBackend, io.toBackend)
   private val (fromMemExuBlock, toMemExuBlock) = (io.fromMemExuBlock, io.toMemExuBlock)
   private val (fromDCache, toDCache) = (io.fromDCache, io.toDCache)
+  private val (fromTlb, toTlb) = (io.fromTlb, io.toTlb)
   private val fromPmp = io.fromPmp
+  private val toLsq = io.toLsq
 
   // The number of vector load/store units is decoupled with the number of load/store units
   val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
@@ -115,23 +118,23 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   val vlsuCanAccept = (0 until VlduCnt).map(
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
-  val isSegment     = fromBackend.issueVldu.head.valid && isVsegls(fromBackend.issueVldu.head.bits.uop.fuType)
+  val isSegment     = fromBackend.issueVldu.head.valid && FuType.isVsegls(fromBackend.issueVldu.head.bits.uop.fuType)
   val isFixVlUop    = fromBackend.issueVldu.map{x =>
     x.bits.uop.vpu.isVleff && x.bits.uop.vpu.lastUop && x.valid
   }
 
   when (vSegmentUnit.io.in.fire) {
     vSegmentFlag := true.B
-  } .elsewhen (vSegmentUnit.io.uopWriteback.valid) {
+  } .elsewhen (vSegmentUnit.io.uopwriteback.valid) {
     vSegmentFlag := false.B
   }
   io.vSegmentFlag := vSegmentFlag
 
-  vlMergeBuffer.io.redirect <> redirect
-  vsMergeBuffer.map(_.io.redirect <> redirect)
+  vlMergeBuffer.io.redirect <> fromCtrl.redirect
+  vsMergeBuffer.map(_.io.redirect <> fromCtrl.redirect)
   vSegmentUnit.io.redirect <> fromCtrl.redirect
   vSegmentUnit.io.fromCsrTrigger <> fromCtrl.trigger
-  vfofBuffer.io.redirect <> redirect
+  vfofBuffer.io.redirect <> fromCtrl.redirect
 
 
   // init port
@@ -158,7 +161,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   }
 
   // vector store issue: [[Backend]] -> [[MemExuBlock]]
-  vsSplit.zip(toMemExuBlock.vectorStoreIssue).zipWithIndex.foreach {
+  vsSplit.zip(toMemExuBlock.vectorStoreIssues).zipWithIndex.foreach {
     case ((impl: VSSplitImp, stu), i) =>
       impl.io.redirect <> fromCtrl.redirect
       impl.io.in <> fromBackend.issueVldu(i)
@@ -168,9 +171,14 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
       impl.io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
       impl.io.vstd.get := DontCare // TODO: Discuss how to pass vector store data
 
+      val vecStIn = Wire(DecoupledIO(new VecPipeBundle))
+      stu.valid := vecStIn.valid
+      stu.bits.fromVecPipeBundle(vecStIn.bits, isStore = true)
+      vecStIn.ready := stu.ready
+
       NewPipelineConnect(
-        impl.io.out, stu, stu.fire,
-        Mux(impl.io.out.fire, impl.io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect), stu.bits.uop.robIdx.needFlush(fromCtrl.redirect)),
+        impl.io.out, vecStIn, vecStIn.fire,
+        Mux(impl.io.out.fire, impl.io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect), vecStIn.bits.uop.robIdx.needFlush(fromCtrl.redirect)),
         Option("VsSplitConnectStu" + i)
       )
     case _ =>
@@ -179,16 +187,21 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   // vector load issue: [[Backend]] -> [[MemExuBlock]]
   vlSplit.zip(toMemExuBlock.vectorLoadIssues).zipWithIndex.foreach {
     case ((impl: VLSplitImp, ldu), i) =>
-      impl.io.redirect <> redirect
+      impl.io.redirect <> fromCtrl.redirect
       impl.io.in <> fromBackend.issueVldu(i)
       impl.io.in.valid := fromBackend.issueVldu(i).valid &&
                           VlduType.isVecLd(fromBackend.issueVldu(i).bits.uop.fuOpType) &&
                           vlsuCanAccept(i) && !isSegment && !isFixVlUop(i)
       impl.io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
 
+      val vecLdIn = Wire(DecoupledIO(new VecPipeBundle))
+      ldu.valid := vecLdIn.valid
+      ldu.bits.fromVecPipeBundle(vecLdIn.bits)
+      vecLdIn.ready := ldu.ready
+
       NewPipelineConnect(
-        impl.io.out, ldu, ldu.fire,
-        Mux(impl.io.out.fire, impl.io.out.bits.uop.robIdx.needFlush(io.redirect), ldu.bits.uop.robIdx.needFlush(io.redirect)),
+        impl.io.out, vecLdIn, vecLdIn.fire,
+        Mux(impl.io.out.fire, impl.io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect), vecLdIn.bits.uop.robIdx.needFlush(fromCtrl.redirect)),
         Option("VlSplitConnectLdu" + i)
       )
     case _ =>
@@ -203,17 +216,21 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   // vl writeback: [[MemExuBlock]] -> [[vlMergeBuffer]]
   vlMergeBuffer.io.fromPipeline.zip(fromMemExuBlock.vectorLoadWriteback).foreach {
     case (sink, source) =>
-      sink <> source
+      sink.valid := source.valid
+      sink.bits  := source.bits.toVecPipelineFeedbackBundle()
+      source.ready := sink.ready
   }
 
   // vs writeback: [[MemExuBlock]] -> [[vsMergeBuffer]]
   vsMergeBuffer.map(_.io.fromPipeline.head).zip(fromMemExuBlock.vectorStoreWriteback).foreach {
     case (sink, source) =>
-      sink <> source
+      sink.valid := source.valid
+      sink.bits  := source.bits.toVecPipelineFeedbackBundle(isVStore = true)
+      source.ready := sink.ready
   }
 
   // vl feedback: [[vlMergeBuffer]] -> [[Lsq]]
-  toLsq.ldvecFeedback.zip(vlMergeBuffer.map(_.io.toLsq)).foreach {
+  toLsq.ldvecFeedback.zip(vlMergeBuffer.io.toLsq).foreach {
     case (sink, source) =>
       sink <> source
   }
@@ -243,7 +260,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
       if (i == 0) {
         sink.feedbackSlow.valid := source.valid || vSegmentUnit.io.feedback.valid
         sink.feedbackSlow.bits  := Mux1H(Seq(
-          vSegment.io.feedback.valid -> vSegmentUnit.io.feedback.bits,
+          vSegmentUnit.io.feedback.valid -> vSegmentUnit.io.feedback.bits,
           source.valid -> source.bits
         ))
       } else {
@@ -253,15 +270,16 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
 
   // vSegmentUnit issue: [[Backend]] -> [[vSegmentUnit]]
   vSegmentUnit.io.in <> fromBackend.issueVldu.head
-  vSegmentUnit.io.in.valid := fromBackend.issueVld.head.valid && !isSegment
+  vSegmentUnit.io.in.valid := fromBackend.issueVldu.head.valid && !isSegment
 
   // dcache: [[vSegmentUnit]] <-> [[DCache]]
   connectSamePort(toDCache.req, vSegmentUnit.io.rdcache)
   connectSamePort(vSegmentUnit.io.rdcache, fromDCache.resp)
 
   // tlb: [[vSegmentUnit]] <-> [[Tlb]]
-  connectSamePort(toTlb, vSegmentUnit.io.dtlb)
-  connectSamePort(vSegmentUnit.io.dtlb.resp, fromTlb)
+  toTlb.req <> vSegmentUnit.io.dtlb.req
+  toTlb.req_kill := vSegmentUnit.io.dtlb.req_kill
+  fromTlb <> vSegmentUnit.io.dtlb.resp
 
   // pmp: [[Pmp]] -> [[vSegmentUnit]]
   vSegmentUnit.io.pmpResp <> fromPmp
@@ -273,12 +291,12 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
   io.vecDifftestInfo <> vSegmentUnit.io.vecDifftestInfo
 
   // vldu writeback: [[vlMergeBuffer]] -> [[Backend]]
-  val vlMergeBufferWriteback = vlMergeBuffer.map(_.io.uopWriteback)
-  val vsMergeBufferWriteback = vsMergeBuffer.map(_.io.uopwriteback.head)
-  val vfofBufferWriteback    = vfofBuffer.map(_.io.mergeUopWriteback)
+  val vlMergeBufferWriteback = vlMergeBuffer.io.uopWriteback
+  val vsMergeBufferWriteback = vsMergeBuffer.map(_.io.uopWriteback.head)
+  val vfofBufferWriteback    = vfofBuffer.io.mergeUopWriteback
 
   toBackend.writebackVldu.zip(vlMergeBufferWriteback.zip(vsMergeBufferWriteback).zip(vfofBufferWriteback)).zipWithIndex.foreach {
-    case ((sink, ((vl, vs), vfof), i)) =>
+    case ((sink, ((vl, vs), vfof)), i) =>
       if (i == 0) {
         sink.valid := vl.valid || vs.valid || vSegmentUnit.io.uopwriteback.valid
         sink.bits  := PriorityMux(Seq(
@@ -287,8 +305,8 @@ class VecExuBlock(implicit p: Parameters) extends XSModule
           vs.valid -> vs.bits
         ))
         vSegmentUnit.io.uopwriteback.ready := sink.ready
-        vl.ready := sink.ready && !vSegmentUnit.io.uopWriteback.valid
-        vs.ready := sink.ready && !vSegmentUnit.io.uopWriteback.valid && !vl.valid
+        vl.ready := sink.ready && !vSegmentUnit.io.uopwriteback.valid
+        vs.ready := sink.ready && !vSegmentUnit.io.uopwriteback.valid && !vl.valid
       } else if (i == 1) {
         sink.valid := vl.valid || vs.valid || vfofBuffer.io.uopWriteback.valid
         sink.bits  := PriorityMux(Seq(
