@@ -1271,16 +1271,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
   }
 
-  when (atomicsUnit.io.out.valid) {
-    // when atom inst writeback, surpress normal load trigger
-    (0 until LduCnt).map(i => {
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger := TriggerAction.None
-    })
-    (0 until HyuCnt).map(i => {
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger := TriggerAction.None
-    })
-  }
-
   // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
