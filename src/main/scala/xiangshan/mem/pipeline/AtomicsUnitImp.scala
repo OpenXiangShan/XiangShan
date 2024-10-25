@@ -33,7 +33,7 @@ import xiangshan.backend.datapath.NewPipelineConnectPipe
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 import xiangshan.cache.{DCacheLoadReqIO, DCacheLoadRespIO, AtomicWordIO}
-import xiangshan.mem.ReplayCauseNo._
+import xiangshan.mem.ReplayCauseNO._
 import xiangshan.mem.Bundles._
 import difftest._
 
@@ -48,7 +48,7 @@ class AtomicsUnitIO()(implicit p: Parameters, params: MemUnitParams) extends Mem
     val iqFeedback = ValidIO(new RSFeedback)
   }
   val flushSbuffer = new SbufferFlushBundle
-  val exceptionInfo = ValidIO(new ExceptionInfoBundle)
+  val exceptionInfo = ValidIO(new ExceptionAddrIO)
   val amoDCacheIO = new AtomicWordIO
 }
 
@@ -59,9 +59,7 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
   io.suggestName("none")
   override lazy val io = IO(new AtomicsUnitIO).suggestName("io")
 
-  private val toIssue = io.toIssue.head
   private val toBackend = io.toBackend
-  private val toTlb = io.toTlb
 
   val sInvalid :: sTlbAndFlushSbufferReq :: sPm :: sWaitFlushSbufferResp :: sCacheReq :: sCacheResp :: sCacheRespLatch :: sFinish :: Nil = Enum(8)
   val state = RegInit(sInvalid)
@@ -94,6 +92,7 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
   val fuopReg = Reg(UInt(8.W))
 
   io.exceptionInfo.valid := atomOverrideXtval
+  io.exceptionInfo.bits := DontCare
   io.exceptionInfo.bits.vaddr := in.bits.src(0)
   io.exceptionInfo.bits.gpaddr := gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
@@ -106,7 +105,7 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
   toTlb.req.valid    := false.B
   toTlb.req.bits     := DontCare
   toTlb.req_kill     := false.B
-  io.fromTlb.ready := true.B
+  io.fromTlb.resp.ready := true.B
 
   io.flushSbuffer.valid := false.B
 
@@ -153,8 +152,8 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
     toTlb.req.bits.debug.pc := in.bits.uop.pc
     toTlb.req.bits.debug.robIdx := in.bits.uop.robIdx
     toTlb.req.bits.debug.isFirstIssue := false.B
-    io.fromTlb.ready      := true.B
-    toIssue.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
+    io.fromTlb.resp.ready      := true.B
+    io.toIssue.head.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
     // send req to sbuffer to flush it if it is not empty
     io.flushSbuffer.valid := Mux(sbufferEmpty, false.B, true.B)
@@ -164,10 +163,10 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
     // when !haveSentFirstTlbReq, tlb resp may come from hw prefetch
     haveSentFirstTlbReq := true.B
 
-    when(io.fromTlb.fire && haveSentFirstTlbReq){
-      paddr   := io.fromTlb.bits.paddr(0)
-      gpaddr  := io.fromTlb.bits.gpaddr(0)
-      isForVSnonLeafPTE := io.fromTlb.bits.isForVSnonLeafPTE
+    when(io.fromTlb.resp.fire && haveSentFirstTlbReq){
+      paddr   := io.fromTlb.resp.bits.paddr(0)
+      gpaddr  := io.fromTlb.resp.bits.gpaddr(0)
+      isForVSnonLeafPTE := io.fromTlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.bits.uop.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -177,15 +176,15 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
       ))
       exceptionVec(loadAddrMisaligned)  := !addrAligned && isLr
       exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
-      exceptionVec(storePageFault)      := io.fromTlb.bits.excp(0).pf.st
-      exceptionVec(loadPageFault)       := io.fromTlb.bits.excp(0).pf.ld
-      exceptionVec(storeAccessFault)    := io.fromTlb.bits.excp(0).af.st
-      exceptionVec(loadAccessFault)     := io.fromTlb.bits.excp(0).af.ld
-      exceptionVec(storeGuestPageFault) := io.fromTlb.bits.excp(0).gpf.st
-      exceptionVec(loadGuestPageFault)  := io.fromTlb.bits.excp(0).gpf.ld
+      exceptionVec(storePageFault)      := io.fromTlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)       := io.fromTlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)    := io.fromTlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)     := io.fromTlb.resp.bits.excp(0).af.ld
+      exceptionVec(storeGuestPageFault) := io.fromTlb.resp.bits.excp(0).gpf.st
+      exceptionVec(loadGuestPageFault)  := io.fromTlb.resp.bits.excp(0).gpf.ld
 
-      when (!io.fromTlb.bits.miss) {
-        toIssue.bits.uop.debugInfo.tlbRespTime := GTimer()
+      when (!io.fromTlb.resp.bits.miss) {
+        io.toIssue.head.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned) {
           // NOTE: when addrAligned, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
@@ -359,16 +358,16 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
     outValid := true.B
   }
 
-  toIssue.valid := outValid
+  io.toIssue.head.valid := outValid
   XSError((state === sFinish) =/= outValid, "outValid reg error\n")
-  toIssue.bits := DontCare
-  toIssue.bits.uop := in.bits.uop
-  toIssue.bits.uop.exceptionVec := exceptionVec
-  toIssue.bits.data := respData
-  toIssue.bits.mmio := isMmio
-  toIssue.bits.paddr := paddr
-  when (toIssue.fire) {
-    XSDebug("atomics writeback: pc %x data %x\n", toIssue.bits.uop.pc, io.amoDCacheIO.resp.bits.data)
+  io.toIssue.head.bits := DontCare
+  io.toIssue.head.bits.uop := in.bits.uop
+  io.toIssue.head.bits.uop.exceptionVec := exceptionVec
+  io.toIssue.head.bits.data := respData
+  io.toIssue.head.bits.mmio := isMmio
+  io.toIssue.head.bits.paddr := paddr
+  when (io.toIssue.head.fire) {
+    XSDebug("atomics writeback: pc %x data %x\n", io.toIssue.head.bits.uop.pc, io.amoDCacheIO.resp.bits.data)
     state := sInvalid
     outValid := false.B
   }
@@ -393,10 +392,10 @@ class AtomicsUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, para
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    val uop = toIssue.bits.uop
+    val uop = io.toIssue.head.bits.uop
     val difftest = DifftestModule(new DiffLrScEvent)
     difftest.coreid := io.fromCtrl.hartId
-    difftest.valid := toIssue.fire &&
+    difftest.valid := io.toIssue.head.fire &&
       (uop.fuOpType === LSUOpType.sc_d || uop.fuOpType === LSUOpType.sc_w)
     difftest.success := isLrscValid
   }
