@@ -105,43 +105,63 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
   protected val toDCache   = io.toDCache
   protected val toTlb      = io.toTlb
 
-  def getIqIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(_._2.isIq).map(_._1)
+  private def getIssues(issueType: MemIssueType.Type): Seq[DecoupledIO[LsPipelineBundle]] = {
+    fromIssue.zip(params.issueParams).filter(_._2.issueType == issueType).map(_._1)
   }
 
-  def getIqWb(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    params.issueParams.filter(_.isIq).map(_.getPort()).distinct.map(
+  private def getWritebacks(issueType: MemIssueType.Type): Seq[DecoupledIO[LsPipelineBundle]] = {
+    params.issueParams.filter(_.issueType == issueType).map(_.getPort()).filter(_ >= 0).distinct.map(
       toIssue(_)
     )
   }
 
-  def getPrefetchIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(_._2.isPrefetch).map(_._1)
-  }
+  def getStoreDataIssues() = getIssues(MemIssueType.StoreData)
 
-  def getVectorIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(_._2.isVector).map(_._1)
-  }
+  def getStoreDataWritebacks() = getWritebacks(MemIssueType.StoreData)
 
-  def getVectorWb(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    params.issueParams.filter(_.isVector).map(_.getPort()).distinct.map(
-      toIssue(_)
-    )
-  }
+  def getStoreAddrIssues() = getIssues(MemIssueType.StoreAddr)
 
-  def getMisalignBufIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(_._2.isMisalignBuf).map(_._1)
-  }
+  def getStoreAddrWritebacks() = getWritebacks(MemIssueType.StoreAddr)
 
-  def getMisalignBufWb(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    params.issueParams.filter(_.isMisalignBuf).map(_.getPort()).distinct.map(
-      toIssue(_)
-    )
-  }
+  def getScalarLoadIssues() = getIssues(MemIssueType.ScalarLoad)
 
+  def getScalarLoadWritebacks() = getWritebacks(MemIssueType.ScalarLoad)
 
-  private val hasLoadTrigger = params.hasLoadExe
-  private val hasStoreTrigger = params.hasStoreAddrExe
+  def getVectorLoadIssues() = getIssues(MemIssueType.VectorLoad)
+
+  def getVectorLoadWritebacks() = getWritebacks(MemIssueType.VectorLoad)
+
+  def getVectorStoreIssues() = getIssues(MemIssueType.VectorStore)
+
+  def getVectorStoreWritebacks() = getWritebacks(MemIssueType.VectorStore)
+
+  def getAtomicsIssues() = getIssues(MemIssueType.Atomic)
+
+  def getAtomicsWritebacks() = getWritebacks(MemIssueType.Atomic)
+
+  def getUncacheIssues() = getIssues(MemIssueType.Uncache)
+
+  def getUncacheWritebacks() = getWritebacks(MemIssueType.Uncache)
+
+  def getPrefetchIssues() = getIssues(MemIssueType.Prefetch)
+
+  def getPrefetchWritebacks() = getWritebacks(MemIssueType.Prefetch)
+
+  def getMisalignBufIssues() = getIssues(MemIssueType.MisalignBuf)
+
+  def getMisalignBufWritebacks() = getWritebacks(MemIssueType.MisalignBuf)
+
+  def getFastReplayIssues() = getIssues(MemIssueType.FastReplay)
+
+  def getFastReplayWritebacks() = getWritebacks(MemIssueType.FastReplay)
+
+  def getLoadReplayIssues() = getIssues(MemIssueType.LoadReplay)
+
+  def getLoadReplayWritebacks() = getWritebacks(MemIssueType.LoadReplay)
+
+  //
+  private val hasLoadTrigger = params.hasLoadExe && params.hasTrigger
+  private val hasStoreTrigger = params.hasStoreAddrExe && params.hasTrigger
   val loadTrigger = OptionWrapper(hasLoadTrigger, Module(new MemTrigger(MemType.LOAD)))
   val storeTrigger = OptionWrapper(hasStoreTrigger, Module(new MemTrigger(MemType.STORE)))
   val triggers = Seq(loadTrigger, storeTrigger)
@@ -293,17 +313,23 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
   s1Out.bits.ptwBack   := fromTlb.resp.bits.ptwBack
   s1Out.bits.uop.flushPipe := false.B
 
-  if (params.hasTrigger) {
-    triggers.map(_.get).foreach {
-      case module =>
-        module.io.fromCsrTrigger.tdataVec             := fromCtrl.trigger.get.tdataVec
-        module.io.fromCsrTrigger.tEnableVec           := fromCtrl.trigger.get.tEnableVec
-        module.io.fromCsrTrigger.triggerCanRaiseBpExp := fromCtrl.trigger.get.triggerCanRaiseBpExp
-        module.io.fromCsrTrigger.debugMode            := fromCtrl.trigger.get.debugMode
-        module.io.fromLoadStore.vaddr                 := s1In.bits.vaddr
-        module.io.fromLoadStore.isVectorUnitStride    := s1In.bits.isVector && s1In.bits.is128bit
-        module.io.fromLoadStore.mask                  := s1In.bits.mask
-    }
+  if (hasLoadTrigger) {
+    loadTrigger.get.io.fromCsrTrigger.tdataVec             := fromCtrl.trigger.get.tdataVec
+    loadTrigger.get.io.fromCsrTrigger.tEnableVec           := fromCtrl.trigger.get.tEnableVec
+    loadTrigger.get.io.fromCsrTrigger.triggerCanRaiseBpExp := fromCtrl.trigger.get.triggerCanRaiseBpExp
+    loadTrigger.get.io.fromCsrTrigger.debugMode            := fromCtrl.trigger.get.debugMode
+    loadTrigger.get.io.fromLoadStore.vaddr                 := s1In.bits.vaddr
+    loadTrigger.get.io.fromLoadStore.isVectorUnitStride    := s1In.bits.isVector && s1In.bits.is128bit
+    loadTrigger.get.io.fromLoadStore.mask                  := s1In.bits.mask
+  }
+  if (hasStoreTrigger) {
+    storeTrigger.get.io.fromCsrTrigger.tdataVec             := fromCtrl.trigger.get.tdataVec
+    storeTrigger.get.io.fromCsrTrigger.tEnableVec           := fromCtrl.trigger.get.tEnableVec
+    storeTrigger.get.io.fromCsrTrigger.triggerCanRaiseBpExp := fromCtrl.trigger.get.triggerCanRaiseBpExp
+    storeTrigger.get.io.fromCsrTrigger.debugMode            := fromCtrl.trigger.get.debugMode
+    storeTrigger.get.io.fromLoadStore.vaddr                 := s1In.bits.vaddr
+    storeTrigger.get.io.fromLoadStore.isVectorUnitStride    := s1In.bits.isVector && s1In.bits.is128bit
+    storeTrigger.get.io.fromLoadStore.mask                  := s1In.bits.mask
   }
 
   val s1TriggerAction = true match {
@@ -465,7 +491,7 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
     ))
   }))
 
-  val s3RdataOH = RegEnable(s2RdataOH, 0.U.asTypeOf(s2RdataOH), s2Out.fire)
+  val s3RdataOH = RegEnable(s2RdataOH, 0.U(s2RdataOH.getWidth.W), s2Out.fire)
   val s3DataSelectOffset = RegEnable(s2DataSelectOffset, 0.U.asTypeOf(s2DataSelectOffset), s2Out.fire)
   val s3PickedData = VecInit((0 until LdDataDup).map(i => {
     Mux1H(genDataSelectByOffset(s3In.bits.paddr(2, 0)), s3Data(i))
