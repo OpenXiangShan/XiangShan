@@ -19,7 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{SRAMTemplate, XSPerfAccumulate}
+import utility.{SRAMTemplate, XSPerfAccumulate, ClockGate}
 import xiangshan.cache.CacheInstrucion._
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
@@ -102,6 +102,7 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
 
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
+  tag_array.clock := ClockGate(false.B, ren | wen, clock)
   io.resp := tag_array.io.r.resp.data
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
 
@@ -111,6 +112,7 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
       ecc.io.r.req.valid := ecc_ren
       ecc.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
       io.ecc_resp := ecc.io.r.resp.data
+      ecc.clock := ClockGate(false.B, ecc_ren | ecc_wen, clock)
     case None =>
       io.ecc_resp := 0.U.asTypeOf(io.ecc_resp)
   }
