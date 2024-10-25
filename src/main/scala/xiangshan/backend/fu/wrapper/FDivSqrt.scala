@@ -10,17 +10,19 @@ import xiangshan.backend.fu.fpu.FpNonPipedFuncUnit
 import xiangshan.backend.rob.RobPtr
 import yunsuan.VfpuType
 import yunsuan.fpu.FloatDivider
+import xiangshan.frontend.tracertl.{TraceDummyFpDivider, TraceRTLChoose}
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fdiv OpType not supported")
 
   // io alias
-  private val opcode = fuOpType(0)
+  private val is_sqrt_i = fuOpType(0)
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 
   // modules
   private val fdiv = Module(new FloatDivider)
+  private val dummyFdiv = Module(new TraceDummyFpDivider)
 
   val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
                               fp_fmt === VSew.e16 && !src1.head(48).andR
@@ -34,46 +36,66 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
     thisRobIdx := outCtrl.robIdx
   }
 
-  fdiv.io.start_valid_i  := io.in.valid
-  fdiv.io.finish_ready_i := io.out.ready & io.out.valid
-  fdiv.io.flush_i        := thisRobIdx.needFlush(io.flush)
-  fdiv.io.fp_format_i    := fp_fmt
-  fdiv.io.opa_i          := src1
-  fdiv.io.opb_i          := src0
-  fdiv.io.is_sqrt_i      := opcode
-  fdiv.io.rm_i           := rm
-  fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
-  fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
+  val flush_i = thisRobIdx.needFlush(io.flush)
+  if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
+    fdiv.io <> DontCare
 
-  private val resultData = Mux1H(
+    dummyFdiv.io.start_valid_i  := io.in.valid
+    dummyFdiv.io.finish_ready_i := io.out.ready & io.out.valid
+    dummyFdiv.io.flush_i        := flush_i
+    dummyFdiv.io.format_i       := fp_fmt
+    dummyFdiv.io.is_sqrt_i      := is_sqrt_i
+  } else {
+    dummyFdiv.io <> DontCare
+
+    fdiv.io.start_valid_i  := io.in.valid
+    fdiv.io.finish_ready_i := io.out.ready & io.out.valid
+    fdiv.io.flush_i        := flush_i
+    fdiv.io.fp_format_i    := fp_fmt
+    fdiv.io.opa_i          := src1
+    fdiv.io.opb_i          := src0
+    fdiv.io.is_sqrt_i      := is_sqrt_i
+    fdiv.io.rm_i           := rm
+    fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
+    fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
+  }
+
+  private val resultData = TraceRTLChoose(Mux1H(
     Seq(
       (outCtrl.vpu.get.vsew === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
       (outCtrl.vpu.get.vsew === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
       (outCtrl.vpu.get.vsew === VSew.e64) -> fdiv.io.fpdiv_res_o
     )
-  )
-  private val fflagsData = fdiv.io.fflags_o
+  ), 0.U)
+  if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
+    io.in.ready := dummyFdiv.io.start_ready_o
+    io.out.valid := dummyFdiv.io.finish_valid_o
+    io.out.bits.res.fflags.get := 0.U
+    io.out.bits.res.data := 0.U
+  } else {
+    val fflagsData = fdiv.io.fflags_o
 
-  io.in.ready  := fdiv.io.start_ready_o
-  io.out.valid := fdiv.io.finish_valid_o
+    io.in.ready  := fdiv.io.start_ready_o
+    io.out.valid := fdiv.io.finish_valid_o
 
-  io.out.bits.res.fflags.get := fflagsData
-  io.out.bits.res.data       := resultData
+    io.out.bits.res.fflags.get := fflagsData
+    io.out.bits.res.data       := resultData
+  }
 
-  val simFormat0 = (fdiv.io.fp_format_i === 0.U)
-  val simFormat1 = (fdiv.io.fp_format_i === 1.U)
-  val simFormat2 = (fdiv.io.fp_format_i === 2.U)
-  val simFormat3 = (fdiv.io.fp_format_i === 3.U)
-  val exeFdivCycleCounter = StartStopCounter(io.in.fire && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFsqrtCycleCounter = StartStopCounter(io.in.fire && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFdivFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFdivFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFdivFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFdivFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && !fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFsqrtFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFsqrtFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFsqrtFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
-  val exeFsqrtFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && fdiv.io.is_sqrt_i, io.out.valid, 1, fdiv.io.flush_i)
+  val simFormat0 = (fp_fmt === 0.U)
+  val simFormat1 = (fp_fmt === 1.U)
+  val simFormat2 = (fp_fmt === 2.U)
+  val simFormat3 = (fp_fmt === 3.U)
+  val exeFdivCycleCounter = StartStopCounter(io.in.fire && !is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFsqrtCycleCounter = StartStopCounter(io.in.fire && is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFdivFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && !is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFdivFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && !is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFdivFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && !is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFdivFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && !is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFsqrtFM0CycleCounter = StartStopCounter(io.in.fire && simFormat0 && is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFsqrtFM1CycleCounter = StartStopCounter(io.in.fire && simFormat1 && is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFsqrtFM2CycleCounter = StartStopCounter(io.in.fire && simFormat2 && is_sqrt_i, io.out.valid, 1, flush_i)
+  val exeFsqrtFM3CycleCounter = StartStopCounter(io.in.fire && simFormat3 && is_sqrt_i, io.out.valid, 1, flush_i)
 
   XSPerfHistogram("fdivCycle", exeFdivCycleCounter, io.out.fire && (exeFdivCycleCounter =/= 0.U), 0, 24, 1)
   XSPerfHistogram("fsqrtCycle", exeFsqrtCycleCounter, io.out.fire && (exeFsqrtCycleCounter =/= 0.U), 0, 24, 1)
