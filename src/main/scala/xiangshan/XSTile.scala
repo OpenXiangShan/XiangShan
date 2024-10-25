@@ -42,7 +42,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
   val memBlock = core.memBlock.inner
-  val core_l3_pf_port = memBlock.l3_pf_sender_opt
+  val core_l3_pf_port = memBlock.l3PfSenderOpt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
   val tl_uncache = l2top.inner.mmio_port
   // val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
@@ -52,21 +52,21 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
   val nmi_int_node = l2top.inner.nmi_int_node
-  memBlock.clint_int_sink := clint_int_node
-  memBlock.plic_int_sink :*= plic_int_node
-  memBlock.debug_int_sink := debug_int_node
-  memBlock.nmi_int_sink := nmi_int_node
+  memBlock.clintIntSink := clint_int_node
+  memBlock.plicIntSink :*= plic_int_node
+  memBlock.debugIntSink := debug_int_node
+  memBlock.nmiIntSink := nmi_int_node
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
   coreParams.dcacheParametersOpt.map { _ =>
-    l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcache_port :=
-      memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
+    l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcachePort :=
+      memBlock.l1dToL2Buffer.node := memBlock.dcache.clientNode
   }
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
-    l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptw_to_l2_buffer.node
+    l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptwToL2Buffer.node
   }
 
   // L2 Prefetch
@@ -74,7 +74,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case Some(l2) =>
       l2.pf_recv_node.foreach(recv => {
         println("Connecting L1 prefetcher to L2!")
-        recv := memBlock.l2_pf_sender_opt.get
+        recv := memBlock.l2PfSenderOpt.get
       })
     case None =>
   }
@@ -83,10 +83,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.inner.l2cache match {
     case Some(l2) =>
       l2.cmo_sink_node.foreach(recv => {
-        recv := memBlock.cmo_sender.get
+        recv := memBlock.cmoSender.get
       })
       l2.cmo_source_node.foreach(resp => {
-        memBlock.cmo_reciver.get := resp
+        memBlock.cmoReciver.get := resp
       })
     case None =>
   }

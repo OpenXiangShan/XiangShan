@@ -104,19 +104,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val backend = outer.backend.module
   val memBlock = outer.memBlock.module
 
-  frontend.io.hartId := memBlock.io.inner_hartId
-  frontend.io.reset_vector := memBlock.io.inner_reset_vector
-  frontend.io.softPrefetch <> memBlock.io.ifetchPrefetch
+  frontend.io.hartId := memBlock.io.bypass.innerHartId
+  frontend.io.reset_vector := memBlock.io.bypass.innerResetVector
+  frontend.io.softPrefetch <> memBlock.io.toFrontend.ifetchPrefetch
   frontend.io.backend <> backend.io.frontend
   frontend.io.sfence <> backend.io.frontendSfence
   frontend.io.tlbCsr <> backend.io.frontendTlbCsr
   frontend.io.csrCtrl <> backend.io.frontendCsrCtrl
   frontend.io.fencei <> backend.io.fenceio.fencei
 
-  backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
+  backend.io.fromTop := memBlock.io.bypass.fromTopToBackend
 
-  require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
-  backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
+  require(backend.io.mem.stIn.length == memBlock.io.toBackend.stIssue.length)
+  backend.io.mem.stIn.zip(memBlock.io.toBackend.stIssue).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits := 0.U.asTypeOf(sink.bits)
     sink.bits.robIdx := source.bits.uop.robIdx
@@ -124,103 +124,99 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sink.bits.storeSetHit := source.bits.uop.storeSetHit
     // The other signals have not been used
   }
-  backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
-  backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
-  backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
-  backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq
-  backend.io.mem.sqDeqPtr := memBlock.io.mem_to_ooo.sqDeqPtr
-  backend.io.mem.lqDeqPtr := memBlock.io.mem_to_ooo.lqDeqPtr
-  backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
-  backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
-  backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
-  backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
-  backend.io.mem.ldaIqFeedback := memBlock.io.mem_to_ooo.ldaIqFeedback
-  backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
-  backend.io.mem.hyuIqFeedback := memBlock.io.mem_to_ooo.hyuIqFeedback
-  backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
-  backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
-  backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
-  backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
-  backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
-  backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
-  backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
-  backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
-  backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
-  backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
-  backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
+  backend.io.mem.memoryViolation := memBlock.io.toBackend.memoryViolation
+  backend.io.mem.lsqEnqIO <> memBlock.io.fromBackend.enqLsq
+  backend.io.mem.sqDeq := memBlock.io.toBackend.sqDeq
+  backend.io.mem.lqDeq := memBlock.io.toBackend.lqDeq
+  backend.io.mem.sqDeqPtr := memBlock.io.toBackend.sqDeqPtr
+  backend.io.mem.lqDeqPtr := memBlock.io.toBackend.lqDeqPtr
+  backend.io.mem.lqCancelCnt := memBlock.io.toBackend.lqCancelCnt
+  backend.io.mem.sqCancelCnt := memBlock.io.toBackend.sqCancelCnt
+  backend.io.mem.otherFastWakeup := DontCare
+  backend.io.mem.stIssuePtr := memBlock.io.toBackend.stIssuePtr
+  backend.io.mem.ldaIqFeedback := memBlock.io.toBackend.ldaIqFeedback
+  backend.io.mem.staIqFeedback := memBlock.io.toBackend.staIqFeedback
+  backend.io.mem.hyuIqFeedback := memBlock.io.toBackend.hyuIqFeedback
+  backend.io.mem.vstuIqFeedback := memBlock.io.toBackend.vstuIqFeedback
+  backend.io.mem.vlduIqFeedback := memBlock.io.toBackend.vlduIqFeedback
+  backend.io.mem.ldCancel := memBlock.io.toBackend.ldCancel
+  backend.io.mem.wakeup := memBlock.io.toBackend.wakeup
+  backend.io.mem.writebackLda <> memBlock.io.toBackend.writebackLda
+  backend.io.mem.writebackSta <> memBlock.io.toBackend.writebackSta
+  backend.io.mem.writebackHyuLda <> memBlock.io.toBackend.writebackHyuLda
+  backend.io.mem.writebackHyuSta <> memBlock.io.toBackend.writebackHyuSta
+  backend.io.mem.writebackStd <> memBlock.io.toBackend.writebackStd
+  backend.io.mem.writebackVldu <> memBlock.io.toBackend.writebackVldu
+  backend.io.mem.robLsqIO.mmio := memBlock.io.toBackend.lsqio.mmio
+  backend.io.mem.robLsqIO.uop := memBlock.io.toBackend.lsqio.uop
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  backend.io.mem.s3_delayed_load_error := memBlock.io.mem_to_ooo.s3_delayed_load_error
+  backend.io.mem.s3_delayed_load_error := memBlock.io.toBackend.s3DelayedLoadError
 
-  backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
-  backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
-  backend.io.mem.exceptionAddr.isForVSnonLeafPTE := memBlock.io.mem_to_ooo.lsqio.isForVSnonLeafPTE
-  backend.io.mem.debugLS := memBlock.io.debug_ls
-  backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
-  backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
-  backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
-  backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
+  backend.io.mem.exceptionAddr.vaddr  := memBlock.io.toBackend.lsqio.vaddr
+  backend.io.mem.exceptionAddr.gpaddr := memBlock.io.toBackend.lsqio.gpaddr
+  backend.io.mem.exceptionAddr.isForVSnonLeafPTE := memBlock.io.toBackend.lsqio.isForVSnonLeafPTE
+  backend.io.mem.debugLS := memBlock.io.debugLsInfo
+  backend.io.mem.lsTopdownInfo := memBlock.io.toBackend.lsTopdownInfo
+  backend.io.mem.lqCanAccept := memBlock.io.toBackend.lsqio.lqCanAccept
+  backend.io.mem.sqCanAccept := memBlock.io.toBackend.lsqio.sqCanAccept
+  backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.toBackend.sbIsEmpty
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.io_perf
   backend.io.perf.perfEventsLsu := memBlock.io_perf
-  backend.io.perf.perfEventsHc := memBlock.io.inner_hc_perfEvents
+  backend.io.perf.perfEventsHc := memBlock.io.bypass.innerHcPerfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 
   // top -> memBlock
-  memBlock.io.fromTopToBackend.clintTime := io.clintTime
-  memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
-  memBlock.io.hartId := io.hartId
-  memBlock.io.outer_reset_vector := io.reset_vector
-  memBlock.io.outer_hc_perfEvents := io.perfEvents
+  memBlock.io.fromCtrl.hartId := io.hartId
+  memBlock.io.bypass.fromTop.clintTime := io.clintTime
+  memBlock.io.bypass.fromTop.msiInfo := io.msiInfo
+  memBlock.io.bypass.outerResetVector := io.reset_vector
+  memBlock.io.bypass.outerHcPerfEvents := io.perfEvents
   // frontend -> memBlock
-  memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
-  memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
-  memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
-  memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
-  memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
-  memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
-  memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
+  memBlock.io.bypass.innerBeuErrorsIcache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
+  memBlock.io.bypass.innerL2PfEnable := backend.io.csrCustomCtrl.l2_pf_enable
+  memBlock.io.bypass.fromBackendToTop := backend.io.toTop
+  memBlock.io.fromBackend.issueLda <> backend.io.mem.issueLda
+  memBlock.io.fromBackend.issueSta <> backend.io.mem.issueSta
+  memBlock.io.fromBackend.issueStd <> backend.io.mem.issueStd
+  memBlock.io.fromBackend.issueHya <> backend.io.mem.issueHylda
   backend.io.mem.issueHysta.foreach(_.ready := false.B) // this fake port should not be used
-  memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
+  memBlock.io.fromBackend.issueVldu <> backend.io.mem.issueVldu
 
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.ooo_to_mem.issueUops.map(_.bits.uop.clearExceptions())
-  memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
-  memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
-  memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
-  memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
-  memBlock.io.ooo_to_mem.loadFastMatch := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastMatch)
-  memBlock.io.ooo_to_mem.loadFastImm := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastImm)
-  memBlock.io.ooo_to_mem.loadFastFuOpType := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastFuOpType)
+  memBlock.io.fromBackend.issueUops.map(_.bits.uop.clearExceptions())
+  memBlock.io.fromBackend.loadPc := backend.io.mem.loadPcRead
+  memBlock.io.fromBackend.storePc := backend.io.mem.storePcRead
+  memBlock.io.fromBackend.hybridPc := backend.io.mem.hyuPcRead
+  memBlock.io.fromBackend.sfence <> backend.io.mem.sfence
+  memBlock.io.fromBackend.flushSb := backend.io.fenceio.sbuffer.flushSb
 
-  memBlock.io.ooo_to_mem.sfence <> backend.io.mem.sfence
+  memBlock.io.fromCtrl.redirect := backend.io.mem.redirect
+  memBlock.io.fromCtrl.csrCtrl := backend.io.mem.csrCtrl
+  memBlock.io.fromBackend.tlbCsr := backend.io.mem.tlbCsr
+  memBlock.io.fromBackend.rob.lcommit          := backend.io.mem.robLsqIO.lcommit
+  memBlock.io.fromBackend.rob.scommit          := backend.io.mem.robLsqIO.scommit
+  memBlock.io.fromBackend.rob.pendingUncacheld := backend.io.mem.robLsqIO.pendingUncacheld
+  memBlock.io.fromBackend.rob.pendingld        := backend.io.mem.robLsqIO.pendingld
+  memBlock.io.fromBackend.rob.pendingst        := backend.io.mem.robLsqIO.pendingst
+  memBlock.io.fromBackend.rob.pendingVst       := backend.io.mem.robLsqIO.pendingVst
+  memBlock.io.fromBackend.rob.commit           := backend.io.mem.robLsqIO.commit
+  memBlock.io.fromBackend.rob.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
+  memBlock.io.fromBackend.rob.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext
+  memBlock.io.fromBackend.isStoreException       := backend.io.mem.isStoreException
+  memBlock.io.fromBackend.isVlsException         := backend.io.mem.isVlsException
 
-  memBlock.io.redirect := backend.io.mem.redirect
-  memBlock.io.ooo_to_mem.csrCtrl := backend.io.mem.csrCtrl
-  memBlock.io.ooo_to_mem.tlbCsr := backend.io.mem.tlbCsr
-  memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
-  memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit
-  memBlock.io.ooo_to_mem.lsqio.pendingUncacheld := backend.io.mem.robLsqIO.pendingUncacheld
-  memBlock.io.ooo_to_mem.lsqio.pendingld        := backend.io.mem.robLsqIO.pendingld
-  memBlock.io.ooo_to_mem.lsqio.pendingst        := backend.io.mem.robLsqIO.pendingst
-  memBlock.io.ooo_to_mem.lsqio.pendingVst       := backend.io.mem.robLsqIO.pendingVst
-  memBlock.io.ooo_to_mem.lsqio.commit           := backend.io.mem.robLsqIO.commit
-  memBlock.io.ooo_to_mem.lsqio.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
-  memBlock.io.ooo_to_mem.lsqio.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext
-  memBlock.io.ooo_to_mem.isStoreException       := backend.io.mem.isStoreException
-  memBlock.io.ooo_to_mem.isVlsException         := backend.io.mem.isVlsException
-
-  memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
-  memBlock.io.l2_hint.valid := io.l2_hint.valid
-  memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
-  memBlock.io.l2_tlb_req <> io.l2_tlb_req
-  memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
-  memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
+  memBlock.io.fromFrontend.itlb <> frontend.io.ptw
+  memBlock.io.l2Hint.valid := io.l2_hint.valid
+  memBlock.io.l2Hint.bits.isKeyword := io.l2_hint.bits.isKeyword
+  memBlock.io.l2Hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2TlbReq <> io.l2_tlb_req
+  memBlock.io.l2PmpResp <> io.l2_pmp_resp
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
@@ -235,17 +231,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
   memBlock.io.debugRolling := backend.io.debugRolling
 
-  io.cpu_halt := memBlock.io.outer_cpu_halt
-  io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
+  io.cpu_halt := memBlock.io.bypass.outerCpuHalt
+  io.beu_errors.icache <> memBlock.io.bypass.outerBeuErrorsIcache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
-  io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
+  io.l2_pf_enable := memBlock.io.bypass.outerL2PfEnable
 
-  memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
-  io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
+  memBlock.io.bypass.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
+  io.resetInFrontend := memBlock.io.bypass.resetInFrontendBypass.toL2Top
 
   if (debugOpts.ResetGen) {
-    backend.reset := memBlock.io.reset_backend
+    backend.reset := memBlock.io.bypass.resetBackend
     frontend.reset := backend.io.frontendReset
   }
 }
