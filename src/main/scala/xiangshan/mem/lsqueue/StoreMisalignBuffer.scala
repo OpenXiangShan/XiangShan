@@ -92,13 +92,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new LsPipelineBundle))
     val writeBack       = Decoupled(new MemExuOutput)
-    val overwriteExpBuf = Output(new XSBundle {
-      val valid = Bool()
-      val vaddr = UInt(XLEN.W)
-      val isHyper = Bool()
-      val gpaddr = UInt(XLEN.W)
-      val isForVSnonLeafPTE = Bool()
-    })
+    val overwriteExpBuf = ValidIO(new ExceptionAddrIO)
     val sqControl       = new StoreMaBufToSqCtrlIO
   })
 
@@ -605,10 +599,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteIsForVSnonLeafPTE = GatedRegNext(splitStoreResp(curPtr).isForVSnonLeafPTE)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
-  io.overwriteExpBuf.vaddr := overwriteVaddr
-  io.overwriteExpBuf.isHyper := overwriteIsHyper
-  io.overwriteExpBuf.gpaddr := overwriteGpaddr
-  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
+  io.overwriteExpBuf.bits := DontCare
+  io.overwriteExpBuf.bits.isStore := true.B
+  io.overwriteExpBuf.bits.vaddr := overwriteVaddr
+  io.overwriteExpBuf.bits.isHyper := overwriteIsHyper
+  io.overwriteExpBuf.bits.gpaddr := overwriteGpaddr
+  io.overwriteExpBuf.bits.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)
   XSPerfAccumulate("flush",                  flush)
