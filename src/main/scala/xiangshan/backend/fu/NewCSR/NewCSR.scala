@@ -257,6 +257,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   val V = RegInit(VirtMode(0), VirtMode.Off)
   val debugMode = RegInit(false.B)
 
+  // dcsr stopcount 
+  val debugModeStopCountNext = debugMode && dcsr.regOut.STOPCOUNT
+  val debugModeStopTimeNext  = debugMode && dcsr.regOut.STOPTIME
+  val debugModeStopCount = RegNext(debugModeStopCountNext)
+  val unprivCountUpdate  = !debugModeStopCount && debugModeStopCountNext
+
   private val privState = Wire(new PrivState)
   privState.PRVM := PRVM
   privState.V := V
@@ -673,6 +679,13 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.fromMstateen0 := mstateen0.regOut
         m.fromHstateen0 := hstateen0.regOut
         m.privState     := privState
+      case _ =>
+    }
+    mod match {
+      case m: HasDebugStopBundle =>
+        m.debugModeStopCount := debugModeStopCount
+        m.debugModeStopTime  := debugModeStopTimeNext
+        m.unprivCountUpdate  := unprivCountUpdate
       case _ =>
     }
   }

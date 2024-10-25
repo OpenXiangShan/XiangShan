@@ -269,6 +269,8 @@ class DscratchBundle extends OneFieldBundle
 class DcsrBundle extends CSRBundle {
   override val len: Int = 32
   val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec) // Debug implementation as it described in 0.13 draft // todo
+  val EXTCAUSE  =           RO(26, 24).withReset(0.U)
+  val CETRIG    =           RW(    19).withReset(0.U)
   // All ebreak Privileges are RW, instead of WARL, since XiangShan support U/S/VU/VS.
   val EBREAKVS  =           RW(    17).withReset(0.U)
   val EBREAKVU  =           RW(    16).withReset(0.U)
@@ -277,8 +279,8 @@ class DcsrBundle extends CSRBundle {
   val EBREAKU   =           RW(    12).withReset(0.U)
   // STEPIE is RW, instead of WARL, since XiangShan support interrupts being enabled single stepping.
   val STEPIE    =           RW(    11).withReset(0.U)
-  val STOPCOUNT =           RO(    10).withReset(0.U) // Stop count updating has not been supported
-  val STOPTIME  =           RO(     9).withReset(0.U) // Stop time updating has not been supported
+  val STOPCOUNT =           RW(    10).withReset(0.U)
+  val STOPTIME  =           RW(     9).withReset(0.U)
   val CAUSE     =    DcsrCause( 8,  6).withReset(DcsrCause.None)
   val V         =     VirtMode(     5).withReset(VirtMode.Off)
   // MPRVEN is RW, instead of WARL, since XiangShan support use mstatus.mprv in debug mode
