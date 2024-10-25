@@ -29,22 +29,21 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.datapath.{NewPipelineConnect, NewPipelineConnectPipe}
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 import xiangshan.mem.mdp._
-import xiangshan.mem.ReplayCauseNo._
+import xiangshan.mem.ReplayCauseNO._
 import xiangshan.mem.Bundles._
 
 class HybridUnitIO()(implicit p: Parameters, val params: MemUnitParams) extends MemUnitIO {
   // from
   val fromLsq    = OptionWrapper(params.hasLoadExe, new Bundle() {
-    val forward  = ValidIO(new LoadForwardRespBundle)
-    val rarNuke  = ValidIO(new LoadNukeQueryRespBundle)
-    val rawNuke  = ValidIO(new LoadNukeQueryRespBundle)
+    val forward  = Flipped(ValidIO(new LoadForwardRespBundle))
+    val rarNuke  = Flipped(ValidIO(new LoadNukeQueryRespBundle))
+    val rawNuke  = Flipped(ValidIO(new LoadNukeQueryRespBundle))
   })
   val fromSta        = OptionWrapper(params.hasLoadExe, Vec(StorePipelineWidth, Flipped(ValidIO(new StoreNukeQueryBundle))))
   val fromSBuffer    = OptionWrapper(params.hasLoadExe, Flipped(ValidIO(new LoadForwardRespBundle)))
@@ -53,7 +52,7 @@ class HybridUnitIO()(implicit p: Parameters, val params: MemUnitParams) extends 
 
   // to
   val toBackend = new Bundle() {
-    val issue    = OptionWrapper(params.hasStoreAddrExe, ValidIO(new LsPipelineBundle))
+    val issue    = OptionWrapper(params.hasStoreAddrExe, ValidIO(new MemExuInput))
     val wakeup   = OptionWrapper(params.hasLoadExe, ValidIO(new DynInst))
     val ldCancel = OptionWrapper(params.hasLoadExe, Output(new LoadCancelIO()))
     val rollback = OptionWrapper(params.hasLoadExe, ValidIO(new Redirect))
@@ -93,7 +92,7 @@ class HybridUnitIO()(implicit p: Parameters, val params: MemUnitParams) extends 
 
   // perf
   val debugLsInfo   = Output(new DebugLsInfoBundle)
-  val lsTopdownInfo = Flipped(Output(new LsTopdownInfo))
+  val lsTopdownInfo = Output(new LsTopdownInfo)
 }
 
 class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemUnitParams)
@@ -124,26 +123,6 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
   protected val fromMissQueue  = io.fromMissQueue
   protected val fromTLDchannel = io.fromTLDchannel
 
-  def getStoreIqIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(x => x._2.isStore && x._2.isIq).map(_._1)
-  }
-
-  def getStoreIqWb(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    params.issueParams.filter(_._2.isIq).map(MemWBPortMap.getPort(_.wbPort)).distinct.map(
-      toIssue(_)
-    )
-  }
-
-  def getLoadIqIssue(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    fromIssue.zip(params.issueParams).filter(x => x._2.isLoad && x._2.isIq).map(_._1)
-  }
-
-  def getLoadIqWb(): Seq[DecoupledIO[LsPipelineBundle]] = {
-    params.issueParams.filter(_._2.isIq).map(MemWBPortMap.getPort(_.wbPort)).distinct.map(
-      toIssue(_)
-    )
-  }
-
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
@@ -156,7 +135,7 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
   val issueParamPairs = fromIssue.zip(params.issueParams)
   fromIssue.zip(params.issueParams).zipWithIndex.map {
     case ((issue, issueParam), i) =>
-      val prioritySelect = !fromIssue.slice(0, i).map(_.valid).reduce(_|_)
+      val prioritySelect = (if (i == 0) true.B else !fromIssue.slice(0, i).map(_.valid).reduce(_|_))
       val selected =
           if (i == 0) true.B
           else
@@ -190,9 +169,11 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
               }
 
               case _ if (issueParam.isPrefetch) => {
-                  (issue.bits.confidence > 0.U) && !issueParamPairs.filter(
+                  val higherIssues = issueParamPairs.filter(
                     x => !(x._2.isVector || x._2.isIq || x._2.isPrefetch)
-                  ).map(_._1.valid).reduce(_|_)
+                  )
+                  val hasHigherIssue = (if (higherIssues.length > 0) higherIssues.map(_._1.valid).reduce(_|_) else false.B)
+                  (issue.bits.confidence > 0.U) && !hasHigherIssue
               }
 
               case _ => prioritySelect
@@ -425,7 +406,7 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
   // to Backend
   if (toBackend.issue.isDefined) {
     toBackend.issue.get.valid := s1In.valid && !fromTlb.resp.bits.miss && s1In.bits.isIq
-    toBackend.issue.get.bits  := s1In.bits
+    toBackend.issue.get.bits  := s1In.bits.toMemExuInputBundle()
   }
 
   // Send TLB feedback to store issue queue
@@ -463,8 +444,8 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
                          s1Kill ||
                          s1In.bits.isPrefetch ||
                          s1HasException
+  val lsqForward = toLsq.forward.getOrElse(0.U.asTypeOf(ValidIO(new LoadForwardReqBundle)))
   if (toLsq.forward.isDefined) {
-    val lsqForward = toLsq.forward.get
     lsqForward.valid := s1Out.valid && !s1LsqForwardKill
     lsqForward.bits.vaddr := s1Out.bits.vaddr
     lsqForward.bits.paddr := s1Out.bits.paddr
@@ -486,12 +467,10 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
 
   // to prefetch
   if (params.hasPrefetch) {
-    toPrefetch.train.s1PrefetchSpec := s1Out.fire
+    toPrefetch.train.get.s1PrefetchSpec := s1Out.fire
     if (toPrefetch.trainL1.isDefined) {
       toPrefetch.trainL1.get.s1PrefetchSpec := s1Out.fire
     }
-  } else {
-    toPrefetch.train.s1PrefetchSpec := false.B
   }
 
   // override exceptionVec when s1DelayedError is false
@@ -808,7 +787,7 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
     s2PfTrainValid := s2In.valid && !s2RealMmio && (!s2In.bits.tlbMiss || s2In.bits.isHWPrefetch)
     s2PfTrainL1Valid := s2In.valid && !s2RealMmio
 
-    toPrefetch.train.s2PrefetchSpec := s2PfTrainValid
+    toPrefetch.train.get.s2PrefetchSpec := s2PfTrainValid
 
     if (toPrefetch.trainL1.isDefined) {
       toPrefetch.trainL1.get.s2PrefetchSpec := s2PfTrainValid
@@ -898,6 +877,7 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
   // writeback and update load queue
   val s3BadInst = GatedValidRegNext(s2BadInst)
   val s3HasException = GatedValidRegNext(s2HasException)
+  val s3VPMatchFail = GatedValidRegNext(s2VPMatchFail)
 
   // set delay error
   val s3DelayedError = WireInit(false.B)
@@ -964,7 +944,6 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
                    GatedValidRegNext(fromCtrl.csrCtrl.ldld_vio_check_enable)
   }
 
-  val s3VPMatchFail = GatedValidRegNext(s2VPMatchFail)
   if (toBackend.rollback.isDefined) {
     val rollback = toBackend.rollback.get
     rollback.valid := s3Out.valid && (s3VPMatchFail || s3FlushPipe) && s3Out.bits.isLoad && s3HasException
@@ -1055,6 +1034,7 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
   s3Out.bits.data := newRdataHelper(s3RdataOH, s3PickedDataFromCache(0))
 
   // writeback
+  val s3SafeWriteback = true.B
   s3Out.ready := false.B
   toIssue.zip(s3WBPort).map {
     case (wb, select) =>
@@ -1063,7 +1043,6 @@ class HybridUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, param
       wb.bits.uop.exceptionVec(loadAccessFault) := (s3DelayedError || s3Out.bits.uop.exceptionVec(loadAccessFault))
       wb.bits.uop.flushPipe  := false.B
       wb.bits.uop.replayInst := s3VPMatchFail || s3FlushPipe
-      wb.bits.isFromLoadUnit := true.B
       when (select) {
         s3Out.ready := wb.ready
       }
