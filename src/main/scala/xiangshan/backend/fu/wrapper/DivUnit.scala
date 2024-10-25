@@ -37,11 +37,12 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val kill_w = io.in.bits.ctrl.robIdx.needFlush(io.flush)
   val kill_r = TraceRTLChoose(!divDataModule.io.in_ready, !dummyDivDataMod.io.start_ready_o) && robIdxReg.needFlush(io.flush)
 
+  val debug_unity_kill = Mux(io.in.ready, kill_w, kill_r)
   if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
     divDataModule.io <> DontCare
 
     dummyDivDataMod.io.start_valid_i := io.in.valid
-    dummyDivDataMod.io.flush_i := kill_r || kill_w
+    dummyDivDataMod.io.flush_i := debug_unity_kill
     dummyDivDataMod.io.format_i := Mux(ctrlReg.isW, 2.U, 3.U)
     dummyDivDataMod.io.is_sqrt_i := false.B
     dummyDivDataMod.io.finish_ready_i := io.out.ready
@@ -73,11 +74,11 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   }
   connectNonPipedCtrlSingal
 
-  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, kill_w || kill_r)
+  val exeCycleCounter = StartStopCounter(io.in.fire, io.out.valid, 1, debug_unity_kill)
   XSPerfHistogram("divCycle", exeCycleCounter, io.out.fire, 0, 24, 1)
 
-  val exeWCycleCounter = StartStopCounter(io.in.fire && ctrlReg.isW, io.out.valid, 1, kill_w || kill_r)
+  val exeWCycleCounter = StartStopCounter(io.in.fire && ctrlReg.isW, io.out.valid, 1, debug_unity_kill)
   XSPerfHistogram("divWCycle", exeWCycleCounter, io.out.fire, 0, 24, 1)
-  val exeDCycleCounter = StartStopCounter(io.in.fire && !ctrlReg.isW, io.out.valid, 1, kill_w || kill_r)
+  val exeDCycleCounter = StartStopCounter(io.in.fire && !ctrlReg.isW, io.out.valid, 1, debug_unity_kill)
   XSPerfHistogram("divDCycle", exeDCycleCounter, io.out.fire, 0, 24, 1)
 }
