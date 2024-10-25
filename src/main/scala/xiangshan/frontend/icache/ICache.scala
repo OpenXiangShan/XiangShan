@@ -557,6 +557,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetcher.io.req.valid := softPrefetchValid || io.ftqPrefetch.req.valid
   prefetcher.io.req.bits  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
   io.ftqPrefetch.req.ready := prefetcher.io.req.ready && !softPrefetchValid
+  prefetcher.io.exceptionFromBackend := ExceptionType.fromFtq(io.fetch.req.bits)
 
   missUnit.io.hartId            := io.hartId
   missUnit.io.fencei            := io.fencei

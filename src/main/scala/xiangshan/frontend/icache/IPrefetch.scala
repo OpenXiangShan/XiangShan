@@ -71,6 +71,8 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val MSHRReq           = DecoupledIO(new ICacheMissReq)
   val MSHRResp          = Flipped(ValidIO(new ICacheMissResp))
   val wayLookupWrite    = DecoupledIO(new WayLookupInfo)
+
+  val exceptionFromBackend = Input(UInt(ExceptionType.width.W))
 }
 
 class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
@@ -109,6 +111,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s0_isSoftPrefetch = io.req.bits.isSoftPrefetch
   val s0_doubleline   = io.req.bits.crossCacheline
   val s0_req_vSetIdx  = s0_req_vaddr.map(get_idx)
+  val s0_exceptionFromBackend = io.exceptionFromBackend
 
   from_bpu_s0_flush := !s0_isSoftPrefetch && (io.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
                                               io.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx))
@@ -135,6 +138,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
   val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
   val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx))
+  val s1_exceptionFromBackend = RegEnable(s0_exceptionFromBackend, 0.U.asTypeOf(s0_exceptionFromBackend), s0_fire)
 
   val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
   val state = RegInit(m_idle)
@@ -197,7 +201,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE), data = fromITLB(i).bits.isForVSnonLeafPTE)
   ))
   val s1_itlb_exception     = VecInit((0 until PortNumber).map( i =>
-    ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits))
+    Mux(ExceptionType.hasException(s1_exceptionFromBackend),
+      s1_exceptionFromBackend,
+      ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U(ExceptionType.width.W), data = ExceptionType.fromTlbResp(fromITLB(i).bits)))
   ))
   val s1_itlb_pbmt          = VecInit((0 until PortNumber).map( i =>
     ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.pbmt(0)), data = fromITLB(i).bits.pbmt(0))

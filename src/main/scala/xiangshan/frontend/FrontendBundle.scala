@@ -122,6 +122,8 @@ object ExceptionType {
   def af    : UInt = "b11".U // instruction access fault
   def width : Int  = 2
 
+  def hasException(e: UInt): Bool = e =/= none
+
   def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
     assert(
       PopCount(VecInit(has_pf, has_gpf, has_af)) <= 1.U,
