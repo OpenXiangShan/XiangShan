@@ -138,7 +138,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
   val s1_doubleline           = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
   val s1_req_ftqIdx           = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
   val s1_req_vSetIdx          = VecInit(s1_req_vaddr.map(get_idx))
-  val s1_exceptionFromBackend = RegEnable(s0_exceptionFromBackend, 0.U.asTypeOf(s0_exceptionFromBackend), s0_fire)
+  val s1_exceptionFromBackend = RegEnable(s0_exceptionFromBackend, 0.U(ExceptionType.width.W), s0_fire)
 
   val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
   val state                                                                  = RegInit(m_idle)
