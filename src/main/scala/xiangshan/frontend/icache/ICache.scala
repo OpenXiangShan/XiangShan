@@ -629,7 +629,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   // Parity error port
   val errors       = mainPipe.io.errors
   val errors_valid = errors.map(e => e.valid).reduce(_ | _)
-  io.error.bits <> RegEnable(Mux1H(errors.map(e => e.valid -> e.bits)), 0.U.asTypeOf(errors(0).bits), errors_valid)
+  io.error.bits <> RegEnable(
+    PriorityMux(errors.map(e => e.valid -> e.bits)),
+    0.U.asTypeOf(errors(0).bits),
+    errors_valid
+  )
   io.error.valid := RegNext(errors_valid, false.B)
 
   XSPerfAccumulate(
