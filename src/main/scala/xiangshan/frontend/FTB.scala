@@ -19,11 +19,8 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import os.copy
 import scala.{Tuple2 => &}
-import scala.math.min
 import utility._
-import utils._
 import xiangshan._
 
 trait FTBParams extends HasXSParameter with HasBPUConst {

@@ -21,9 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import scala.math.min
-import scala.util.matching.Regex
 import utility._
-import utils._
 import xiangshan._
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {

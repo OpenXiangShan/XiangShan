@@ -17,11 +17,8 @@
 package xiangshan.frontend
 
 import chisel3._
-import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
-import xiangshan._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
