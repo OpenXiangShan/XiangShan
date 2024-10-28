@@ -288,7 +288,7 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
     val ill = Output(Bool())
   })
 
-  val decoder = new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true)
+  val decoder = new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = false)
 
   if (HasCExtension) {
     io.out := decoder.decode
