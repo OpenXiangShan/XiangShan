@@ -805,6 +805,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.always_taken(i)
   }
 
+  val s3_pc_diff       = s3_pc_dup(0).getAddr()
+  val s3_pc_startLower = Cat(0.U(1.W), s3_pc_diff(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
+  val s3_ftb_entry_endLowerwithCarry = Cat(s3_ftb_entry_dup(0).carry, s3_ftb_entry_dup(0).pftAddr)
+  val fallThroughErr =
+    s3_pc_startLower >= s3_ftb_entry_endLowerwithCarry || s3_ftb_entry_endLowerwithCarry > (s3_pc_startLower + PredictWidth.U)
+  XSError(
+    s3_ftb_entry_dup(0).valid && s3_hit_dup(0) && io.s3_fire(0) && fallThroughErr,
+    "FTB read sram entry in s3 fallThrough address error!"
+  )
+
   // Update logic
   val update = io.update.bits
 
