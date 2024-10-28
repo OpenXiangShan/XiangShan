@@ -12,9 +12,9 @@ on:
         description: 'Commit SHA to run the workflow on'
         required: false
         default: ''
-  #only for test
-  push:
-    branches: [ ci-perf-yml ]
+  #only for test push
+  # push:
+  #   branches: [ ci-perf-yml ]
 
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
     continue-on-error: false
     #At most 2 days to finish
     timeout-minutes: 2880
-    name: Performance Regression - Checkpoints
+    name: Checkpoints
     steps:
       - name: Set test commit
         id: set_test_commit
@@ -41,7 +41,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run_biweekly=true" >> $GITHUB_OUTPUT
-          elif [ $(( $(date +'%V') % 2 )) -eq 0 ]; then
+          elif [ $(( $(date +'%V') % 2 )) -eq 1 ]; then
             echo "run_biweekly=true" >> $GITHUB_OUTPUT
           else
             echo "run_biweekly=false" >> $GITHUB_OUTPUT
@@ -66,65 +66,54 @@ jobs:
           echo "SPEC_DIR=/nfs/home/ci-runner/master-perf-report/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
           echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
-    
-      - name: Test
+
+      - name: Clean Up
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+
+      - name: Build EMU with DRAMsim3
         if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           if [ -e "$SPEC_DIR/emu" ]; then
-            echo "no need build"
-          else
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
             mkdir -p $NOOP_HOME/build
-            echo "need build"
+            cp $SPEC_DIR/emu $NOOP_HOME/build/emu
+          else
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
+              --with-dramsim3 --threads 16                                  \
+              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
+              --llvm-profdata llvm-profdata
+            mkdir -p $SPEC_DIR
+            cp $NOOP_HOME/build/emu $SPEC_DIR/emu
           fi
 
-      # - name: Clean Up
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Run SPEC CPU2006 checkpoints
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          cd $PERF_HOME
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
+            -L "node033 node034 node036 node037 node038 node039 node040 node041 node042"
+          find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
 
-      # - name: Build EMU with DRAMsim3
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     if [ -e "$SPEC_DIR/emu" ]; then
-      #       mkdir -p $NOOP_HOME/build
-      #       cp $SPEC_DIR/emu $NOOP_HOME/build/emu
-      #     else
-      #       python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
-      #         --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-      #         --with-dramsim3 --threads 16                                  \
-      #         --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-      #         --llvm-profdata llvm-profdata
-      #       mkdir -p $SPEC_DIR
-      #       cp $NOOP_HOME/build/emu $SPEC_DIR/emu
-      #     fi
+      - name: Report SPEC CPU2006 score
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          cd $PERF_HOME
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
+            --check --dump-json-path $SPEC_DIR/err_ckps.json
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
+            > $SPEC_DIR/score.txt
+          mkdir $GITHUB_WORKSPACE/result
+          cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
+          cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
-      # - name: Run SPEC CPU2006 checkpoints
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     cd $PERF_HOME
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
-      #       -L "node033 node034 node036 node037 node038 node039 node040 node041 node042"
-      #     find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
-
-      # - name: Report SPEC CPU2006 score
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     cd $PERF_HOME
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
-      #       --check --dump-json-path $SPEC_DIR/err_ckps.json
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
-      #       > $SPEC_DIR/score.txt
-      #     mkdir $GITHUB_WORKSPACE/result
-      #     cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
-      #     cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
-
-      # - name: Upload result
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: result
-      #     path: result
+      - name: Upload result
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: result
+          path: result
