@@ -104,7 +104,6 @@ trait HasXSDts {
       memBlock.inner.nmi_int_sink.edges.in.flatMap(_.source.sources)
       ).flatMap {
       s =>
-        println(s.resources.map(_.key), s.range)
         (s.range.start until s.range.`end`).map(_ => s.resources)
     }
     val int_ids = Seq(
