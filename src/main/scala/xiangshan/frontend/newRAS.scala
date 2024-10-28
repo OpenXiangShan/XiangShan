@@ -548,7 +548,10 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }.elsewhen(io.commit_valid && (distanceBetween(io.commit_meta_TOSW, BOS) > 2.U)) {
       BOS := specPtrDec(io.commit_meta_TOSW)
     }
-    XSError(io.commit_valid && (distanceBetween(io.commit_meta_TOSW,BOS) > 2.U), "The use of inference queue of the RAS module has unexpected situations")
+    XSError(
+      io.commit_valid && (distanceBetween(io.commit_meta_TOSW, BOS) > 2.U),
+      "The use of inference queue of the RAS module has unexpected situations"
+    )
 
     when(io.redirect_valid) {
       TOSR := io.redirect_meta_TOSR

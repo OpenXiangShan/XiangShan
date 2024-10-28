@@ -21,9 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
 import utility._
-import utils._
 import xiangshan._
-import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
   val MaxMetaBaseLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
@@ -555,9 +553,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s1_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
-      s1_ghist_ptr_dup(0).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s1.shouldShiftVec(0)(b) && s1_valid_dup(
-        0
-      )
+      s1_ghist_ptr_dup(0).value === (CGHPtr(false.B, n.U) + b.U).value &&
+        resp.s1.shouldShiftVec(0)(b) && s1_valid_dup(0)
     )
   )
   val s1_ghv_wdatas = (0 until HistoryLength).map(n =>
@@ -666,9 +663,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s2_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
-      s2_ghist_ptr_dup(0).value === (CGHPtr(false.B, n.U) + b.U).value && resp.s2.shouldShiftVec(0)(
-        b
-      ) && s2_redirect_dup(0)
+      s2_ghist_ptr_dup(0).value === (CGHPtr(false.B, n.U) + b.U).value &&
+        resp.s2.shouldShiftVec(0)(b) && s2_redirect_dup(0)
     )
   )
   val s2_ghv_wdatas = (0 until HistoryLength).map(n =>

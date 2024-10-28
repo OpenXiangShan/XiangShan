@@ -18,11 +18,8 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import java.util.ResourceBundle.Control
 import org.chipsalliance.cde.config.Parameters
-import scala.math._
 import utility._
-import utils._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp

@@ -17,11 +17,9 @@
 package xiangshan.frontend
 
 import chisel3._
-import chisel3.util
 import chisel3.util._
 import freechips.rocketchip.rocket.ExpandedInstruction
 import freechips.rocketchip.rocket.RVCDecoder
-import java.lang.reflect.Parameter
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._

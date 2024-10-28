@@ -22,7 +22,6 @@ import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
-import utils._
 import xiangshan._
 
 trait HasSCParameter extends TageParams {}
