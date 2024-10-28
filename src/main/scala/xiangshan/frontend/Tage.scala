@@ -681,8 +681,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val u_valid = io.update.valid
   val update  = io.update.bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
-      update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.strong_bias(w) &&
-      !(PriorityEncoder(update.br_taken_mask) < w.U)))
+    update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.strong_bias(w) &&
+      !(PriorityEncoder(update.br_taken_mask) < w.U)
+  ))
 
   val updateMeta = update.meta.asTypeOf(new TageMeta)
 

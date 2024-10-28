@@ -150,7 +150,8 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val u_s0_br_update_valids =
     VecInit((0 until numBr).map(w =>
       u.bits.ftb_entry.brValids(w) && u.valid && !u.bits.ftb_entry.strong_bias(w) &&
-      !(PriorityEncoder(u.bits.br_taken_mask) < w.U)))
+        !(PriorityEncoder(u.bits.br_taken_mask) < w.U)
+    ))
 
   // s1
   val u_s1_valid            = RegNext(u.valid)
