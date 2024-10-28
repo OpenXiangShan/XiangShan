@@ -56,8 +56,8 @@ class InterruptFilter extends Module {
   val mIpriosIsZero : Bool = miprios  === 0.U
   val hsIpriosIsZero: Bool = hsiprios === 0.U
 
-  val mtopigather = mip & mie
-  val hstopigather = hsip & hsie
+  val mtopigather = mip & mie & (~mideleg).asUInt
+  val hstopigather = hsip & hsie & (~hideleg).asUInt
   val vstopigather = vsip & vsie
   val mipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
   val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
@@ -252,35 +252,43 @@ class InterruptFilter extends Module {
 
   val mIRVec = Mux(
     privState.isModeM && mstatusMIE || privState < PrivState.ModeM,
-    mip.asUInt & mie.asUInt & (~(mideleg.asUInt)).asUInt,
+    io.out.mtopi.IID.asUInt,
     0.U
   )
 
   val hsIRVec = Mux(
     privState.isModeHS && sstatusSIE || privState < PrivState.ModeHS,
-    hsip & hsie & (~(hideleg.asUInt)).asUInt,
+    io.out.stopi.IID.asUInt,
     0.U
   )
 
   val vsIRVec = Mux(
     privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS,
-    vsip.asUInt & vsie.asUInt,
+    io.out.vstopi.IID.asUInt,
     0.U
   )
 
-  val vsMapHostIRVec = Cat((0 until vsIRVec.getWidth).map { num =>
+  val mIRNotZero  = mIRVec.orR
+  val hsIRNotZero = hsIRVec.orR
+  val vsIRNotZero = vsIRVec.orR
+
+  val mIRVecOH  = Mux(mIRNotZero,  UIntToOH(mIRVec,  64), 0.U)
+  val hsIRVecOH = Mux(hsIRNotZero, UIntToOH(hsIRVec, 64), 0.U)
+  val vsIRVecOH = Mux(vsIRNotZero, UIntToOH(vsIRVec, 64), 0.U)
+
+  val vsMapHostIRVec = Cat((0 until vsIRVecOH.getWidth).map { num =>
     // 2,6,10
     if (InterruptNO.getVS.contains(num)) {
       // 1,5,9
       val sNum = num - 1
-      vsIRVec(sNum)
+      vsIRVecOH(sNum)
     }
     // 1,5,9
     else if(InterruptNO.getHS.contains(num)) {
       0.U(1.W)
     }
     else {
-      vsIRVec(num)
+      vsIRVecOH(num)
     }
   }.reverse)
 
@@ -292,9 +300,9 @@ class InterruptFilter extends Module {
   val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
   val debugInterupt = ((io.in.debugIntr && !disableDebugIntr)  << CSRConst.IRQ_DEBUG).asUInt
 
-  val normalIntrVec = Mux(mIRVec.orR, mIRVec,
-                        Mux(hsIRVec.orR, hsIRVec,
-                          Mux(vsMapHostIRVec.orR, vsMapHostIRVec, 0.U)))
+  val normalIntrVec = Mux(mIRNotZero, mIRVecOH,
+                        Mux(hsIRNotZero, hsIRVecOH,
+                          Mux(vsIRNotZero, vsMapHostIRVec, 0.U)))
   val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableAllIntr)).asUInt | debugInterupt
 
   // virtual interrupt with hvictl injection
