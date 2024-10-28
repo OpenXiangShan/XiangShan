@@ -19,12 +19,9 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import os.followLink
 import scala.{Tuple2 => &}
 import scala.math.min
-import scala.util.matching.Regex
 import utility._
-import utils._
 import xiangshan._
 
 trait TageParams extends HasBPUConst with HasXSParameter {

@@ -21,7 +21,6 @@ import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan._
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.PMP
