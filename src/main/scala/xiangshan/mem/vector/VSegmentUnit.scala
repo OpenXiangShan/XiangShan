@@ -610,11 +610,13 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
      (splitPtr + splitPtrOffset)
     )
 
-  dontTouch(issueUopFlowNumLog2)
-  dontTouch(issueEmul)
-  dontTouch(splitPtrNext)
-  dontTouch(stridePtr)
-  dontTouch(segmentActive)
+  if (backendParams.debugEn){
+    dontTouch(issueUopFlowNumLog2)
+    dontTouch(issueEmul)
+    dontTouch(splitPtrNext)
+    dontTouch(stridePtr)
+    dontTouch(segmentActive)
+  }
 
   // update splitPtr
   when(state === s_latch_and_merge_data || (state === s_send_data && (fieldActiveWirteFinish || !segmentActive))){

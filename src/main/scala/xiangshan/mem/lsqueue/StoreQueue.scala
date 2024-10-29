@@ -939,7 +939,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val commitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val needCancel = Wire(Vec(StoreQueueSize, Bool())) // Will be assigned later
-  dontTouch(commitVec)
+
+  if (backendParams.debugEn){ dontTouch(commitVec) }
+
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
     // don't mark misalign store as committed

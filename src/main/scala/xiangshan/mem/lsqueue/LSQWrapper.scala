@@ -135,8 +135,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.hartId := io.hartId
   storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
 
+  if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
 
-  dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl

@@ -300,9 +300,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // load flow source select (OH)
   val s0_src_select_vec = WireInit(VecInit((0 until SRC_NUM).map{i => s0_src_valid_vec(i) && s0_src_ready_vec(i)}))
   val s0_hw_prf_select = s0_src_select_vec(high_pf_idx) || s0_src_select_vec(low_pf_idx)
-  dontTouch(s0_src_valid_vec)
-  dontTouch(s0_src_ready_vec)
-  dontTouch(s0_src_select_vec)
+
+  if (backendParams.debugEn){
+    dontTouch(s0_src_valid_vec)
+    dontTouch(s0_src_ready_vec)
+    dontTouch(s0_src_select_vec)
+  }
 
   val s0_tlb_no_query = s0_hw_prf_select || s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) || s0_sel_src.prf_i
   s0_valid := (

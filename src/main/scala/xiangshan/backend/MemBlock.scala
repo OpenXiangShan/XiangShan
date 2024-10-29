@@ -645,7 +645,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
   val tlbreplay_reg = GatedValidRegNext(tlbreplay)
   val dtlb_ld0_tlbreplay_reg = GatedValidRegNext(dtlb_ld(0).tlbreplay)
-  dontTouch(tlbreplay)
+
+  if (backendParams.debugEn){ dontTouch(tlbreplay) }
+
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
       ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.vmid, allType = true, ignoreAsid = true)
