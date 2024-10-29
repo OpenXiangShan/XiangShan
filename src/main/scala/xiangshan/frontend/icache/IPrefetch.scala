@@ -35,11 +35,12 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
-  val startAddr:      UInt   = UInt(VAddrBits.W)
-  val nextlineStart:  UInt   = UInt(VAddrBits.W)
-  val ftqIdx:         FtqPtr = new FtqPtr
-  val isSoftPrefetch: Bool   = Bool()
-  def crossCacheline: Bool   = startAddr(blockOffBits - 1) === 1.U
+  val startAddr:        UInt   = UInt(VAddrBits.W)
+  val nextlineStart:    UInt   = UInt(VAddrBits.W)
+  val ftqIdx:           FtqPtr = new FtqPtr
+  val isSoftPrefetch:   Bool   = Bool()
+  val backendException: UInt   = UInt(ExceptionType.width.W)
+  def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
     this.startAddr      := info.startAddr
@@ -72,8 +73,6 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val MSHRReq        = DecoupledIO(new ICacheMissReq)
   val MSHRResp       = Flipped(ValidIO(new ICacheMissResp))
   val wayLookupWrite = DecoupledIO(new WayLookupInfo)
-
-  val exceptionFromBackend = Input(UInt(ExceptionType.width.W))
 }
 
 class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
@@ -106,12 +105,12 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
     * receive ftq req
     ******************************************************************************
     */
-  val s0_req_vaddr            = VecInit(Seq(io.req.bits.startAddr, io.req.bits.nextlineStart))
-  val s0_req_ftqIdx           = io.req.bits.ftqIdx
-  val s0_isSoftPrefetch       = io.req.bits.isSoftPrefetch
-  val s0_doubleline           = io.req.bits.crossCacheline
-  val s0_req_vSetIdx          = s0_req_vaddr.map(get_idx)
-  val s0_exceptionFromBackend = io.exceptionFromBackend
+  val s0_req_vaddr        = VecInit(Seq(io.req.bits.startAddr, io.req.bits.nextlineStart))
+  val s0_req_ftqIdx       = io.req.bits.ftqIdx
+  val s0_isSoftPrefetch   = io.req.bits.isSoftPrefetch
+  val s0_doubleline       = io.req.bits.crossCacheline
+  val s0_req_vSetIdx      = s0_req_vaddr.map(get_idx)
+  val s0_backendException = VecInit(Seq.fill(PortNumber)(io.req.bits.backendException))
 
   from_bpu_s0_flush := !s0_isSoftPrefetch && (io.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
     io.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx))
@@ -133,12 +132,12 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr            = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
-  val s1_isSoftPrefetch       = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
-  val s1_doubleline           = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
-  val s1_req_ftqIdx           = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
-  val s1_req_vSetIdx          = VecInit(s1_req_vaddr.map(get_idx))
-  val s1_exceptionFromBackend = RegEnable(s0_exceptionFromBackend, 0.U(ExceptionType.width.W), s0_fire)
+  val s1_req_vaddr        = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
+  val s1_isSoftPrefetch   = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
+  val s1_doubleline       = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+  val s1_req_ftqIdx       = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
+  val s1_req_vSetIdx      = VecInit(s1_req_vaddr.map(get_idx))
+  val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
 
   val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
   val state                                                                  = RegInit(m_idle)
@@ -214,14 +213,10 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
     )
   ))
   val s1_itlb_exception = VecInit((0 until PortNumber).map(i =>
-    Mux(
-      ExceptionType.hasException(s1_exceptionFromBackend),
-      s1_exceptionFromBackend,
-      ResultHoldBypass(
-        valid = tlb_valid_pulse(i),
-        init = 0.U(ExceptionType.width.W),
-        data = ExceptionType.fromTlbResp(fromITLB(i).bits)
-      )
+    ResultHoldBypass(
+      valid = tlb_valid_pulse(i),
+      init = 0.U(ExceptionType.width.W),
+      data = ExceptionType.fromTlbResp(fromITLB(i).bits)
     )
   ))
   val s1_itlb_pbmt = VecInit((0 until PortNumber).map(i =>
@@ -404,6 +399,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
   // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next
   // for timing consideration, meta_corrupt is not merged, and it will NOT cancel prefetch
   val s1_exception_out = ExceptionType.merge(
+    s1_backendException,
     s1_itlb_exception,
     s1_pmp_exception
   )

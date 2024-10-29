@@ -58,7 +58,7 @@ object Bundles {
       this.pc               := source.pc
       this.foldpc           := source.foldpc
       this.exceptionVec     := source.exceptionVec
-      this.isFetchMalAddr   := source.exceptionFromBackend
+      this.isFetchMalAddr   := source.backendException
       this.trigger          := source.trigger
       this.preDecodeInfo    := source.pd
       this.pred_taken       := source.pred_taken
