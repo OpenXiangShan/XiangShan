@@ -268,7 +268,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         (isFakePte(d) && vsatp.mode === Sv48) -> 3.U,
         (!isFakePte(d)) -> (level(d) - 1.U),
       ))
-      val gpaddr_offset = Mux(isLeaf(d), get_off(req_out(i).vaddr), Cat(getVpnn(get_pn(req_out(i).vaddr), vpn_idx),  0.U(log2Up(XLEN/8).W)))
+      // We use `fullva` here when `isLeaf`, in order to cope with the situation of an unaligned load/store cross page
+      // for example, a `ld` instruction on address 0x81000ffb will be splited into two loads
+      // 1. ld 0x81000ff8. vaddr = 0x81000ff8, fullva = 0x80000ffb
+      // 2. ld 0x81001000. vaddr = 0x81001000, fullva = 0x80000ffb
+      // When load 1 trigger a guest page fault, we should use offset of fullva when generate gpaddr
+      // and when load 2 trigger a guest page fault, we should just use offset of vaddr(all zero).
+      // Whether cross-page will be determined in misalign buffer(situation 2) so we only need to judge situation 1 here.
+      val gpaddr_offset = Mux(isLeaf(d), get_off(req_out(i).fullva), Cat(getVpnn(get_pn(req_out(i).fullva), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
       resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, vaddr, gpaddr)
