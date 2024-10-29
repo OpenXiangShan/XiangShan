@@ -242,7 +242,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SB -> 0.U,
     SH -> 1.U,
     SW -> 3.U,
-    SD -> 7.U 
+    SD -> 7.U
   )) + req.vaddr(4, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
@@ -553,7 +553,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.sqControl.control.writeSb := bufferState === s_sq_req
   io.sqControl.control.wdata   := splitStoreData(curPtr).wdata
   io.sqControl.control.wmask   := splitStoreData(curPtr).wmask
-  // the paddr and vaddr is not corresponding to the exact addr of 
+  // the paddr and vaddr is not corresponding to the exact addr of
   io.sqControl.control.paddr   := splitStoreResp(curPtr).paddr
   io.sqControl.control.vaddr   := splitStoreResp(curPtr).vaddr
   io.sqControl.control.last    := !((unWriteStores & ~UIntToOH(curPtr)).orR)
@@ -582,7 +582,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.vaddr := req.vaddr
 
   io.sqControl.control.removeSq := req_valid && (bufferState === s_wait) && !(globalMMIO || globalException) && (io.rob.scommit =/= 0.U)
-  
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush && (bufferState =/= s_idle)) {
@@ -597,11 +597,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the storeExceptionBuffer vaddr
-  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteVaddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
-  val overwriteIsHyper = GatedRegNext(splitStoreResp(curPtr).isHyper)
-  val overwriteGpaddr = GatedRegNext(splitStoreResp(curPtr).gpaddr)
-  val overwriteIsForVSnonLeafPTE = GatedRegNext(splitStoreResp(curPtr).isForVSnonLeafPTE)
+  val shouldOverwrite = req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U)
+  val overwriteExpBuf = GatedValidRegNext(shouldOverwrite)
+  val overwriteVaddr = RegEnable(splitStoreResp(curPtr).vaddr, shouldOverwrite)
+  val overwriteIsHyper = RegEnable(splitStoreResp(curPtr).isHyper, shouldOverwrite)
+  val overwriteGpaddr = RegEnable(splitStoreResp(curPtr).gpaddr, shouldOverwrite)
+  val overwriteIsForVSnonLeafPTE = RegEnable(splitStoreResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteVaddr
