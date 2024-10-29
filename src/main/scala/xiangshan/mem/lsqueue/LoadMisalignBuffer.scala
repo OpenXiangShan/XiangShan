@@ -588,8 +588,9 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteGpaddr = RegEnable(
     Mux(
       cross16BytesBoundary && (curPtr === 1.U),
-      splitLoadResp(curPtr).gpaddr,
-      Cat(get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva))),
+      // when cross-page, offset should always be 0
+      Cat(get_pn(splitLoadResp(curPtr).gpaddr), get_off(0.U(splitLoadResp(curPtr).gpaddr.getWidth.W))),
+      splitLoadResp(curPtr).gpaddr),
     shouldOverwrite)
   val overwriteIsHyper = RegEnable(splitLoadResp(curPtr).isHyper, shouldOverwrite)
   val overwriteIsForVSnonLeafPTE = RegEnable(splitLoadResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
