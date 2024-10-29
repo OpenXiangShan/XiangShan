@@ -35,11 +35,12 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val dummyDivDataMod = Module(new TraceDummyIntDivider)
 
   val kill_w = io.in.bits.ctrl.robIdx.needFlush(io.flush)
-  val kill_r = TraceRTLChoose(!divDataModule.io.in_ready, !dummyDivDataMod.io.start_ready_o) && robIdxReg.needFlush(io.flush)
+  val kill_r = !divDataModule.io.in_ready && robIdxReg.needFlush(io.flush)
 
   val debug_unity_kill = Mux(io.in.ready, kill_w, kill_r)
   if (env.TraceRTLMode && TraceDummyFixCycleDivSqrt) {
     divDataModule.io <> DontCare
+    kill_r := !dummyDivDataMod.io.start_ready_o && robIdxReg.needFlush(io.flush)
 
     dummyDivDataMod.io.start_valid_i := io.in.valid
     dummyDivDataMod.io.flush_i := debug_unity_kill
