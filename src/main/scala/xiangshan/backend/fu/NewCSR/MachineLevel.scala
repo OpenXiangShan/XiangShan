@@ -452,12 +452,14 @@ class MstatusBundle extends CSRBundle {
   val TVM  = CSRRWField     (20).withReset(0.U)
   val TW   = CSRRWField     (21).withReset(0.U)
   val TSR  = CSRRWField     (22).withReset(0.U)
+  val SDT  = CSRRWField     (24).withReset(0.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
   val SBE  = CSRROField     (36).withReset(0.U)
   val MBE  = CSRROField     (37).withReset(0.U)
   val GVA  = CSRRWField     (38).withReset(0.U)
   val MPV  = VirtMode       (39).withReset(0.U)
+  val MDT  = CSRRWField     (42).withReset(mdtInit.U)
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
@@ -471,6 +473,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   with MNretEventSinkBundle
   with SretEventSinkBundle
   with HasRobCommitBundle
+  with HasMachineEnvBundle
 {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
@@ -496,9 +499,23 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
-
+  // when MDT is explicitly written by 1, clear MIE
+  // only when reg.MDT is zero or wdata.MDT is zero , MIE can be explicitly written by 1
+  when (w.wdataFields.MDT && w.wen) {
+    reg.MIE := false.B
+  }
+  // when DTE is zero, SDT field is read-only zero(write any, read zero, side effect of write 1 is block)
+  val writeSDT = Wire(Bool())
+  writeSDT := Mux(this.menvcfg.DTE.asBool, (w.wdataFields.SDT && w.wen) || (wAliasSstatus.wdataFields.SDT && wAliasSstatus.wen), 0.U)
+  when (!this.menvcfg.DTE) {
+    regOut.SDT := false.B
+  }
+  // SDT and SIE is the same as MDT and MIE
+  when (writeSDT) {
+    reg.SIE := false.B
+  }
   // read connection
-  mstatus :|= reg
+  mstatus :|= regOut
   sstatus := mstatus
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
@@ -628,6 +645,11 @@ class MEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
+  if (CSRConfig.EXT_DBLTRP) {
+    // software write envcfg to open ssdbltrp if need
+    // set 0 to pass ci
+    this.DTE.setRW().withReset(0.U)
+  }
 }
 
 object MarchidField extends CSREnum with ROApply {
