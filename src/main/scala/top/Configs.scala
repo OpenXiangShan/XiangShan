@@ -295,6 +295,10 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        enableTagECC = true,
+        enableDataECC = true,
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
