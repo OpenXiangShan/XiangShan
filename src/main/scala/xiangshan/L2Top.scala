@@ -33,6 +33,7 @@ import top.BusPerfMonitor
 import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.trace.TraceCoreInterface
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -161,6 +162,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val resetInFrontend = Input(Bool())
         val toTile = Output(Bool())
       }
+      val traceCoreInterface = new Bundle{
+        val fromCore = Flipped(new TraceCoreInterface)
+        val toTile   = new TraceCoreInterface
+      }
       val debugTopDown = new Bundle() {
         val robTrueCommit = Input(UInt(64.W))
         val robHeadPaddr = Flipped(Valid(UInt(36.W)))
@@ -183,6 +188,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
+    io.traceCoreInterface.toTile <> io.traceCoreInterface.fromCore
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
     dontTouch(io.cpu_critical_error)

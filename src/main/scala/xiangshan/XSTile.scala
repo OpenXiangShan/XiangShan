@@ -131,7 +131,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
-    io.traceCoreInterface <> core.module.io.traceCoreInterface
+    l2top.module.io.traceCoreInterface.fromCore <> core.module.io.traceCoreInterface
+    io.traceCoreInterface <> l2top.module.io.traceCoreInterface.toTile
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
