@@ -201,7 +201,8 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
   val s1_req_gpaddr_tmp = VecInit((0 until PortNumber).map(i =>
     ResultHoldBypass(
       valid = tlb_valid_pulse(i),
-      init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)),
+      // NOTE: we dont use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
+      init = 0.U(PAddrBitsMax.W),
       data = fromITLB(i).bits.gpaddr(0)
     )
   ))

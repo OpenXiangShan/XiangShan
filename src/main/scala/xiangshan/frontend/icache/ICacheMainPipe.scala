@@ -37,15 +37,21 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle {
 }
 
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
-  val vaddr             = UInt(VAddrBits.W)
-  val data              = UInt(blockBits.W)
-  val paddr             = UInt(PAddrBits.W)
-  val gpaddr            = UInt(GPAddrBits.W)
+  val vaddr            = UInt(VAddrBits.W)
+  val data             = UInt(blockBits.W)
+  val paddr            = UInt(PAddrBits.W)
+  val exception        = UInt(ExceptionType.width.W)
+  val pmp_mmio         = Bool()
+  val itlb_pbmt        = UInt(Pbmt.width.W)
+  val backendException = Bool()
+  /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
+   * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
+   * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
+   * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
+   * (cases 56<x<=64 are handled by the backend datapath)
+   */
+  val gpaddr            = UInt(PAddrBitsMax.W)
   val isForVSnonLeafPTE = Bool()
-  val exception         = UInt(ExceptionType.width.W)
-  val pmp_mmio          = Bool()
-  val itlb_pbmt         = UInt(Pbmt.width.W)
-  val backendException  = Bool()
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
