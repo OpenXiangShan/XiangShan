@@ -954,7 +954,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     val misPredictMask:      UInt      = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
     val takenMask: UInt =
       io.ftq_to_bpu.update.bits.br_taken_mask.asUInt |
-        io.ftq_to_bpu.update.bits.ftb_entry.always_taken.asUInt // Always taken branch is recorded in history
+        io.ftq_to_bpu.update.bits.ftb_entry.strong_bias.asUInt // Always taken branch is recorded in history
     val takenIdx:      UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val misPredictIdx: UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val shouldShiftMask: UInt = Mux(takenMask.orR, LowerMask(takenIdx).asUInt, ((1 << numBr) - 1).asUInt) &
