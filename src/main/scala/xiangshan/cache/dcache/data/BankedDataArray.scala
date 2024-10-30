@@ -328,7 +328,6 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
                 singlePort = true
             ))
       )))
-      println(ecc)
       ecc
   }
 
