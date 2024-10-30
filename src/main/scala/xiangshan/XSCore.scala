@@ -250,6 +250,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
+  memBlock.io.traceCoreInterfaceBypass.fromBackend <> backend.io.traceCoreInterface
+  io.traceCoreInterface <> memBlock.io.traceCoreInterfaceBypass.toL2Top
+
 
   if (debugOpts.ResetGen) {
     backend.reset := memBlock.io.reset_backend
