@@ -577,19 +577,22 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
-  val overwriteExpBuf = GatedValidRegNext(req_valid && globalException)
-  val overwriteVaddr = GatedRegNext(Mux(
-    cross16BytesBoundary && (curPtr === 1.U), 
-    splitLoadResp(curPtr).vaddr,
-    splitLoadResp(curPtr).fullva))
-  val overwriteGpaddr = GatedRegNext(Mux(
-    cross16BytesBoundary && (curPtr === 1.U), 
-    splitLoadResp(curPtr).gpaddr,
-    Cat(
-      get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva)
-    )))
-  val overwriteIsHyper = GatedRegNext(splitLoadResp(curPtr).isHyper)
-  val overwriteIsForVSnonLeafPTE = GatedRegNext(splitLoadResp(curPtr).isForVSnonLeafPTE)
+  val shouldOverwrite = req_valid && globalException
+  val overwriteExpBuf = GatedValidRegNext(shouldOverwrite)
+  val overwriteVaddr = RegEnable(
+    Mux(
+      cross16BytesBoundary && (curPtr === 1.U),
+      splitLoadResp(curPtr).vaddr,
+      splitLoadResp(curPtr).fullva),
+    shouldOverwrite)
+  val overwriteGpaddr = RegEnable(
+    Mux(
+      cross16BytesBoundary && (curPtr === 1.U),
+      splitLoadResp(curPtr).gpaddr,
+      Cat(get_pn(splitLoadResp(curPtr).gpaddr), get_off(splitLoadResp(curPtr).fullva))),
+    shouldOverwrite)
+  val overwriteIsHyper = RegEnable(splitLoadResp(curPtr).isHyper, shouldOverwrite)
+  val overwriteIsForVSnonLeafPTE = RegEnable(splitLoadResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteVaddr
