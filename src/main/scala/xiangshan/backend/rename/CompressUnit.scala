@@ -42,6 +42,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       val needRobFlags = Vec(RenameWidth, Output(Bool()))
       val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
       val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val canCompressVec = Vec(RenameWidth, Output(Bool()))
     }
   })
 
@@ -89,4 +90,5 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   (io.out.needRobFlags ++ io.out.instrSizes ++ io.out.masks).zip(decoder).foreach {
     case (sink, source) => sink := source
   }
+  io.out.canCompressVec := VecInit(canCompress)
 }

@@ -442,20 +442,25 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
    * trace begin
    */
+  // note: fusionInst can't robcompress
   val inVec = io.in.map(_.bits)
-  val canRobCompressVec = inVec.map(_.canRobCompress)
   val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
-  val halfWordNumVec = (0 until RenameWidth).map{
-    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
-      case (mask, isRVC) => Mux(mask, Mux(isRVC, 1.U, 2.U), 0.U)
-    }
-  }
+  val isFusionVec = inVec.map(_.commitType).map(ctype => CommitType.isFused(ctype))
+
+  val canRobCompressVec = compressUnit.io.out.canCompressVec
+  val iLastSizeVec = isRVCVec.map(isRVC => Mux(isRVC, Ilastsize.HalfWord, Ilastsize.Word))
+  val halfWordNumVec = isRVCVec.map(isRVC => Mux(isRVC, 1.U, 2.U))
+  val halfWordNumMatrix = (0 until RenameWidth).map(
+    i => compressMasksVec(i).asBools.map(
+      mask => Mux(mask, halfWordNumVec(i), 0.U)
+    )
+  )
 
   for (i <- 0 until RenameWidth) {
     // iretire
     uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
-      halfWordNumVec(i).reduce(_ +& _),
-      Mux(isRVCVec(i), 1.U, 2.U)
+      halfWordNumMatrix(i).reduce(_ +& _),
+      (if(i < RenameWidth -1) Mux(isFusionVec(i), halfWordNumVec(i+1), 0.U) else 0.U) +& halfWordNumVec(i)
     )
 
     // ilastsize
@@ -469,7 +474,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
       Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
-      Mux(isRVCVec(i), Ilastsize.HalfWord, Ilastsize.Word)
+      (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
     )
 
     // itype
