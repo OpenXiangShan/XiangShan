@@ -671,7 +671,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !debugMode && mnstatus.regOut.NMIE
+  trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
   trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
@@ -1032,7 +1032,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
-  entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode && !nmi
+  entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
   trapEntryDEvent.valid                       := entryDebugMode
   trapEntryDEvent.in.hasDebugIntr             := debugMod.io.out.hasDebugIntr
