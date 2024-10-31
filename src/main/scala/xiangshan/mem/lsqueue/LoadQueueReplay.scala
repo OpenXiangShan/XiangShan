@@ -603,7 +603,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // Allocate logic
   val newEnqueue = (0 until LoadPipelineWidth).map(i => {
-    needEnqueue(i) && !io.enq(i).bits.isLoadReplay
+    needEnqueue(i) && !io.enq(i).bits.isLoadReplay && !io.enq(i).bits.ldCancel.valid
   })
 
   for ((enq, w) <- io.enq.zipWithIndex) {

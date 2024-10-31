@@ -205,6 +205,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
 
     query.resp.valid := RegNext(query.req.valid)
+    query.resp.bits.safe_release := false.B
     // Generate real violation mask
     val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
     val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))

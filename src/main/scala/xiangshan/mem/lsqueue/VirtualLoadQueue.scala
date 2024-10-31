@@ -25,7 +25,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache._
 import utils._
 import utility._
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, UopIdx}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.FuType
@@ -60,21 +60,26 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   //  | Allocated | MicroOp | Flags |
   //  +-----------+---------+-------+
   //  Allocated   : entry has been allocated already
-  //  MicroOp     : inst's microOp
-  //  Flags       : load flags
+  //  Rob Index   : inst's rob index
+  //  Uop Index   : inst's uop index
+  //  Committed   : committed flag
   val allocated = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(VirtualLoadQueueSize, new DynInst))
-  val addrvalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio addr is valid
-  val datavalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio data is valid
-  // vector load: inst -> uop (pdest registor) -> flow (once load operation in loadunit)
-  val isvec = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // vector load flow
-  val veccommitted = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // vector load uop has commited
+  val robIdx = Reg(Vec(VirtualLoadQueueSize, new RobPtr))
+  val uopIdx = Reg(Vec(VirtualLoadQueueSize, UopIdx()))
+  val committed = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // vector load uop has commited
 
   /**
    * used for debug
    */
+  val debug_isvec = Reg(Vec(VirtualLoadQueueSize, Bool()))
+  val debug_pc = Reg(Vec(VirtualLoadQueueSize, UInt(XLEN.W)))
   val debug_mmio = Reg(Vec(VirtualLoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
+
+  /**
+   * used for performance
+   */
+  val perf_isvec = debug_isvec
 
   //  maintain pointers
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
@@ -92,7 +97,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
-    uop(i).robIdx.needFlush(io.redirect) && allocated(i)
+    robIdx(i).needFlush(io.redirect) && allocated(i)
   })))
   val lastNeedCancel = GatedValidRegNext(needCancel)
   val enqCancel = canEnqueue.zip(io.enq.req).map{case (v , x) =>
@@ -133,9 +138,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val DeqPtrMoveStride = CommitWidth
   require(DeqPtrMoveStride == CommitWidth, "DeqPtrMoveStride must be equal to CommitWidth!")
   val deqLookupVec = VecInit((0 until DeqPtrMoveStride).map(deqPtr + _.U))
-  val deqLookup = VecInit(deqLookupVec.map(ptr => allocated(ptr.value)
-    && ((datavalid(ptr.value) && addrvalid(ptr.value) && !isvec(ptr.value)) || (isvec(ptr.value) && veccommitted(ptr.value)))
-    && ptr =/= enqPtrExt(0)))
+  val deqLookup = VecInit(deqLookupVec.map(ptr => allocated(ptr.value) && committed(ptr.value) && ptr =/= enqPtrExt(0)))
   val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
@@ -172,15 +175,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
         when (j.U < validVLoadOffset(i)) {
           allocated((index + j.U).value) := true.B
-          uop((index + j.U).value) := io.enq.req(i).bits
-          uop((index + j.U).value).lqIdx := lqIdx + j.U
 
           // init
-          addrvalid((index + j.U).value) := false.B
-          datavalid((index + j.U).value) := false.B
-          isvec((index + j.U).value) := FuType.isVLoad(io.enq.req(i).bits.fuType)
-          veccommitted((index + j.U).value) := false.B
+          committed((index + j.U).value) := false.B
 
+          debug_isvec((index + j.U).value) := FuType.isVLoad(io.enq.req(i).bits.fuType)
+          debug_pc((index + j.U).value) := 0.U
           debug_mmio((index + j.U).value) := false.B
           debug_paddr((index + j.U).value) := 0.U
 
@@ -210,12 +210,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VirtualLoadQueueSize) {
     val cmt = io.vecCommit
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && robIdx(i) === cmt(j).bits.robidx && uopIdx(i) === cmt(j).bits.uopidx
     }
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
 
     when (vecLdCommit(i)) {
-      veccommitted(i) := true.B
+      committed(i) := true.B
     }
   }
 
@@ -243,36 +243,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
     when (io.ldin(i).valid) {
-      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      val need_rep = io.ldin(i).bits.rep_info.need_rep
-
-      when (!need_rep) {
-      // update control flag
-        addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss || io.ldin(i).bits.isSWPrefetch
-        datavalid(loadWbIndex) :=
-          (if (EnableFastForward) {
-              hasExceptions ||
-              io.ldin(i).bits.mmio ||
-             !io.ldin(i).bits.miss && // dcache miss
-             !io.ldin(i).bits.dcacheRequireReplay || // do not writeback if that inst will be resend from rs
-              io.ldin(i).bits.isSWPrefetch
-           } else {
-              hasExceptions ||
-              io.ldin(i).bits.mmio ||
-             !io.ldin(i).bits.miss ||
-              io.ldin(i).bits.isSWPrefetch
-           })
-
-        //
-        when (io.ldin(i).bits.data_wen_dup(1)) {
-          uop(loadWbIndex) := io.ldin(i).bits.uop
-        }
-        when (io.ldin(i).bits.data_wen_dup(4)) {
-          uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
-        }
-        uop(loadWbIndex).debugInfo := io.ldin(i).bits.rep_info.debug
-
+      when (io.ldin(i).bits.safeRelease) {
+        committed(loadWbIndex) := false.B
         //  Debug info
+        debug_pc(loadWbIndex) := io.ldin(i).bits.uop.pc
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
 
@@ -294,7 +268,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   //  perf counter
   QueuePerf(VirtualLoadQueueSize, validCount, !allowEnqueue)
-  val vecValidVec = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => allocated(i) && isvec(i))))
+  val vecValidVec = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => allocated(i) && perf_isvec(i))))
   QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
   val perfEvents: Seq[(String, UInt)] = Seq()
@@ -312,12 +286,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {
-    XSDebug(s"$i pc %x pa %x ", uop(i).pc, debug_paddr(i))
+    XSDebug(s"$i pc %x pa %x ", debug_pc(i), debug_paddr(i))
     PrintFlag(allocated(i), "v")
-    PrintFlag(allocated(i) && datavalid(i), "d")
-    PrintFlag(allocated(i) && addrvalid(i), "a")
-    PrintFlag(allocated(i) && addrvalid(i) && datavalid(i), "w")
-    PrintFlag(allocated(i) && isvec(i), "c")
+    PrintFlag(allocated(i) && debug_isvec(i), "c")
     XSDebug(false, true.B, "\n")
   }
   // end

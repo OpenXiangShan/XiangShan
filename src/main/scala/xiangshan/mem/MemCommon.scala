@@ -160,6 +160,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
   // hardware prefetch and fast replay no need to query tlb
   val tlbNoQuery = Bool()
+  val safeRelease = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -227,6 +228,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     lateKill := DontCare
     feedbacked := DontCare
     ldCancel := DontCare
+    safeRelease := DontCare
   }
 
   def asPrefetchReqBundle(): PrefetchReqBundle = {
@@ -299,6 +301,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 
     rep_info := DontCare
     data_wen_dup := DontCare
+    safeRelease := DontCare
   }
 }
 
@@ -372,6 +375,8 @@ class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle { // provide lqI
 }
 
 class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
+  // load safe release
+  val safe_release = Bool()
   // rep_frm_fetch: ld-ld violation check success, replay from fetch.
   val rep_frm_fetch = Bool()
 }

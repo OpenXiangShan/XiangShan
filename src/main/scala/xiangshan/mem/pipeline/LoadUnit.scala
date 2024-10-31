@@ -1370,11 +1370,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_frm_mabuf
+  io.lsq.ldin.valid := s3_valid
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
   io.lsq.ldin.bits.miss := s3_in.miss
+  io.lsq.ldin.bits.ldCancel.valid := (s3_fast_rep && !s3_fast_rep_canceled) || s3_in.feedbacked || s3_frm_mabuf
+  io.lsq.ldin.bits.ldCancel.bits := DontCare
+  io.lsq.ldin.bits.safeRelease := io.lsq.stld_nuke_query.resp.valid &&
+                                  io.lsq.stld_nuke_query.resp.bits.safe_release
 
   // connect to misalignBuffer
   io.misalign_buf.valid := io.lsq.ldin.valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) && !io.lsq.ldin.bits.isvec
