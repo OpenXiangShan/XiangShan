@@ -138,3 +138,48 @@ object AddPipelineReg {
     pipelineReg.io.isFlush := isFlush
   }
 }
+
+object SelectOldest {
+  class SelectOldest[T <: Data](gen: T, numIn: Int, fn: (T, T) => Bool) extends Module {
+    val io = IO(new Bundle() {
+      val in = Flipped(Vec(numIn, ValidIO(chiselTypeOf(gen))))
+      val oldest = ValidIO(chiselTypeOf(gen))
+    })
+
+    def findOldest: (T, T) => Bool = fn
+
+    def selectOldest(valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+      assert(valid.length == bits.length)
+      if (valid.length == 0 || valid.length == 1) {
+        (valid, bits)
+      } else if (valid.length == 2) {
+        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+        for (i <- res.indices) {
+          res(i).valid := valid(i)
+          res(i).bits := bits(i)
+        }
+        val oldest = Mux(valid(0) && valid(1),
+          Mux(findOldest(bits(0), bits(1)), res(1), res(0)),
+          Mux(valid(0) && !valid(1), res(0), res(1)))
+        (Seq(oldest.valid), Seq(oldest.bits))
+      } else {
+        val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
+        val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+        selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+      }
+    }
+
+    val oldest = selectOldest(io.in.map(_.valid), io.in.map(_.bits))
+    io.oldest.valid := oldest._1.head
+    io.oldest.bits  := oldest._2.head
+  }
+
+  def apply[T <: Data]
+  (gen: T, ins: Vec[ValidIO[T]], fn: (T, T) => Bool,
+   moduleName: Option[String] = None
+  ) = {
+    val selectOldest = Module(new SelectOldest[T](gen = ins.head.bits.cloneType, numIn = ins.length, fn = fn))
+    selectOldest.io.in <> ins
+    selectOldest.io.oldest
+  }
+}
