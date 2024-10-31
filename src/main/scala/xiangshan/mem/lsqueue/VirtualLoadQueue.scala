@@ -244,7 +244,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
     when (io.ldin(i).valid) {
       when (io.ldin(i).bits.safeRelease) {
-        committed(loadWbIndex) := false.B
+        committed(loadWbIndex) := true.B
         //  Debug info
         debug_pc(loadWbIndex) := io.ldin(i).bits.uop.pc
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
