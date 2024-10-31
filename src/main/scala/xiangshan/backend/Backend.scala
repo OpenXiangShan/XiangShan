@@ -413,7 +413,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
   bypassNetwork.io.fromLoadIQ.zip(memScheduler.io.toBypassNetworkBeforeDelay.get).foreach{ case (fromLoadIQ, toBy) =>
     fromLoadIQ.zip(toBy).foreach{ case (sink, source) =>
-      sink.valid := source.valid && source.bits.common.needPf.get
+      sink.valid := source.valid && source.bits.common.needPf.get && !source.bits.common.loadDependency.get.map(_.orR).reduce(_ || _)
       sink.bits.fromIssueBundle(source.bits)
       sink.bits.perfDebugInfo := DontCare
       sink.bits.isLoadPf.get := true.B
