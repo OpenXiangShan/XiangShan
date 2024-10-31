@@ -1300,6 +1300,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
 
+  XSPerfAccumulate("mem_redirect_cnt", oldestRedirect.valid)
+
   // lsq.io.uncache        <> uncache.io.lsq
   val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)
   val uncacheState = RegInit(s_idle)
