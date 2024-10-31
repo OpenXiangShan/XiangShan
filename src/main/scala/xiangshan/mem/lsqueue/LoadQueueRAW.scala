@@ -162,7 +162,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
-    query.bits.safe_release  := RegNext(hasAddrInvalidStore(w))
+    query.bits.safe_release  := RegNext(!hasAddrInvalidStore(w))
     query.bits.rep_frm_fetch := RegNext(false.B)
   }
 
