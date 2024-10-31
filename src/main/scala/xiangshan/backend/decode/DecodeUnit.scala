@@ -228,6 +228,7 @@ object XDecode extends DecodeConstants {
     SFENCE_VMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
     FENCE_I    -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fencei, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
     FENCE      -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence , SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    PAUSE      -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence , SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
 
     // RV64A
     AMOADD_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
