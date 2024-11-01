@@ -266,6 +266,12 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val permitMod = Module(new CSRPermitModule)
   val sstcIRGen = Module(new SstcInterruptGen)
+  val commidIdMod = Module(new CommitIDModule(40))
+
+  val gitCommitSHA = WireInit(commidIdMod.io.commitID)
+  val gitDirty     = WireInit(commidIdMod.io.dirty)
+  dontTouch(gitCommitSHA)
+  dontTouch(gitDirty)
 
   private val wenLegal = permitMod.io.out.hasLegalWen
 
