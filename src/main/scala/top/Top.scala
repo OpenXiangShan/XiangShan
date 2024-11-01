@@ -152,6 +152,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val instrCnt = Output(UInt(64.W))
       val dse_rst = Input(Reset())
+      val reset_vector = Input(UInt(36.W))
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
@@ -159,7 +160,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
-    childReset := reset_sync
+    childReset := `reset_sync`
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
@@ -178,6 +179,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
       io.riscv_halt(i) := core.module.io.cpu_halt
+      core.module.io.reset_vector := io.reset_vector
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
@@ -215,6 +217,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dseCtrl.module.io.clk := io.clock.asClock
     dseCtrl.module.io.rst := io.dse_rst
 //    core_with_l2.head.module.io.robSize := dseCtrl.module.io.robSize
+
 
     ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
 

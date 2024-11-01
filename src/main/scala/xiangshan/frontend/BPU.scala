@@ -56,7 +56,6 @@ trait HasBPUConst extends HasXSParameter {
   val numBpStages = BP_STAGES.length
 
   val debug = true
-  val resetVector = 0x10000000L
   // TODO: Replace log2Up by log2Ceil
 }
 
@@ -167,6 +166,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
 
   val update = Vec(numDup, Flipped(Valid(new BranchPredictionUpdate)))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
+  val reset_vector = Input(UInt(PAddrBits.W))
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
@@ -187,9 +187,13 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s3_ready := true.B
 
   val s0_pc_dup   = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
-  val s1_pc_dup   = s0_pc_dup.zip(io.s0_fire).map {case (s0_pc, s0_fire) => RegEnable(s0_pc, resetVector.U, s0_fire)}
+  val s1_pc_dup   = s0_pc_dup.zip(io.s0_fire).map {case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire)}
   val s2_pc_dup   = s1_pc_dup.zip(io.s1_fire).map {case (s1_pc, s1_fire) => RegEnable(s1_pc, s1_fire)}
   val s3_pc_dup   = s2_pc_dup.zip(io.s2_fire).map {case (s2_pc, s2_fire) => RegEnable(s2_pc, s2_fire)}
+
+  when(RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    s1_pc_dup.map { case s1_pc => s1_pc := io.reset_vector }
+  }
 
   io.out.s1.pc := s1_pc_dup
   io.out.s2.pc := s2_pc_dup
@@ -215,6 +219,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtqIO()
   val ftq_to_bpu = Flipped(new FtqToBpuIO())
   val ctrl = Input(new BPUCtrl)
+  val reset_vector = Input(UInt(PAddrBits.W))
 }
 
 @chiselName
@@ -227,15 +232,21 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // ctrl signal
   predictors.io.ctrl := ctrl
 
+  //reset vector
+  predictors.io.reset_vector := io.reset_vector
+
 
   val s0_fire_dup, s1_fire_dup, s2_fire_dup, s3_fire_dup = dup_wire(Bool())
   val s1_valid_dup, s2_valid_dup, s3_valid_dup = RegInit(dup(false.B))
   val s1_ready_dup, s2_ready_dup, s3_ready_dup = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup = dup(resetVector.U(VAddrBits.W))
+  val s0_pc_dup = dup(WireInit(0.U.asTypeOf(UInt(VAddrBits.W))))
 
-  val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x, init=resetVector.U))
+  val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x, init=0.U))
+  when(RegNext(RegNext(reset.asBool) && !reset.asBool)) {
+    s0_pc_reg_dup.map { case s0_pc => s0_pc := io.reset_vector }
+  }
   // for debug, would not appear in real RTL
   val s1_pc = RegEnable(s0_pc_dup(0), s0_fire_dup(0))
   val s2_pc = RegEnable(s1_pc, s1_fire_dup(0))

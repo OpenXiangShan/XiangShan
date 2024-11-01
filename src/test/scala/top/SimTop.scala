@@ -72,12 +72,14 @@ class SimTop(implicit p: Parameters) extends Module {
     val memAXI = if(useDRAMSim) soc.memory.cloneType else null
     val dse_rst = Input(Bool())
     val instrCnt = Output(UInt(64.W))
+    val reset_vector = Input(UInt(36.W))
   })
 
   simMMIO.io.uart <> io.uart
   soc.io.dse_rst := io.dse_rst
   // ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
   io.instrCnt := soc.io.instrCnt
+  soc.io.reset_vector := io.reset_vector
 
   if(useDRAMSim){
     io.memAXI <> soc.memory

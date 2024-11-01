@@ -149,6 +149,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(64.W))
       val cpu_halt = Output(Bool())
 //      val robSize = Input(UInt(log2Up(RobSize + 1).W))
+      val reset_vector = Input(UInt(PAddrBits.W))
     })
 
     dontTouch(io.hartId)
@@ -157,6 +158,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     io.cpu_halt := core.module.io.cpu_halt
+
+    // reset vector
+    core.module.io.reset_vector := io.reset_vector
 
 //    core.module.io.robSize := io.robSize
     if(l2cache.isDefined){
