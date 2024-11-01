@@ -224,6 +224,8 @@ trait MachineLevel { self: NewCSR =>
         wen -> wdata.STIP,
         fromMvip.STIP.valid -> fromMvip.STIP.bits,
       ))
+    }.otherwise {
+      reg.STIP := reg.STIP
     }
 
     // bit 6 VSTIP
@@ -270,6 +272,8 @@ trait MachineLevel { self: NewCSR =>
       ))
     }.elsewhen(lcofiReq) {
       reg.LCOFIP := lcofiReq
+    }.otherwise {
+      reg.LCOFIP := reg.LCOFIP
     }
   }).setAddr(CSRs.mip)
 
