@@ -57,7 +57,7 @@ class ExeUnitImp(
   override val wrapper: ExeUnit
 )(implicit
   p: Parameters, exuParams: ExeUnitParams
-) extends LazyModuleImp(wrapper) with HasXSParameter{
+) extends LazyModuleImp(wrapper) with HasXSParameter with HasCriticalErrors {
   private val fuCfgs = exuParams.fuConfigs
 
   val io = IO(new ExeUnitIO(exuParams))
@@ -306,6 +306,9 @@ class ExeUnitImp(
     Option.when(funcUnits.exists(_.cfg.writeVlRf))
       (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
   ).flatten
+
+  val criticalErrors = funcUnits.filter(fu => fu.cfg.needCriticalErrors).flatMap(fu => fu.getCriticalErrors)
+  generateCriticalErrors()
 
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)

@@ -3,7 +3,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.DataHoldBypass
+import utility._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
@@ -97,8 +97,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
 }
 
-abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
+abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new FuncUnitIO(cfg))
+  val criticalErrors = Seq(("none", false.B))
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {

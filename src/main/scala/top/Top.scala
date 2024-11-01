@@ -254,6 +254,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_critical_error = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
     })
 
@@ -292,6 +293,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.msiInfo := msiInfo
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
+      io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 

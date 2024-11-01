@@ -153,6 +153,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
+      val cpu_critical_error = new Bundle() {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
+      }
       val hartIsInReset = new Bundle() {
         val resetInFrontend = Input(Bool())
         val toTile = Output(Bool())
@@ -178,8 +182,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
+    io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
+    dontTouch(io.cpu_critical_error)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val hartIsInReset = RegInit(true.B)

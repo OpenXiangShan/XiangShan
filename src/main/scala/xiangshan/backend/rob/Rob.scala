@@ -47,7 +47,7 @@ class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with
 }
 
 class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper)
-  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents {
+  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with HasCriticalErrors {
 
   private val LduCnt = params.LduCnt
   private val StaCnt = params.StaCnt
@@ -99,6 +99,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
       val excpInfo = ValidIO(new VecExcpInfo)
     })
+    val criticalError = Input(Bool())
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
     val debugEnqLsq = Input(new LsqEnqIO)
@@ -712,6 +713,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqFlushBlock = deqFlushBlockCounter(0)
   val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
   val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
+  val criticalErrorState = RegEnable(true.B, false.B, io.criticalError)
   when(deqNeedFlush && deqHitRedirectReg){
     deqFlushBlockCounter := "b111".U
   }.otherwise{
@@ -722,7 +724,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(deqNeedFlush && io.flushOut.valid && !io.flushOut.bits.flushItself()){
     deqHasFlushed := true.B
   }
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed) || deqFlushBlock
+  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid ||
+    (deqNeedFlush && !deqHasFlushed) || deqFlushBlock || criticalErrorState
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -1518,6 +1521,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.code := trapCode
       difftest.pc := trapPC
     }
+
+    val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent)
+    diffCriticalErrorEvent.valid := io.criticalError && !RegNext(io.criticalError)
+    diffCriticalErrorEvent.coreid := io.hartId
+    diffCriticalErrorEvent.criticalError := io.criticalError
   }
 
   val commitMoveVec = VecInit(io.commits.commitValid.zip(commitIsMove).map { case (v, m) => v && m })
@@ -1546,6 +1554,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
   )
   generatePerfEvent()
+
+  // max commit-stuck cycle
+  val deqismmio = Mux(robEntries(deqPtr.value).valid, robEntries(deqPtr.value).mmio, false.B)
+  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
+  val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))
+  when(commitStuck) {
+    commitStuckCycle := commitStuckCycle + 1.U
+  }.elsewhen(!commitStuck && RegNext(commitStuck)) {
+    commitStuckCycle := 0.U
+  }
+  // check if stuck > 2^maxCommitStuckCycle
+  val commitStuck_overflow = commitStuckCycle.andR
+  val criticalErrors = Seq(
+    ("rob_commit_stuck  ", commitStuck_overflow),
+  )
+  generateCriticalErrors()
+
 
   // dontTouch for debug
   if (backendParams.debugEn) {
