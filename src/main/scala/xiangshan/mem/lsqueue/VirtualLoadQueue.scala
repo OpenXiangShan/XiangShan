@@ -179,11 +179,15 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
           // init
           committed((index + j.U).value) := false.B
 
+          robIdx((index + j.U).value) := io.enq.req(i).bits.robIdx
+          uopIdx((index + j.U).value) := io.enq.req(i).bits.uopIdx
+
           debug_isvec((index + j.U).value) := FuType.isVLoad(io.enq.req(i).bits.fuType)
           debug_pc((index + j.U).value) := 0.U
           debug_mmio((index + j.U).value) := false.B
           debug_paddr((index + j.U).value) := 0.U
 
+          XSError(allocated((index + j.U).value) === true.B, s"must allocate invalid entry $i\n")
           XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
           XSError(index.value =/= lqIdx.value, s"must be the same entry $i\n")
         }
@@ -243,8 +247,13 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
     when (io.ldin(i).valid) {
-      when (io.ldin(i).bits.safeRelease) {
-        committed(loadWbIndex) := true.B
+      when (allocated(loadWbIndex) && io.ldin(i).bits.uop.robIdx === robIdx(loadWbIndex)) {
+        val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
+        val mmioOp = io.ldin(i).bits.mmio
+        val softwarePfOp = io.ldin(i).bits.isSWPrefetch
+        val safeRelease = io.ldin(i).bits.safeRelease || !io.ldin(i).bits.rep_info.need_rep
+
+        committed(loadWbIndex) := hasExceptions || mmioOp || softwarePfOp || safeRelease
         //  Debug info
         debug_pc(loadWbIndex) := io.ldin(i).bits.uop.pc
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
