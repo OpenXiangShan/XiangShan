@@ -292,7 +292,9 @@ class InterruptFilter extends Module {
   val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
   val debugInterupt = ((io.in.debugIntr && !disableDebugIntr)  << CSRConst.IRQ_DEBUG).asUInt
 
-  val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec
+  val normalIntrVec = Mux(mIRVec.orR, mIRVec,
+                        Mux(hsIRVec.orR, hsIRVec,
+                          Mux(vsMapHostIRVec.orR, vsMapHostIRVec, 0.U)))
   val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableAllIntr)).asUInt | debugInterupt
 
   // virtual interrupt with hvictl injection
