@@ -66,7 +66,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val trigger = RegInit(TriggerAction.None)
   val atom_override_xtval = RegInit(false.B)
   val have_sent_first_tlb_req = RegInit(false.B)
-  val isLr = in.uop.fuOpType === LSUOpType.lr_w || in.uop.fuOpType === LSUOpType.lr_d
   // paddr after translation
   val paddr = Reg(UInt())
   val gpaddr = Reg(UInt())
@@ -106,8 +105,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
   io.flush_sbuffer.valid := false.B
 
-  XSDebug("state: %d\n", state)
-
   when (state === s_invalid) {
     io.in.ready := true.B
     when (io.in.fire) {
@@ -123,6 +120,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     data_valid := true.B
   }
 
+  // TODO: remove this for AMOCAS
   assert(!(io.storeDataIn.fire && data_valid), "atomic unit re-receive data")
 
   // Send TLB feedback to store issue queue
@@ -143,7 +141,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
   val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   tEnableVec := csrCtrl.mem_trigger.tEnableVec
-  when(csrCtrl.mem_trigger.tUpdate.valid) {
+  when (csrCtrl.mem_trigger.tUpdate.valid) {
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
 
@@ -154,8 +152,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
-  val isNotLr = (in.uop.fuOpType =/= LSUOpType.lr_w) && (in.uop.fuOpType =/= LSUOpType.lr_d)
-  val isNotSc = (in.uop.fuOpType =/= LSUOpType.sc_w) && (in.uop.fuOpType =/= LSUOpType.sc_d)
+  assert(state === s_invalid || in.uop.fuOpType(1,0) === "b10".U || in.uop.fuOpType(1,0) === "b11".U,
+    "Only word or doubleword is supported")
+  val isLr = in.uop.fuOpType === LSUOpType.lr_w || in.uop.fuOpType === LSUOpType.lr_d
+  val isSc = in.uop.fuOpType === LSUOpType.sc_w || in.uop.fuOpType === LSUOpType.sc_d
+  val isNotLr = !isLr
+  val isNotSc = !isSc
   
   // store trigger
   val store_hit = Wire(Vec(TriggerNum, Bool()))
@@ -204,21 +206,19 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
     // send req to sbuffer to flush it if it is not empty
-    io.flush_sbuffer.valid := Mux(sbuffer_empty, false.B, true.B)
+    io.flush_sbuffer.valid := !sbuffer_empty
 
     // do not accept tlb resp in the first cycle
     // this limition is for hw prefetcher
     // when !have_sent_first_tlb_req, tlb resp may come from hw prefetch
     have_sent_first_tlb_req := true.B
 
-    when(io.dtlb.resp.fire && have_sent_first_tlb_req){
+    when (io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr   := io.dtlb.resp.bits.paddr(0)
       gpaddr  := io.dtlb.resp.bits.gpaddr(0)
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
-        "b00".U   -> true.B,              //b
-        "b01".U   -> (in.src(0)(0) === 0.U),   //h
         "b10".U   -> (in.src(0)(1,0) === 0.U), //w
         "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
@@ -364,40 +364,17 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     is_lrsc_valid :=  dcache_resp_id
     val rdataSel = LookupTree(paddr(2, 0), List(
       "b000".U -> dcache_resp_data(63, 0),
-      "b001".U -> dcache_resp_data(63, 8),
-      "b010".U -> dcache_resp_data(63, 16),
-      "b011".U -> dcache_resp_data(63, 24),
-      "b100".U -> dcache_resp_data(63, 32),
-      "b101".U -> dcache_resp_data(63, 40),
-      "b110".U -> dcache_resp_data(63, 48),
-      "b111".U -> dcache_resp_data(63, 56)
+      "b100".U -> dcache_resp_data(63, 32)
     ))
 
-    resp_data_wire := LookupTree(in.uop.fuOpType, List(
-      LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.sc_w      -> dcache_resp_data,
-      LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amoand_w  -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amoor_w   -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amomin_w  -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amomax_w  -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amominu_w -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
-
-      LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.sc_d      -> dcache_resp_data,
-      LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amoand_d  -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amoor_d   -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amomin_d  -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amomax_d  -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amominu_d -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
-    ))
+    resp_data_wire := Mux(
+      isSc,
+      dcache_resp_data,
+      LookupTree(in.uop.fuOpType(1,0), List(
+        "b10".U -> SignExt(rdataSel(31, 0), XLEN), // w
+        "b11".U -> SignExt(rdataSel(63, 0), XLEN)  // d
+      ))
+    )
 
     when (dcache_resp_error && io.csrCtrl.cache_error_enable) {
       exceptionVec(loadAccessFault)  := isLr
