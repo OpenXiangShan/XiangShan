@@ -274,11 +274,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       // 2. ld 0x81001000. vaddr = 0x81001000, fullva = 0x80000ffb
       // When load 1 trigger a guest page fault, we should use offset of fullva when generate gpaddr
       // and when load 2 trigger a guest page fault, we should just use offset of vaddr(all zero).
-      // Whether cross-page will be determined in misalign buffer(situation 2) so we only need to judge situation 1 here.
-      val gpaddr_offset = Mux(isLeaf(d), get_off(req_out(i).fullva), Cat(getVpnn(get_pn(req_out(i).fullva), vpn_idx), 0.U(log2Up(XLEN/8).W)))
+      // Also, when onlyS2, if crosspage, gpaddr = vaddr(start address of a new page), else gpaddr = fullva(original vaddr)
+      val crossPageVaddr = Mux(req_out(i).fullva(12) =/= vaddr(12), vaddr, req_out(i).fullva)
+      val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
-      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, vaddr, gpaddr)
+      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
