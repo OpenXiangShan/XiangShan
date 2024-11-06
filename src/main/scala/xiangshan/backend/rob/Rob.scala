@@ -249,7 +249,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Instructions in multiple Ftq entries compressed to one RobEntry do not occur.
   for (i <- 0 until CommitWidth) {
     val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt).asUInt) + rawInfo(i).ftqOffset
-    commitInfo(i).ftqOffset := lastOffset
+    commitInfo(i).ftqOffset := Mux(CommitType.isFused(rawInfo(i).commitType), rawInfo(i).ftqOffset, lastOffset)
   }
 
   // data for debug
