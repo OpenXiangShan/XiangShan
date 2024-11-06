@@ -108,7 +108,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
   when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
     req_valid := s2_enqueue.asUInt.orR
   }.elsewhen (s2_enqueue.asUInt.orR) {
-    req_valid := req_valid || true.B
+    req_valid := true.B
   }
 
   def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
