@@ -313,17 +313,25 @@ class InterruptFilter extends Module {
   val intrVecReg = RegInit(0.U(64.W))
   val nmiReg = RegInit(false.B)
   val viIsHvictlInjectReg = RegInit(false.B)
+  val irToHSReg = RegInit(false.B)
+  val irToVSReg = RegInit(false.B)
   intrVecReg := intrVec
   nmiReg := io.in.nmi
   viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
+  irToHSReg := !mIRNotZero && hsIRNotZero
+  irToVSReg := !mIRNotZero && !hsIRNotZero && vsIRNotZero
   val delayedIntrVec = DelayN(intrVecReg, 5)
   val delayedNMI = DelayN(nmiReg, 5)
   val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
+  val delayedIRToHS = DelayN(irToHSReg, 5)
+  val delayedIRToVS = DelayN(irToVSReg, 5)
 
   io.out.interruptVec.valid := delayedIntrVec.orR || delayedVIIsHvictlInjectReg
   io.out.interruptVec.bits := delayedIntrVec
   io.out.nmi := delayedNMI
   io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
+  io.out.irToHS := delayedIRToHS & !delayedNMI
+  io.out.irToVS := delayedIRToVS & !delayedNMI
 
   dontTouch(hsip)
   dontTouch(hsie)
@@ -374,5 +382,7 @@ class InterruptFilterIO extends Bundle {
     val stopi  = new TopIBundle
     val vstopi = new TopIBundle
     val virtualInterruptIsHvictlInject = Bool()
+    val irToHS = Bool()
+    val irToVS = Bool()
   })
 }
