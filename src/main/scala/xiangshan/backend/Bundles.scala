@@ -917,6 +917,7 @@ object Bundles {
     val flowNum      = OptionWrapper(isVector, NumLsElem())
 
     def src_rs1 = src(0)
+    def src_rs2 = src(1)
     def src_stride = src(1)
     def src_vs3 = src(2)
     def src_mask = if (isVector) src(3) else 0.U
