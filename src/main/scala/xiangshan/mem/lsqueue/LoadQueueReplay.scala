@@ -68,8 +68,10 @@ object LoadReplayCauses {
   val C_RAW = 8
   // st-ld violation
   val C_NK  = 9
+  // misalignBuffer Full
+  val C_MF  = 10
   // total causes
-  val allCauses = 10
+  val allCauses = 11
 }
 
 class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
@@ -203,6 +205,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ldWbPtr = Input(new LqPtr)
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
+    val loadMisalignFull = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
@@ -358,6 +361,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // case C_RAW
     when (cause(i)(LoadReplayCauses.C_RAW)) {
       blocking(i) := Mux((!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr)), false.B, blocking(i))
+    }
+    // case C_MF
+    when (cause(i)(LoadReplayCauses.C_MF)) {
+      blocking(i) := Mux(!io.loadMisalignFull, false.B, blocking(i))
     }
   })
 
