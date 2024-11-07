@@ -103,7 +103,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       }
       val oldest = Mux(valid(0) && valid(1),
         Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
+          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
@@ -115,11 +115,14 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
+    val req             = Vec(enqPortNum, Flipped(Decoupled(new LqWriteBundle)))
     val rob             = Flipped(new RobLsqIO)
     val splitLoadReq    = Decoupled(new LsPipelineBundle)
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
     val writeBack       = Decoupled(new MemExuOutput)
+    val vecWriteBack    = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
+    val loadOutValid    = Input(Bool())
+    val loadVecOutValid = Input(Bool())
     val overwriteExpBuf = Output(new XSBundle {
       val valid  = Bool()
       val vaddr  = UInt(XLEN.W)
@@ -128,6 +131,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       val isForVSnonLeafPTE = Bool()
     })
     val flushLdExpBuff  = Output(Bool())
+    val loadMisalignFull = Output(Bool())
   })
 
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
@@ -136,57 +140,44 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
 
-  // enqueue
-  // s1:
-  val s1_req = VecInit(io.req.map(_.bits))
-  val s1_valid = VecInit(io.req.map(x => x.valid))
+  io.loadMisalignFull := req_valid
 
-  // s2: delay 1 cycle
-  val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until enqPortNum).map(i =>
-    RegNext(s1_valid(i)) &&
-    !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
-    !s2_req(i).uop.robIdx.needFlush(io.redirect)
-  )
-  val s2_miss_aligned = s2_req.map(x =>
-    x.uop.exceptionVec(loadAddrMisaligned) && !x.uop.exceptionVec(breakPoint) && !TriggerAction.isDmode(x.uop.trigger)
-  )
-
-  val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
-  for (w <- 0 until enqPortNum) {
-    s2_enqueue(w) := s2_valid(w) && s2_miss_aligned(w)
+  (0 until io.req.length).map{i =>
+    if (i == 0) {
+      io.req(0).ready := !req_valid && io.req(0).valid
+    }
+    else {
+      io.req(i).ready := !io.req.take(i).map(_.ready).reduce(_ || _) && !req_valid && io.req(i).valid
+    }
   }
 
-  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
-    req_valid := s2_enqueue.asUInt.orR
-  } .elsewhen (s2_enqueue.asUInt.orR) {
-    req_valid := req_valid || true.B
+
+  val select_req_bit   = ParallelPriorityMux(io.req.map(_.valid), io.req.map(_.bits))
+  val select_req_valid = io.req.map(_.valid).reduce(_ || _)
+  val canEnqValid = !req_valid && !select_req_bit.uop.robIdx.needFlush(io.redirect) && select_req_valid
+  when(canEnqValid) {
+    req := select_req_bit
+    req_valid := true.B
   }
-
-  val reqSel = selectOldest(s2_enqueue, s2_req)
-
-  when (req_valid) {
-    req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
-      reqSel._2(0),
-      req)
-  } .elsewhen (s2_enqueue.asUInt.orR) {
-    req := reqSel._2(0)
-  }
-
-  val robMatch = req_valid && io.rob.pendingld && (io.rob.pendingPtr === req.uop.robIdx)
 
   // buffer control:
-  //  - split miss-aligned load into aligned loads
-  //  - send split load to ldu and get result from ldu
-  //  - merge them and write back to rob
-  val s_idle :: s_split :: s_req :: s_resp :: s_comb :: s_wb :: s_wait :: Nil = Enum(7)
+  //  - s_idle:   idle
+  //  - s_split:  split misalign laod
+  //  - s_req:    issue a split memory access request
+  //  - s_resp:   Responds to a split load access request
+  //  - s_comb_wakeup_rep: Merge the data and issue a wakeup load
+  //  - s_wb: writeback yo rob/vecMergeBuffer
+  val s_idle :: s_split :: s_req :: s_resp :: s_comb_wakeup_rep :: s_wb :: Nil = Enum(6)
   val bufferState = RegInit(s_idle)
   val splitLoadReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitLoadResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LqWriteBundle))))
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentLoads = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
+  val needWakeUpReqsWire = Wire(Bool())
+  val needWakeUpReqsReg  = RegInit(false.B)
+  val needWakeUpWB       = RegInit(false.B)
+  val data_select        = RegEnable(genRdataOH(select_req_bit.uop), 0.U(genRdataOH(select_req_bit.uop).getWidth.W), canEnqValid)
 
   // if there is exception or mmio in split load
   val globalException = RegInit(false.B)
@@ -194,10 +185,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val hasException = ExceptionNO.selectByFu(io.splitLoadResp.bits.uop.exceptionVec, LduCfg).asUInt.orR
   val isMMIO = io.splitLoadResp.bits.mmio
-
+  needWakeUpReqsWire := false.B
   switch(bufferState) {
     is (s_idle) {
-      when (robMatch) {
+      when (req_valid) {
         bufferState := s_split
       }
     }
@@ -226,35 +217,66 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
           bufferState := s_req
         } .otherwise {
           // merge the split load results
-          bufferState := s_comb
+          bufferState := s_comb_wakeup_rep
+          when(!req.isvec) {
+            needWakeUpReqsWire := true.B
+            needWakeUpWB := true.B
+            needWakeUpReqsReg := !io.splitLoadReq.fire
+          }
         }
       }
     }
 
-    is (s_comb) {
-      bufferState := s_wb
+    is (s_comb_wakeup_rep) {
+      when(!req.isvec) {
+        when(needWakeUpReqsReg) {
+          when(io.splitLoadReq.fire) {
+            bufferState := s_wb
+            needWakeUpReqsReg := false.B
+          }.otherwise {
+            bufferState := s_comb_wakeup_rep
+          }
+          needWakeUpReqsWire := true.B
+        } .otherwise {
+          bufferState := s_comb_wakeup_rep
+        }
+      } .otherwise {
+        bufferState := s_wb
+      }
+
     }
 
     is (s_wb) {
-      when(io.writeBack.fire) {
-        bufferState := s_wait
-      }
-    }
+      when(req.isvec) {
+        when(io.vecWriteBack.fire) {
+          bufferState := s_idle
+          req_valid := false.B
+          curPtr := 0.U
+          unSentLoads := 0.U
+          globalException := false.B
+          globalMMIO := false.B
+          needWakeUpReqsReg := false.B
+          needWakeUpWB := false.B
+        }
 
-    is (s_wait) {
-      when(io.rob.lcommit =/= 0.U || req.uop.robIdx.needFlush(io.redirect)) {
-        // rob commits the unaligned load or handled the exception, reset all state
-        bufferState := s_idle
-        req_valid := false.B
-        curPtr := 0.U
-        unSentLoads := 0.U
-        globalException := false.B
-        globalMMIO := false.B
+      } .otherwise {
+        when(io.writeBack.fire) {
+          bufferState := s_idle
+          req_valid := false.B
+          curPtr := 0.U
+          unSentLoads := 0.U
+          globalException := false.B
+          globalMMIO := false.B
+          needWakeUpReqsReg := false.B
+          needWakeUpWB := false.B
+        }
       }
+
     }
   }
 
-  val highAddress = LookupTree(req.uop.fuOpType(1, 0), List(
+  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val highAddress = LookupTree(alignedType, List(
     LB -> 0.U,
     LH -> 1.U,
     LW -> 3.U,
@@ -277,17 +299,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   when (bufferState === s_split) {
     when (!cross16BytesBoundary) {
-      // change this unaligned load into a 128 bits load
-      unSentLoads := 1.U
-      curPtr := 0.U
-      new128Load.vaddr := aligned16BytesAddr
-      new128Load.fullva := req.fullva
-      // new128Load.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
-      new128Load.mask  := 0xffff.U
-      new128Load.uop   := req.uop
-      new128Load.uop.exceptionVec(loadAddrMisaligned) := false.B
-      new128Load.is128bit := true.B
-      splitLoadReqs(0) := new128Load
+      assert(false.B, s"There should be no non-aligned access that does not cross 16Byte boundaries.")
     } .otherwise {
       // split this unaligned load into `maxSplitNum` aligned loads
       unSentLoads := Fill(maxSplitNum, 1.U(1.W))
@@ -299,7 +311,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       highAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
       highAddrLoad.fullva := req.fullva
 
-      switch (req.uop.fuOpType(1, 0)) {
+      switch (alignedType(1, 0)) {
         is (LB) {
           assert(false.B, "lb should not trigger miss align")
         }
@@ -481,13 +493,17 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
   }
 
-  io.splitLoadReq.valid := req_valid && (bufferState === s_req)
+  io.splitLoadReq.valid := req_valid && (bufferState === s_req || bufferState === s_comb_wakeup_rep && needWakeUpReqsReg && !req.isvec)
   io.splitLoadReq.bits  := splitLoadReqs(curPtr)
+  io.splitLoadReq.bits.isvec  := req.isvec
+  io.splitLoadReq.bits.misalignNeedWakeUp  := needWakeUpReqsWire
+  io.splitLoadReq.bits.isFinalSplit        := curPtr(0) && !needWakeUpReqsWire
   // Restore the information of H extension load
   // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
   val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)
   val reqIsHlvx = LSUOpType.isHlvx(req.uop.fuOpType)
-  io.splitLoadReq.bits.uop.fuOpType := Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0))
+  io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
+  io.splitLoadReq.bits.alignedType  := Mux(req.isvec, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
 
   when (io.splitLoadResp.valid) {
     val resp = io.splitLoadResp.bits
@@ -509,61 +525,34 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val combinedData = RegInit(0.U(XLEN.W))
 
-  when (bufferState === s_comb) {
-    when (!cross16BytesBoundary) {
-      val shiftData = LookupTree(aligned16BytesSel, List(
-        "b0000".U -> splitLoadResp(0).data(63,     0),
-        "b0001".U -> splitLoadResp(0).data(71,     8),
-        "b0010".U -> splitLoadResp(0).data(79,    16),
-        "b0011".U -> splitLoadResp(0).data(87,    24),
-        "b0100".U -> splitLoadResp(0).data(95,    32),
-        "b0101".U -> splitLoadResp(0).data(103,   40),
-        "b0110".U -> splitLoadResp(0).data(111,   48),
-        "b0111".U -> splitLoadResp(0).data(119,   56),
-        "b1000".U -> splitLoadResp(0).data(127,   64),
-        "b1001".U -> splitLoadResp(0).data(127,   72),
-        "b1010".U -> splitLoadResp(0).data(127,   80),
-        "b1011".U -> splitLoadResp(0).data(127,   88),
-        "b1100".U -> splitLoadResp(0).data(127,   96),
-        "b1101".U -> splitLoadResp(0).data(127,  104),
-        "b1110".U -> splitLoadResp(0).data(127,  112),
-        "b1111".U -> splitLoadResp(0).data(127,  120)
-      ))
-      val truncateData = LookupTree(req.uop.fuOpType(1, 0), List(
-        LB -> shiftData(7,  0), // lb
-        LH -> shiftData(15, 0), // lh
-        LW -> shiftData(31, 0), // lw
-        LD -> shiftData(63, 0)  // ld
-      ))
-      combinedData := rdataHelper(req.uop, truncateData(XLEN - 1, 0))
-    } .otherwise {
-      val lowAddrResult = getShiftAndTruncateData(lowResultShift, lowResultWidth, splitLoadResp(0).data)
-                            .asTypeOf(Vec(XLEN / 8, UInt(8.W)))
-      val highAddrResult = getShiftAndTruncateData(highResultShift, highResultWidth, splitLoadResp(1).data)
-                            .asTypeOf(Vec(XLEN / 8, UInt(8.W)))
-      val catResult = Wire(Vec(XLEN / 8, UInt(8.W)))
-      (0 until XLEN / 8) .map {
-        case i => {
-          when (i.U < lowResultWidth) {
-            catResult(i) := lowAddrResult(i)
-          } .otherwise {
-            catResult(i) := highAddrResult(i.U - lowResultWidth)
-          }
+  when (bufferState === s_comb_wakeup_rep) {
+    val lowAddrResult = getShiftAndTruncateData(lowResultShift, lowResultWidth, splitLoadResp(0).data)
+                          .asTypeOf(Vec(XLEN / 8, UInt(8.W)))
+    val highAddrResult = getShiftAndTruncateData(highResultShift, highResultWidth, splitLoadResp(1).data)
+                          .asTypeOf(Vec(XLEN / 8, UInt(8.W)))
+    val catResult = Wire(Vec(XLEN / 8, UInt(8.W)))
+    (0 until XLEN / 8) .map {
+      case i => {
+        when (i.U < lowResultWidth) {
+          catResult(i) := lowAddrResult(i)
+        } .otherwise {
+          catResult(i) := highAddrResult(i.U - lowResultWidth)
         }
       }
-      combinedData := rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0))
     }
+    combinedData := Mux(req.isvec, rdataVecHelper(req.alignedType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
+
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb)
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalMMIO || globalException) && !io.loadOutValid && !req.isvec
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.fuType := FuType.ldu.U
-  io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
+  io.writeBack.bits.uop.flushPipe := false.B
   io.writeBack.bits.uop.replayInst := false.B
-  io.writeBack.bits.data := combinedData
-  io.writeBack.bits.isFromLoadUnit := DontCare
+  io.writeBack.bits.data := newRdataHelper(data_select, combinedData)
+  io.writeBack.bits.isFromLoadUnit := needWakeUpWB
   io.writeBack.bits.debug.isMMIO := globalMMIO
   // FIXME lyq: temporarily set to false
   io.writeBack.bits.debug.isNC := false.B
@@ -571,9 +560,38 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
 
+
+  // vector output
+  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isvec
+
+  io.vecWriteBack.bits.alignedType          := req.alignedType
+  io.vecWriteBack.bits.vecFeedback          := true.B
+  io.vecWriteBack.bits.vecdata.get          := combinedData
+  io.vecWriteBack.bits.isvec                := req.isvec
+  io.vecWriteBack.bits.elemIdx              := req.elemIdx
+  io.vecWriteBack.bits.elemIdxInsideVd.get  := req.elemIdxInsideVd
+  io.vecWriteBack.bits.mask                 := req.mask
+  io.vecWriteBack.bits.reg_offset.get       := 0.U
+  io.vecWriteBack.bits.usSecondInv          := req.usSecondInv
+  io.vecWriteBack.bits.mBIndex              := req.mbIndex
+  io.vecWriteBack.bits.hit                  := true.B
+  io.vecWriteBack.bits.sourceType           := RSFeedbackType.lrqFull
+  io.vecWriteBack.bits.trigger              := TriggerAction.None
+  io.vecWriteBack.bits.flushState           := DontCare
+  io.vecWriteBack.bits.exceptionVec         := ExceptionNO.selectByFu(exceptionVec, VlduCfg)
+  io.vecWriteBack.bits.vaddr                := req.fullva
+  io.vecWriteBack.bits.vaNeedExt            := req.vaNeedExt
+  io.vecWriteBack.bits.gpaddr               := req.gpaddr
+  io.vecWriteBack.bits.isForVSnonLeafPTE    := req.isForVSnonLeafPTE
+  io.vecWriteBack.bits.mmio                 := DontCare
+  io.vecWriteBack.bits.vstart               := req.uop.vpu.vstart
+  io.vecWriteBack.bits.vecTriggerMask       := req.vecTriggerMask
+  io.vecWriteBack.bits.nc                   := false.B
+
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
-  when (flush && (bufferState =/= s_idle)) {
+  when (flush) {
     bufferState := s_idle
     req_valid := false.B
     curPtr := 0.U
@@ -596,7 +614,9 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteIsHyper = RegEnable(splitLoadResp(curPtr).isHyper, shouldOverwrite)
   val overwriteIsForVSnonLeafPTE = RegEnable(splitLoadResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
-  io.overwriteExpBuf.valid := overwriteExpBuf
+  //TODO In theory, there is no need to overwrite, but for now, the signal is retained in the code in this way.
+  // and the signal will be removed after sufficient verification.
+  io.overwriteExpBuf.valid := false.B
   io.overwriteExpBuf.vaddr := overwriteVaddr
   io.overwriteExpBuf.isHyper := overwriteIsHyper
   io.overwriteExpBuf.gpaddr := overwriteGpaddr
