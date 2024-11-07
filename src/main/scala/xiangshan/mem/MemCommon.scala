@@ -54,6 +54,18 @@ object genVWmask {
   }
 }
 
+object genBasemask {
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
+    LookupTree(sizeEncode, List(
+      "b00".U -> 0x1.U,
+      "b01".U -> 0x3.U,
+      "b10".U -> 0xf.U,
+      "b11".U -> 0xff.U
+    ))
+  }
+}
+
+
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -160,6 +172,13 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
   // hardware prefetch and fast replay no need to query tlb
   val tlbNoQuery = Bool()
+
+  // misalign
+  val isMisalign = Bool()
+  val isFinalSplit = Bool()
+  val misalignWith16Byte = Bool()
+  val misalignNeedWakeUp = Bool()
+  val updateAddrValid = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -398,26 +417,27 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
 class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
   // from storeMisalignBuffer to storeQueue, control it's sbuffer write
-  val control = Output(new XSBundle {
-    // control sq to write-into sb
-    val writeSb = Bool()
-    val wdata = UInt(VLEN.W)
-    val wmask = UInt((VLEN / 8).W)
+  val toStoreQueue = Output(new XSBundle {
+    // This entry is a cross page
+    val crossPageWithHit = Bool()
+    val crossPageCanDeq  = Bool()
+    // High page Paddr
     val paddr = UInt(PAddrBits.W)
-    val vaddr = UInt(VAddrBits.W)
-    val last  = Bool()
-    val hasException = Bool()
-    // remove this entry in sq
-    val removeSq = Bool()
+
+    val withSameUop = Bool()
   })
   // from storeQueue to storeMisalignBuffer, provide detail info of this store
-  val storeInfo = Input(new XSBundle {
-    val data = UInt(VLEN.W)
-    // is the data of the unaligned store ready at sq?
-    val dataReady = Bool()
-    // complete a data transfer from sq to sb
-    val completeSbTrans = Bool()
+  val toStoreMisalignBuffer = Input(new XSBundle {
+    val sqPtr = new SqPtr
+    val doDeq = Bool()
+
+    val uop = new DynInst()
   })
+}
+
+class StoreMaBufToVecStoreMergeBufferIO(implicit p: Parameters)  extends VLSUBundle{
+  val mbIndex = Output(UInt(vsmBindexBits.W))
+  val flush   = Output(Bool())
 }
 
 // Store byte valid mask write bundle
@@ -522,3 +542,38 @@ object AddPipelineReg {
     pipelineReg.io.isFlush := isFlush
   }
 }
+
+/**
+ *
+ * @param needFullVa vaddr Specifies whether FullVa(64bit) is required
+ *
+ * An address group that separates the 4k page offset common to va and pa, please use set/get to set/get the address
+ */
+class LSUAddrGroup(needFullVa: Boolean=false)(implicit p: Parameters) extends XSBundle {
+  private val VAddrWidth  = if(needFullVa) XLEN else VAddrBits
+  private val PAddrWidth  = PAddrBits
+
+  private val pageOffset            = UInt(PageOffsetWidth.W)
+  private val vaddrHigh             = UInt((VAddrWidth - PageOffsetWidth).W)
+  private val paddrHigh             = UInt((PAddrWidth - PageOffsetWidth).W)
+
+  def setPageOffset(addr: UInt): Unit = {
+    require(addr.getWidth >= PageOffsetWidth, s"The bit width of vaddr must be greater than PageOffsetWidth:{$PageOffsetWidth}")
+    pageOffset := addr(PageOffsetWidth - 1, 0)
+  }
+
+  def setVaddr(vaddr: UInt): Unit = {
+    require(vaddr.getWidth == VAddrWidth, s"The bit width of vaddr must be VAddrWidth:{$VAddrWidth}")
+    vaddrHigh := vaddr(VAddrWidth - 1, PageOffsetWidth)
+  }
+
+  def setPaddr(paddr: UInt): Unit = {
+    require(paddr.getWidth == PAddrWidth, s"The bit width of paddr must be PAddrWidth:{$PAddrWidth}")
+    paddrHigh := paddr(PAddrWidth - 1, PageOffsetWidth)
+  }
+
+
+  def getVaddr(): UInt = Cat(vaddrHigh, pageOffset)(VAddrWidth, 0)
+  def getPaddr(): UInt = Cat(paddrHigh, pageOffset)(PAddrWidth, 0)
+}
+

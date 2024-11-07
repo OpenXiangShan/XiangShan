@@ -306,8 +306,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       needRSReplay(wbIndex) := true.B
     }
     pipewb.ready := true.B
-    XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, "FlowWriteback overflow!!\n")
-    XSError(!allocated(latchWbIndex) && latchWbValid, "Writeback error flow!!\n")
+    XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, s"entry: ${latchWbIndex}, FlowWriteback overflow!!\n")
+    XSError(!allocated(latchWbIndex) && latchWbValid, s"entry: ${latchWbIndex}, Writeback error flow!!\n")
   }
   // for inorder mem asscess
   io.toSplit := DontCare
@@ -467,5 +467,10 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.isFromLoadUnit   := DontCare
     sink.uop.vpu.vstart   := source.vstart
     sink
+  }
+
+  // from misalignBuffer flush
+  when(io.fromMisalignBuffer.get.flush){
+    needRSReplay(io.fromMisalignBuffer.get.mbIndex) := true.B
   }
 }

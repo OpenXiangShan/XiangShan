@@ -458,14 +458,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // misalignBuffer will overwrite the source from ldu if it is about to writeback
   val misalignWritebackOverride = Mux(
-     loadMisalignBuffer.io.writeBack.valid,
-     loadMisalignBuffer.io.writeBack.bits,
-     loadUnits(MisalignWBPort).io.ldout.bits
+    loadUnits(MisalignWBPort).io.ldout.valid,
+    loadUnits(MisalignWBPort).io.ldout.bits,
+    loadMisalignBuffer.io.writeBack.bits
   )
-  ldaExeWbReqs(MisalignWBPort).valid := loadMisalignBuffer.io.writeBack.valid || loadUnits(MisalignWBPort).io.ldout.valid
-  ldaExeWbReqs(MisalignWBPort).bits  := misalignWritebackOverride
-  loadMisalignBuffer.io.writeBack.ready := ldaExeWbReqs(MisalignWBPort).ready
+  ldaExeWbReqs(MisalignWBPort).valid    := loadMisalignBuffer.io.writeBack.valid || loadUnits(MisalignWBPort).io.ldout.valid
+  ldaExeWbReqs(MisalignWBPort).bits     := misalignWritebackOverride
+  loadMisalignBuffer.io.writeBack.ready := ldaExeWbReqs(MisalignWBPort).ready && !loadUnits(MisalignWBPort).io.ldout.valid
+  loadMisalignBuffer.io.loadOutValid    := loadUnits(MisalignWBPort).io.ldout.valid
+  loadMisalignBuffer.io.loadVecOutValid := loadUnits(MisalignWBPort).io.vecldout.valid
   loadUnits(MisalignWBPort).io.ldout.ready := ldaExeWbReqs(MisalignWBPort).ready
+  ldaExeWbReqs(MisalignWBPort).bits.isFromLoadUnit := loadUnits(MisalignWBPort).io.ldout.bits.isFromLoadUnit || loadMisalignBuffer.io.writeBack.valid
 
   // loadUnit will overwrite the source from uncache if it is about to writeback
   ldaExeWbReqs(UncacheWBPort) <> loadUnits(UncacheWBPort).io.ldout
@@ -540,6 +543,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrapper)
+//  dontTouch(lsq.io)
+//  lsq.io := DontCare
+
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer) // out of date now
@@ -806,6 +812,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       dcache.io.lsu.load(0).s0_pc                  := vSegmentUnit.io.rdcache.s0_pc
       dcache.io.lsu.load(0).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
       dcache.io.lsu.load(0).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
+      dcache.io.lsu.load(0).is128Req               := vSegmentUnit.io.rdcache.is128Req
     }.otherwise {
       loadUnits(i).io.dcache.req.ready             := dcache.io.lsu.load(i).req.ready
 
@@ -817,6 +824,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       dcache.io.lsu.load(0).s0_pc                  := loadUnits(0).io.dcache.s0_pc
       dcache.io.lsu.load(0).s1_pc                  := loadUnits(0).io.dcache.s1_pc
       dcache.io.lsu.load(0).s2_pc                  := loadUnits(0).io.dcache.s2_pc
+      dcache.io.lsu.load(0).is128Req               := loadUnits(0).io.dcache.is128Req
     }
 
     // forward
@@ -916,7 +924,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // connect misalignBuffer
     loadMisalignBuffer.io.req(i) <> loadUnits(i).io.misalign_buf
 
-    if (i == 0) {
+    if (i == MisalignWBPort) {
       loadUnits(i).io.misalign_ldin  <> loadMisalignBuffer.io.splitLoadReq
       loadUnits(i).io.misalign_ldout <> loadMisalignBuffer.io.splitLoadResp
     } else {
@@ -1084,7 +1092,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 
-  lsq.io.flushFrmMaBuf                          := loadMisalignBuffer.io.flushLdExpBuff
+  lsq.io.loadMisalignFull                       := loadMisalignBuffer.io.loadMisalignFull
 
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
@@ -1266,16 +1274,22 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stOut(0).bits  := mmioStout.bits
     mmioStout.ready := true.B
   }
+
   // vec mmio writeback
   lsq.io.vecmmioStout.ready := false.B
-  when (lsq.io.vecmmioStout.valid && !storeUnits(0).io.vecstout.valid) {
-    stOut(0).valid := true.B
-    stOut(0).bits  := lsq.io.vecmmioStout.bits
-    lsq.io.vecmmioStout.ready := true.B
-  }
+//  when (lsq.io.vecmmioStout.valid && !storeUnits(0).io.vecstout.valid) {
+//    stOut(0).valid := true.B
+//    stOut(0).bits  := lsq.io.vecmmioStout.bits
+//    lsq.io.vecmmioStout.ready := true.B
+//  }
+//
+
   // miss align buffer will overwrite stOut(0)
-  storeMisalignBuffer.io.writeBack.ready := true.B
-  when (storeMisalignBuffer.io.writeBack.valid) {
+  val storeMisalignCanWriteBack = !mmioStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid
+  storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
+  storeMisalignBuffer.io.storeOutValid := storeUnits(0).io.stout.valid
+  storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid
+  when (storeMisalignBuffer.io.writeBack.valid && storeMisalignCanWriteBack) {
     stOut(0).valid := true.B
     stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
   }
@@ -1457,6 +1471,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until VstuCnt).foreach{i =>
     vsMergeBuffer(i).io.fromPipeline := DontCare
     vsMergeBuffer(i).io.fromSplit := DontCare
+
+    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
+    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
   }
 
   (0 until VstuCnt).foreach{i =>
@@ -1471,6 +1488,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       Option("VsSplitConnectStu")
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
+
+    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty := !storeMisalignBuffer.io.full
+    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits(i).io.s0_s1_valid
 
   }
   (0 until VlduCnt).foreach{i =>
@@ -1490,12 +1510,35 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vfofBuffer.io.in(i).bits  := io.ooo_to_mem.issueVldu(i).bits
   }
   (0 until LduCnt).foreach{i=>
-    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
+    loadUnits(i).io.vecldout.ready         := vlMergeBuffer.io.fromPipeline(i).ready
+    loadMisalignBuffer.io.vecWriteBack.ready := true.B
+
+    if (i == 1) {
+      when(loadUnits(i).io.vecldout.valid) {
+        vlMergeBuffer.io.fromPipeline(i).valid := loadUnits(i).io.vecldout.valid
+        vlMergeBuffer.io.fromPipeline(i).bits  := loadUnits(i).io.vecldout.bits
+      } .otherwise {
+        vlMergeBuffer.io.fromPipeline(i).valid   := loadMisalignBuffer.io.vecWriteBack.valid
+        vlMergeBuffer.io.fromPipeline(i).bits    := loadMisalignBuffer.io.vecWriteBack.bits
+      }
+    } else {
+      vlMergeBuffer.io.fromPipeline(i).valid := loadUnits(i).io.vecldout.valid
+      vlMergeBuffer.io.fromPipeline(i).bits  := loadUnits(i).io.vecldout.bits
+    }
   }
 
   (0 until StaCnt).foreach{i=>
     if(i < VstuCnt){
-      vsMergeBuffer(i).io.fromPipeline.head <> storeUnits(i).io.vecstout
+      storeUnits(i).io.vecstout.ready := true.B
+      storeMisalignBuffer.io.vecWriteBack(i).ready := vsMergeBuffer(i).io.fromPipeline.head.ready
+
+      when(storeUnits(i).io.vecstout.valid) {
+        vsMergeBuffer(i).io.fromPipeline.head.valid := storeUnits(i).io.vecstout.valid
+        vsMergeBuffer(i).io.fromPipeline.head.bits  := storeUnits(i).io.vecstout.bits
+      } .otherwise {
+        vsMergeBuffer(i).io.fromPipeline.head.valid   := storeMisalignBuffer.io.vecWriteBack(i).valid
+        vsMergeBuffer(i).io.fromPipeline.head.bits    := storeMisalignBuffer.io.vecWriteBack(i).bits
+      }
     }
   }
 
