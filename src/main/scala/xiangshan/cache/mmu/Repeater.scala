@@ -552,7 +552,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
   val issue_filtered = ptwResp_valid && ptwResp_hit(io.ptw.req(0).bits.vpn, io.ptw.req(0).bits.s2xlate, ptwResp)
-  val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
+  val issue_fire_fake = issue_valid && io.ptw.req(0).ready
   io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
