@@ -868,6 +868,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isCboInval = CBO_INVAL === io.enq.ctrlFlow.instr
   private val isCboZero  = CBO_ZERO  === io.enq.ctrlFlow.instr
 
+  // Note that rnum of aes64ks1i must be in the range 0x0..0xA. The values 0xB..0xF are reserved.
+  private val isAes64ks1iIllegal =
+    FuType.FuTypeOrR(decodedInst.fuType, FuType.bku) && (decodedInst.fuOpType === BKUOpType.aes64ks1i) && inst.isRnumIllegal
+
   private val exceptionII =
     decodedInst.selImm === SelImm.INVALID_INSTR ||
     vecException.io.illegalInst ||
@@ -889,7 +893,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm ||
     io.fromCSR.illegalInst.cboZ       && isCboZero ||
     io.fromCSR.illegalInst.cboCF      && (isCboClean || isCboFlush) ||
-    io.fromCSR.illegalInst.cboI       && isCboInval
+    io.fromCSR.illegalInst.cboI       && isCboInval ||
+    isAes64ks1iIllegal
 
   private val exceptionVI =
     io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
