@@ -359,12 +359,13 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
+  // no-unit-stride can trigger misalign
   val addrAligned = LookupTree(issueEew, List(
-    "b00".U   -> true.B,                   //b
-    "b01".U   -> (issueBaseAddr(0)    === 0.U), //h
-    "b10".U   -> (issueBaseAddr(1, 0) === 0.U), //w
-    "b11".U   -> (issueBaseAddr(2, 0) === 0.U)  //d
-  ))
+    "b00".U   -> true.B,                //b
+    "b01".U   -> (vaddr(0)    === 0.U), //h
+    "b10".U   -> (vaddr(1, 0) === 0.U), //w
+    "b11".U   -> (vaddr(2, 0) === 0.U)  //d
+  )) || !issuePreIsSplit
 
   // data
   io.out.bits match { case x =>
@@ -392,7 +393,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
  /* Execute logic */
   /** Issue to scala pipeline**/
-  val allowIssue = io.out.ready
+
+  lazy val misalignedCanGo = true.B
+  val allowIssue = (addrAligned || misalignedCanGo) && io.out.ready
   val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(activeIssue))) // for dont need split unit-stride, issue two flow
   splitFinish := splitIdx >= (issueFlowNum - issueCount)
 
@@ -427,7 +430,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   }
 
   // out connect
-  io.out.valid := issueValid && (vecActive || !issuePreIsSplit) // TODO: inactive unit-stride uop do not send to pipeline
+  io.out.valid := issueValid && (vecActive || !issuePreIsSplit) && (addrAligned || misalignedCanGo) // TODO: inactive unit-stride uop do not send to pipeline
 
   XSPerfAccumulate("out_valid",             io.out.valid)
   XSPerfAccumulate("out_fire",              io.out.fire)
@@ -437,6 +440,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
+  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty && io.vstdMisalign.get.storeMisalignBufferEmpty
+
   // split data
   val splitData = genVSData(
         data = issueEntry.data.asUInt,
@@ -525,5 +530,7 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
   io.vstd.get <> splitBuffer.io.vstd.get
+
+  io.vstdMisalign.get <> splitBuffer.io.vstdMisalign.get
 }
 
