@@ -847,8 +847,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // perf
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
-    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
-    Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR
+    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
   )
 
   // flush
@@ -1490,6 +1489,12 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
+    val diffAIAXtopeiEvent = DifftestModule(new DiffAIAXtopeiEvent)
+    diffAIAXtopeiEvent.coreid := hartId
+    diffAIAXtopeiEvent.valid := fromAIA.rdata.valid
+    diffAIAXtopeiEvent.mtopei := mtopei.rdata
+    diffAIAXtopeiEvent.stopei := stopei.rdata
+    diffAIAXtopeiEvent.vstopei := vstopei.rdata
   }
 }
 
