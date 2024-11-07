@@ -451,9 +451,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val iLastSizeVec = isRVCVec.map(isRVC => Mux(isRVC, Ilastsize.HalfWord, Ilastsize.Word))
   val halfWordNumVec = isRVCVec.map(isRVC => Mux(isRVC, 1.U, 2.U))
   val halfWordNumMatrix = (0 until RenameWidth).map(
-    i => compressMasksVec(i).asBools.map(
-      mask => Mux(mask, halfWordNumVec(i), 0.U)
-    )
+    i => compressMasksVec(i).asBools.zipWithIndex.map{ case(mask, j) =>
+      Mux(mask, halfWordNumVec(j), 0.U)
+    }
   )
 
   for (i <- 0 until RenameWidth) {
@@ -464,9 +464,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     )
 
     // ilastsize
-    val j = i
+    val tmp = i
     val lastIsRVC = WireInit(false.B)
-    (j until RenameWidth).map { j =>
+    (tmp until RenameWidth).map { j =>
       when(compressMasksVec(i)(j)) {
         lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
       }
