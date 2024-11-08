@@ -498,6 +498,7 @@ object VecDecoder extends DecodeConstants {
     FLE_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
     FMIN_S -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
     FMIN_D -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
+    FMAX_H -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
     FMAX_S -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
     FMAX_D -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
     // Scalar Float Point Convert Inst.
