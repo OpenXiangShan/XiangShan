@@ -55,6 +55,11 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   )
   val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
   val isFP16Instrs = Seq(
+    // zfh inst
+    FADD_H, FSUB_H, FEQ_H, FLT_H, FLE_H, FMIN_H, FMAX_H,
+    FMUL_H, FDIV_H, FSQRT_H,
+    FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
+    FCLASS_H, FSGNJ_H, FSGNJX_H, FSGNJN_H,
     // zfa inst
     FLEQ_H, FLTQ_H, FMINM_H, FMAXM_H,
     FROUND_H, FROUNDNX_H,
@@ -299,7 +304,6 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FNMADD_D-> List(BitPat("b11"),Y),
     FNMADD_H-> List(BitPat("b11"),Y),
     FNMSUB_S-> List(BitPat("b10"),Y),
-    FNMSUB_D-> List(BitPat("b10"),Y)
     FNMSUB_D-> List(BitPat("b10"),Y),
     FNMSUB_H-> List(BitPat("b10"),Y)
   )
