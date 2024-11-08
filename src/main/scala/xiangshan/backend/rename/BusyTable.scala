@@ -33,6 +33,11 @@ class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val loadDependency = Vec(LoadPipelineWidth, Output(UInt(LoadDependencyWidth.W)))
 }
 
+class VlBusyTableReadIO(implicit p: Parameters) extends XSBundle {
+  val is_zero = Output(Bool())
+  val is_vlmax = Output(Bool())
+}
+
 class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
     // set preg state to busy
@@ -178,4 +183,69 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                  )
   )
   generatePerfEvent()
+}
+
+class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters, params: SchdBlockParams) extends BusyTable(numReadPorts, numWritePorts, numPhyPregs, pregWB) {
+
+  val io_vl_Wb = IO(new Bundle() {
+    val vlWriteBackInfo = new Bundle {
+      val vlFromIntIsZero  = Input(Bool())
+      val vlFromIntIsVlmax = Input(Bool())
+      val vlFromVfIsZero   = Input(Bool())
+      val vlFromVfIsVlmax  = Input(Bool())
+    }
+  })
+  val io_vl_read = IO(new Bundle() {
+    val vlReadInfo = Vec(numReadPorts, new VlBusyTableReadIO)
+  })
+
+  var intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
+  var vfSchdVlWbPort = p(XSCoreParamsKey).vfSchdVlWbPort
+
+  val zeroTableUpdate = Wire(Vec(numPhyPregs, Bool()))
+  val vlmaxTableUpdate = Wire(Vec(numPhyPregs, Bool()))
+
+  val wb0Mask = Mux(io.wbPregs(intSchdVlWbPort).valid, UIntToOH(io.wbPregs(intSchdVlWbPort).bits), 0.U)
+  val wb1Mask = Mux(io.wbPregs(vfSchdVlWbPort).valid, UIntToOH(io.wbPregs(vfSchdVlWbPort).bits), 0.U)
+
+  val zeroTable = VecInit((0 until numPhyPregs).zip(zeroTableUpdate).map{ case (idx, update) =>
+    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wb0Mask(idx) || wb1Mask(idx))
+  }).asUInt
+  val vlmaxTable = VecInit((0 until numPhyPregs).zip(vlmaxTableUpdate).map{ case (idx, update) =>
+    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wb0Mask(idx) || wb1Mask(idx))
+  }).asUInt
+
+
+  zeroTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
+    when(wb0Mask(idx)) {
+      // int schd vl write back, check whether the vl is zero
+      update := !io_vl_Wb.vlWriteBackInfo.vlFromIntIsZero
+    }.elsewhen(wb1Mask(idx)) {
+      // vf schd vl write back, check whether the vl is zero
+      update := !io_vl_Wb.vlWriteBackInfo.vlFromVfIsZero
+    }.elsewhen(allocMask(idx) || ldCancelMask(idx)) {
+      update := true.B
+    }.otherwise {
+      update := zeroTable(idx)
+    }
+  }
+
+  vlmaxTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
+    when(wb1Mask(idx)) {
+      // int schd vl write back, check whether the vl is vlmax
+      update := !io_vl_Wb.vlWriteBackInfo.vlFromIntIsVlmax
+    }.elsewhen(wb1Mask(idx)) {
+      // vf schd vl write back, check whether the vl is vlmax
+      update := !io_vl_Wb.vlWriteBackInfo.vlFromVfIsVlmax
+    }.elsewhen(allocMask(idx) || ldCancelMask(idx)) {
+      update := true.B
+    }.otherwise {
+      update := vlmaxTable(idx)
+    }
+  }
+
+  io_vl_read.vlReadInfo.zip(io.read).foreach{ case (vlRes, res) =>
+    vlRes.is_zero := !zeroTable(res.req)
+    vlRes.is_vlmax := !vlmaxTable(res.req)
+  }
 }

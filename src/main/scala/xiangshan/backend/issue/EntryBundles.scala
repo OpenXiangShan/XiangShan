@@ -208,10 +208,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       })
       var numVecWb = params.backendParam.getVfWBExeGroup.size
       var numV0Wb = params.backendParam.getV0WBExeGroup.size
+      var intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
+      var vfSchdVlWbPort = p(XSCoreParamsKey).vfSchdVlWbPort
       // int wb is first bit of vlwb, which is after vfwb and v0wb
-      common.vlWakeupByIntWb  := wakeUpFromVl(numVecWb + numV0Wb)
+      common.vlWakeupByIntWb  := wakeUpFromVl(numVecWb + numV0Wb + intSchdVlWbPort)
       // vf wb is second bit of wb
-      common.vlWakeupByVfWb   := wakeUpFromVl(numVecWb + numV0Wb + 1)
+      common.vlWakeupByVfWb   := wakeUpFromVl(numVecWb + numV0Wb + vfSchdVlWbPort)
     } else {
       common.vlWakeupByIntWb  := false.B
       common.vlWakeupByVfWb   := false.B
@@ -298,7 +300,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByIntWb = common.vlWakeupByIntWb
       val vlWakeUpByVfWb = common.vlWakeupByVfWb
-      val isDependOldvd = entryReg.payload.vpu.isDependOldvd
+      val isDependOldVd = entryReg.payload.vpu.isDependOldVd
       val isWritePartVd = entryReg.payload.vpu.isWritePartVd
       val vta = entryReg.payload.vpu.vta
       val vma = entryReg.payload.vpu.vma
@@ -319,7 +321,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
           * 3. when vl = vlmax, we can set srctype to imm when vta is not set
           */
-        ignoreOldVd := !VlduType.isFof(entryReg.payload.fuOpType) && srcIsVec && vlIsNonZero && !isDependOldvd && (ignoreTail || ignoreWhole)
+        ignoreOldVd := !VlduType.isFof(entryReg.payload.fuOpType) && srcIsVec && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
       } else {
         ignoreOldVd := false.B
       }
