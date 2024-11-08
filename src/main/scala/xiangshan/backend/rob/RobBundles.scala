@@ -61,8 +61,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isVset = Bool()
     val isHls = Bool()
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
-    val loadWaitBit = Bool()    // for perfEvents
-    val eliminatedMove = Bool() // for perfEvents
     // data end
     
     // trace
@@ -76,7 +74,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vxsat = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val commitTrigger = Bool()
     val needFlush = Bool()
     // status end
 
@@ -112,8 +109,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     val fpWen = Bool()
     val rfWen = Bool()
-    val loadWaitBit = Bool() // for perfEvents
-    val isMove = Bool()      // for perfEvents
     val needFlush = Bool()
     // trace
     val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
@@ -140,8 +135,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
     robEntry.dirtyVs := robEnq.dirtyVs
-    robEntry.loadWaitBit := robEnq.loadWaitBit
-    robEntry.eliminatedMove := robEnq.eliminatedMove
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     // trace
@@ -172,8 +165,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.instrSize := robEntry.instrSize
-    robCommitEntry.loadWaitBit := robEntry.loadWaitBit
-    robCommitEntry.isMove := robEntry.eliminatedMove
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
