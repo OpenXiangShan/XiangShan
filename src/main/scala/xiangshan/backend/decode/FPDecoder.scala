@@ -35,19 +35,20 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
 
   val inst = io.instr.asTypeOf(new XSInstBitFields)
   val fpToVecInsts = Seq(
-    FADD_S, FSUB_S, FADD_D, FSUB_D,
-    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
-    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
-    FMUL_S, FMUL_D,
-    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
-    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FADD_S, FSUB_S, FADD_D, FSUB_D, FADD_H, FSUB_H,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D, FEQ_H, FLT_H, FLE_H,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D, FMIN_H, FMAX_H,
+    FMUL_S, FMUL_D, FMUL_H,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D, FDIV_H, FSQRT_H,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D, FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
     FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
-
+    FCLASS_H, FSGNJ_H, FSGNJX_H, FSGNJN_H,
     // scalar cvt inst
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
     FCVT_S_H, FCVT_H_S, FCVT_H_D, FCVT_D_H,
     FMV_X_W, FMV_X_D, FMV_X_H,
+    FCVT_W_H, FCVT_WU_H, FCVT_L_H, FCVT_LU_H,
     // zfa inst
     FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
     FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D, FCVTMOD_W_D,
@@ -93,6 +94,9 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   val isSew2Cvth = Seq(
     FCVT_S_H, FCVT_H_S, FCVT_D_H,
     FMV_X_H,
+    FCVT_W_H, FCVT_L_H, FCVT_H_W,
+    FCVT_H_L, FCVT_H_WU, FCVT_H_LU,
+    FCVT_WU_H, FCVT_LU_H,
   )
   val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
   val isSew2Cvt16 = isSew2Cvth.map(io.instr === _).reduce(_ || _)
@@ -102,13 +106,15 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   )
   val isLmulMf4Cvt = isLmulMf4Cvts.map(io.instr === _).reduce(_ || _)
   val needReverseInsts = Seq(
-    FADD_S, FSUB_S, FADD_D, FSUB_D,
-    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
-    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
-    FMUL_S, FMUL_D,
-    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
+    FADD_S, FSUB_S, FADD_D, FSUB_D, FADD_H, FSUB_H,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D, FEQ_H, FLT_H, FLE_H,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D, FMIN_H, FMAX_H,
+    FMUL_S, FMUL_D, FMUL_H,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D, FDIV_H, FSQRT_H,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
     FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
+    FCLASS_H, FSGNJ_H, FSGNJX_H, FSGNJN_H,
     // zfa inst
     FLEQ_H, FLEQ_S, FLEQ_D, FLTQ_H, FLTQ_S, FLTQ_D, FMINM_H, FMINM_S, FMINM_D, FMAXM_H, FMAXM_S, FMAXM_D,
   )
@@ -144,13 +150,15 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   private val inst: XSInstBitFields = io.instr.asTypeOf(new XSInstBitFields)
 
   def X = BitPat("b?")
+  def T = BitPat("b??") //type
   def N = BitPat("b0")
   def Y = BitPat("b1")
-  val s = BitPat(FPU.S(0))
-  val d = BitPat(FPU.D(0))
-  val i = BitPat(FPU.D(0))
+  val s = BitPat(FPU.S(1,0))
+  val d = BitPat(FPU.D(1,0))
+  val i = BitPat(FPU.D(1,0))
+  val h = BitPat(FPU.H(1,0))
 
-  val default = List(X,X,X,N,N,N,X,X,X)
+  val default = List(X,T,T,N,N,N,X,X,X)
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
@@ -222,7 +230,41 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FSQRT_D  -> List(N,d,d,N,Y,Y,N,Y,N)
   )
 
-  val table = single ++ double
+  val half : Array[(BitPat, List[BitPat])] = Array(
+    // IntToFP
+    FMV_H_X  -> List(N,i,h,Y,N,Y,N,N,N),
+    FCVT_H_W -> List(N,i,h,Y,Y,Y,N,N,Y),
+    FCVT_H_WU-> List(N,i,h,Y,Y,Y,N,N,Y),
+    FCVT_H_L -> List(N,i,h,Y,Y,Y,N,N,Y),
+    FCVT_H_LU-> List(N,i,h,Y,Y,Y,N,N,Y),
+    // FPToInt
+    FMV_X_H  -> List(N,h,i,N,N,N,N,N,N), // d or h ??
+    FCLASS_H -> List(N,h,i,N,N,N,N,N,N),
+    FCVT_W_H -> List(N,h,i,N,Y,N,N,N,Y),
+    FCVT_WU_H-> List(N,h,i,N,Y,N,N,N,Y),
+    FCVT_L_H -> List(N,h,i,N,Y,N,N,N,Y),
+    FCVT_LU_H-> List(N,h,i,N,Y,N,N,N,Y),
+    FEQ_H    -> List(N,h,i,N,Y,N,N,N,N),
+    FLT_H    -> List(N,h,i,N,Y,N,N,N,N),
+    FLE_H    -> List(N,h,i,N,Y,N,N,N,N),
+    // FPToFP
+    FSGNJ_H  -> List(N,h,h,N,N,Y,N,N,N),
+    FSGNJN_H -> List(N,h,h,N,N,Y,N,N,N),
+    FSGNJX_H -> List(N,h,h,N,N,Y,N,N,N),
+    FMIN_H   -> List(N,h,h,N,Y,Y,N,N,N),
+    FMAX_H   -> List(N,h,h,N,Y,Y,N,N,N),
+    FADD_H   -> List(Y,h,h,N,Y,Y,N,N,N),
+    FSUB_H   -> List(Y,h,h,N,Y,Y,N,N,N),
+    FMUL_H   -> List(N,h,h,N,Y,Y,N,N,N),
+    FMADD_H  -> List(N,h,h,N,Y,Y,N,N,N),
+    FMSUB_H  -> List(N,h,h,N,Y,Y,N,N,N),
+    FNMADD_H -> List(N,h,h,N,Y,Y,N,N,N),
+    FNMSUB_H -> List(N,h,h,N,Y,Y,N,N,N),
+    FDIV_H   -> List(N,h,h,N,Y,Y,Y,N,N),
+    FSQRT_H  -> List(N,h,h,N,Y,Y,N,Y,N)
+  )
+
+  val table = single ++ double ++ half
 
   val decoder = DecodeLogic(io.instr, default, table)
 
@@ -240,18 +282,26 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
     FADD_S  -> List(BitPat("b00"),N),
     FADD_D  -> List(BitPat("b00"),N),
+    FADD_H  -> List(BitPat("b00"),N),
     FSUB_S  -> List(BitPat("b01"),N),
     FSUB_D  -> List(BitPat("b01"),N),
+    FSUB_H  -> List(BitPat("b01"),N),
     FMUL_S  -> List(BitPat("b00"),N),
     FMUL_D  -> List(BitPat("b00"),N),
+    FMUL_H  -> List(BitPat("b00"),N),
     FMADD_S -> List(BitPat("b00"),Y),
     FMADD_D -> List(BitPat("b00"),Y),
+    FMADD_H -> List(BitPat("b00"),Y),
     FMSUB_S -> List(BitPat("b01"),Y),
     FMSUB_D -> List(BitPat("b01"),Y),
+    FMSUB_H -> List(BitPat("b01"),Y),
     FNMADD_S-> List(BitPat("b11"),Y),
     FNMADD_D-> List(BitPat("b11"),Y),
+    FNMADD_H-> List(BitPat("b11"),Y),
     FNMSUB_S-> List(BitPat("b10"),Y),
     FNMSUB_D-> List(BitPat("b10"),Y)
+    FNMSUB_D-> List(BitPat("b10"),Y),
+    FNMSUB_H-> List(BitPat("b10"),Y)
   )
   val fmaDefault = List(BitPat("b??"), N)
   Seq(ctrl.fmaCmd, ctrl.ren3).zip(
