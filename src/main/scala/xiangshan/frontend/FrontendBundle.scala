@@ -85,11 +85,9 @@ class IFUICacheIO(implicit p: Parameters) extends XSBundle with HasICacheParamet
 }
 
 class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val pcMemRead   = Vec(5, new FtqICacheInfo)
-  val readValid   = Vec(5, Bool())
-  val backendIpf  = Bool()
-  val backendIgpf = Bool()
-  val backendIaf  = Bool()
+  val pcMemRead        = Vec(5, new FtqICacheInfo)
+  val readValid        = Vec(5, Bool())
+  val backendException = Bool()
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
@@ -116,6 +114,8 @@ object ExceptionType {
   def af:    UInt = "b11".U // instruction access fault
   def width: Int  = 2
 
+  def hasException(e: UInt): Bool = e =/= none
+
   def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
     assert(
       PopCount(VecInit(has_pf, has_gpf, has_af)) <= 1.U,
@@ -134,14 +134,6 @@ object ExceptionType {
       )
     )
   }
-
-  // raise pf/gpf/af according to ftq(backend) request
-  def fromFtq(req: FtqToICacheRequestBundle): UInt =
-    fromOH(
-      req.backendIpf,
-      req.backendIgpf,
-      req.backendIaf
-    )
 
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): UInt = {
@@ -239,18 +231,18 @@ object ExceptionType {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs               = Vec(PredictWidth, UInt(32.W))
-  val valid                = UInt(PredictWidth.W)
-  val enqEnable            = UInt(PredictWidth.W)
-  val pd                   = Vec(PredictWidth, new PreDecodeInfo)
-  val foldpc               = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqOffset            = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val exceptionFromBackend = Vec(PredictWidth, Bool())
-  val exceptionType        = Vec(PredictWidth, UInt(ExceptionType.width.W))
-  val crossPageIPFFix      = Vec(PredictWidth, Bool())
-  val illegalInstr         = Vec(PredictWidth, Bool())
-  val triggered            = Vec(PredictWidth, TriggerAction())
-  val isLastInFtqEntry     = Vec(PredictWidth, Bool())
+  val instrs           = Vec(PredictWidth, UInt(32.W))
+  val valid            = UInt(PredictWidth.W)
+  val enqEnable        = UInt(PredictWidth.W)
+  val pd               = Vec(PredictWidth, new PreDecodeInfo)
+  val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
+  val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val backendException = Vec(PredictWidth, Bool())
+  val exceptionType    = Vec(PredictWidth, UInt(ExceptionType.width.W))
+  val crossPageIPFFix  = Vec(PredictWidth, Bool())
+  val illegalInstr     = Vec(PredictWidth, Bool())
+  val triggered        = Vec(PredictWidth, TriggerAction())
+  val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
   val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
   val ftqPtr       = new FtqPtr

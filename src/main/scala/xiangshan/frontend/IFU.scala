@@ -385,8 +385,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     .elsewhen(f1_fire && !f1_flush)(f2_valid := true.B)
     .elsewhen(f2_fire)(f2_valid := false.B)
 
-  val f2_exception          = VecInit((0 until PortNumber).map(i => fromICache(i).bits.exception))
-  val f2_except_fromBackend = fromICache(0).bits.exceptionFromBackend
+  val f2_exception        = VecInit((0 until PortNumber).map(i => fromICache(i).bits.exception))
+  val f2_backendException = fromICache(0).bits.backendException
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs            = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddr            = fromICache(0).bits.gpaddr
@@ -516,9 +516,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_cut_data = RegEnable(f2_cut_data, f2_fire)
 
-  val f3_exception          = RegEnable(f2_exception, f2_fire)
-  val f3_mmio               = RegEnable(f2_mmio, f2_fire)
-  val f3_except_fromBackend = RegEnable(f2_except_fromBackend, f2_fire)
+  val f3_exception        = RegEnable(f2_exception, f2_fire)
+  val f3_mmio             = RegEnable(f2_mmio, f2_fire)
+  val f3_backendException = RegEnable(f2_backendException, f2_fire)
 
   val f3_instr = RegEnable(f2_instr, f2_fire)
 
@@ -862,11 +862,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
   io.toIbuffer.bits.foldpc        := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
-  // exceptionFromBackend only needs to be set for the first instruction.
+  // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
-    case 0 => f3_except_fromBackend
+  io.toIbuffer.bits.backendException := (0 until PredictWidth).map {
+    case 0 => f3_backendException
     case _ => false.B
   }
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)

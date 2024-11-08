@@ -49,17 +49,17 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
 }
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
-  val inst                 = UInt(32.W)
-  val pc                   = UInt(VAddrBits.W)
-  val foldpc               = UInt(MemPredPCWidth.W)
-  val pd                   = new PreDecodeInfo
-  val pred_taken           = Bool()
-  val ftqPtr               = new FtqPtr
-  val ftqOffset            = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType        = IBufferExceptionType()
-  val exceptionFromBackend = Bool()
-  val triggered            = TriggerAction()
-  val isLastInFtqEntry     = Bool()
+  val inst             = UInt(32.W)
+  val pc               = UInt(VAddrBits.W)
+  val foldpc           = UInt(MemPredPCWidth.W)
+  val pd               = new PreDecodeInfo
+  val pred_taken       = Bool()
+  val ftqPtr           = new FtqPtr
+  val ftqOffset        = UInt(log2Ceil(PredictWidth).W)
+  val exceptionType    = IBufferExceptionType()
+  val backendException = Bool()
+  val triggered        = TriggerAction()
+  val isLastInFtqEntry = Bool()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst       := fetch.instrs(i)
@@ -74,9 +74,9 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
       fetch.crossPageIPFFix(i),
       fetch.illegalInstr(i)
     )
-    exceptionFromBackend := fetch.exceptionFromBackend(i)
-    triggered            := fetch.triggered(i)
-    isLastInFtqEntry     := fetch.isLastInFtqEntry(i)
+    backendException := fetch.backendException(i)
+    triggered        := fetch.triggered(i)
+    isLastInFtqEntry := fetch.isLastInFtqEntry(i)
     this
   }
 
@@ -90,7 +90,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.exceptionVec(instrGuestPageFault) := IBufferExceptionType.isGPF(this.exceptionType)
     cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF(this.exceptionType)
     cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
-    cf.exceptionFromBackend              := exceptionFromBackend
+    cf.backendException                  := backendException
     cf.trigger                           := triggered
     cf.pd                                := pd
     cf.pred_taken                        := pred_taken
