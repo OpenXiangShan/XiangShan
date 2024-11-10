@@ -68,7 +68,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplate(gen, FtqSize, holdRead = true))
     sram.io.r.req.valid       := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i)               := sram.io.r.resp.data(0)
@@ -1451,23 +1451,27 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val update = WireInit(0.U.asTypeOf(new BranchPredictionUpdate()))
   val update_buffer_valid = RegInit(false.B)
-  val update_buffer = RegInit(0.U.asTypeOf(new BranchPredictionUpdate()))
-  io.toBpu.update.bits := Mux(update_buffer_valid, update_buffer, update)
+  val update_buffer_pc = RegInit(0.U.asTypeOf(commit_pc_bundle.startAddr))
+  val update_buffer_target = RegInit(0.U.asTypeOf(commit_target))
+  val update_buffer_spec_info = RegInit(0.U.asTypeOf(commit_spec_meta))
+  io.toBpu.update.bits := update
   io.toBpu.update.valid := commit_valid && do_commit_fire
   // io.toBpu.update.valid := commit_valid && do_commit
   // val update = io.toBpu.update.bits
   update.false_hit   := commit_hit === h_false_hit
-  update.pc          := commit_pc_bundle.startAddr
+  update.pc          := Mux(update_buffer_valid, update_buffer_pc, commit_pc_bundle.startAddr)
   update.meta        := commit_meta
   update.cfi_idx     := commit_cfi
-  update.full_target := commit_target
+  update.full_target := Mux(update_buffer_valid, update_buffer_target, commit_target)
   update.from_stage  := commit_stage
-  update.spec_info   := commit_spec_meta
+  update.spec_info   := Mux(update_buffer_valid, update_buffer_spec_info, commit_spec_meta)
 
 
   when(do_commit && !do_commit_fire && !update_buffer_valid){
     update_buffer_valid := true.B
-    update_buffer := update
+    update_buffer_pc := commit_pc_bundle.startAddr
+    update_buffer_target := commit_target
+    update_buffer_spec_info := commit_spec_meta
   }.elsewhen(do_commit_fire){
     update_buffer_valid := false.B
   }
@@ -1478,7 +1482,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val update_ftb_entry = update.ftb_entry
 
   val ftbEntryGen = Module(new FTBEntryGen).io
-  ftbEntryGen.start_addr     := commit_pc_bundle.startAddr
+  ftbEntryGen.start_addr     := Mux(update_buffer_valid, update_buffer_pc, commit_pc_bundle.startAddr)
   ftbEntryGen.old_entry      := commit_ftb_entry
   ftbEntryGen.pd             := commit_pd
   ftbEntryGen.cfiIndex       := commit_cfi

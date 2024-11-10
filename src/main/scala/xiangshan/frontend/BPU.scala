@@ -24,7 +24,7 @@ import utility._
 import xiangshan._
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaBaseLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
+  val MaxMetaBaseLength = if (!env.FPGAPlatform) 512 else 128 // TODO: Reduce meta length
   val MaxMetaLength     = if (HasHExtension) MaxMetaBaseLength + 4 else MaxMetaBaseLength
   val MaxBasicBlockSize = 32
   val LHistoryLength    = 32
