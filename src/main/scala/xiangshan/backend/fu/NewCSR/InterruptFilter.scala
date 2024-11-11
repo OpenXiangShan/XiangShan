@@ -86,49 +86,90 @@ class InterruptFilter extends Module {
   }
 
   // value lower, priority higher
-  def minSelect(index: Vec[UInt], value: Vec[UInt]): (Vec[UInt], Vec[UInt]) = {
+  def minSelect(index: Vec[UInt], value: Vec[UInt], xei: UInt): (Vec[UInt], Vec[UInt]) = {
     value.size match {
       case 1 =>
         (index, value)
       case 2 =>
+        /**
+         * default: index(0) priority > index(1) priority
+         *
+         * AIA Spec table 5.3/5.5
+         *
+         * xei is InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U for M
+         * xei is InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U for S
+         *
+         * if index(0) enable, index(1) disable:
+         *    select index(0)
+         * else if index(0) disable, index(1) enable:
+         *    select index(1)
+         * else if index(0), index(1) all enable:
+         *    if index(0), index(1) priority number all 0s:
+         *      select index(0)
+         *    else if index(0) priority number is 0, index(1) priority number is not 0:
+         *      if index(0) <= xei:
+         *        select index(0)
+         *      else:
+         *        select index(1)
+         *    else if index(0) priority number is not 0, index(1) priority number is 0:
+         *      if index(1) <= xei:
+         *        select index(1)
+         *      else:
+         *        select index(0)
+         *    else if index(0) priority number is not 0, index(1) priority number is not 0:
+         *      if value(0) <= value(1):
+         *        select index(0)
+         *      else:
+         *        select index(1)
+         */
         val minIndex = Mux1H(Seq(
-          (value(0)(8).asBool && (value(1)(8).asBool && (value(0)(7, 0) < value(1)(7 ,0)) || !value(1)(8).asBool)) -> index(0),
-          (value(1)(8).asBool && (value(0)(8).asBool && (value(0)(7, 0) > value(1)(7, 0)) || !value(0)(8).asBool)) -> index(1),
-          (value(0)(8).asBool && value(1)(8).asBool && (value(0)(7, 0) === value(1)(7, 0))) -> Mux(index(0) < index(1), index(0), index(1)),
+          ( value(0)(8).asBool && !value(1)(8).asBool) -> index(0),
+          (!value(0)(8).asBool &&  value(1)(8).asBool) -> index(1),
+          ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
+            (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> index(0),
+            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei, index(0), index(1)),
+            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei, index(1), index(0)),
+            ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), index(0), index(1)),
+          ))
         ))
         val minValue = Mux1H(Seq(
-          (value(0)(8).asBool && (value(1)(8).asBool && (value(0)(7, 0) < value(1)(7, 0)) || !value(1)(8).asBool)) -> value(0),
-          (value(1)(8).asBool && (value(0)(8).asBool && (value(0)(7, 0) > value(1)(7, 0)) || !value(0)(8).asBool)) -> value(1),
-          (value(0)(8).asBool && value(1)(8).asBool && (value(0)(7, 0) === value(1)(7, 0))) -> Mux(index(0) < index(1), value(0), value(1)),
+          ( value(0)(8).asBool && !value(1)(8).asBool) -> value(0),
+          (!value(0)(8).asBool &&  value(1)(8).asBool) -> value(1),
+          ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
+            (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> value(0),
+            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei, value(0), value(1)),
+            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei, value(1), value(0)),
+            ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), value(0), value(1)),
+          ))
         ))
         (VecInit(minIndex), VecInit(minValue))
       case _ =>
-        val (leftIndex,  leftValue)  = minSelect(VecInit(index.take((value.size + 1)/2)), VecInit(value.take((value.size + 1)/2)))
-        val (rightIndex, rightValue) = minSelect(VecInit(index.drop((value.size + 1)/2)), VecInit(value.drop((value.size + 1)/2)))
-        minSelect(VecInit(leftIndex ++ rightIndex), VecInit(leftValue ++ rightValue))
+        val (leftIndex,  leftValue)  = minSelect(VecInit(index.take((value.size + 1)/2)), VecInit(value.take((value.size + 1)/2)), xei)
+        val (rightIndex, rightValue) = minSelect(VecInit(index.drop((value.size + 1)/2)), VecInit(value.drop((value.size + 1)/2)), xei)
+        minSelect(VecInit(leftIndex ++ rightIndex), VecInit(leftValue ++ rightValue), xei)
     }
   }
 
-  def highIprio(iprios: Vec[UInt], vsMode: Boolean = false): (UInt, UInt) = {
+  def highIprio(iprios: Vec[UInt], vsMode: Boolean = false, xei: UInt = 0.U): (UInt, UInt) = {
     if (vsMode) {
       val index = WireInit(VecInit(Seq.fill(3)(0.U(6.W))))
       for (i <- 0 until 3) {
         index(i) := i.U
       }
-      val result = minSelect(index, iprios)
+      val result = minSelect(index, iprios, xei)
       (result._1(0), result._2(0)(7, 0))
     } else {
       val index = WireInit(VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W))))
       InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (prio, i) =>
         index(i) := i.U
       }
-      val result = minSelect(index, iprios)
+      val result = minSelect(index, iprios, xei)
       (result._1(0), result._2(0)(7, 0))
     }
   }
 
-  private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort)
-  private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort)
+  private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort, xei = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
+  private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort, xei = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
 
   private val mIidNum  = findNum(mIidIdx)
   private val hsIidNum = findNum(hsIidIdx)
