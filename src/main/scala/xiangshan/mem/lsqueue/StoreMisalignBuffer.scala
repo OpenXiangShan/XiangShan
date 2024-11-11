@@ -31,6 +31,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.StaCfg
 
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -156,6 +157,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val bufferState = RegInit(s_idle)
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new SqWriteBundle))))
+  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentStores  = RegInit(0.U(maxSplitNum.W))
   val unWriteStores = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
@@ -449,19 +451,22 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.splitStoreReq.bits.uop.fuOpType := Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0))
 
   when (io.splitStoreResp.valid) {
+    val resp = io.splitStoreResp.bits
     splitStoreResp(curPtr) := io.splitStoreResp.bits
     when (isMMIO) {
       unWriteStores := 0.U
       unSentStores := 0.U
-      splitStoreResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
       // delegate to software
-      splitStoreResp(curPtr).uop.exceptionVec(storeAddrMisaligned) := true.B
+      exceptionVec(storeAddrMisaligned) := true.B
     } .elsewhen (hasException) {
       unWriteStores := 0.U
       unSentStores := 0.U
+      StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitStoreResp.bits.need_rep) {
       unSentStores := unSentStores & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
+      exceptionVec := 0.U.asTypeOf(ExceptionVec())
     }
   }
 
@@ -566,11 +571,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
   io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := ExceptionNO.selectByFu(Mux(
-    globalMMIO || globalException,
-    splitStoreResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  ), StaCfg)
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := unalignedStoreData
