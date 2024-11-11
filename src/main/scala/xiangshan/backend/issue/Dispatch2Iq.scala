@@ -136,8 +136,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   private val vlReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 1))
   private val intRenVec:     IndexedSeq[Bool] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcInt).map(x => in.valid))
   private val intSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIntStateRead, SrcState())))
-  private val fpSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, SrcState()))) 
-  private val vfSrcStateVec  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, SrcState()))) 
+  private val fpSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, SrcState())))
+  private val vfSrcStateVec  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, SrcState())))
   private val v0SrcStateVec  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, SrcState())))
   private val vlSrcStateVec  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, SrcState())))
   private val vlSrcIsZeroVec  = Option.when(io.readVlInfo.isDefined )(Wire(Vec(numVlStateRead, Bool())))
@@ -213,13 +213,13 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
 
     for (i <- 0 until numIn) {
       for (j <- 0 until numRegSrcVf) {
-        vecAllSrcStateVec.get(i * numRegSrc + j)       := vfSrcStateVec.get(i * numRegSrcVf + j);
-        vecAllSrcLoadDependency.get(i * numRegSrc + j) := vfSrcLoadDependency.get(i * numRegSrcVf + j);
+        vecAllSrcStateVec.get(i * numRegSrc + j)       := vfSrcStateVec.get(i * numRegSrcVf + j)
+        vecAllSrcLoadDependency.get(i * numRegSrc + j) := vfSrcLoadDependency.get(i * numRegSrcVf + j)
       }
-      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 2)       := v0SrcStateVec.get(i);
-      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 1)       := vlSrcStateVec.get(i);
-      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 2) := v0SrcLoadDependency.get(i);
-      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 1) := vlSrcLoadDependency.get(i);
+      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 2)       := v0SrcStateVec.get(i)
+      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 1)       := vlSrcStateVec.get(i)
+      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 2) := v0SrcLoadDependency.get(i)
+      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 1) := vlSrcLoadDependency.get(i)
 
       // same as eliminate the old vd dependency in issue queue when wake up by wakeup
       val isDependOldVd = io.in(i).bits.vpu.isDependOldVd

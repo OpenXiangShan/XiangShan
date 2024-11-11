@@ -682,7 +682,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       multiFlStall  -> TopDownCounters.MultiFlStall.id.U,
     )
   ))
-  io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
+  io.stallReason.out.reason.zip(io.stallReason.in.reason).foreach { case (out, in) =>
     out := Mux(io.stallReason.in.backReason.valid, io.stallReason.in.backReason.bits, in)
   }
 
