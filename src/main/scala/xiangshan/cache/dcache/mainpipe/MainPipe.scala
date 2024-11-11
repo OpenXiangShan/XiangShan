@@ -1422,9 +1422,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
   io.meta_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
-  io.tag_read.valid := req.valid && !set_conflict && !s0_req.replace
+  io.tag_read.valid := req.valid && !set_conflict
+  io.tag_read.valid := req.valid && s1_ready && !set_conflict
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
-  io.tag_read.bits.way_en := ~0.U(nWays.W)
+  io.tag_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
   io.data_read_intend := s1_valid_dup(3) && s1_need_data
   io.data_readline.valid := s1_valid_dup(4) && s1_need_data
