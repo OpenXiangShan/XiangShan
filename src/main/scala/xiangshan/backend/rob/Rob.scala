@@ -99,7 +99,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
       val excpInfo = ValidIO(new VecExcpInfo)
     })
-    val criticalError = Input(Bool())
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
     val debugEnqLsq = Input(new LsqEnqIO)
@@ -719,7 +718,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqFlushBlock = deqFlushBlockCounter(0)
   val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
   val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
-  val criticalErrorState = RegEnable(true.B, false.B, io.criticalError)
+  val criticalErrorState = io.csr.criticalErrorState
   when(deqNeedFlush && deqHitRedirectReg){
     deqFlushBlockCounter := "b111".U
   }.otherwise{
@@ -1492,9 +1491,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent)
-    diffCriticalErrorEvent.valid := io.criticalError && !RegNext(io.criticalError)
+    diffCriticalErrorEvent.valid := criticalErrorState && !RegNext(criticalErrorState)
     diffCriticalErrorEvent.coreid := io.hartId
-    diffCriticalErrorEvent.criticalError := io.criticalError
+    diffCriticalErrorEvent.criticalError := criticalErrorState
   }
 
   //store evetn difftest information

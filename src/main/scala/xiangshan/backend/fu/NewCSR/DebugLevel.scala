@@ -56,7 +56,11 @@ trait DebugLevel { self: NewCSR =>
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
-  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
+  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
+    when(nmip){
+      reg.NMIP := nmip
+    }
+  })
     .setAddr(CSRs.dcsr)
 
   val dpc = Module(new CSRModule("Dpc", new Epc) with TrapEntryDEventSinkBundle)
@@ -307,6 +311,7 @@ object DcsrCause extends CSREnum with ROApply {
   val Step         = Value(4.U)
   val Resethaltreq = Value(5.U)
   val Group        = Value(6.U)
+  val Other        = Value(7.U)
 }
 
 trait HasTdataSink { self: CSRModule[_] =>
@@ -318,6 +323,10 @@ trait HasTdataSink { self: CSRModule[_] =>
 trait HasdebugModeBundle { self: CSRModule[_] =>
   val debugMode = IO(Input(Bool()))
   val chainable = IO(Input(Bool()))
+}
+
+trait HasNmipBundle { self: CSRModule[_] =>
+  val nmip = IO(Input(Bool()))
 }
 
 /**

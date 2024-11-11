@@ -124,6 +124,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromTop = Input(new Bundle {
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
@@ -189,6 +190,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val instrAddrTransType = new AddrTransType
       // custom
       val custom = new CSRCustomState
+      val criticalErrorState = Bool()
     })
     // tlb
     val tlb = Output(new Bundle {
@@ -262,6 +264,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugModeStopTimeNext  = debugMode && dcsr.regOut.STOPTIME
   val debugModeStopCount = RegNext(debugModeStopCountNext)
   val unprivCountUpdate  = !debugModeStopCount && debugModeStopCountNext
+
+  val criticalErrorStateInCSR = Wire(Bool())
+  val criticalErrorState = RegEnable(true.B, false.B, io.fromTop.criticalErrorState || criticalErrorStateInCSR)
 
   private val privState = Wire(new PrivState)
   privState.PRVM := PRVM
@@ -356,6 +361,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.mnstatusNMIE := mnstatus.regOut.NMIE.asBool
   intrMod.io.in.nmi := nmip.asUInt.orR
   intrMod.io.in.nmiVec := nmip.asUInt
+  intrMod.io.in.debugMode := debugMode
+  intrMod.io.in.debugIntr := debugIntr
+  intrMod.io.in.dcsr      := dcsr.regOut
 
   when(intrMod.io.out.nmi && intrMod.io.out.interruptVec.valid) {
     nmip.NMI_31 := nmip.NMI_31 & !intrMod.io.out.interruptVec.bits(NonMaskableIRNO.NMI_31).asBool
@@ -386,6 +394,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.stvec := stvec.regOut
   trapHandleMod.io.in.vstvec := vstvec.regOut
   trapHandleMod.io.in.virtualInterruptIsHvictlInject := virtualInterruptIsHvictlInject
+  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasTrap && !trapIsInterrupt && singleStep
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
   val entryDebugMode = WireInit(false.B)
@@ -686,6 +695,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.debugModeStopCount := debugModeStopCount
         m.debugModeStopTime  := debugModeStopTimeNext
         m.unprivCountUpdate  := unprivCountUpdate
+      case _ =>
+    }
+    mod match {
+      case m: HasNmipBundle =>
+        m.nmip := nmip.asUInt.orR
       case _ =>
     }
   }
@@ -1043,6 +1057,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
   debugMod.io.in.trapInfo.bits.singleStep  := singleStep
+  debugMod.io.in.trapInfo.bits.criticalErrorState := criticalErrorState
   debugMod.io.in.privState                 := privState
   debugMod.io.in.debugMode                 := debugMode
   debugMod.io.in.dcsr                      := dcsr.regOut
@@ -1057,20 +1072,15 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
 
-  trapEntryDEvent.valid                       := entryDebugMode
-  trapEntryDEvent.in.hasDebugIntr             := debugMod.io.out.hasDebugIntr
-  trapEntryDEvent.in.debugMode                := debugMode
-  trapEntryDEvent.in.hasTrap                  := hasTrap
-  trapEntryDEvent.in.hasSingleStep            := debugMod.io.out.hasSingleStep
-  trapEntryDEvent.in.triggerEnterDebugMode    := debugMod.io.out.triggerEnterDebugMode
-  trapEntryDEvent.in.hasDebugEbreakException  := debugMod.io.out.hasDebugEbreakException
-  trapEntryDEvent.in.breakPoint               := debugMod.io.out.breakPoint
-
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := debugMod.io.out.hasSingleStep
-
-  intrMod.io.in.debugMode := debugMode
-  intrMod.io.in.debugIntr := debugIntr
-  intrMod.io.in.dcsr      := dcsr.regOut
+  trapEntryDEvent.valid                           := entryDebugMode
+  trapEntryDEvent.in.hasDebugIntr                 := debugMod.io.out.hasDebugIntr
+  trapEntryDEvent.in.debugMode                    := debugMode
+  trapEntryDEvent.in.hasTrap                      := hasTrap
+  trapEntryDEvent.in.hasSingleStep                := debugMod.io.out.hasSingleStep
+  trapEntryDEvent.in.triggerEnterDebugMode        := debugMod.io.out.triggerEnterDebugMode
+  trapEntryDEvent.in.hasDebugEbreakException      := debugMod.io.out.hasDebugEbreakException
+  trapEntryDEvent.in.breakPoint                   := debugMod.io.out.breakPoint
+  trapEntryDEvent.in.criticalErrorStateEnterDebug := debugMod.io.out.criticalErrorStateEnterDebug
 
   tdata1RegVec.foreach { mod =>
     mod match {
@@ -1308,10 +1318,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   io.distributedWenLegal := wenLegal
+  io.status.criticalErrorState := criticalErrorState && !dcsr.regOut.CETRIG.asBool
 
   val criticalErrors = Seq(
     ("csr_dbltrp_inMN", !mnstatus.regOut.NMIE && hasTrap && !entryDebugMode),
   )
+  criticalErrorStateInCSR := criticalErrors.map(criticalError => criticalError._2).reduce(_ || _).asBool
   generateCriticalErrors()
 
   // Always instantiate basic difftest modules.

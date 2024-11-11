@@ -232,6 +232,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val vlFromVfIsZero = vfExuBlock.io.vlIsZero.get
   private val vlFromVfIsVlmax = vfExuBlock.io.vlIsVlmax.get
 
+  private val backendCriticalError = Wire(Bool())
+
   ctrlBlock.io.intIQValidNumVec := intScheduler.io.intIQValidNumVec
   ctrlBlock.io.fpIQValidNumVec := fpScheduler.io.fpIQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -247,6 +249,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
+  ctrlBlock.io.robio.csr.criticalErrorState := intExuBlock.io.csrio.get.criticalErrorState
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
@@ -454,6 +457,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
+  csrin.criticalErrorState := backendCriticalError
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -820,11 +824,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
 
   // expand to collect frontend/memblock/L2 critical errors
-  val backendCriticalError = criticalErrors.map(_._2).reduce(_ || _)
+  backendCriticalError := criticalErrors.map(_._2).reduce(_ || _)
 
-  ctrlBlock.io.robio.criticalError := backendCriticalError
-  io.toTop.cpuCriticalError := backendCriticalError
-
+  io.toTop.cpuCriticalError := csrio.criticalErrorState
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
