@@ -105,11 +105,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
 
+  // RVCDecoder fsIsOff
+  ifu.io.csr_fsIsOff := csrCtrl.fsIsOff
+
   // bpu ctrl
   bpu.io.ctrl         := csrCtrl.bp_ctrl
   bpu.io.reset_vector := io.reset_vector
 
-// pmp
+  // pmp
   val PortNumber = ICacheParameters().PortNumber
   val pmp        = Module(new PMP())
   val pmp_check  = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
@@ -151,8 +154,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   ftq.io.fromBpu <> bpu.io.bpu_to_ftq
 
   ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
-  // IFU-ICache
 
+  // IFU-ICache
   icache.io.fetch.req <> ftq.io.toICache.req
   ftq.io.toICache.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
 
