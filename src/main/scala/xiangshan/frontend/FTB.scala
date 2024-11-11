@@ -27,7 +27,7 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val numEntries = FtbSize
   val numWays    = FtbWays
   val numSets    = numEntries / numWays // 512
-  val tagSize    = 20
+  val tagLength  = FtbTagLength
 
   val TAR_STAT_SZ = 2
   def TAR_FIT     = 0.U(TAR_STAT_SZ.W)
@@ -413,7 +413,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
 
 class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
   val entry = new FTBEntry
-  val tag   = UInt(tagSize.W)
+  val tag   = UInt(tagLength.W)
   def display(cond: Bool): Unit = {
     entry.display(cond)
     XSDebug(cond, p"tag is ${Hexadecimal(tag)}\n------------------------------- \n")
@@ -518,10 +518,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.req_pc.ready   := ftb.io.r.req.ready
     io.u_req_pc.ready := ftb.io.r.req.ready
 
-    val req_tag = RegEnable(ftbAddr.getTag(io.req_pc.bits)(tagSize - 1, 0), io.req_pc.valid)
+    val req_tag = RegEnable(ftbAddr.getTag(io.req_pc.bits)(tagLength - 1, 0), io.req_pc.valid)
     val req_idx = RegEnable(ftbAddr.getIdx(io.req_pc.bits), io.req_pc.valid)
 
-    val u_req_tag = RegEnable(ftbAddr.getTag(io.u_req_pc.bits)(tagSize - 1, 0), io.u_req_pc.valid)
+    val u_req_tag = RegEnable(ftbAddr.getTag(io.u_req_pc.bits)(tagLength - 1, 0), io.u_req_pc.valid)
 
     val read_entries = pred_rdata.map(_.entry)
     val read_tags    = pred_rdata.map(_.tag)
@@ -840,7 +840,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val ftb_write = Wire(new FTBEntryWithTag)
   ftb_write.entry := Mux(update_now, update.ftb_entry, delay2_entry)
-  ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update.pc, delay2_pc))(tagSize - 1, 0)
+  ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update.pc, delay2_pc))(tagLength - 1, 0)
 
   val write_valid = update_now || DelayN(u_valid && !u_meta.hit, 2)
   val write_pc    = Mux(update_now, update.pc, delay2_pc)
