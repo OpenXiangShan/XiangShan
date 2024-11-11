@@ -356,7 +356,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.exceptionVl.valid     := false.B
     instMicroOp.exceptionVl.bits      := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
-    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVSegLoad(io.in.bits.uop.fuType)
   }
   // latch data
   when(io.in.fire && !isEnqFixVlUop){
