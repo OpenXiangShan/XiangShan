@@ -617,7 +617,7 @@ class CtrlBlockImp(
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
-  rob.io.criticalError := io.robio.criticalError
+  rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
@@ -731,7 +731,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val vtype = Output(ValidIO(VType()))
       val hasVsetvl = Output(Bool())
     }
-    val criticalError = Input(Bool())
 
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {

@@ -216,6 +216,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val trapTarget = Input(new TargetPCBundle)
   val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
+  val criticalErrorState = Input(Bool())
 
   val fflags     = Output(Valid(UInt(5.W)))
   val vxsat      = Output(Valid(Bool()))

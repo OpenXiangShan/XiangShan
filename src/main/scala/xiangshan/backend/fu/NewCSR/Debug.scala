@@ -38,6 +38,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
    *    2. ebreak inst in nonDmode
    *    3. trigger fire in nonDmode
    *    4. single step(debug module set dcsr.step before hart resume)
+   *    5. critical error state(when dcsr.cetrig assert)
    */
   // debug_intr
   val hasIntr = hasTrap && trapIsInterrupt
@@ -68,7 +69,11 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   // debug_exception_single
   val hasSingleStep = hasExp && singleStep
 
-  val hasDebugException = hasDebugEbreakException || triggerEnterDebugMode || hasSingleStep
+
+  // critical error state
+  val criticalErrorStateEnterDebug = trapInfo.bits.criticalErrorState && dcsr.CETRIG.asBool
+
+  val hasDebugException = hasDebugEbreakException || triggerEnterDebugMode || hasSingleStep || criticalErrorStateEnterDebug
   val hasDebugTrap = hasDebugException || hasDebugIntr
 
   val tselect1H = UIntToOH(tselect.asUInt, TriggerNum).asBools
@@ -126,12 +131,13 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   io.out.triggerFrontendChange  := frontendTriggerUpdate
   io.out.newTriggerChainIsLegal := newTriggerChainIsLegal
 
-  io.out.hasDebugTrap            := hasDebugTrap
-  io.out.hasDebugIntr            := hasDebugIntr
-  io.out.hasSingleStep           := hasSingleStep
-  io.out.triggerEnterDebugMode   := triggerEnterDebugMode
-  io.out.hasDebugEbreakException := hasDebugEbreakException
-  io.out.breakPoint              := breakPoint
+  io.out.hasDebugTrap                 := hasDebugTrap
+  io.out.hasDebugIntr                 := hasDebugIntr
+  io.out.hasSingleStep                := hasSingleStep
+  io.out.triggerEnterDebugMode        := triggerEnterDebugMode
+  io.out.hasDebugEbreakException      := hasDebugEbreakException
+  io.out.breakPoint                   := breakPoint
+  io.out.criticalErrorStateEnterDebug := criticalErrorStateEnterDebug
 }
 
 class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
@@ -142,6 +148,7 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
       val isInterrupt = Bool()
       val singleStep = Bool()
       val trigger = TriggerAction()
+      val criticalErrorState = Bool()
     })
 
     val privState = new PrivState
@@ -172,6 +179,7 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     val triggerEnterDebugMode = Bool()
     val hasDebugEbreakException = Bool()
     val breakPoint = Bool()
+    val criticalErrorStateEnterDebug = Bool()
   })
 }
 

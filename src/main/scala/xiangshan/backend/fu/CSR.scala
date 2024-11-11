@@ -85,6 +85,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
+  val criticalErrorState = Output(Bool())
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
