@@ -485,6 +485,13 @@ class XiangShan(object):
         ]
         f16_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return f16_test
+    def __get_ci_zcbtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/zcb-test"
+        workloads = [
+            "zcb-test-riscv64-xs.bin"
+        ]
+        zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return zcb_test
 
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
@@ -568,7 +575,8 @@ class XiangShan(object):
             "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest,
-            "f16_test": self.__get_ci_F16test
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -596,7 +604,8 @@ class XiangShan(object):
             "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
             "rvv-test": self.__get_ci_rvvtest,
-            "f16_test": self.__get_ci_F16test
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
