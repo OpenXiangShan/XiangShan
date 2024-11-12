@@ -23,6 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache.mmu.HasTlbConst
@@ -493,7 +494,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isMMIO) {
       unSentLoads := 0.U
-      exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), LduCfg)
       // delegate to software
       exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
@@ -558,6 +559,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
+  io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := combinedData

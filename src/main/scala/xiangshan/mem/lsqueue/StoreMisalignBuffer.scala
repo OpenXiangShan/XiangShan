@@ -456,7 +456,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     when (isMMIO) {
       unWriteStores := 0.U
       unSentStores := 0.U
-      exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
+      exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), StaCfg)
       // delegate to software
       exceptionVec(storeAddrMisaligned) := true.B
     } .elsewhen (hasException) {
