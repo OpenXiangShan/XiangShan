@@ -426,8 +426,24 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new DefaultConfig(n)
 )
 
+class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
+  new WithCHI
+    ++ new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+    })
+    ++ new WithNKBL2(128, inclusive = true, banks = 1, tp = false)
+    ++ new WithNKBL1D(32, ways = 4)
+    ++ new MinimalConfig(n)
+)
+
 class XSNoCTopConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
+
+class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
+  (new KunminghuV2MinimalConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
