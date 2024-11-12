@@ -39,6 +39,11 @@ class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
   val ecc = UInt(eccTagBits.W)
 }
 
+class TagMetaResp(implicit p: Parameters) extends DCacheBundle {
+  val tag = Vec(nWays, UInt(tagBits.W))
+  val meta = Vec(nWays, new Meta)
+}
+
 case object HasTagEccParam
 
 abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
@@ -48,8 +53,7 @@ abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
 class TagArray(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new TagReadReq))
-    val tag_resp = Output(Vec(nWays, UInt(tagBits.W)))
-    val meta_resp = Output(Vec(nWays, new Meta))
+    val resp = Output(new TagMetaResp)
     val tag_write = Flipped(DecoupledIO(new TagWriteReq))
     val meta_write = Flipped(DecoupledIO(new CohMetaWriteReq))
     // ecc
@@ -127,8 +131,8 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   tag_array.clock := ClockGate(false.B, ren | wen, clock)
-  io.tag_resp := tag_array.io.r.resp.data.map(r => r(tagBits - 1, 0))
-  io.meta_resp := VecInit(tag_array.io.r.resp.data.map(r => r(metaBits + tagBits - 1, tagBits).asTypeOf(new Meta)))
+  io.resp.tag := tag_array.io.r.resp.data.map(r => r(tagBits - 1, 0))
+  io.resp.meta := VecInit(tag_array.io.r.resp.data.map(r => r(metaBits + tagBits - 1, tagBits).asTypeOf(new Meta)))
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
 
   val ecc_ren = io.ecc_read.fire
@@ -155,13 +159,12 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   }
 }
 
-class DuplicatedTagArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends AbstractTagArray {
+class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
-    val tag_resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))
-    val meta_resp = Output(Vec(readPorts, Vec(nWays, new Meta)))
+    val resp = Output(Vec(readPorts, new TagMetaResp))
     val tag_write = Flipped(DecoupledIO(new TagWriteReq))
-    val meta_write = Vec(writePorts, Flipped(DecoupledIO(new CohMetaWriteReq)))
+    val meta_write = Flipped(DecoupledIO(new CohMetaWriteReq))
     // customized cache op port
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
@@ -180,8 +183,8 @@ class DuplicatedTagArray(readPorts: Int, writePorts: Int)(implicit p: Parameters
     // normal read / write
     array(i).io.tag_write.valid := io.tag_write.valid
     array(i).io.tag_write.bits := io.tag_write.bits
-    array(i).io.meta_write.valid := io.meta_write(0).valid
-    array(i).io.meta_write.bits := io.meta_write(0).bits
+    array(i).io.meta_write.valid := io.meta_write.valid
+    array(i).io.meta_write.bits := io.meta_write.bits
     array(i).io.ecc_write.valid := io.tag_write.valid
     array(i).io.ecc_write.bits.idx := io.tag_write.bits.idx
     array(i).io.ecc_write.bits.way_en := io.tag_write.bits.way_en
@@ -191,8 +194,8 @@ class DuplicatedTagArray(readPorts: Int, writePorts: Int)(implicit p: Parameters
     array(i).io.read <> io.read(i)
     array(i).io.ecc_read.valid := io.read(i).valid
     array(i).io.ecc_read.bits := io.read(i).bits
-    io.tag_resp(i) := (array(i).io.ecc_resp zip array(i).io.tag_resp).map { case (e, r) => Cat(e, r) }
-    io.meta_resp(i) := array(i).io.meta_resp
+    io.resp(i).tag := (array(i).io.ecc_resp zip array(i).io.resp.tag).map { case (e, r) => Cat(e, r) }
+    io.resp(i).meta := array(i).io.resp.meta
     // extra ports for cache op
 //    array(i).io.ecc_write.valid := false.B
 //    array(i).io.ecc_write.bits := DontCare
@@ -201,7 +204,7 @@ class DuplicatedTagArray(readPorts: Int, writePorts: Int)(implicit p: Parameters
   }
   XSPerfAccumulate("tag_read_counter", tag_read_oh.reduce(_ + _))
   io.tag_write.ready := true.B
-  io.meta_write(0).ready := true.B
+  io.meta_write.ready := true.B
 
   require(nWays <= 32)
   io.cacheOp.resp.bits := DontCare
@@ -248,6 +251,6 @@ class DuplicatedTagArray(readPorts: Int, writePorts: Int)(implicit p: Parameters
   }
 
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, array(0).io.tag_resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
+  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, array(0).io.resp.tag(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
   io.cacheOp.resp.bits.read_tag_ecc := Mux(io.cacheOp.resp.valid, array(0).io.ecc_resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
 }

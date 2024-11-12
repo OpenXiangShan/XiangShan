@@ -949,7 +949,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
-  val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort, writePorts=1))
+  val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
   val fdpMonitor =  Module(new FDPrefetcherMonitor)
   val bloomFilter =  Module(new BloomFilter(BLOOM_FILTER_ENTRY_NUM, true))
@@ -1032,15 +1032,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.meta_write
   )
   if(StorePrefetchL1Enabled) {
-    meta_resp_ports.zip(tagArray.io.meta_resp).foreach { case (p, r) => p := r }
+    meta_resp_ports.zipWithIndex.foreach({ case (meta_resp, i) =>
+      meta_resp := tagArray.io.resp(i).meta })
   } else {
     (meta_resp_ports.take(HybridLoadReadBase + 1) ++
-     meta_resp_ports.takeRight(backendParams.HyuCnt)).zip(tagArray.io.meta_resp).foreach { case (p, r) => p := r }
+     meta_resp_ports.takeRight(backendParams.HyuCnt)).zipWithIndex.foreach({ case (meta_resp, i) =>
+      meta_resp := tagArray.io.resp(i).meta })
 
     meta_read_ports.drop(HybridLoadReadBase + 1).take(HybridStoreReadBase).foreach { case p => p.ready := false.B }
     meta_resp_ports.drop(HybridLoadReadBase + 1).take(HybridStoreReadBase).foreach { case p => p := 0.U.asTypeOf(p) }
   }
-  meta_write_ports.zip(tagArray.io.meta_write).foreach { case (p, w) => w <> p }
+  mainPipe.io.meta_write <> tagArray.io.meta_write
   // read extra meta (exclude stu)
   (meta_read_ports.take(HybridLoadReadBase + 1) ++
    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(errorArray.io.read).foreach { case (p, r) => r <> p }
@@ -1123,14 +1125,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   ldu.take(HybridLoadReadBase).zipWithIndex.foreach {
     case (ld, i) =>
       tagArray.io.read(i) <> ld.io.tag_read
-      ld.io.tag_resp := tagArray.io.tag_resp(i)
+      ld.io.tag_resp := tagArray.io.resp(i).tag
       ld.io.tag_read.ready := !tag_write_intend
   }
   if(StorePrefetchL1Enabled) {
     stu.take(HybridStoreReadBase).zipWithIndex.foreach {
       case (st, i) =>
         tagArray.io.read(HybridLoadReadBase + i) <> st.io.tag_read
-        st.io.tag_resp := tagArray.io.tag_resp(HybridLoadReadBase + i)
+        st.io.tag_resp := tagArray.io.resp(HybridLoadReadBase + i).tag
         st.io.tag_read.ready := !tag_write_intend
     }
   }else {
@@ -1167,11 +1169,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
 
     // tag resp
-    ldu(HybridLoadTagReadPort).io.tag_resp := tagArray.io.tag_resp(TagReadPort)
-    stu(HybridStoreTagReadPort).io.tag_resp := tagArray.io.tag_resp(TagReadPort)
+    ldu(HybridLoadTagReadPort).io.tag_resp := tagArray.io.resp(TagReadPort).tag
+    stu(HybridStoreTagReadPort).io.tag_resp := tagArray.io.resp(TagReadPort).tag
   }
   tagArray.io.read.last <> mainPipe.io.tag_read
-  mainPipe.io.tag_resp := tagArray.io.tag_resp.last
+  mainPipe.io.tag_resp := tagArray.io.resp.last.tag
 
   val fake_tag_read_conflict_this_cycle = PopCount(ldu.map(ld=> ld.io.tag_read.valid))
   XSPerfAccumulate("fake_tag_read_conflict", fake_tag_read_conflict_this_cycle)
