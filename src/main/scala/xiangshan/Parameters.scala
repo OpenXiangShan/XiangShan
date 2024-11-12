@@ -46,6 +46,7 @@ import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+import com.typesafe.scalalogging.LazyLogging
 
 import scala.math.{max, min, pow}
 
@@ -580,7 +581,7 @@ case class DebugOptions
   EnableRollingDB: Boolean = false
 )
 
-trait HasXSParameter {
+trait HasXSParameter extends LazyLogging {
 
   implicit val p: Parameters
 

@@ -259,6 +259,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
+    ivy"com.typesafe.scala-logging::scala-logging:3.9.5",
+    ivy"ch.qos.logback:logback-classic:1.5.12",
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")

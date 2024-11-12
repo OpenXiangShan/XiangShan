@@ -558,18 +558,18 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   val io: ICacheIO = IO(new ICacheIO)
 
-  println("ICache:")
-  println("  TagECC: " + cacheParams.tagECC)
-  println("  DataECC: " + cacheParams.dataECC)
-  println("  ICacheSets: " + cacheParams.nSets)
-  println("  ICacheWays: " + cacheParams.nWays)
-  println("  PortNumber: " + cacheParams.PortNumber)
-  println("  nFetchMshr: " + cacheParams.nFetchMshr)
-  println("  nPrefetchMshr: " + cacheParams.nPrefetchMshr)
-  println("  nWayLookupSize: " + cacheParams.nWayLookupSize)
-  println("  DataCodeUnit: " + cacheParams.DataCodeUnit)
-  println("  ICacheDataBanks: " + cacheParams.ICacheDataBanks)
-  println("  ICacheDataSRAMWidth: " + cacheParams.ICacheDataSRAMWidth)
+  logger.info("ICache:")
+  logger.info("  TagECC: " + cacheParams.tagECC)
+  logger.info("  DataECC: " + cacheParams.dataECC)
+  logger.info("  ICacheSets: " + cacheParams.nSets)
+  logger.info("  ICacheWays: " + cacheParams.nWays)
+  logger.info("  PortNumber: " + cacheParams.PortNumber)
+  logger.info("  nFetchMshr: " + cacheParams.nFetchMshr)
+  logger.info("  nPrefetchMshr: " + cacheParams.nPrefetchMshr)
+  logger.info("  nWayLookupSize: " + cacheParams.nWayLookupSize)
+  logger.info("  DataCodeUnit: " + cacheParams.DataCodeUnit)
+  logger.info("  ICacheDataBanks: " + cacheParams.ICacheDataBanks)
+  logger.info("  ICacheDataSRAMWidth: " + cacheParams.ICacheDataSRAMWidth)
 
   val (bus, edge) = outer.clientNode.out.head
 
