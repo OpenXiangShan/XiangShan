@@ -333,7 +333,7 @@ object InterruptNO {
     SEI, SSI, STI,
     SGEI,
     VSEI, VSSI, VSTI,
-    COI,
+    COI, 14, 15,
   )
 
   val localHighGroup = Seq(
