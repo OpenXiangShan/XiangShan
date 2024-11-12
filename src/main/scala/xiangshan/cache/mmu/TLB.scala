@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Binh Pham, Viswanathan Vaidyanathan, Aamer Jaleel, and Abhishek Bhattacharjee. "[Colt: Coalesced large-reach
+* tlbs.](https://doi.org/10.1109/MICRO.2012.32)" 45th Annual IEEE/ACM International Symposium on Microarchitecture
+* (MICRO). 2012.
 ***************************************************************************************/
 
 package xiangshan.cache.mmu

@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] George Z. Chrysos, and Joel S. Emer. "[Memory dependence prediction using store sets.]
+* (https://doi.org/10.1109/ISCA.1998.694770)" 25th Annual International Symposium on Computer Architecture (ISCA).
+* 1998.
 ***************************************************************************************/
 
 package xiangshan.mem.mdp

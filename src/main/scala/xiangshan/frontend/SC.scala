@@ -12,6 +12,17 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] André Seznec. "[Tage-sc-l branch predictors.](https://inria.hal.science/hal-01086920)" The Journal of
+* Instruction-Level Parallelism (JILP) 4th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
+* Branch Prediction (CBP). 2014.
+* [2] André Seznec. "[Tage-sc-l branch predictors again.](https://inria.hal.science/hal-01354253)" The Journal of
+* Instruction-Level Parallelism (JILP) 5th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
+* Branch Prediction (CBP). 2016.
 ***************************************************************************************/
 
 package xiangshan.frontend

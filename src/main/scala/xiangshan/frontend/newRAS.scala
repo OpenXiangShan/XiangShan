@@ -13,6 +13,17 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Kevin Skadron, Pritpal S. Ahuja, Margaret Martonosi, and Douglas W. Clark. "[Improving prediction for procedure
+* returns with return-address-stack repair mechanisms.](https://doi.org/10.1109/MICRO.1998.742787)" 31st Annual
+* ACM/IEEE International Symposium on Microarchitecture (MICRO). 1998.
+* [2] Tan Hongze, and Wang Jian. "[A Return Address Predictor Based on Persistent Stack.]
+* (https://crad.ict.ac.cn/en/article/doi/10.7544/issn1000-1239.202111274)" Journal of Computer Research and Development
+* (CRAD) 60.6: 1337-1345. 2023.
 ***************************************************************************************/
 package xiangshan.frontend
 

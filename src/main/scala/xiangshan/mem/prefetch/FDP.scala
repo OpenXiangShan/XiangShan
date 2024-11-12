@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Santhosh Srinath, Onur Mutlu, Hyesoon Kim, and Yale N. Patt "[Feedback directed prefetching: Improving the
+* performance and bandwidth-efficiency of hardware prefetchers.](https://doi.org/10.1109/HPCA.2007.346185)" IEEE 13th
+* International Symposium on High Performance Computer Architecture (HPCA). 2007.
 ***************************************************************************************/
 
 package xiangshan.mem.prefetch
