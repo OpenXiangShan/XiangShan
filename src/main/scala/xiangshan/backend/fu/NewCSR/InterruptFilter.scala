@@ -61,14 +61,18 @@ class InterruptFilter extends Module {
   val vstopigather = vsip & vsie
   val mipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
   val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
-  val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(3)(0.U(9.W)))
+  val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
   InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (value, index) =>
-    mipriosSort(index) := Mux(mtopigather(value), Cat(1.U, miprios(7 + 8 * value, 8 * value)), 0.U)
+    mipriosSort(index)  := Mux(mtopigather(value), Cat(1.U, miprios(7 + 8 * value, 8 * value)), 0.U)
     hsipriosSort(index) := Mux(hstopigather(value), Cat(1.U, hsiprios(7 + 8 * value, 8 * value)), 0.U)
+    hvipriosSort(index) := Mux(vstopigather(value), Cat(1.U, 0.U(8.W)), 0.U)
   }
-  hvipriosSort(0) := Mux(vstopigather(1).asBool, Cat(1.U, hviprios(15, 8)), 0.U)
-  hvipriosSort(1) := Mux(vstopigather(5).asBool, Cat(1.U, hviprios(31, 24)), 0.U)
-  hvipriosSort(2) := Mux(vstopigather(13).asBool, Cat(1.U, hviprios(47, 40)), 0.U)
+  hvipriosSort(findIndex(1.U)) := Mux(vstopigather(1).asBool, Cat(1.U, hviprio1.PrioSSI.asUInt), 0.U)
+  hvipriosSort(findIndex(5.U)) := Mux(vstopigather(5).asBool, Cat(1.U, hviprio1.PrioSTI.asUInt), 0.U)
+
+  for (i <- 0 to 10) {
+    hvipriosSort(findIndex((i+13).U)) := Mux(vstopigather(i+13).asBool, Cat(1.U, hviprios(7 + 8 * (i+5), 8 * (i+5))), 0.U)
+  }
 
   def findNum(input: UInt): UInt = {
     val select = Mux1H(UIntToOH(input), InterruptNO.interruptDefaultPrio.map(_.U))
@@ -107,12 +111,12 @@ class InterruptFilter extends Module {
          *    if index(0), index(1) priority number all 0s:
          *      select index(0)
          *    else if index(0) priority number is 0, index(1) priority number is not 0:
-         *      if index(0) <= xei:
+         *      if index(0) <= xei, index(1) > xei:
          *        select index(0)
          *      else:
          *        select index(1)
          *    else if index(0) priority number is not 0, index(1) priority number is 0:
-         *      if index(1) <= xei:
+         *      if index(1) <= xei, index(0) > xei:
          *        select index(1)
          *      else:
          *        select index(0)
@@ -127,8 +131,8 @@ class InterruptFilter extends Module {
           (!value(0)(8).asBool &&  value(1)(8).asBool) -> index(1),
           ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
             (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> index(0),
-            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei, index(0), index(1)),
-            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei, index(1), index(0)),
+            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei && index(1) > xei, index(0), index(1)),
+            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei && index(0) > xei, index(1), index(0)),
             ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), index(0), index(1)),
           ))
         ))
@@ -137,8 +141,8 @@ class InterruptFilter extends Module {
           (!value(0)(8).asBool &&  value(1)(8).asBool) -> value(1),
           ( value(0)(8).asBool &&  value(1)(8).asBool) -> Mux1H(Seq(
             (!value(0)(7, 0).orR && !value(1)(7, 0).orR) -> value(0),
-            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei, value(0), value(1)),
-            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei, value(1), value(0)),
+            (!value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(index(0) <= xei && index(1) > xei, value(0), value(1)),
+            ( value(0)(7, 0).orR && !value(1)(7, 0).orR) -> Mux(index(1) <= xei && index(0) > xei, value(1), value(0)),
             ( value(0)(7, 0).orR &&  value(1)(7, 0).orR) -> Mux(value(0)(7, 0) <= value(1)(7, 0), value(0), value(1)),
           ))
         ))
@@ -150,26 +154,17 @@ class InterruptFilter extends Module {
     }
   }
 
-  def highIprio(iprios: Vec[UInt], vsMode: Boolean = false, xei: UInt = 0.U): (UInt, UInt) = {
-    if (vsMode) {
-      val index = WireInit(VecInit(Seq.fill(3)(0.U(6.W))))
-      for (i <- 0 until 3) {
-        index(i) := i.U
-      }
-      val result = minSelect(index, iprios, xei)
-      (result._1(0), result._2(0)(7, 0))
-    } else {
-      val index = WireInit(VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W))))
-      InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (prio, i) =>
-        index(i) := i.U
-      }
-      val result = minSelect(index, iprios, xei)
-      (result._1(0), result._2(0)(7, 0))
+  def highIprio(iprios: Vec[UInt], xei: UInt = 0.U): (UInt, UInt) = {
+    val index = WireInit(VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W))))
+    InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (prio, i) =>
+      index(i) := i.U
     }
+    val result = minSelect(index, iprios, xei)
+    (result._1(0), result._2(0)(7, 0))
   }
 
-  private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort, xei = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
-  private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort, xei = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
+  private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
+  private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
 
   private val mIidNum  = findNum(mIidIdx)
   private val hsIidNum = findNum(hsIidIdx)
@@ -226,17 +221,9 @@ class InterruptFilter extends Module {
   assert(PopCount(Cat(Candidate1, Candidate2, Candidate3)) < 2.U, "Only one Candidate could be select from Candidate1/2/3 in VS-level!")
   assert(PopCount(Cat(Candidate4, Candidate5)) < 2.U, "Only one Candidate could be select from Candidate4/5 in VS-level!")
 
-  val VSIidNumTmp = Wire(UInt(6.W))
-  val VSIidNum = Wire(UInt(6.W))
-  val VSPrioNum = Wire(UInt(8.W))
-  VSIidNumTmp := highIprio(hvipriosSort, vsMode = true)._1
-  VSPrioNum := highIprio(hvipriosSort, vsMode = true)._2
+  private val (vsIidIdx, vsPrioNum) = highIprio(hvipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
 
-  VSIidNum := Mux1H(Seq(
-    (VSIidNumTmp === 0.U) -> 1.U,
-    (VSIidNumTmp === 1.U) -> 5.U,
-    ((VSIidNumTmp =/= 0.U) && (VSIidNumTmp =/= 1.U)) -> (VSIidNumTmp + 11.U),
-  ))
+  private val vsIidNum = findNum(vsIidIdx)
 
   val iidCandidate123   = Wire(UInt(12.W))
   val iidCandidate45    = Wire(UInt(12.W))
@@ -249,11 +236,11 @@ class InterruptFilter extends Module {
     Candidate3 -> 256.U,
   ))
   iidCandidate45 := Mux1H(Seq(
-    Candidate4 -> VSIidNum,
+    Candidate4 -> vsIidNum,
     Candidate5 -> hvictl.IID.asUInt,
   ))
   iprioCandidate45 := Mux1H(Seq(
-    Candidate4 -> VSPrioNum,
+    Candidate4 -> vsPrioNum,
     Candidate5 -> hvictl.IPRIO.asUInt,
   ))
 
