@@ -177,8 +177,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
-    beu.module.io.errors.icache := io.beu_errors.icache
-    beu.module.io.errors.dcache := io.beu_errors.dcache
+    beu.module.io.errors <> io.beu_errors
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
@@ -241,9 +240,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           io.chi.get <> l2.io_chi
         case l2cache: TL2TLCoupledL2 =>
       }
-
-      beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid
-      beu.module.io.errors.l2.ecc_error.bits := l2.io.error.address
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.debugTopDown <> DontCare
