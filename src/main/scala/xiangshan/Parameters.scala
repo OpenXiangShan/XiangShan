@@ -95,11 +95,12 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
+  FtbWays: Int = 4,
+  FtbTagLength: Int = 20,
   RasSize: Int = 16,
   RasSpecSize: Int = 32,
   RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
-  FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
     Seq(( 4096,    8,    8),
@@ -650,6 +651,7 @@ trait HasXSParameter {
   def EnableFauFTB = coreParams.EnableFauFTB
   def FtbSize = coreParams.FtbSize
   def FtbWays = coreParams.FtbWays
+  def FtbTagLength = coreParams.FtbTagLength
   def RasSize = coreParams.RasSize
   def RasSpecSize = coreParams.RasSpecSize
   def RasCtrSize = coreParams.RasCtrSize
