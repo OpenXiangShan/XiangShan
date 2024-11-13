@@ -114,7 +114,9 @@ object ExceptionType {
   def af:    UInt = "b11".U // instruction access fault
   def width: Int  = 2
 
-  def hasException(e: UInt): Bool = e =/= none
+  def hasException(e: UInt):             Bool = e =/= none
+  def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
+  def hasException(e: IndexedSeq[UInt]): Bool = hasException(VecInit(e))
 
   def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
     assert(

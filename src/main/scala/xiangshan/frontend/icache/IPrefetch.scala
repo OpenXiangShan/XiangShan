@@ -388,7 +388,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
     */
   toPMP.zipWithIndex.foreach { case (p, i) =>
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
-    p.valid     := s1_valid // && s1_itlb_exception === ExceptionType.none
+    p.valid     := s1_valid // !ExceptionType.hasException(s1_itlb_exception(i))
     p.bits.addr := s1_req_paddr(i)
     p.bits.size := 3.U      // TODO
     p.bits.cmd  := TlbCmd.exec
@@ -534,7 +534,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
    */
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i == 0) true.B else s2_doubleline) &&
-    s2_exception.take(i + 1).map(_ === ExceptionType.none).reduce(_ && _) &&
+    !ExceptionType.hasException(s2_exception.take(i + 1)) &&
     s2_mmio.take(i + 1).map(!_).reduce(_ && _)
   })
 
