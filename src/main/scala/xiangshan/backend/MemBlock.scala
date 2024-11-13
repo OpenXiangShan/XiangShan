@@ -147,6 +147,12 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
+
+  val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+    val robidx = Output(new RobPtr)
+    val pc     = Input(UInt(VAddrBits.W))
+  })
+
   val writebackLda = Vec(LduCnt, DecoupledIO(new MemExuOutput))
   val writebackSta = Vec(StaCnt, DecoupledIO(new MemExuOutput))
   val writebackStd = Vec(StdCnt, DecoupledIO(new MemExuOutput))
@@ -1887,6 +1893,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.reset_backend := DontCare
   }
   io.resetInFrontendBypass.toL2Top := io.resetInFrontendBypass.fromFrontend
+
+  io.mem_to_ooo.storeDebugInfo := DontCare
+  // store event difftest information
+  if (env.EnableDifftest) {
+    (0 until EnsbufferWidth).foreach{i =>
+        io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.robIdx
+        sbuffer.io.vecDifftestInfo(i).bits.pc := io.mem_to_ooo.storeDebugInfo(i).pc
+    }
+  }
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

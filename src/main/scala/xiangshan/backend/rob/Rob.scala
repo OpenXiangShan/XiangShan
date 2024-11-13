@@ -111,6 +111,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadLqIdx = Valid(new LqPtr)
     }
     val debugRolling = new RobDebugRollingIO
+
+    // store event difftest information
+    val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+      val robidx = Input(new RobPtr)
+      val pc     = Output(UInt(VAddrBits.W))
+    })
   })
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.exuWriteback.filter(!_.bits.params.hasStdFu).toSeq
@@ -1489,6 +1495,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     diffCriticalErrorEvent.valid := io.criticalError && !RegNext(io.criticalError)
     diffCriticalErrorEvent.coreid := io.hartId
     diffCriticalErrorEvent.criticalError := io.criticalError
+  }
+
+  //store evetn difftest information
+  io.storeDebugInfo := DontCare
+  if (env.EnableDifftest) {
+    io.storeDebugInfo.map{port =>
+      port.pc := debug_microOp(port.robidx.value).pc
+    }
   }
 
   val commitLoadVec = VecInit(commitLoadValid)
