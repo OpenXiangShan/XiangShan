@@ -153,17 +153,23 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val instrCnt = Output(UInt(64.W))
       val dse_rst = Input(Reset())
       val reset_vector = Input(UInt(36.W))
+      val dse_reset_valid = Output(Bool())
+      val dse_reset_vec = Output(UInt(36.W))
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val reset_sync = withClockAndReset(io.clock.asClock, io.reset.asBool.asAsyncReset) { ResetGen() }
+    val dse_reset_sync = withClockAndReset(io.clock.asClock, dseCtrl.module.io.core_reset.asAsyncReset) { ResetGen() }
+    val true_reset_sync = (reset_sync.asBool || dse_reset_sync.asBool).asAsyncReset
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
-    childReset := `reset_sync`
+    childReset := `true_reset_sync`
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
+    io.dse_reset_valid := dse_reset_sync.asBool
+    io.dse_reset_vec := dseCtrl.module.io.reset_vector
 
     // input
     dontTouch(dma)
@@ -176,10 +182,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
+//    val true_reset_vector = Mux(true_reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector)
+    val true_reset_vector = withClock(io.clock.asClock) {
+      // RegEnable( Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector),
+      // enable = true_reset_sync.asBool)
+      RegNext(RegNext(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector)))
+    }
+
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
       io.riscv_halt(i) := core.module.io.cpu_halt
-      core.module.io.reset_vector := io.reset_vector
+      core.module.io.reset_vector := true_reset_vector
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
@@ -207,16 +220,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, reset_sync) {
+    withClockAndReset(io.clock.asClock, true_reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      ResetGen(resetChain, true_reset_sync, !debugOpts.FPGAPlatform)
     }
 
     dseCtrl.module.io.clk := io.clock.asClock
     dseCtrl.module.io.rst := io.dse_rst
 //    core_with_l2.head.module.io.robSize := dseCtrl.module.io.robSize
+    dseCtrl.module.io.instrCnt := io.instrCnt
 
 
     ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")

@@ -73,6 +73,8 @@ class SimTop(implicit p: Parameters) extends Module {
     val dse_rst = Input(Bool())
     val instrCnt = Output(UInt(64.W))
     val reset_vector = Input(UInt(36.W))
+    val dse_reset_valid = Output(Bool())
+    val dse_reset_vec = Output(UInt(36.W))
   })
 
   simMMIO.io.uart <> io.uart
@@ -80,6 +82,8 @@ class SimTop(implicit p: Parameters) extends Module {
   // ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
   io.instrCnt := soc.io.instrCnt
   soc.io.reset_vector := io.reset_vector
+  io.dse_reset_valid := soc.io.dse_reset_valid
+  io.dse_reset_vec := soc.io.dse_reset_vec
 
   if(useDRAMSim){
     io.memAXI <> soc.memory

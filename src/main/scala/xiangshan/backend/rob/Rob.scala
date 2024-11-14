@@ -344,6 +344,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // for DSE
    val pRobSize = WireInit(0.U(log2Up(RobSize + 1).W))
    ExcitingUtils.addSink(pRobSize, "DSE_ROBSIZE")
+   ExcitingUtils.addSource(io.commits.commitValid(0), "DSE_COMMITVALID")
   /**
    * states of Rob
    */
