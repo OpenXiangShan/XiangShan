@@ -316,6 +316,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val cfiUpdate = new CfiUpdateInfo
   val fullTarget = UInt(XLEN.W) // only used for tval storage in backend
 
+  val isRaw = Bool()
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
