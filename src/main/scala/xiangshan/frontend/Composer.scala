@@ -73,8 +73,8 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {
-    c.io.update.valid := io.update.valid
-    c.io.update.bits := io.update.bits
+    c.io.update.valid     := io.update.valid
+    c.io.update.bits      := io.update.bits
     c.io.update.bits.meta := update_meta
     update_meta = update_meta >> c.meta_size
   }
