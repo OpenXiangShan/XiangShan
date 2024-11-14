@@ -395,7 +395,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   // FIXME: what if port 0 is not mmio, but port 1 is?
   // cancel mmio fetch if exception occurs
-  val f2_mmio = f2_exception(0) === ExceptionType.none && (
+  val f2_mmio = !ExceptionType.hasException(f2_exception(0)) && (
     fromICache(0).bits.pmp_mmio ||
       // currently, we do not distinguish between Pbmt.nc and Pbmt.io
       // anyway, they are both non-cacheable, and should be handled with mmio fsm and sent to Uncache module
@@ -486,7 +486,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
    */
   val f2_crossPage_exception_vec = VecInit((0 until PredictWidth).map { i =>
     Mux(
-      isLastInLine(f2_pc(i)) && !f2_pd(i).isRVC && f2_doubleLine && f2_exception(0) === ExceptionType.none,
+      isLastInLine(f2_pc(i)) && !f2_pd(i).isRVC && f2_doubleLine && !ExceptionType.hasException(f2_exception(0)),
       f2_exception(1),
       ExceptionType.none
     )
@@ -706,7 +706,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         assert(!io.iTLBInter.resp.bits.miss, "blocked mode iTLB miss when resp.fire")
         val tlb_exception = ExceptionType.fromTlbResp(io.iTLBInter.resp.bits)
         // if tlb has exception, abort checking pmp, just send instr & exception to ibuffer and wait for commit
-        mmio_state := Mux(tlb_exception === ExceptionType.none, m_sendPMP, m_waitCommit)
+        mmio_state := Mux(ExceptionType.hasException(tlb_exception), m_waitCommit, m_sendPMP)
         // also save itlb response
         mmio_resend_addr              := io.iTLBInter.resp.bits.paddr(0)
         mmio_resend_exception         := tlb_exception
@@ -719,7 +719,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       // if pmp re-check does not respond mmio, must be access fault
       val pmp_exception = Mux(io.pmp.resp.mmio, ExceptionType.fromPMPResp(io.pmp.resp), ExceptionType.af)
       // if pmp has exception, abort sending request, just send instr & exception to ibuffer and wait for commit
-      mmio_state := Mux(pmp_exception === ExceptionType.none, m_resendReq, m_waitCommit)
+      mmio_state := Mux(ExceptionType.hasException(pmp_exception), m_waitCommit, m_resendReq)
       // also save pmp response
       mmio_resend_exception := pmp_exception
     }
@@ -871,7 +871,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     case 0 => f3_backendException
     case _ => false.B
   }
-  io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
+  io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(ExceptionType.hasException)
   io.toIbuffer.bits.illegalInstr    := f3_ill
   io.toIbuffer.bits.triggered       := f3_triggered
 
@@ -942,7 +942,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isRet  := isRet
 
     io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
-    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception =/= ExceptionType.none
+    io.toIbuffer.bits.crossPageIPFFix(0) := ExceptionType.hasException(mmio_resend_exception)
     io.toIbuffer.bits.illegalInstr(0)    := mmioRVCExpander.io.ill
 
     io.toIbuffer.bits.enqEnable := f3_mmio_range.asUInt
