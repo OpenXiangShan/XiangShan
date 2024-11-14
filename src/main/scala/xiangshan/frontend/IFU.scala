@@ -80,6 +80,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = new TlbRequestIO
   val pmp             = new ICachePMPBundle
   val mmioCommitRead  = new mmioCommitRead
+  val csr_fsIsOff     = Input(Bool())
 }
 
 // record the situation in which fallThruAddr falls into
@@ -523,7 +524,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_instr = RegEnable(f2_instr, f2_fire)
 
   expanders.zipWithIndex.foreach { case (expander, i) =>
-    expander.io.in := f3_instr(i)
+    expander.io.in      := f3_instr(i)
+    expander.io.fsIsOff := io.csr_fsIsOff
   }
   // Use expanded instruction only when input is legal.
   // Otherwise use origin illegal RVC instruction.
@@ -919,7 +921,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
   val mmioRVCExpander = Module(new RVCExpander)
-  mmioRVCExpander.io.in := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+  mmioRVCExpander.io.in      := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+  mmioRVCExpander.io.fsIsOff := io.csr_fsIsOff
 
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio) {

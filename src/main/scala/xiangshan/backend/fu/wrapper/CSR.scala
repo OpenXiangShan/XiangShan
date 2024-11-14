@@ -353,6 +353,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.mem_trigger      := csrMod.io.status.memTrigger
       // virtual mode
       custom.virtMode := csrMod.io.status.privState.V.asBool
+      // xstatus.fs field is off
+      custom.fsIsOff := csrMod.io.toDecode.illegalInst.fsIsOff
   }
 
   csrOut.instrAddrTransType := csrMod.io.status.instrAddrTransType

@@ -614,6 +614,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode
   val virtMode = Output(Bool())
+  // xstatus.fs field is off
+  val fsIsOff = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
