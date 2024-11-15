@@ -81,12 +81,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
-    (tvalFillPc                     ) -> trapPC,
-    (tvalFillPcPlus2                ) -> (trapPC + 2.U),
-    (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
-    (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
-    (isLSGuestExcp                  ) -> trapMemVA,
-    (tvalFillInst                   ) -> trapInst,
+    (tvalFillPc                        ) -> trapPC,
+    (tvalFillPcPlus2                   ) -> (trapPC + 2.U),
+    (tvalFillMemVaddr || isLSGuestExcp ) -> trapMemVA,
+    (tvalFillInst                      ) -> trapInst,
   ))
 
   private val tval2 = Mux1H(Seq(

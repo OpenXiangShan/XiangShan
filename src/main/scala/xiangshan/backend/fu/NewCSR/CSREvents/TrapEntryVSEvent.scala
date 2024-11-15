@@ -92,11 +92,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
-    (tvalFillPc                     ) -> trapPC,
-    (tvalFillPcPlus2                ) -> (trapPC + 2.U),
-    (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
-    (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
-    (tvalFillInst                   ) -> trapInst,
+    tvalFillPc       -> trapPC,
+    tvalFillPcPlus2  -> (trapPC + 2.U),
+    tvalFillMemVaddr -> trapMemVA,
+    tvalFillInst     -> trapInst,
   ))
 
   private val instrAddrTransType = AddrTransType(
