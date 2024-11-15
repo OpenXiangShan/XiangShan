@@ -412,8 +412,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   }
   predictors.io.s1_fire := s1_fire_dup
 
-  s2_fire_dup := s2_valid_dup
-
   for (
     ((((s1_fire, s2_flush), s2_fire), s2_valid), s1_flush) <-
       s1_fire_dup zip s2_flush_dup zip s2_fire_dup zip s2_valid_dup zip s1_flush_dup
