@@ -694,8 +694,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     vecExcpInfo.bits.vstart := exceptionDataRead.bits.vstart
   }
 
-  io.csr.vstart.valid := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstartEn, resetVstart))
-  io.csr.vstart.bits := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstart, 0.U))
+  io.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
+  io.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
 
   val vxsat = Wire(Valid(Bool()))
   vxsat.valid := io.commits.isCommit && vxsat.bits
