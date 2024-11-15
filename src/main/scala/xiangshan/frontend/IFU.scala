@@ -459,7 +459,35 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   val f2_cache_response_data = fromICache.map(_.bits.data)
-  val f2_data_2_cacheline    = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
+  /* NOTE: the following `Cat(_data(0), _data(0))` *is* intentional, _data(1) is technically useless in current design.
+   * Explanation:
+   * In the old design, IFU is responsible for selecting requested data from two adjacent cachelines,
+   *    so IFU has to receive 2*64B (2cacheline * 64B) data from ICache, and do `Cat(_data(1), _data(0))` here.
+   * However, a fetch block is 34B at max, sending 2*64B is quiet a waste of power.
+   * In current design (2024.06~), ICacheDataArray is responsible for selecting data from two adjacent cachelines,
+   *    so IFU only need to receive 40B (5bank * 8B) valid data, and use only the first port is enough.
+   * For example, when pc falls on the 6th bank in cacheline0(so this is a doubleline request):
+   *                                MSB                                         LSB
+   *                  cacheline 1 || 1-7 | 1-6 | 1-5 | 1-4 | 1-3 | 1-2 | 1-1 | 1-0 ||
+   *                  cacheline 0 || 0-7 | 0-6 | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | 0-0 ||
+   *    and ICacheDataArray will respond:
+   *      fromICache(0).bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *    therefore simply make a copy of the response and `Cat` together, and obtain the requested data from centre:
+   *          f2_data_2_cacheline || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 | 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *                                             requested data: ^-----------------------------^
+   * For another example, pc falls on the 1st bank in cacheline 0, we have:
+   *      fromICache(0).bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *          f2_data_2_cacheline || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx | xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *                                                                           requested data: ^-----------------------------^
+   * Each "| x-y |" block is a 8B bank from cacheline(x).bank(y)
+   * Please also refer to:
+   * - DataArray selects data:
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L355-L381
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L149-L161
+   * - ICache respond to IFU:
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
+   */
+  val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
 
   val f2_cut_data = cut(f2_data_2_cacheline, f2_cut_ptr)
 
