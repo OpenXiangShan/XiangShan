@@ -85,7 +85,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   // We fill pc here
   private val tvalFillPc       = isFetchExcp && !fetchCrossPage || isFetchBkpt
   private val tvalFillPcPlus2  = isFetchExcp && fetchCrossPage
-  private val tvalFillMemVaddr = isMemExcp
+  private val tvalFillMemVaddr = isMemExcp || isMemBkpt
   private val tvalFillGVA      =
     (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
     (isMemExcp || isMemBkpt) && memIsVirt
