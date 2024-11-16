@@ -3,9 +3,10 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.experimental.SourceInfo
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
-import utility.{SignExt, PerfEvent}
+import utility.{PerfEvent, SignExt}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
@@ -18,14 +19,14 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
-trait MachineLevel { self: NewCSR =>
+trait MachineLevel extends LazyLogging { self: NewCSR =>
   val mstatus = Module(new MstatusModule)
     .setAddr(CSRs.mstatus)
 
   val misa = Module(new CSRModule("Misa", new MisaBundle))
     .setAddr(CSRs.misa)
 
-  println(s"[CSR] supported isa ext: ${misa.bundle.getISAString}")
+  logger.info(s"[CSR] supported isa ext: ${misa.bundle.getISAString}")
 
   val medeleg = Module(new CSRModule("Medeleg", new MedelegBundle))
     .setAddr(CSRs.medeleg)

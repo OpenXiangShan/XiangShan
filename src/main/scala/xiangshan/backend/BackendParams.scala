@@ -19,6 +19,7 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
@@ -36,7 +37,7 @@ case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
   iqWakeUpParams : Seq[WakeUpConfig],
-) {
+) extends LazyLogging {
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
 
@@ -51,13 +52,13 @@ case class BackendParams(
     copyPdestInfo.contains(exuIdx)
   }
   def connectWakeup(exuIdx: Int): Unit = {
-    println(s"[Backend] copyPdestInfo ${copyPdestInfo}")
+    logger.trace(s"[Backend] copyPdestInfo ${copyPdestInfo}")
     if (copyPdestInfo.contains(exuIdx)) {
-      println(s"[Backend] exuIdx ${exuIdx} be connected, old info ${copyPdestInfo(exuIdx)}")
+      logger.trace(s"[Backend] exuIdx ${exuIdx} be connected, old info ${copyPdestInfo(exuIdx)}")
       val newInfo = exuIdx -> (copyPdestInfo(exuIdx)._1, copyPdestInfo(exuIdx)._2 + 1)
       copyPdestInfo.remove(exuIdx)
       copyPdestInfo += newInfo
-      println(s"[Backend] exuIdx ${exuIdx} be connected, new info ${copyPdestInfo(exuIdx)}")
+      logger.trace(s"[Backend] exuIdx ${exuIdx} be connected, new info ${copyPdestInfo(exuIdx)}")
     }
   }
   def getCopyPdestIndex(exuIdx: Int): Int = {
@@ -436,7 +437,7 @@ case class BackendParams(
     val rdTypes = Seq(IntRD(), FpRD(), VfRD())
     for(wbType <- wbTypes){
       for(rdType <- rdTypes){
-        println(s"[BackendParams] wbType: ${wbType}, rdType: ${rdType}")
+        logger.trace(s"[BackendParams] wbType: ${wbType}, rdType: ${rdType}")
         allRealExuParams.map {
           case exuParam =>
             val wbPortConfigs = exuParam.wbPortConfigs
@@ -458,7 +459,7 @@ case class BackendParams(
           .sortBy(_._1.get.priority)
           .groupBy(_._1.get.port).map { case (wbPort, intWbRdPairs) =>
             val rdCfgs = intWbRdPairs.map(_._2).flatten
-            println(s"[BackendParams] wb port ${wbPort} rdcfgs: ${rdCfgs}")
+            logger.trace(s"[BackendParams] wb port ${wbPort} rdcfgs: ${rdCfgs}")
             rdCfgs.groupBy(_.port).foreach { case (p, rdCfg) =>
               //println(s"[BackendParams] rdport: ${p}, cfgs: ${rdCfg}")
               rdCfg.zip(rdCfg.drop(1)).foreach { case (cfg0, cfg1) => assert(cfg0.priority <= cfg1.priority, s"an exu has high priority at ${wbType} wb port ${wbPort}, but has low priority at ${rdType} rd port ${p}") }

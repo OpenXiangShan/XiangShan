@@ -329,7 +329,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s0_ghist = WireInit(0.U.asTypeOf(UInt(HistoryLength.W)))
 
-  println(f"history buffer length ${HistoryLength}")
+  logger.info(f"history buffer length ${HistoryLength}")
   val ghv_write_datas = Wire(Vec(HistoryLength, Bool()))
   val ghv_wens        = Wire(Vec(HistoryLength, Bool()))
 

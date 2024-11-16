@@ -44,7 +44,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
 
-  println(s"[Rename] numRegSrc: $numRegSrc")
+  logger.info(s"numRegSrc: $numRegSrc")
 
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))

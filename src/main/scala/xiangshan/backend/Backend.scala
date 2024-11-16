@@ -83,7 +83,7 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     ibp.updateIdx(idx)
   }
 
-  println(params.iqWakeUpParams)
+  logger.debug(s"${params.iqWakeUpParams}")
 
   for ((schdCfg, i) <- params.allSchdParams.zipWithIndex) {
     schdCfg.bindBackendParam(params)
@@ -99,14 +99,14 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     exuCfg.updateExuIdx(i)
   }
 
-  println("[Backend] ExuConfigs:")
+  logger.debug("ExuConfigs:")
   for (exuCfg <- params.allExuParams) {
     val fuConfigs = exuCfg.fuConfigs
     val wbPortConfigs = exuCfg.wbPortConfigs
     val immType = exuCfg.immType
 
-    println("[Backend]   " +
-      s"${exuCfg.name}: " +
+    logger.debug(
+      s"  ${exuCfg.name}: " +
       (if (exuCfg.fakeUnit) "fake, " else "") +
       (if (exuCfg.hasLoadFu || exuCfg.hasHyldaFu) s"LdExuIdx(${backendParams.getLdExuIdx(exuCfg)})" else "") +
       s"${fuConfigs.map(_.name).mkString("fu(s): {", ",", "}")}, " +
@@ -132,47 +132,47 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
     )
   }
 
-  println(s"[Backend] all fu configs")
+  logger.trace(s"all fu configs")
   for (cfg <- FuConfig.allConfigs) {
-    println(s"[Backend]   $cfg")
+    logger.trace(s"  $cfg")
   }
 
-  println(s"[Backend] Int RdConfigs: ExuName(Priority)")
+  logger.trace(s"Int RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(IntData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Int WbConfigs: ExuName(Priority)")
+  logger.trace(s"Int WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(IntData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Fp RdConfigs: ExuName(Priority)")
+  logger.trace(s"Fp RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(FpData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Fp WbConfigs: ExuName(Priority)")
+  logger.trace(s"Fp WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(FpData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Vf RdConfigs: ExuName(Priority)")
+  logger.trace(s"Vf RdConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getRdPortParams(VecData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Vf WbConfigs: ExuName(Priority)")
+  logger.trace(s"Vf WbConfigs: ExuName(Priority)")
   for ((port, seq) <- params.getWbPortParams(VecData())) {
-    println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
+    logger.trace(s"  port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
-  println(s"[Backend] Dispatch Configs:")
-  println(s"[Backend] Load IQ enq width(${params.numLoadDp}), Store IQ enq width(${params.numStoreDp})")
-  println(s"[Backend] Load DP width(${LSQLdEnqWidth}), Store DP width(${LSQStEnqWidth})")
+  logger.info(s"Dispatch Configs:")
+  logger.info(s"  Load IQ enq width(${params.numLoadDp}), Store IQ enq width(${params.numStoreDp})")
+  logger.info(s"  Load DP width(${LSQLdEnqWidth}), Store DP width(${LSQStEnqWidth})")
 
   params.updateCopyPdestInfo
-  println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
+  logger.trace(s"copyPdestInfo ${params.copyPdestInfo}")
   params.allExuParams.map(_.copyNum)
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val pcTargetMem = LazyModule(new PcTargetMem(params))
@@ -220,7 +220,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       memScheduler.io.toSchedulers.wakeupVec
     ).map(x => (x.bits.exuIdx, x)).toMap
 
-  println(s"[Backend] iq wake up keys: ${iqWakeUpMappedBundle.keys}")
+  logger.trace(s"iq wake up keys: ${iqWakeUpMappedBundle.keys}")
 
   wbFuBusyTable.io.in.intSchdBusyTable := intScheduler.io.wbFuBusyTable
   wbFuBusyTable.io.in.fpSchdBusyTable := fpScheduler.io.wbFuBusyTable
@@ -376,8 +376,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   dataPath.io.ldCancel := io.mem.ldCancel
 
-  println(s"[Backend] wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
-  println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
+  logger.trace(s"wbDataPath.io.toIntPreg: ${wbDataPath.io.toIntPreg.size}, dataPath.io.fromIntWb: ${dataPath.io.fromIntWb.size}")
+  logger.trace(s"wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
   dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
@@ -401,9 +401,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     }
   og2ForVector.io.fromOg1ImmInfo := dataPath.io.og1ImmInfo.zip(params.allExuParams).filter(_._2.needOg2).map(_._1)
 
-  println(s"[Backend] BypassNetwork OG1 Mem Size: ${bypassNetwork.io.fromDataPath.mem.zip(params.memSchdParams.get.issueBlockParams).filterNot(_._2.needOg2Resp).size}")
-  println(s"[Backend] BypassNetwork OG2 Mem Size: ${bypassNetwork.io.fromDataPath.mem.zip(params.memSchdParams.get.issueBlockParams).filter(_._2.needOg2Resp).size}")
-  println(s"[Backend] bypassNetwork.io.fromDataPath.mem: ${bypassNetwork.io.fromDataPath.mem.size}, dataPath.io.toMemExu: ${dataPath.io.toMemExu.size}")
+  logger.trace(s"BypassNetwork OG1 Mem Size: ${bypassNetwork.io.fromDataPath.mem.zip(params.memSchdParams.get.issueBlockParams).filterNot(_._2.needOg2Resp).size}")
+  logger.trace(s"BypassNetwork OG2 Mem Size: ${bypassNetwork.io.fromDataPath.mem.zip(params.memSchdParams.get.issueBlockParams).filter(_._2.needOg2Resp).size}")
+  logger.trace(s"bypassNetwork.io.fromDataPath.mem: ${bypassNetwork.io.fromDataPath.mem.size}, dataPath.io.toMemExu: ${dataPath.io.toMemExu.size}")
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
   bypassNetwork.io.fromDataPath.fp <> dataPath.io.toFpExu
   bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfArithExu
@@ -598,8 +598,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
   private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(x => x.hasLoadFu || x.hasHyldaFu))
   private val memExuBlocksHasVecLoad = memIssueParams.map(_.exuBlockParams.map(x => x.hasVLoadFu))
-  println(s"[Backend] memExuBlocksHasLDU: $memExuBlocksHasLDU")
-  println(s"[Backend] memExuBlocksHasVecLoad: $memExuBlocksHasVecLoad")
+  logger.debug(s"memExuBlocksHasLDU: $memExuBlocksHasLDU")
+  logger.debug(s"memExuBlocksHasVecLoad: $memExuBlocksHasVecLoad")
 
   private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)
   for (i <- toMem.indices) {
@@ -812,7 +812,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("backend perfEvents Set", name, inc, i)
+      logger.trace(f"Backend perfEvents Set, ${name}, ${inc}, ${i}")
     }
   }
 

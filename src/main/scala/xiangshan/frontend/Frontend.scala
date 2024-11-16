@@ -400,7 +400,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("Frontend perfEvents Set", name, inc, i)
+      logger.trace(f"Frontend perfEvents Set, ${name}, ${inc}, ${i}")
     }
   }
 

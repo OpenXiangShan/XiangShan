@@ -148,7 +148,7 @@ class ITTageTable(
   val foldedWidth = if (nRows >= SRAM_SIZE) nRows / SRAM_SIZE else 1
 
   if (nRows < SRAM_SIZE) {
-    println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
+    logger.warn(f"ittage table $tableIdx has small sram depth of $nRows")
   }
 
   // override val debug = true

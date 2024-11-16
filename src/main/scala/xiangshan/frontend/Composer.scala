@@ -28,7 +28,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
   require(all_fast_pred.length <= 1)
   if (all_fast_pred.length == 1) {
     val fast_pred = all_fast_pred(0)
-    println("[composer] bypassing output of fast pred: " + fast_pred.name)
+    logger.info("bypassing output of fast pred: " + fast_pred.name)
     io.out.s1 := fast_pred.io.out.s1
   }
 
@@ -59,7 +59,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     }
     meta_sz = meta_sz + c.meta_size
   }
-  println(s"total meta size: $meta_sz\n\n")
+  logger.info(s"total meta size: $meta_sz")
 
   io.in.ready := components.map(_.io.s1_ready).reduce(_ && _)
 

@@ -295,7 +295,7 @@ class TageTable(
   val bankFoldWidth = if (bankSize >= bankSRAMSize) bankSize / bankSRAMSize else 1
   val uFoldedWidth  = nRowsPerBr / uSRAMSize
   if (bankSize < bankSRAMSize) {
-    println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
+    logger.warn(f"tage table $tableIdx has small sram depth of $bankSize")
   }
   val bankIdxWidth = log2Ceil(nBanks)
   def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth - 1, 0) === _.U))

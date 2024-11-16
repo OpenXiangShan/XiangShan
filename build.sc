@@ -63,6 +63,14 @@ trait HasChisel extends SbtModule {
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
 
+trait HasLogging extends SbtModule {
+  override def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(
+    ivy"com.typesafe.scala-logging::scala-logging:3.9.5",
+    ivy"ch.qos.logback:logback-classic:1.5.12",
+    ivy"org.fusesource.jansi:jansi:1.17",
+  )
+}
+
 object rocketchip
   extends $file.`rocket-chip`.common.RocketChipModule
     with HasChisel {
@@ -109,7 +117,7 @@ object rocketchip
   }
 }
 
-object utility extends HasChisel {
+object utility extends HasChisel with HasLogging {
 
   override def millSourcePath = pwd / "utility"
 
@@ -233,7 +241,7 @@ trait XiangShanModule extends ScalaModule {
   override def forkEnv = Map("PATH" -> envPATH)
 }
 
-object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
+object xiangshan extends XiangShanModule with HasChisel with HasLogging with ScalafmtModule {
 
   override def millSourcePath = pwd
 
@@ -259,8 +267,6 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
-    ivy"com.typesafe.scala-logging::scala-logging:3.9.5",
-    ivy"ch.qos.logback:logback-classic:1.5.12",
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
