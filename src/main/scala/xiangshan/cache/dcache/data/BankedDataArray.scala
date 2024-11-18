@@ -13,6 +13,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Gurindar S. Sohi, and Manoj Franklin. "[High-bandwidth data memory systems for superscalar processors.]
+* (https://doi.org/10.1145/106972.106980)" 4th International Conference on Architectural Support for Programming
+* Languages and Operating Systems (ASPLOS). 1991.
 ***************************************************************************************/
 
 package xiangshan.cache

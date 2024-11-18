@@ -12,6 +12,14 @@
   * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
   *
   * See the Mulan PSL v2 for more details.
+  *
+  *
+  * Acknowledgement
+  *
+  * This implementation is inspired by several key papers:
+  * [1] André Seznec. "[A 64-Kbytes ITTAGE indirect branch predictor.](https://inria.hal.science/hal-00639041)" The
+  * Journal of Instruction-Level Parallelism (JILP) 2nd JILP Workshop on Computer Architecture Competitions (JWAC):
+  * Championship Branch Prediction (CBP). 2011.
   ***************************************************************************************/
 
 package xiangshan.frontend

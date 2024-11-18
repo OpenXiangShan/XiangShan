@@ -12,6 +12,13 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Richard Kessler. "[The alpha 21264 microprocessor.](https://doi.org/10.1109/40.755465)" IEEE Micro 19.2: 24-36.
+* 1999.
 ***************************************************************************************/
 
 package xiangshan.mem.mdp

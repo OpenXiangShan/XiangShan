@@ -12,6 +12,18 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Pierre Michaud. "[A PPM-like, tag-based branch predictor.](https://inria.hal.science/hal-03406188)" The Journal
+* of Instruction-Level Parallelism (JILP) 7: 10. 2005.
+* [2] André Seznec, and Pierre Michaud. "[A case for (partially) tagged geometric history length branch prediction.]
+* (https://inria.hal.science/hal-03408381)" The Journal of Instruction-Level Parallelism (JILP) 8: 23. 2006.
+* [3] André Seznec. "[A 256 kbits l-tage branch predictor.](http://www.irisa.fr/caps/people/seznec/L-TAGE.pdf)" The
+* Journal of Instruction-Level Parallelism (JILP) Special Issue: The Second Championship Branch Prediction Competition
+* (CBP) 9: 1-6. 2007.
 ***************************************************************************************/
 
 package xiangshan.frontend
