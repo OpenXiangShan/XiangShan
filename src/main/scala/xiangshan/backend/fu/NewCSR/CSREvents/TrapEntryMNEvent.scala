@@ -8,20 +8,13 @@ import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.AddrTransType
 
 class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
   val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE))
   val mnepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
-
-  def getBundleByName(name: String): Valid[CSRBundle] = {
-    name match {
-      case "mnstatus"  => this.mnstatus
-      case "mnepc"     => this.mnepc
-      case "mncause"   => this.mncause
-    }
-  }
+  val targetPc = ValidIO(new TargetPCBundle)
 }
 
 class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -36,6 +29,8 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isInterrupt = in.causeNO.Interrupt.asBool
+
+  private val isFetchMalAddr = in.isFetchMalAddr
 
   private val trapPC = genTrapVA(
     iMode,
@@ -56,23 +51,20 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnstatus.bits.MNPP         := current.privState.PRVM
   out.mnstatus.bits.MNPV         := current.privState.V
   out.mnstatus.bits.NMIE         := 0.U
-  out.mnepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
+  out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO
-  out.targetPc.bits              := in.pcFromXtvec
+  out.targetPc.bits.pc           := in.pcFromXtvec
+  out.targetPc.bits.raiseIPF     := false.B
+  out.targetPc.bits.raiseIAF     := AddrTransType(bare = true).checkAccessFault(in.pcFromXtvec)
+  out.targetPc.bits.raiseIGPF    := false.B
 
 }
 
-trait TrapEntryMNEventSinkBundle { self: CSRModule[_] =>
+trait TrapEntryMNEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val trapToMN = IO(Flipped(new TrapEntryMNEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = trapToMN.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(trapToMN.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

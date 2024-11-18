@@ -171,7 +171,7 @@ class TLBFA(
     entries(io.w.bits.wayIdx).apply(io.w.bits.data)
   }
   // write assert, should not duplicate with the existing entries
-  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), s2xlate = io.w.bits.data.s2xlate) && vi })
+  val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
   val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
@@ -384,6 +384,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.ppn(d) := p.bits.ppn(d)
       rp.bits.perm(d).pf := p.bits.perm(d).pf
       rp.bits.perm(d).af := p.bits.perm(d).af
+      rp.bits.perm(d).v := p.bits.perm(d).v
       rp.bits.perm(d).d := p.bits.perm(d).d
       rp.bits.perm(d).a := p.bits.perm(d).a
       rp.bits.perm(d).g := p.bits.perm(d).g

@@ -13,12 +13,12 @@ import scala.collection.immutable.SeqMap
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x30.U ||
+      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
       value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.miselect)
 
@@ -40,12 +40,12 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 
   val siselect = Module(new CSRModule("Siselect", new SISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x30.U ||
+      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
       value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.siselect)
 
@@ -67,11 +67,10 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 
   val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    inIMSICRange := value >= 0x70.U && value < 0x100.U
     isIllegal :=
       value < 0x70.U ||
-      value >= 0x100.U ||
-      value(0) === 1.U
+      value >= 0x100.U
   })
     .setAddr(CSRs.vsiselect)
 

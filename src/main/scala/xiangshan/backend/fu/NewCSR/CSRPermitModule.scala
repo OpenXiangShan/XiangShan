@@ -231,8 +231,7 @@ class CSRPermitModule extends Module {
    * Sm/Ssstateen end
    */
 
-  private val rwStimecmp_EX_II = csrAccess && ((privState.isModeHS && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.vstimecmp.U ||
-    ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_II = csrAccess && !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
   private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
     wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
 
@@ -253,9 +252,8 @@ class CSRPermitModule extends Module {
 
   private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
     ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-    (privState.isModeVS && vsiselect > 0x1FF.U)) && addr === CSRs.sireg.U
-  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) || 
-    privState.isModeVU) && addr === CSRs.sireg.U
+    (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U)) && addr === CSRs.sireg.U
 
   private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
 

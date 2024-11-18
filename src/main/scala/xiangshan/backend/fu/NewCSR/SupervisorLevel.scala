@@ -154,13 +154,11 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     override val len: Int = 32
     val OFVEC = RO(31, 3).withReset(0.U)
   }) with HasMhpmeventOfBundle {
-    reg.OFVEC := ofVec
     regOut.OFVEC := Mux1H(Seq(
-        privState.isModeM  -> reg.OFVEC.asUInt,
-        privState.isModeHS -> (mcounteren.HPM.asUInt & reg.OFVEC.asUInt),
-        privState.isModeVS -> (mcounteren.HPM.asUInt & hcounteren.HPM.asUInt & reg.OFVEC.asUInt),
-      )
-    )
+      privState.isModeM  -> ofVec,
+      privState.isModeHS -> (mcounteren.HPM.asUInt & ofVec),
+      privState.isModeVS -> (mcounteren.HPM.asUInt & hcounteren.HPM.asUInt & ofVec),
+    ))
   }).setAddr(CSRs.scountovf)
 
   val sstateen0 = Module(new CSRModule("Sstateen", new SstateenBundle0) with HasStateen0Bundle {
@@ -210,6 +208,7 @@ class SstatusBundle extends CSRBundle {
   val XS   = ContextStatusRO(16, 15).withReset(0.U)
   val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U)
   val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U)
+  val SDT  = CSRWARLField   (24, wNoFilter).withReset(0.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty)
 }

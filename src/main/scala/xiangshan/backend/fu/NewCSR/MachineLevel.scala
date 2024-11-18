@@ -5,8 +5,7 @@ import chisel3.experimental.SourceInfo
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
-import utility.SignExt
-import utils.PerfEvent
+import utility.{SignExt, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
@@ -15,7 +14,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.NewCSR.CSRConfig._
-import xiangshan.backend.fu.NewCSR.CSRFunc.wNoEffectWhen
+import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
@@ -166,8 +165,12 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
-      regOut := this.perfEvents(num - 3)
+    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasOfFromPerfCntBundle {
+      when(wen){
+        reg.OF := wdata.OF
+      }.elsewhen(ofFromPerfCnt) {
+        reg.OF := ofFromPerfCnt
+      }
     })
       .setAddr(CSRs.mhpmevent3 - 3 + num)
   )
@@ -225,6 +228,8 @@ trait MachineLevel { self: NewCSR =>
         wen -> wdata.STIP,
         fromMvip.STIP.valid -> fromMvip.STIP.bits,
       ))
+    }.otherwise {
+      reg.STIP := reg.STIP
     }
 
     // bit 6 VSTIP
@@ -245,7 +250,7 @@ trait MachineLevel { self: NewCSR =>
     // mip.SEIP is implemented as the alias of mvip.SEIP when mvien=0
     // the read valid of SEIP is ORed by mvip.SEIP and the other source from the interrupt controller.
 
-    toMvip.SEIP.valid := wen && !this.mvien.SSIE
+    toMvip.SEIP.valid := wen && !this.mvien.SEIE
     toMvip.SEIP.bits := wdata.SEIP
     // When mvien.SEIE = 0, mip.SEIP is alias of mvip.SEIP.
     // Otherwise, mip.SEIP is read only 0
@@ -263,13 +268,16 @@ trait MachineLevel { self: NewCSR =>
     regOut.SGEIP := Cat(hgeip.asUInt & hgeie.asUInt).orR
 
     // bit 13 LCOFIP
-    reg.LCOFIP := lcofiReq
     when (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid || wen) {
       reg.LCOFIP := Mux1H(Seq(
         fromSip.LCOFIP.valid  -> fromSip.LCOFIP.bits,
         fromVSip.LCOFIP.valid -> fromVSip.LCOFIP.bits,
         wen -> wdata.LCOFIP,
       ))
+    }.elsewhen(lcofiReq) {
+      reg.LCOFIP := lcofiReq
+    }.otherwise {
+      reg.LCOFIP := reg.LCOFIP
     }
   }).setAddr(CSRs.mip)
 
@@ -280,12 +288,12 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = RO(33, 32)
-    val SSEED = RO(     9)
-    val USEED = RO(     8)
-    val RLB   = RO(     2)
-    val MMWP  = RO(     1)
-    val MML   = RO(     0)
+    val MLPE  = RO(10) // Landing pand, Zicfilp extension
+    val SSEED = RO( 9) // Zkr extension
+    val USEED = RO( 8) // Zkr extension
+    val RLB   = RO( 2) // Smepmp
+    val MMWP  = RO( 1) // Smepmp
+    val MML   = RO( 0) // Smepmp
   })).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
@@ -341,10 +349,10 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mimpid)
 
   val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
-    val ALL = RO(7, 0)
+    val ALL = RO(hartIdLen - 1, 0)
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.reg.ALL := RegEnable(hartid, reset.asBool)
+    this.regOut.ALL := hartid
   })
     .setAddr(CSRs.mhartid)
 
@@ -418,20 +426,6 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
-  // read/write/update mhpmevents -> read/write/update perfEvents
-  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
-    List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
-    List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
-    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
-
-  mhpmevents.foreach { mod =>
-    mod match {
-      case m: HasPerfEventBundle =>
-        m.perfEvents := perfEvents
-      case _ =>
-    }
-  }
-
 }
 
 class MstatusBundle extends CSRBundle {
@@ -452,12 +446,14 @@ class MstatusBundle extends CSRBundle {
   val TVM  = CSRRWField     (20).withReset(0.U)
   val TW   = CSRRWField     (21).withReset(0.U)
   val TSR  = CSRRWField     (22).withReset(0.U)
+  val SDT  = CSRRWField     (24).withReset(0.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
   val SBE  = CSRROField     (36).withReset(0.U)
   val MBE  = CSRROField     (37).withReset(0.U)
   val GVA  = CSRRWField     (38).withReset(0.U)
   val MPV  = VirtMode       (39).withReset(0.U)
+  val MDT  = CSRRWField     (42).withReset(mdtInit.U)
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
@@ -471,15 +467,22 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   with MNretEventSinkBundle
   with SretEventSinkBundle
   with HasRobCommitBundle
+  with HasMachineEnvBundle
 {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
   val sstatusRdata = IO(Output(UInt(64.W)))
 
   val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
+  for ((name, field) <- wAliasSstatus.wdataFields.elements) {
+    reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+      wAliasSstatus.wen && field.asInstanceOf[CSREnumType].isLegal,
+      field.asInstanceOf[CSREnumType]
+    )
+  }
 
   // write connection
-  this.wfn(reg)(Seq(wAliasSstatus))
+  reconnectReg()
 
   when (robCommit.fsDirty || writeFCSR) {
     assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
@@ -490,20 +493,35 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
-
+  // when MDT is explicitly written by 1, clear MIE
+  // only when reg.MDT is zero or wdata.MDT is zero , MIE can be explicitly written by 1
+  when (w.wdataFields.MDT && w.wen) {
+    reg.MIE := false.B
+  }
+  // when DTE is zero, SDT field is read-only zero(write any, read zero, side effect of write 1 is block)
+  val writeSDT = Wire(Bool())
+  writeSDT := Mux(this.menvcfg.DTE.asBool, (w.wdataFields.SDT && w.wen) || (wAliasSstatus.wdataFields.SDT && wAliasSstatus.wen), 0.U)
+  when (!this.menvcfg.DTE) {
+    regOut.SDT := false.B
+  }
+  // SDT and SIE is the same as MDT and MIE
+  when (writeSDT) {
+    reg.SIE := false.B
+  }
   // read connection
-  mstatus :|= reg
+  mstatus :|= regOut
   sstatus := mstatus
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
 }
-class MnstatusBundle extends CSRBundle {
 
+class MnstatusBundle extends CSRBundle {
   val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
   val MNPV   = VirtMode    (7).withReset(0.U)
-  val MNPELP = CSRRWField  (9).withReset(0.U)
+  val MNPELP = RO          (9).withReset(0.U)
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
 }
+
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
   val A = RO( 0).withReset(1.U) // Atomic extension
@@ -540,7 +558,7 @@ class MisaBundle extends CSRBundle {
 class MedelegBundle extends ExceptionBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   this.EX_MCALL.setRO().withReset(0.U) // never delegate machine level ecall
-  this.EX_BP.setRO().withReset(0.U)    // Parter 5.4 in debug spec. tcontrol is implemented. medeleg [3] is hard-wired to 0.
+  this.EX_DBLTRP.setRO().withReset(0.U)// double trap is not delegatable
 }
 
 class MidelegBundle extends InterruptBundle {
@@ -606,19 +624,15 @@ class Mtval2Bundle extends FieldInitBundle
 
 class MhpmcounterBundle extends FieldInitBundle
 
-// todo: for the future, delete bypass between mhpmevents and perfEvents
-class MhpmeventBundle extends CSRBundle {
-  val OF    = RW(63).withReset(0.U)
-  val MINH  = RW(62).withReset(0.U)
-  val SINH  = RW(61).withReset(0.U)
-  val UINH  = RW(60).withReset(0.U)
-  val VSINH = RW(59).withReset(0.U)
-  val VUINH = RW(58).withReset(0.U)
-}
-
 class MEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
+  }
+  this.PBMTE.setRW().withReset(0.U)
+  if (CSRConfig.EXT_DBLTRP) {
+    // software write envcfg to open ssdbltrp if need
+    // set 0 to pass ci
+    this.DTE.setRW().withReset(0.U)
   }
 }
 
@@ -654,6 +668,35 @@ class MipToMvip extends IpValidBundle {
   this.SEIP.bits.setRW()
 }
 
+class MhpmeventBundle extends CSRBundle {
+  val OF      = RW(63).withReset(0.U)
+  val MINH    = RW(62).withReset(0.U)
+  val SINH    = RW(61).withReset(0.U)
+  val UINH    = RW(60).withReset(0.U)
+  val VSINH   = RW(59).withReset(0.U)
+  val VUINH   = RW(58).withReset(0.U)
+  val OPTYPE2 = OPTYPE(54, 50, wNoFilter).withReset(OPTYPE.OR)
+  val OPTYPE1 = OPTYPE(49, 45, wNoFilter).withReset(OPTYPE.OR)
+  val OPTYPE0 = OPTYPE(44, 40, wNoFilter).withReset(OPTYPE.OR)
+  val EVENT3  = RW(39, 30).withReset(0.U)
+  val EVENT2  = RW(29, 20).withReset(0.U)
+  val EVENT1  = RW(19, 10).withReset(0.U)
+  val EVENT0  = RW(9, 0).withReset(0.U)
+}
+
+object OPTYPE extends CSREnum with WARLApply {
+  val OR = Value(0.U)
+  val AND = Value(1.U)
+  val XOR = Value(2.U)
+  val ADD = Value(4.U)
+
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(OR, AND, XOR, ADD)
+}
+
+trait HasOfFromPerfCntBundle { self: CSRModule[_] =>
+  val ofFromPerfCnt = IO(Input(Bool()))
+}
+
 trait HasMipToAlias { self: CSRModule[_] =>
   val mipAlias = Output(new MipBundle)
 }
@@ -678,7 +721,8 @@ trait HasExternalInterruptBundle {
 }
 trait HasNonMaskableIRPBundle {
   val nonMaskableIRP = IO(new Bundle {
-    val NMI = Input(Bool())
+    val NMI_43 = Input(Bool())
+    val NMI_31 = Input(Bool())
   })
 }
 

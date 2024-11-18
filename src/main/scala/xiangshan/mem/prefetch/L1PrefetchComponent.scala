@@ -1,7 +1,7 @@
 package xiangshan.mem.prefetch
 
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.util.ValidPseudoLRU
+import freechips.rocketchip.util._
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -601,9 +601,12 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
     tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
+    tlb_req_arb.io.in(i).bits.fullva := 0.U
+    tlb_req_arb.io.in(i).bits.checkfullva := false.B
     tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
@@ -640,7 +643,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
       when(!s2_tlb_resp.bits.miss) {
         l1_array(s2_tlb_update_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
+        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
           invalid_array(s2_tlb_update_index, false)
         }
       }
@@ -650,7 +653,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   
       when(!s2_tlb_resp.bits.miss) {
         l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
+        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
           invalid_array(inner_index, true)
         }
       }
@@ -663,6 +666,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   XSPerfAccumulate("s2_tlb_resp_miss", s2_tlb_resp.valid && !s2_tlb_evict && s2_tlb_resp.bits.miss)
   XSPerfAccumulate("s2_tlb_resp_updated", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss)
   XSPerfAccumulate("s2_tlb_resp_page_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.pf.ld)
+  XSPerfAccumulate("s2_tlb_resp_guestpage_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.gpf.ld)
   XSPerfAccumulate("s2_tlb_resp_access_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.af.ld)
 
   // l1 pf
@@ -713,7 +717,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_array(s1_pf_index).bit_vec := l1_array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && (s1_pf_bits.req.paddr >= 0x80000000L.U) && io.enable
+  val in_pmem = PmemRanges.map(range => s1_pf_bits.req.paddr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && in_pmem && io.enable
   io.l1_req.bits := s1_pf_bits.req
 
   l1_pf_req_arb.io.out.ready := s1_pf_can_go || !s1_pf_valid
@@ -881,9 +886,11 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.confidence := pf_ctrl.confidence
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
-  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && pf_queue_filter.io.l2_pf_addr.bits.addr > 0x80000000L.U && enable && pf_ctrl.enable
+  val l2_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && enable && pf_ctrl.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
 
-  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && pf_queue_filter.io.l3_pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
+  val l3_in_pmem = PmemRanges.map(range => pf_queue_filter.io.l3_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && enable && pf_ctrl.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
 }

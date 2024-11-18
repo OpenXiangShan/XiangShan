@@ -233,10 +233,13 @@ class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val pht_index = UInt(PHT_INDEX_BITS.W)
   val pht_tag = UInt(PHT_TAG_BITS.W)
   val region_bits = UInt(REGION_BLKS.W)
+  val region_bit_single = UInt(REGION_BLKS.W)
   val region_tag = UInt(REGION_TAG_WIDTH.W)
   val region_offset = UInt(REGION_OFFSET.W)
   val access_cnt = UInt((REGION_BLKS-1).U.getWidth.W)
   val decr_mode = Bool()
+  val single_update = Bool()//this is a signal update request
+  val has_been_signal_updated = Bool() 
 }
 
 class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -339,9 +342,13 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s0_agt_entry.pht_index := s0_lookup.pht_index
   s0_agt_entry.pht_tag := s0_lookup.pht_tag
   s0_agt_entry.region_bits := region_offset_to_bits(s0_lookup.region_offset)
+  // update bits this time
+  s0_agt_entry.region_bit_single := region_offset_to_bits(s0_lookup.region_offset) 
   s0_agt_entry.region_tag := s0_lookup.region_tag
   s0_agt_entry.region_offset := s0_lookup.region_offset
   s0_agt_entry.access_cnt := 1.U
+
+  s0_agt_entry.has_been_signal_updated := false.B
   // lookup_region + 1 == entry_region
   // lookup_region = entry_region - 1 => decr mode
   s0_agt_entry.decr_mode := !s0_region_hit && !any_region_m1_match && any_region_p1_match
@@ -350,6 +357,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   // s0 hit a entry that may be replaced in s1
   val s0_update_conflict = Cat(VecInit(region_match_vec_s0).asUInt & s1_replace_mask_w).orR
   val s0_update = s0_lookup_valid && s0_region_hit && !s0_update_conflict
+  s0_agt_entry.single_update := s0_update
 
   val s0_access_way = Mux1H(
     Seq(s0_update, s0_alloc),
@@ -381,6 +389,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_region_paddr = RegEnable(s0_lookup.region_paddr, s0_lookup_valid)
   val s1_region_vaddr = RegEnable(s0_lookup.region_vaddr, s0_lookup_valid)
   val s1_region_offset = RegEnable(s0_lookup.region_offset, s0_lookup_valid)
+  val s1_bit_region_signal = RegEnable(region_offset_to_bits(s0_lookup.region_offset), s0_lookup_valid)
+
   for(i <- entries.indices){
     val alloc = s1_replace_mask(i) && s1_alloc
     val update = s1_update_mask(i) && s1_update
@@ -390,9 +400,15 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       entries(i).access_cnt,
       entries(i).access_cnt + (s1_agt_entry.region_bits & (~entries(i).region_bits).asUInt).orR
     )
+    update_entry.region_bit_single := s1_agt_entry.region_bit_single
+    update_entry.has_been_signal_updated := entries(i).has_been_signal_updated || (!((s1_alloc || s1_do_dcache_evict) && s1_evict_valid)) && s1_update
     valids(i) := valids(i) || alloc
     entries(i) := Mux(alloc, s1_alloc_entry, Mux(update, update_entry, entries(i)))
   }
+
+  val s1_update_entry = Mux1H(s1_update_mask, entries)
+  val s1_update_valid = Mux1H(s1_update_mask, valids)
+
 
   when(s1_update){
     assert(PopCount(s1_update_mask) === 1.U, "multi-agt-update")
@@ -464,13 +480,18 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s1_pht_lookup.region_vaddr := s1_region_vaddr
   s1_pht_lookup.region_paddr := s1_region_paddr
   s1_pht_lookup.region_offset := s1_region_offset
+  s1_pht_lookup.region_bit_single := s1_bit_region_signal 
 
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
   // stage2: gen pf reg / evict entry to pht
+  // if no evict, update this time region bits to pht
   val s2_do_dcache_evict = GatedValidRegNext(s1_do_dcache_evict, false.B)
-  val s2_evict_entry = RegEnable(s1_evict_entry, (s1_alloc || s1_do_dcache_evict) && s1_evict_valid)
-  val s2_evict_valid = GatedValidRegNext((s1_alloc || s1_do_dcache_evict) && s1_evict_valid, false.B)
+  val s1_send_update_entry = Mux((s1_alloc || s1_do_dcache_evict) && s1_evict_valid, s1_evict_entry, s1_update_entry)
+  val s2_evict_entry = RegEnable(s1_send_update_entry, s1_alloc || s1_do_dcache_evict || s1_update)
+  val s2_evict_valid = GatedValidRegNext(((s1_alloc || s1_do_dcache_evict) && s1_evict_valid) || s1_update, false.B)
+  val s2_update = RegNext(s1_update, false.B)
+  val s2_real_update = RegNext(((s1_alloc || s1_do_dcache_evict) && s1_evict_valid), false.B)
   val s2_paddr_valid = RegEnable(s1_pf_gen_paddr_valid, s1_pf_gen_valid)
   val s2_pf_gen_region_tag = RegEnable(s1_pf_gen_region_tag, s1_pf_gen_valid)
   val s2_pf_gen_decr_mode = RegEnable(s1_pf_gen_decr_mode, s1_pf_gen_valid)
@@ -481,8 +502,9 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pht_lookup_valid = GatedValidRegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
   val s2_pht_lookup = RegEnable(s1_pht_lookup, s1_pht_lookup_valid)
 
-  io.s2_evict.valid := s2_evict_valid && (s2_evict_entry.access_cnt > 1.U)
+  io.s2_evict.valid := Mux(s2_real_update, s2_evict_valid && (s2_evict_entry.access_cnt > 1.U), s2_evict_valid)
   io.s2_evict.bits := s2_evict_entry
+  io.s2_evict.bits.single_update := s2_update && (!s2_real_update)
 
   io.s2_pf_gen_req.bits.region_tag := s2_pf_gen_region_tag
   io.s2_pf_gen_req.bits.region_addr := s2_pf_gen_region_paddr
@@ -523,6 +545,7 @@ class PhtLookup()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelp
   val region_paddr = UInt(REGION_ADDR_BITS.W)
   val region_vaddr = UInt(REGION_ADDR_BITS.W)
   val region_offset = UInt(REGION_OFFSET.W)
+  val region_bit_single = UInt(REGION_BLKS.W)
 }
 
 class PhtEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -595,6 +618,10 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s0_region_bits = evict.bits.region_bits
   val s0_decr_mode = evict.bits.decr_mode
   val s0_evict = evict.valid
+  val s0_access_cnt_signal = evict.bits.access_cnt
+  val s0_single_update = evict.bits.single_update
+  val s0_has_been_single_update = evict.bits.has_been_signal_updated
+  val s0_region_bit_single = evict.bits.region_bit_single
 
   // pipe s1: send addr to ram
   val s1_valid_r = RegInit(false.B)
@@ -603,11 +630,15 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_reg_en = s0_valid && (!s1_wait || !s1_valid)
   val s1_ram_raddr = RegEnable(s0_ram_raddr, s1_reg_en)
   val s1_tag = RegEnable(s0_tag, s1_reg_en)
+  val s1_access_cnt_signal = RegEnable(s0_access_cnt_signal, s1_reg_en)
   val s1_region_bits = RegEnable(s0_region_bits, s1_reg_en)
   val s1_decr_mode = RegEnable(s0_decr_mode, s1_reg_en)
   val s1_region_paddr = RegEnable(s0_region_paddr, s1_reg_en)
   val s1_region_vaddr = RegEnable(s0_region_vaddr, s1_reg_en)
   val s1_region_offset = RegEnable(s0_region_offset, s1_reg_en)
+  val s1_single_update = RegEnable(s0_single_update, s1_reg_en)
+  val s1_has_been_single_update = RegEnable(s0_has_been_single_update, s1_reg_en)
+  val s1_region_bit_single = RegEnable(s0_region_bit_single, s1_reg_en)  
   val s1_pht_valids = pht_valids_reg.map(way => Mux1H(
     (0 until PHT_SETS).map(i => i.U === s1_ram_raddr),
     way
@@ -626,12 +657,21 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
       s1_region_bits.tail(1), 0.U((REGION_BLKS - 1).W)
     ) >> s1_region_offset)(REGION_BLKS - 2, 0)
   )
+  val s1_hist_single_bit = Cat(
+    s1_region_bit_single.head(REGION_BLKS - 1) >> s1_region_offset,
+    (Cat(
+      s1_region_bit_single.tail(1), 0.U((REGION_BLKS - 1).W)
+    ) >> s1_region_offset)(REGION_BLKS - 2, 0)
+  )
 
   // pipe s2: generate ram write addr/data
   val s2_valid = GatedValidRegNext(s1_valid && !s1_wait, false.B)
   val s2_reg_en = s1_valid && !s1_wait
   val s2_hist_update_mask = RegEnable(s1_hist_update_mask, s2_reg_en)
+  val s2_single_update = RegEnable(s1_single_update, s2_reg_en)
+  val s2_has_been_single_update = RegEnable(s1_has_been_single_update, s2_reg_en)
   val s2_hist_bits = RegEnable(s1_hist_bits, s2_reg_en)
+  val s2_hist_bit_single = RegEnable(s1_hist_single_bit, s2_reg_en)
   val s2_tag = RegEnable(s1_tag, s2_reg_en)
   val s2_region_bits = RegEnable(s1_region_bits, s2_reg_en)
   val s2_decr_mode = RegEnable(s1_decr_mode, s2_reg_en)
@@ -646,32 +686,46 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_ram_rdata = pht_ram.io.r.resp.data
   val s2_ram_rtags = s2_ram_rdata.map(_.tag)
   val s2_tag_match_vec = s2_ram_rtags.map(t => t === s2_tag)
+  val s2_access_cnt_signal = RegEnable(s1_access_cnt_signal, s2_reg_en)
   val s2_hit_vec = s2_tag_match_vec.zip(s2_pht_valids).map({
     case (tag_match, v) => v && tag_match
   })
+
+  //distinguish single update and evict update
   val s2_hist_update = s2_ram_rdata.map(way => VecInit(way.hist.zipWithIndex.map({
     case (h, i) =>
       val do_update = s2_hist_update_mask(i)
-      val hist_updated = Mux(s2_hist_bits(i),
-        Mux(h.andR, h, h + 1.U),
-        Mux(h === 0.U, 0.U, h - 1.U)
-      )
+      val hist_updated = Mux(!s2_single_update,
+                            Mux(s2_has_been_single_update,
+                              Mux(s2_hist_bits(i), h, Mux(h === 0.U, 0.U, h - 1.U)), Mux(s2_hist_bits(i),Mux(h.andR, h, h + 1.U), Mux(h === 0.U, 0.U, h - 1.U))),
+                                Mux(s2_hist_bit_single(i), Mux(h.andR, h, Mux(h===0.U, h+2.U, h+1.U)), h)
+                             )
       Mux(do_update, hist_updated, h)
   })))
+
+
   val s2_hist_pf_gen = Mux1H(s2_hit_vec, s2_ram_rdata.map(way => VecInit(way.hist.map(_.head(1))).asUInt))
   val s2_new_hist = VecInit(s2_hist_bits.asBools.map(b => Cat(0.U((PHT_HIST_BITS - 1).W), b)))
+  val s2_new_hist_single = VecInit(s2_hist_bit_single.asBools.map(b => Cat(0.U((PHT_HIST_BITS - 1).W), b)))
+  val s2_new_hist_real = Mux(s2_single_update,s2_new_hist_single,s2_new_hist)
   val s2_pht_hit = Cat(s2_hit_vec).orR
-  val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
+  // update when valid bits over 4
+  val signal_update_write = Mux(!s2_single_update, true.B, s2_pht_hit || s2_single_update && (s2_access_cnt_signal >4.U) )
+  val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist_real)
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
   val s2_incr_region_vaddr = s2_region_vaddr + 1.U
   val s2_decr_region_vaddr = s2_region_vaddr - 1.U
 
+
+
   // pipe s3: send addr/data to ram, gen pf_req
-  val s3_valid = GatedValidRegNext(s2_valid, false.B)
+  val s3_valid = GatedValidRegNext(s2_valid && signal_update_write, false.B) 
   val s3_evict = RegEnable(s2_evict, s2_valid)
   val s3_hist = RegEnable(s2_hist, s2_valid)
   val s3_hist_pf_gen = RegEnable(s2_hist_pf_gen, s2_valid)
+
   val s3_hist_update_mask = RegEnable(s2_hist_update_mask.asUInt, s2_valid)
+  
   val s3_region_offset = RegEnable(s2_region_offset, s2_valid)
   val s3_region_offset_mask = RegEnable(s2_region_offset_mask, s2_valid)
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)
@@ -726,7 +780,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   pht_ram.io.w(
     s3_ram_en, s3_ram_wdata, s3_ram_waddr, s3_way_mask
   )
-
+  pht_ram.clock := ClockGate(false.B, s1_valid | s3_ram_en, clock)
   when(s3_valid && s3_hit){
     assert(!Cat(s3_hit_vec).andR, "sms_pht: multi-hit!")
   }
@@ -885,9 +939,12 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
     tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
     tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
+    tlb_req_arb.io.in(i).bits.fullva := 0.U
+    tlb_req_arb.io.in(i).bits.checkfullva := false.B
     tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
@@ -1094,7 +1151,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 }
 
 class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper with HasL1PrefetchSourceParameter {
-
+  import freechips.rocketchip.util._
 
   val io_agt_en = IO(Input(Bool()))
   val io_stride_en = IO(Input(Bool()))
@@ -1200,7 +1257,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid || stride_gen_valid
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
-  val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
+  val is_valid_address = PmemRanges.map(range => pf_filter.io.l2_pf_addr.bits.inRange(range._1.U, range._2.U)).reduce(_ || _)
 
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits

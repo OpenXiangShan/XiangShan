@@ -946,6 +946,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
 
       } .elsewhen (!isWline) {
         val storeCommit       = io.in(i).fire
@@ -961,7 +963,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
-
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
       }
 
       for (index <- 0 until WlineMaxNumber) {
@@ -977,7 +980,9 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := blockAddr + (index.U << wordOffBits)
           difftest.data   := io.in(i).bits.data
           difftest.mask   := ((1 << wordBytes) - 1).U
-          
+          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.pc
+
           assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
         }
       }
@@ -1009,7 +1014,8 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := waddr
           difftest.data   := wdata
           difftest.mask   := wmask
-
+          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.pc
         }
       }
     }

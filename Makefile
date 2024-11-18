@@ -36,7 +36,7 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-ISSUE ?= B
+ISSUE ?= E.b
 
 SUPPORT_CHI_ISSUE = B E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
@@ -113,12 +113,9 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
-ifeq ($(GOALS),verilog)
-RELEASE_ARGS += --disable-always-basic-diff
-endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
@@ -201,6 +198,7 @@ clean:
 init:
 	git submodule update --init
 	cd rocket-chip && git submodule update --init cde hardfloat
+	cd openLLC && git submodule update --init openNCB
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
@@ -210,6 +208,12 @@ bsp:
 
 idea:
 	mill -i mill.idea.GenIdea/idea
+
+check-format:
+	mill xiangshan.checkFormat
+
+reformat:
+	mill xiangshan.reformat
 
 # verilator simulation
 emu: sim-verilog

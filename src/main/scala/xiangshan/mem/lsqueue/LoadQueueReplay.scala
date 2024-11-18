@@ -302,8 +302,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // dequeue
     //  FIXME: store*Ptr is not accurate
     dataNotBlockVec(i) := isAfter(io.stDataReadySqPtr, blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
-    addrNotBlockVec(i) := Mux(strict(i), isAfter(io.stAddrReadySqPtr, blockSqIdx(i)), stAddrReadyVec(blockSqIdx(i).value)) || io.sqEmpty // for better timing
-
+    addrNotBlockVec(i) := isAfter(io.stAddrReadySqPtr, blockSqIdx(i)) || !strict(i) && stAddrReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
     // store address execute
     storeAddrInSameCycleVec(i) := VecInit((0 until StorePipelineWidth).map(w => {
       io.storeAddrIn(w).valid &&
@@ -536,6 +535,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).valid             := s2_oldestSel(i).valid
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
+    replay_req(i).bits.uop.exceptionVec(loadAddrMisaligned) := false.B
     replay_req(i).bits.isvec        := s2_vecReplay.isvec
     replay_req(i).bits.isLastElem   := s2_vecReplay.isLastElem
     replay_req(i).bits.is128bit     := s2_vecReplay.is128bit

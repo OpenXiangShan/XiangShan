@@ -59,10 +59,12 @@ case class L2TLBParameters
   // l1
   l1nSets: Int = 8,
   l1nWays: Int = 4,
+  l1ReservedBits: Int = 10,
   l1Replacer: Option[String] = Some("setplru"),
   // l0
   l0nSets: Int = 32,
   l0nWays: Int = 8,
+  l0ReservedBits: Int = 3,
   l0Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
@@ -123,7 +125,7 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 10000
+  val timeOutThreshold = 100000
 
   def noS2xlate = "b00".U
   def allStage = "b11".U
@@ -184,6 +186,7 @@ trait HasTlbConst extends HasXSParameter {
     val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := hptwResp.gpf
     tp.af := hptwResp.gaf
+    tp.v := DontCare
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g
@@ -199,6 +202,7 @@ trait HasTlbConst extends HasXSParameter {
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
     tp.af := ptwResp.af
+    tp.v := ptwResp.entry.v
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g

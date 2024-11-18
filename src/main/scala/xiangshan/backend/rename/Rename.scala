@@ -33,6 +33,8 @@ import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenUSWholeEmul}
 import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
+import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
+import xiangshan.backend.fu.util.CSRConst
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -81,10 +83,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val snptIsFull= Input(Bool())
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
     // perf only
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
@@ -117,7 +119,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
-    case Reg_I => x.rfWen && x.ldest =/= 0.U
+    case Reg_I => x.rfWen
     case Reg_F => x.fpWen
     case Reg_V => x.vecWen
     case Reg_V0 => x.v0Wen
@@ -134,7 +136,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   def needDestRegWalk[T <: RabCommitInfo](reg_t: RegType, x: T): Bool = {
     reg_t match {
-      case Reg_I => x.rfWen && x.ldest =/= 0.U
+      case Reg_I => x.rfWen
       case Reg_F => x.fpWen
       case Reg_V => x.vecWen
       case Reg_V0 => x.v0Wen
@@ -195,6 +197,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.regCacheIdx   := DontCare
     uop.traceBlockInPipe := DontCare
   })
+  private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
+  private val isCsr        = Wire(Vec(RenameWidth, Bool()))
+  private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
+  private val isRoCsrr     = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -221,6 +227,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
     isVlsTypeItme && isUnitStrideItem
   }
+  private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
   private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
@@ -233,7 +240,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     )
   }
   uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
+    u.numLsElem := Mux(io.in(i).valid & isVlsType(i) && !isfofFixVlUop(i), numLsElem(i), 0.U)
   }
 
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
@@ -268,6 +275,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
+
+    // read only CSRR instruction support: remove blockBackward and waitForward
+    inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
+    isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
+    isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
+    isRoCsrr(i) := isCsrr(i) && LookupTreeDefault(
+      inst(i).CSRIDX, false.B, CSRConst.roCsrrAddr.map(_.U -> true.B))
+
+    /*
+     * For read-only CSRs, CSRR instructions do not need to wait forward instructions to finish.
+     * For all CSRs, CSRR instructions do not need to block backward instructions for issuing.
+     * Signal "isCsrr" contains not only alias instruction CSRR, but also other csr instructions which
+     *   do not require write to any CSR.
+     */
+    uops(i).waitForward := io.in(i).bits.waitForward && !isRoCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
@@ -468,7 +491,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
@@ -476,15 +499,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)
       else false.B
-    } :+ needV0Dest(i)
+    }
     val vlCond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 4) s === SrcType.vp
       else false.B
-    } :+ needVlDest(i)
-    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
-    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
-    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp) :+ needIntDest(i)
-    val target = io.in(i).bits.lsrc :+ io.in(i).bits.ldest
+    }
+    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp)
+    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp)
+    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp)
+    val target = io.in(i).bits.lsrc
     for ((((((cond1, (condV0, condVl)), cond2), cond3), t), j) <- vecCond.zip(v0Cond.zip(vlCond)).zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
         val indexMatch = in.bits.ldest === t

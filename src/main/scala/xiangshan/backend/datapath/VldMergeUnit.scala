@@ -39,7 +39,8 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   mgu.io.in.info.dstMask := false.B // vlm need not mask
   mgu.io.in.isIndexedVls := wbReg.bits.vls.get.isIndexed
 
-  vdAfterMerge := mgu.io.out.vd
+  //For the uop whose vl is modified by first-only-fault, the data written back can be used directly
+  vdAfterMerge := Mux(wbReg.bits.vlWen.getOrElse(false.B), wbReg.bits.data(0), mgu.io.out.vd)
 
   io.writebackAfterMerge.valid := wbReg.valid
   io.writebackAfterMerge.bits := wbReg.bits

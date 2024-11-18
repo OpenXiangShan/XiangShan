@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
-import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
+import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
@@ -44,6 +44,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
+  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -56,7 +57,7 @@ class ExeUnitImp(
   override val wrapper: ExeUnit
 )(implicit
   p: Parameters, exuParams: ExeUnitParams
-) extends LazyModuleImp(wrapper) with HasXSParameter{
+) extends LazyModuleImp(wrapper) with HasXSParameter with HasCriticalErrors {
   private val fuCfgs = exuParams.fuConfigs
 
   val io = IO(new ExeUnitIO(exuParams))
@@ -81,8 +82,8 @@ class ExeUnitImp(
       val lat0 = (latReal == 0 && !uncerLat).asBool
       val latN = (latReal >  0 && !uncerLat).asBool
 
-      val fuVldVec = (io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
-      val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ io.out.ready
+      val fuVldVec = (fu.io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
+      val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ fu.io.out.ready
 
       for (i <- 0 until latReal) {
         fuRdyVec(i) := !fuVldVec(i + 1) || fuRdyVec(i + 1)
@@ -98,17 +99,17 @@ class ExeUnitImp(
       fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
       fuVld_en_reg := fuVld_en
 
-      when(uncerLat.asBool && io.in.fire) {
+      when(uncerLat.asBool && fu.io.in.fire) {
         uncer_en_reg := true.B
-      }.elsewhen(uncerLat.asBool && io.out.fire) {
+      }.elsewhen(uncerLat.asBool && fu.io.out.fire) {
         uncer_en_reg := false.B
       }
 
-      when(lat0 && io.in.fire) {
+      when(lat0 && fu.io.in.fire) {
         clk_en := true.B
       }.elsewhen(latN && fuVld_en || fuVld_en_reg) {
         clk_en := true.B
-      }.elsewhen(uncerLat.asBool && io.in.fire || uncer_en_reg) {
+      }.elsewhen(uncerLat.asBool && fu.io.in.fire || uncer_en_reg) {
         clk_en := true.B
       }
 
@@ -116,7 +117,9 @@ class ExeUnitImp(
         clk_en := true.B
       }
 
-      fu.clock := ClockGate(false.B, clk_en, clock)
+      if (latReal != 0 || uncerLat) {
+        fu.clock := ClockGate(false.B, clk_en, clock)
+      }
       XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     }
   }
@@ -304,6 +307,9 @@ class ExeUnitImp(
       (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
   ).flatten
 
+  val criticalErrors = funcUnits.filter(fu => fu.cfg.needCriticalErrors).flatMap(fu => fu.getCriticalErrors)
+  generateCriticalErrors()
+
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
 
@@ -329,6 +335,7 @@ class ExeUnitImp(
     fuio =>
       exuio <> fuio
       fuio.exception := DelayN(exuio.exception, 2)
+      fuio.robDeqPtr := DelayN(exuio.robDeqPtr, 2)
   }))
   io.csrin.foreach(exuio => funcUnits.foreach(fu => fu.io.csrin.foreach{fuio => fuio := exuio}))
   io.csrToDecode.foreach(toDecode => funcUnits.foreach(fu => fu.io.csrToDecode.foreach(fuOut => toDecode := fuOut)))
@@ -339,6 +346,7 @@ class ExeUnitImp(
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
   io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))
   io.vlIsVlmax.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsVlmax.foreach(fuio => exuio := fuio)))
+  io.instrAddrTransType.foreach(exuio => funcUnits.foreach(fu => fu.io.instrAddrTransType.foreach(fuio => fuio := exuio)))
 
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)

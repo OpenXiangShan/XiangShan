@@ -31,6 +31,8 @@ import freechips.rocketchip.tilelink._
 import coupledL2.tl2chi.{PortIO, CHIAsyncBridgeSink}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
+import chisel3.experimental.{annotate, ChiselAnnotation}
+import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
@@ -61,20 +63,26 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   })))
 
   // imsic bus top
-  val u_imsic_bus_top = LazyModule(new imsic_bus_top(soc.IMSICUseTL))
+  val u_imsic_bus_top = LazyModule(new imsic_bus_top(
+    useTL = soc.IMSICUseTL,
+    baseAddress = (0x3A800000, 0x3B000000)
+  ))
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
+  val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
   core_with_l2.clintIntNode := clintIntNode
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
-  beuIntNode := IntBuffer(2) := core_with_l2.tile.beu_int_source
+  core_with_l2.nmiIntNode := nmiIntNode
+  beuIntNode := core_with_l2.beuIntNode
   val clint = InModuleBody(clintIntNode.makeIOs())
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
+  val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
 
   // reset nodes
@@ -82,6 +90,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   core_with_l2.tile.core_reset_sink := core_rst_node
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper) {
+    soc.XSTopPrefix.foreach { prefix =>
+      val mod = this.toNamed
+      annotate(new ChiselAnnotation {
+        def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
+      })
+    }
     FileRegisters.add("dts", dts)
     FileRegisters.add("graphml", graphML)
     FileRegisters.add("json", json)
@@ -89,40 +103,35 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
-    val noc_clock = IO(Input(Clock()))
-    val noc_reset = IO(Input(AsyncReset()))
+    val noc_clock = EnableCHIAsyncBridge.map(_ => IO(Input(Clock())))
+    val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
+      val riscv_critical_error = Output(Bool())
+      val hartIsInReset = Output(Bool())
       val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
       val chi = new PortIO
       val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
     // imsic axi4lite io
-    val imsic_m_s = wrapper.u_imsic_bus_top.module.m_s.map(x => IO(chiselTypeOf(x)))
-    val imsic_s_s = wrapper.u_imsic_bus_top.module.s_s.map(x => IO(chiselTypeOf(x)))
+    val imsic_axi4lite = wrapper.u_imsic_bus_top.module.axi4lite.map(x => IO(chiselTypeOf(x)))
     // imsic tl io
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
 
-    val reset_sync = withClockAndReset(clock, reset) { ResetGen() }
-    val noc_reset_sync = withClockAndReset(noc_clock, noc_reset) { ResetGen() }
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen() })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
-
-    // override LazyRawModuleImp's clock and reset
-    childClock := clock
-    childReset := reset_sync
 
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
 
     // imsic axi4lite io connection
-    wrapper.u_imsic_bus_top.module.m_s.foreach(_ <> imsic_m_s.get)
-    wrapper.u_imsic_bus_top.module.s_s.foreach(_ <> imsic_s_s.get)
+    wrapper.u_imsic_bus_top.module.axi4lite.foreach(_ <> imsic_axi4lite.get)
 
     // imsic tl io connection
     wrapper.u_imsic_bus_top.tl_m.foreach(_ <> imsic_m_tl.get)
@@ -131,32 +140,38 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
+    core_with_l2.module.clock := clock
+    core_with_l2.module.reset := reset
+    core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
+    core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
+    io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
+    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
 
     EnableClintAsyncBridge match {
       case Some(param) =>
-        val source = withClockAndReset(soc_clock, soc_reset_sync) {
-          Module(new AsyncQueueSource(UInt(64.W), param))
+        withClockAndReset(soc_clock, soc_reset_sync) {
+          val source = Module(new AsyncQueueSource(UInt(64.W), param))
+          source.io.enq.valid := io.clintTime.valid
+          source.io.enq.bits := io.clintTime.bits
+          core_with_l2.module.io.clintTime <> source.io.async
         }
-        source.io.enq.valid := io.clintTime.valid
-        source.io.enq.bits := io.clintTime.bits
-        core_with_l2.module.io.clintTime.get <> source.io.async
       case None =>
-        core_with_l2.module.io.clintTime.get <> io.clintTime
+        core_with_l2.module.io.clintTime <> io.clintTime
     }
 
     EnableCHIAsyncBridge match {
       case Some(param) =>
-        val sink = withClockAndReset(noc_clock, noc_reset_sync) {
-          Module(new CHIAsyncBridgeSink(param))
+        withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+          val sink = Module(new CHIAsyncBridgeSink(param))
+          sink.io.async <> core_with_l2.module.io.chi
+          io.chi <> sink.io.deq
         }
-        sink.io.async <> core_with_l2.module.io.chi.get
-        io.chi <> sink.io.deq
       case None =>
-        io.chi <> core_with_l2.module.io.chi.get
+        io.chi <> core_with_l2.module.io.chi
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
@@ -165,14 +180,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_rst_node.out.head._1 := false.B.asAsyncReset
 
     core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
-
-    withClockAndReset(clock, reset_sync) {
-      // Modules are reset one by one
-      // reset ----> SYNC --> Core
-      val resetChain = Seq(Seq(core_with_l2.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
-    }
-
   }
 
   lazy val module = new XSNoCTopImp(this)

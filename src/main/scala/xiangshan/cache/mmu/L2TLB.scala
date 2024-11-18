@@ -84,6 +84,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
   val priv   = csr_dup(0).priv
+  val mPBMTE = csr_dup(0).mPBMTE
+  val hPBMTE = csr_dup(0).hPBMTE
   val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed
 
   val pmp = Module(new PMP())
@@ -320,22 +322,22 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem_arb.io.in(2) <> hptw.io.mem.req
   mem_arb.io.out.ready := mem.a.ready && !flush
 
-  // assert, should not send mem access at same addr for twice.
-  val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
-  val last_resp_s2xlate = RegEnable(cache.io.refill.bits.req_info_dup(0).s2xlate, cache.io.refill.valid)
-  val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
-  val last_resp_v = RegInit(false.B)
-  val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR || cache.io.refill.bits.sel_pte_dup(0).asTypeOf(new PteBundle).isAf()
-  when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
-  when (flush) { last_resp_v := false.B }
-  XSError(last_resp_v && cache.io.refill.valid &&
-    (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
-    (cache.io.refill.bits.level_dup(0) === last_resp_level) &&
-    (cache.io.refill.bits.req_info_dup(0).s2xlate === last_resp_s2xlate),
-    "l2tlb should not access mem at same addr for twice")
-  // ATTENTION: this may wrongly assert when: a ptes is l2, last part is valid,
-  // but the current part is invalid, so one more mem access happened
-  // If this happened, remove the assert.
+  // // assert, should not send mem access at same addr for twice.
+  // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
+  // val last_resp_s2xlate = RegEnable(cache.io.refill.bits.req_info_dup(0).s2xlate, cache.io.refill.valid)
+  // val last_resp_level = RegEnable(cache.io.refill.bits.level_dup(0), cache.io.refill.valid)
+  // val last_resp_v = RegInit(false.B)
+  // val last_has_invalid = !Cat(cache.io.refill.bits.ptes.asTypeOf(Vec(blockBits/XLEN, UInt(XLEN.W))).map(a => a(0))).andR || cache.io.refill.bits.sel_pte_dup(0).asTypeOf(new PteBundle).isAf()
+  // when (cache.io.refill.valid) { last_resp_v := !last_has_invalid}
+  // when (flush) { last_resp_v := false.B }
+  // XSError(last_resp_v && cache.io.refill.valid &&
+  //   (cache.io.refill.bits.req_info_dup(0).vpn === last_resp_vpn) &&
+  //   (cache.io.refill.bits.level_dup(0) === last_resp_level) &&
+  //   (cache.io.refill.bits.req_info_dup(0).s2xlate === last_resp_s2xlate),
+  //   "l2tlb should not access mem at same addr for twice")
+  // // ATTENTION: this may wrongly assert when: a ptes is l2, last part is valid,
+  // // but the current part is invalid, so one more mem access happened
+  // // If this happened, remove the assert.
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
@@ -500,7 +502,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbFsmPort).bits.s2 := ptw.io.resp.bits.h_resp
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
-    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id), contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate))
+    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
+      llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id),
+      contiguous_pte_to_merge_ptwResp(
+        resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, 
+        true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf
+      )
+    )
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
@@ -545,10 +553,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // not_super means that this is a normal page
   // valididx(i) will be all true when super page to be convenient for l1 tlb matching
-  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, not_super: Boolean = true, s2xlate: UInt) : PtwMergeResp = {
+  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, s2xlate: UInt, mPBMTE: Bool, hPBMTE: Bool, not_super: Boolean = true, gpf: Bool) : PtwMergeResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_merge_resp = Wire(new PtwMergeResp())
     val hasS2xlate = s2xlate =/= noS2xlate
+    val pbmte = Mux(s2xlate === onlyStage1 || s2xlate === allStage, hPBMTE, mPBMTE)
     for (i <- 0 until tlbcontiguous) {
       val pte_in = pte(64 * i + 63, 64 * i).asTypeOf(new PteBundle())
       val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
@@ -558,16 +567,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.pbmt := pte_in.pbmt
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
-      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U) || !pte_in.isLeaf())
-      ptw_resp.af := (if (!af_first) pte_in.isPf(0.U) else true.B) && (af || Mux(s2xlate === allStage, false.B, pte_in.isAf()))
+      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U, pbmte) || !pte_in.isLeaf())
+      ptw_resp.af := (if (!af_first) pte_in.isPf(0.U, pbmte) else true.B) && (af || (Mux(s2xlate === allStage, false.B, pte_in.isAf()) && !(hasS2xlate && gpf)))
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)
-      ptw_resp.vmid.map(_ := hgatp.vmid) 
+      ptw_resp.vmid.map(_ := hgatp.vmid)
       ptw_merge_resp.entry(i) := ptw_resp
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
     ptw_merge_resp.not_super := not_super.B
+    ptw_merge_resp.not_merge := hasS2xlate
     ptw_merge_resp
   }
 
@@ -594,7 +604,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      ptw_sector_resp.valididx(i) := (ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super
+      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
@@ -629,13 +639,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // print configs
   println(s"${l2tlbParams.name}: a ptw, a llptw with size ${l2tlbParams.llptwsize}, miss queue size ${MissQueueSize} l2:${l2tlbParams.l2Size} fa l1: nSets ${l2tlbParams.l1nSets} nWays ${l2tlbParams.l1nWays} l0: ${l2tlbParams.l0nSets} nWays ${l2tlbParams.l0nWays} blockBytes:${l2tlbParams.blockBytes}")
-
-  // time out assert
-  for (i <- 0 until MemReqWidth) {
-    TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
-    TimeOutAssert(flush_latch(i), timeOutThreshold, s"ptw mem resp time out flush_latch${i}")
-  }
-
 
   val perfEvents  = Seq(llptw, cache, ptw).flatMap(_.getPerfEvents)
   generatePerfEvent()

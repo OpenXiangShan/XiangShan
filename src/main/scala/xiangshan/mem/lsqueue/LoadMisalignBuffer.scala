@@ -23,18 +23,22 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.LduCfg
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
-  with HasLoadHelper 
+  with HasLoadHelper
+  with HasTlbConst
 {
   private val enqPortNum = LoadPipelineWidth
   private val maxSplitNum = 2
@@ -117,8 +121,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
     val writeBack       = Decoupled(new MemExuOutput)
     val overwriteExpBuf = Output(new XSBundle {
-      val valid = Bool()
-      val vaddr = UInt(VAddrBits.W)
+      val valid  = Bool()
+      val vaddr  = UInt(XLEN.W)
+      val isHyper = Bool()
+      val gpaddr = UInt(XLEN.W)
+      val isForVSnonLeafPTE = Bool()
     })
     val flushLdExpBuff  = Output(Bool())
   })
@@ -177,6 +184,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val bufferState = RegInit(s_idle)
   val splitLoadReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitLoadResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LqWriteBundle))))
+  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentLoads = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
 
@@ -250,7 +258,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     LB -> 0.U,
     LH -> 1.U,
     LW -> 3.U,
-    LD -> 7.U 
+    LD -> 7.U
   )) + req.vaddr(4, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
@@ -273,6 +281,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       unSentLoads := 1.U
       curPtr := 0.U
       new128Load.vaddr := aligned16BytesAddr
+      new128Load.fullva := req.fullva
       // new128Load.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
       new128Load.mask  := 0xffff.U
       new128Load.uop   := req.uop
@@ -285,8 +294,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       curPtr := 0.U
       lowAddrLoad.uop := req.uop
       lowAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
+      lowAddrLoad.fullva := req.fullva
       highAddrLoad.uop := req.uop
       highAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
+      highAddrLoad.fullva := req.fullva
 
       switch (req.uop.fuOpType(1, 0)) {
         is (LB) {
@@ -467,23 +478,32 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       splitLoadReqs(0) := lowAddrLoad
       splitLoadReqs(1) := highAddrLoad
     }
+    exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
   }
 
   io.splitLoadReq.valid := req_valid && (bufferState === s_req)
   io.splitLoadReq.bits  := splitLoadReqs(curPtr)
+  // Restore the information of H extension load
+  // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
+  val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)
+  val reqIsHlvx = LSUOpType.isHlvx(req.uop.fuOpType)
+  io.splitLoadReq.bits.uop.fuOpType := Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0))
 
   when (io.splitLoadResp.valid) {
+    val resp = io.splitLoadResp.bits
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isMMIO) {
       unSentLoads := 0.U
-      splitLoadResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), LduCfg)
       // delegate to software
-      splitLoadResp(curPtr).uop.exceptionVec(loadAddrMisaligned) := true.B
+      exceptionVec(loadAddrMisaligned) := true.B
     } .elsewhen (hasException) {
       unSentLoads := 0.U
+      LduCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitLoadResp.bits.rep_info.need_rep) {
       unSentLoads := unSentLoads & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
+      exceptionVec := 0.U.asTypeOf(ExceptionVec())
     }
   }
 
@@ -537,19 +557,18 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.writeBack.valid := req_valid && (bufferState === s_wb)
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := Mux(
-    globalMMIO || globalException,
-    splitLoadResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  )
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
+  io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := combinedData
+  io.writeBack.bits.isFromLoadUnit := DontCare
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
-  
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush && (bufferState =/= s_idle)) {
@@ -563,11 +582,23 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
-  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteAddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+  val shouldOverwrite = req_valid && globalException
+  val overwriteExpBuf = GatedValidRegNext(shouldOverwrite)
+  val overwriteVaddr = RegEnable(
+    Mux(
+      cross16BytesBoundary && (curPtr === 1.U),
+      splitLoadResp(curPtr).vaddr,
+      splitLoadResp(curPtr).fullva),
+    shouldOverwrite)
+  val overwriteGpaddr = RegEnable(splitLoadResp(curPtr).gpaddr, shouldOverwrite)
+  val overwriteIsHyper = RegEnable(splitLoadResp(curPtr).isHyper, shouldOverwrite)
+  val overwriteIsForVSnonLeafPTE = RegEnable(splitLoadResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
-  io.overwriteExpBuf.vaddr := overwriteAddr
+  io.overwriteExpBuf.vaddr := overwriteVaddr
+  io.overwriteExpBuf.isHyper := overwriteIsHyper
+  io.overwriteExpBuf.gpaddr := overwriteGpaddr
+  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   // when no exception or mmio, flush loadExceptionBuffer at s_wb
   val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))

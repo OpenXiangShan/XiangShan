@@ -17,18 +17,35 @@
 package top
 
 import chisel3._
-import org.chipsalliance.cde.config
+import org.chipsalliance.cde.config.Parameters
 import device._
 import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import difftest._
+import utility.AXI4Error
+import system.{HasPeripheralRanges, HasSoCParameter}
 
-class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends LazyModule {
+class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModule
+  with HasSoCParameter
+  with HasPeripheralRanges
+{
 
   val node = AXI4MasterNode(List(edge.master))
 
+  // val uartRange = AddressSet(0x40600000, 0x3f) // ?
+  val flashRange = AddressSet(0x10000000L, 0xfffffff)
+  val sdRange = AddressSet(0x40002000L, 0xfff)
+  val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
+
+  val illegalRange = (onChipPeripheralRanges.values ++ Seq(
+    soc.UARTLiteRange,
+    flashRange,
+    sdRange,
+    intrGenRange
+  )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
+
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
-  val uart = LazyModule(new AXI4UART(Seq(AddressSet(0x40600000L, 0xf))))
+  val uart = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
   // val vga = LazyModule(new AXI4VGA(
   //   sim = false,
   //   fbAddress = Seq(AddressSet(0x50000000L, 0x3fffffL)),
@@ -36,6 +53,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   // ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x40002000L, 0xfff))))
   val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x40070000L, 0x0000ffffL))))
+  val error = LazyModule(new AXI4Error(illegalRange))
 
   val axiBus = AXI4Xbar()
 
@@ -44,6 +62,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   flash.node := axiBus
   sd.node := axiBus
   intrGen.node := axiBus
+  error.node := axiBus
 
   axiBus := node
 

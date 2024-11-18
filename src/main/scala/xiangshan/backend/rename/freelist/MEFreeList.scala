@@ -46,7 +46,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   }
   // update arch head pointer
   val archAlloc = io.commit.commitValid zip io.commit.info map {
-    case (valid, info) => valid && info.rfWen && !info.isMove && info.ldest =/= 0.U
+    case (valid, info) => valid && info.rfWen && !info.isMove
   }
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew  = archHeadPtr + numArchAllocate

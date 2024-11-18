@@ -42,7 +42,7 @@ class VIO(object):
 class VModule(object):
     module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
-    submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
+    submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*\)*\s*;*(|//.*)\s*$')
     # when instance submodule is multiline, it will endswith #( or ( , 
     # we can only get the submodule's module name, and set instance name "multiline_instance"
     submodule_re_multiline = re.compile(r'^\s*(\w+)\s*#*\(\s*$')

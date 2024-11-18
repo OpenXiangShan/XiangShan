@@ -30,8 +30,17 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val fflagsRdata = IO(Output(Fflags()))
     val frmRdata = IO(Output(Frm()))
 
+    for (wAlias <- Seq(wAliasFflags, wAliasFfm)) {
+      for ((name, field) <- wAlias.wdataFields.elements) {
+        reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+          wAlias.wen && field.asInstanceOf[CSREnumType].isLegal,
+          field.asInstanceOf[CSREnumType]
+        )
+      }
+    }
+
     // write connection
-    this.wfn(reg)(Seq(wAliasFflags, wAliasFfm))
+    reconnectReg()
 
     when (robCommit.fflags.valid) {
       reg.NX := robCommit.fflags.bits(0) || reg.NX
@@ -82,8 +91,17 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val vxsat = IO(Output(Vxsat()))
     val vxrm  = IO(Output(Vxrm()))
 
+    for (wAlias <- Seq(wAliasVxsat, wAlisaVxrm)) {
+      for ((name, field) <- wAlias.wdataFields.elements) {
+        reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
+          wAlias.wen && field.asInstanceOf[CSREnumType].isLegal,
+          field.asInstanceOf[CSREnumType]
+        )
+      }
+    }
+
     // write connection
-    this.wfn(reg)(Seq(wAliasVxsat, wAlisaVxrm))
+    reconnectReg()
 
     when(robCommit.vxsat.valid) {
       reg.VXSAT := reg.VXSAT.asBool || robCommit.vxsat.bits.asBool
@@ -113,14 +131,19 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
     val cycle = RO(63, 0)
-  }) with HasMHPMSink {
-    regOut.cycle := mHPM.cycle
+  }) with HasMHPMSink with HasDebugStopBundle {
+    when(unprivCountUpdate) {
+      reg := mHPM.cycle
+    }.otherwise{
+      reg := reg
+    }
+    regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.cycle)
   })
     .setAddr(CSRs.cycle)
 
   val time = Module(new CSRModule("time", new CSRBundle {
     val time = RO(63, 0)
-  }) with HasMHPMSink {
+  }) with HasMHPMSink with HasDebugStopBundle {
     val updated = IO(Output(Bool()))
     val stime  = IO(Output(UInt(64.W)))
     val vstime = IO(Output(UInt(64.W)))
@@ -128,11 +151,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val stimeTmp  = mHPM.time.bits
     val vstimeTmp = mHPM.time.bits + htimedelta
 
-    when (mHPM.time.valid) {
+    when(mHPM.time.valid && !debugModeStopTime) {
       reg.time := Mux(v, vstimeTmp, stimeTmp)
+    }.otherwise {
+      reg := reg
     }
 
-    updated := GatedValidRegNext(mHPM.time.valid)
+    updated := GatedValidRegNext(mHPM.time.valid && !debugModeStopTime)
     stime  := stimeTmp
     vstime := vstimeTmp
   })
@@ -140,16 +165,26 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val instret = Module(new CSRModule("instret", new CSRBundle {
     val instret = RO(63, 0)
-  }) with HasMHPMSink {
-    regOut.instret := mHPM.instret
+  }) with HasMHPMSink with HasDebugStopBundle {
+    when(unprivCountUpdate) {
+      reg := mHPM.instret
+    }.otherwise{
+      reg := reg
+    }
+    regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.instret)
   })
     .setAddr(CSRs.instret)
 
   val hpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Hpmcounter$num", new CSRBundle {
       val hpmcounter = RO(63, 0).withReset(0.U)
-    }) with HasMHPMSink {
-      regOut.hpmcounter := mHPM.hpmcounters(num - 3)
+    }) with HasMHPMSink with HasDebugStopBundle {
+      when(unprivCountUpdate) {
+        reg := mHPM.hpmcounters(num - 3)
+      }.otherwise{
+        reg := reg
+      }
+      regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.hpmcounters(num - 3))
     }).setAddr(CSRs.cycle + num)
   )
 
@@ -234,4 +269,10 @@ trait HasMHPMSink { self: CSRModule[_] =>
   }))
   val v = IO(Input(Bool()))
   val htimedelta = IO(Input(UInt(64.W)))
+}
+
+trait HasDebugStopBundle { self: CSRModule[_] =>
+  val debugModeStopCount = IO(Input(Bool()))
+  val debugModeStopTime  = IO(Input(Bool()))
+  val unprivCountUpdate  = IO(Input(Bool()))
 }

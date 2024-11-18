@@ -190,6 +190,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_valid = io.train_req.fire
   val s0_pc    = io.train_req.bits.pc
   val s0_vaddr = io.train_req.bits.vaddr
+  val s0_miss  = io.train_req.bits.miss
+  val s0_pfHit = io.train_req.bits.pfHitStream
   val s0_region_bits = get_region_bits(s0_vaddr)
   val s0_region_tag = get_region_tag(s0_vaddr)
   val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
@@ -263,6 +265,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc    = RegEnable(s0_pc, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
+  val s1_miss  = RegEnable(s0_miss, s0_valid)
+  val s1_pfHit = RegEnable(s0_pfHit, s0_valid)
   val s1_plus_one_index = RegEnable(s0_plus_one_index, s0_valid)
   val s1_minus_one_index = RegEnable(s0_minus_one_index, s0_valid)
   val s1_hit = RegEnable(s0_hit, s0_valid)
@@ -285,7 +289,11 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B)
+  val strict_trigger_const = Constantin.createRecord(s"StreamStrictTrigger_${p(XSCoreParamsKey).HartId}", initValue = 1)
+  // If use strict triggering mode, the stream prefetcher will only trigger prefetching
+  // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
+  val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
+  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
   s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
 
   when(s1_alloc) {

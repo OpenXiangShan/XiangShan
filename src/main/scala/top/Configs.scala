@@ -31,6 +31,7 @@ import system._
 import utility._
 import utils._
 import huancun._
+import openLLC.{OpenLLCParam}
 import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
@@ -194,8 +195,10 @@ class MinimalConfig(n: Int = 1) extends Config(
           l2Size = 4,
           l1nSets = 4,
           l1nWays = 4,
+          l1ReservedBits = 1,
           l0nSets = 4,
           l0nWays = 8,
+          l0ReservedBits = 0,
           spSize = 4,
         ),
         L2CacheParamsOpt = Some(L2Param(
@@ -288,7 +291,7 @@ class WithNKBL2
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some((if(p.EnableSv48) p.VAddrBitsSv48 else p.VAddrBitsSv39) - log2Up(p.dcacheParametersOpt.get.blockBytes)),
+          vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),
@@ -338,6 +341,17 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         simulation = !site(DebugOptionsKey).FPGAPlatform,
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
+      )),
+      OpenLLCParamsOpt = Some(OpenLLCParam(
+        name = "LLC",
+        ways = ways,
+        sets = sets,
+        banks = banks,
+        fullAddressBits = 48,
+        clientCaches = tiles.map { core =>
+          val l2params = core.L2CacheParamsOpt.get
+          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
+        }
       ))
     )
 })
@@ -394,7 +408,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 8)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
 
@@ -408,8 +422,18 @@ class KunminghuV2Config(n: Int = 1) extends Config(
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
-    ++ new WithNKBL1D(64, ways = 8)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new DefaultConfig(n)
+)
+
+class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
+  new WithCHI
+    ++ new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+    })
+    ++ new WithNKBL2(128, inclusive = true, banks = 1, tp = false)
+    ++ new WithNKBL1D(32, ways = 4)
+    ++ new MinimalConfig(n)
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
@@ -418,10 +442,16 @@ class XSNoCTopConfig(n: Int = 1) extends Config(
   })
 )
 
+class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
+  (new KunminghuV2MinimalConfig(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
+
 class FpgaDefaultConfig(n: Int = 1) extends Config(
   (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 8)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,

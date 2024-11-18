@@ -27,7 +27,7 @@ class ExuBlockImp(
 )(implicit
   p: Parameters,
   params: SchdBlockParams
-) extends LazyModuleImp(wrapper) {
+) extends LazyModuleImp(wrapper) with HasCriticalErrors {
   val io = IO(new ExuBlockIO)
 
   private val exus = wrapper.exus.map(_.module)
@@ -53,6 +53,9 @@ class ExuBlockImp(
 //    }
     XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
+  exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
+    exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
+  }
   val aluFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
   for (i <- 0 until (aluFireSeq.size + 1)){
     XSPerfAccumulate(s"alu_fire_${i}_cnt", PopCount(aluFireSeq) === i.U)
@@ -61,6 +64,8 @@ class ExuBlockImp(
   for (i <- 0 until (brhFireSeq.size + 1)) {
     XSPerfAccumulate(s"brh_fire_${i}_cnt", PopCount(brhFireSeq) === i.U)
   }
+  val criticalErrors = exus.filter(_.wrapper.exuParams.needCriticalErrors).flatMap(exu => exu.getCriticalErrors)
+  generateCriticalErrors()
 }
 
 class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBundle {

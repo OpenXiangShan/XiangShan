@@ -27,6 +27,7 @@ import utility._
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
+import xiangshan.backend.HasMemBlockParameters
 
 class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -201,7 +202,9 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   // end
 }
 
-class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class UncacheBuffer(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper
+  with HasMemBlockParameters {
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(Valid(new Redirect))
@@ -359,7 +362,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   AddPipelineReg(uncacheReq, io.uncache.req, false.B)
 
   // uncache Writeback
-  AddPipelineReg(ldout, io.ldout(0), false.B)
+  AddPipelineReg(ldout, io.ldout(UncacheWBPort), false.B)
 
   // uncache exception
   io.exception.valid := Cat(entries.map(_.io.exception.valid)).orR
@@ -367,7 +370,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     (e.io.exception.valid, e.io.exception.bits)
   ))
 
-  io.ld_raw_data(0)      := RegEnable(ld_raw_data, ldout.fire)
+  io.ld_raw_data(UncacheWBPort)      := RegEnable(ld_raw_data, ldout.fire)
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
