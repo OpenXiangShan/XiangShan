@@ -84,7 +84,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu          = Module(new Predictor)
+  val bpu          = Module(new BPU)
   val ifu          = Module(new NewIFU)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
