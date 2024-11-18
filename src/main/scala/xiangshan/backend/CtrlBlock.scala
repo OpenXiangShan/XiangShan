@@ -64,6 +64,7 @@ class CtrlBlockImp(
   with HasXSParameter
   with HasCircularQueuePtrHelper
   with HasPerfEvents
+  with HasCriticalErrors
 {
   val pcMemRdIndexes = new NamedIndexes(Seq(
     "redirect"  -> 1,
@@ -316,12 +317,12 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
-  decode.io.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.commitVType := rob.io.toDecode.commitVType
-  decode.io.walkVType := rob.io.toDecode.walkVType
+  decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
+  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
+  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
+  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
-  decode.io.vtypeRedirect := s1_s3_redirect.valid
 
   // add decode Buf for in.ready better timing
   val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
@@ -427,7 +428,6 @@ class CtrlBlockImp(
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodedInst)))
-
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), decodePipeRename(i), rename.io.in(i).ready,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
@@ -589,6 +589,7 @@ class CtrlBlockImp(
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
+  rob.io.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
   io.redirect := s1_s3_redirect
 
@@ -616,9 +617,12 @@ class CtrlBlockImp(
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+  rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
+
+  io.robio.storeDebugInfo <> rob.io.storeDebugInfo
 
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
@@ -630,6 +634,30 @@ class CtrlBlockImp(
   rob.io.vstartIsZero := io.toDecode.vstart === 0.U
 
   io.toCSR.trapInstInfo := decode.io.toCSR.trapInstInfo
+
+  io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
+  io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo
+  // T  : rat receive rabCommit
+  // T+1: rat return oldPdest
+  io.toVecExcpMod.ratOldPest match {
+    case fromRat =>
+      (0 until RabCommitWidth).foreach { idx =>
+        fromRat.v0OldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).v0Wen
+        )
+        fromRat.v0OldVdPdest(idx).bits := rat.io.v0_old_pdest(idx)
+        fromRat.vecOldVdPdest(idx).valid := RegNext(
+          rat.io.rabCommits.isCommit &&
+          rat.io.rabCommits.isWalk &&
+          rat.io.rabCommits.commitValid(idx) &&
+          rat.io.rabCommits.info(idx).vecWen
+        )
+        fromRat.vecOldVdPdest(idx).bits := rat.io.vec_old_pdest(idx)
+      }
+  }
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -643,6 +671,9 @@ class CtrlBlockImp(
 
   val perfEvents = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
+
+  val criticalErrors = rob.getCriticalErrors
+  generateCriticalErrors()
 }
 
 class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -700,12 +731,28 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val vtype = Output(ValidIO(VType()))
       val hasVsetvl = Output(Bool())
     }
+
+    // store event difftest information
+    val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+      val robidx = Input(new RobPtr)
+      val pc     = Output(UInt(VAddrBits.W))
+    })
   }
 
   val toDecode = new Bundle {
     val vsetvlVType = Input(VType())
     val vstart = Input(Vl())
   }
+
+  val fromVecExcpMod = Input(new Bundle {
+    val busy = Bool()
+  })
+
+  val toVecExcpMod = Output(new Bundle {
+    val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
+    val excpInfo = ValidIO(new VecExcpInfo)
+    val ratOldPest = new RatToVecExcpMod
+  })
 
   val perfInfo = Output(new Bundle{
     val ctrlInfo = new Bundle {

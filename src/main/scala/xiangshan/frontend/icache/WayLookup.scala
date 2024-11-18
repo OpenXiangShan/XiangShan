@@ -16,12 +16,12 @@
 
 package xiangshan.frontend.icache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.frontend.ExceptionType
 import xiangshan.cache.mmu.Pbmt
+import xiangshan.frontend.ExceptionType
 
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
@@ -30,17 +30,17 @@ import xiangshan.cache.mmu.Pbmt
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx        : Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask        : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val ptag           : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlb_exception : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val itlb_pbmt      : Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val meta_codes     : Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val vSetIdx:        Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:        Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val ptag:           Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
+  val itlb_exception: Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val itlb_pbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
+  val meta_codes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  val gpaddr         : UInt      = UInt(GPAddrBits.W)
-  val isForVSnonLeafPTE        : Bool      = Bool()
+  val gpaddr:            UInt = UInt(GPAddrBits.W)
+  val isForVSnonLeafPTE: Bool = Bool()
 }
 
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
@@ -48,21 +48,21 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGPFEntry
 
   // for compatibility
-  def vSetIdx        : Vec[UInt] = entry.vSetIdx
-  def waymask        : Vec[UInt] = entry.waymask
-  def ptag           : Vec[UInt] = entry.ptag
-  def itlb_exception : Vec[UInt] = entry.itlb_exception
-  def itlb_pbmt      : Vec[UInt] = entry.itlb_pbmt
-  def meta_codes     : Vec[UInt] = entry.meta_codes
-  def gpaddr         : UInt      = gpf.gpaddr
-  def isForVSnonLeafPTE        : Bool      = gpf.isForVSnonLeafPTE
+  def vSetIdx:           Vec[UInt] = entry.vSetIdx
+  def waymask:           Vec[UInt] = entry.waymask
+  def ptag:              Vec[UInt] = entry.ptag
+  def itlb_exception:    Vec[UInt] = entry.itlb_exception
+  def itlb_pbmt:         Vec[UInt] = entry.itlb_pbmt
+  def meta_codes:        Vec[UInt] = entry.meta_codes
+  def gpaddr:            UInt      = gpf.gpaddr
+  def isForVSnonLeafPTE: Bool      = gpf.isForVSnonLeafPTE
 }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
-  val flush   = Input(Bool())
-  val read    = DecoupledIO(new WayLookupInfo)
-  val write   = Flipped(DecoupledIO(new WayLookupInfo))
-  val update  = Flipped(ValidIO(new ICacheMissResp))
+  val flush  = Input(Bool())
+  val read   = DecoupledIO(new WayLookupInfo)
+  val write  = Flipped(DecoupledIO(new WayLookupInfo))
+  val update = Flipped(ValidIO(new ICacheMissResp))
 }
 
 class WayLookup(implicit p: Parameters) extends ICacheModule {
@@ -72,7 +72,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
   private object WayLookupPtr {
     def apply(f: Bool, v: UInt)(implicit p: Parameters): WayLookupPtr = {
       val ptr = Wire(new WayLookupPtr)
-      ptr.flag := f
+      ptr.flag  := f
       ptr.value := v
       ptr
     }
@@ -101,6 +101,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
 
   private val gpf_entry = RegInit(0.U.asTypeOf(Valid(new WayLookupGPFEntry)))
   private val gpfPtr    = RegInit(WayLookupPtr(false.B, 0.U))
+  private val gpf_hit   = gpfPtr === readPtr && gpf_entry.valid
 
   when(io.flush) {
     // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
@@ -114,12 +115,12 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     ******************************************************************************
     */
   private val hits = Wire(Vec(nWayLookupSize, Bool()))
-  entries.zip(hits).foreach{ case(entry, hit) =>
+  entries.zip(hits).foreach { case (entry, hit) =>
     val hit_vec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
       val vset_same = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
       val ptag_same = getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i)
-      val way_same = io.update.bits.waymask === entry.waymask(i)
+      val way_same  = io.update.bits.waymask === entry.waymask(i)
       when(vset_same) {
         when(ptag_same) {
           // miss -> hit
@@ -135,7 +136,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)
     }
-    hit := hit_vec.reduce(_||_)
+    hit := hit_vec.reduce(_ || _)
   }
 
   /**
@@ -143,12 +144,22 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * read
     ******************************************************************************
     */
+  // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
+  private val can_bypass = empty && io.write.valid
   io.read.valid := !empty || io.write.valid
-  when (empty && io.write.valid) {  // bypass
+  when(can_bypass) {
     io.read.bits := io.write.bits
-  }.otherwise {
+  }.otherwise { // can't bypass
     io.read.bits.entry := entries(readPtr.value)
-    io.read.bits.gpf   := Mux(readPtr === gpfPtr && gpf_entry.valid, gpf_entry.bits, 0.U.asTypeOf(new WayLookupGPFEntry))
+    when(gpf_hit) { // ptr match && entry valid
+      io.read.bits.gpf := gpf_entry.bits
+      // also clear gpf_entry.valid when it's read, note this will be override by write (L175)
+      when(io.read.fire) {
+        gpf_entry.valid := false.B
+      }
+    }.otherwise { // gpf not hit
+      io.read.bits.gpf := 0.U.asTypeOf(new WayLookupGPFEntry)
+    }
   }
 
   /**
@@ -156,14 +167,17 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * write
     ******************************************************************************
     */
-  io.write.ready := !full
+  // if there is a valid gpf to be read, we should stall the write
+  private val gpf_stall = gpf_entry.valid && !(io.read.fire && gpf_hit)
+  io.write.ready := !full && !gpf_stall
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
-    // save gpf iff no gpf is already saved
-    when(!gpf_entry.valid && io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_||_)) {
-      gpf_entry.valid := true.B
+    when(io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_ || _)) {
+      // if gpf_entry is bypassed, we don't need to save it
+      // note this will override the read (L156)
+      gpf_entry.valid := !(can_bypass && io.read.fire)
       gpf_entry.bits  := io.write.bits.gpf
-      gpfPtr := writePtr
+      gpfPtr          := writePtr
     }
   }
 }

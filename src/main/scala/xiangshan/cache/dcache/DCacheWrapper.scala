@@ -1114,7 +1114,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
-
+  
   //----------------------------------------
   // tag array
   if(StorePrefetchL1Enabled) {

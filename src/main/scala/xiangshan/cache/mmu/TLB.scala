@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Binh Pham, Viswanathan Vaidyanathan, Aamer Jaleel, and Abhishek Bhattacharjee. "[Colt: Coalesced large-reach
+* tlbs.](https://doi.org/10.1109/MICRO.2012.32)" 45th Annual IEEE/ACM International Symposium on Microarchitecture
+* (MICRO). 2012.
 ***************************************************************************************/
 
 package xiangshan.cache.mmu
@@ -205,12 +213,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(i).vaddr)
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
+    val isPrefetch = req_out(i).isPrefetch
+    val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
+    val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
     when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i)){
       need_gpa := false.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
-    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill) {
+    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
@@ -223,12 +234,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := true.B
     }
 
-    when (req_out_v(i) && hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit ){
+    when (req_out_v(i) && hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit){
       need_gpa := false.B
     }
 
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
+    val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && !isPrefetch && !lastCycleRedirect
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -241,7 +252,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val pbmt = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePbmtLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
-    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(vpnLen.W))))
+    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ptePPNLen.W))))
     val level = WireInit(VecInit(Seq.fill(nRespDups)(0.U(log2Up(Level + 1).W))))
     val isLeaf = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
     val isFakePte = WireInit(VecInit(Seq.fill(nRespDups)(false.B)))
@@ -265,10 +276,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         (isFakePte(d) && vsatp.mode === Sv48) -> 3.U,
         (!isFakePte(d)) -> (level(d) - 1.U),
       ))
-      val gpaddr_offset = Mux(isLeaf(d), get_off(req_out(i).vaddr), Cat(getVpnn(get_pn(req_out(i).vaddr), vpn_idx),  0.U(log2Up(XLEN/8).W)))
+      // We use `fullva` here when `isLeaf`, in order to cope with the situation of an unaligned load/store cross page
+      // for example, a `ld` instruction on address 0x81000ffb will be splited into two loads
+      // 1. ld 0x81000ff8. vaddr = 0x81000ff8, fullva = 0x80000ffb
+      // 2. ld 0x81001000. vaddr = 0x81001000, fullva = 0x80000ffb
+      // When load 1 trigger a guest page fault, we should use offset of fullva when generate gpaddr
+      // and when load 2 trigger a guest page fault, we should just use offset of vaddr(all zero).
+      // Also, when onlyS2, if crosspage, gpaddr = vaddr(start address of a new page), else gpaddr = fullva(original vaddr)
+      // By the way, frontend handles the cross page instruction fetch by itself, so TLB doesn't need to do anything extra.
+      // Also, the fullva of iTLB is not used and always zero. crossPageVaddr should never use fullva in iTLB.
+      val crossPageVaddr = Mux(isitlb || req_out(i).fullva(12) =/= vaddr(12), vaddr, req_out(i).fullva)
+      val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
-      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, vaddr, gpaddr)
+      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
@@ -296,8 +317,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def pbmt_check(idx: Int, d: Int, pbmt: UInt, g_pbmt: UInt, s2xlate: UInt):Unit = {
     val onlyS1 = s2xlate === onlyStage1 || s2xlate === noS2xlate
-    val pbmtRes = Mux(hPBMTE, pbmt, 0.U)
-    val gpbmtRes = Mux(mPBMTE, g_pbmt, 0.U)
+    val pbmtRes = pbmt
+    val gpbmtRes = g_pbmt
     val res = MuxLookup(s2xlate, 0.U)(Seq(
       onlyStage1 -> pbmtRes,
       onlyStage2 -> gpbmtRes,
@@ -368,6 +389,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).af.instr := false.B
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
+      // overwrite miss & gpaddr when exception related to high address truncation happens
+      resp(idx).bits.miss := false.B
+      resp(idx).bits.gpaddr(nDups) := RegNext(req(idx).bits.fullva)
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.

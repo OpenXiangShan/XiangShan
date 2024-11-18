@@ -12,7 +12,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
-import xiangshan.backend.rename.BusyTable
+import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr, LqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
@@ -107,6 +107,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   }
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val vecLoadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
@@ -184,7 +185,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     case _ => None
   }
   val vlBusyTable = schdType match {
-    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVlStateRead, wrapper.numVlStateWrite, VlPhyRegs, VlWB())))
+    case VfScheduler() | MemScheduler() => Some(Module(new VlBusyTable(dispatch2Iq.numVlStateRead, wrapper.numVlStateWrite, VlPhyRegs, VlWB())))
     case _ => None
   }
 
@@ -202,6 +203,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     dp2iq.readVfState.foreach(_ <> vfBusyTable.get.io.read)
     dp2iq.readV0State.foreach(_ <> v0BusyTable.get.io.read)
     dp2iq.readVlState.foreach(_ <> vlBusyTable.get.io.read)
+    dp2iq.readVlInfo.foreach(_ <> vlBusyTable.get.io_vl_read.vlReadInfo)
     dp2iq.readRCTagTableState.foreach(_ <> rcTagTable.get.io.readPorts)
   }
 
@@ -282,6 +284,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
       bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
+
+      bt.io_vl_Wb.vlWriteBackInfo := io.vlWriteBackInfo
     case None =>
   }
 
@@ -416,9 +420,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       og1Resp := io.fromDataPath(i)(j).og1resp
     }
     iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
-      if (io.loadFinalIssueResp(i).isDefinedAt(j)) {
+      if (io.loadFinalIssueResp(i).isDefinedAt(j) && iq.params.isLdAddrIQ) {
         finalIssueResp := io.loadFinalIssueResp(i)(j)
-      } else {
+      } else if (io.vecLoadFinalIssueResp(i).isDefinedAt(j) && iq.params.isVecLduIQ) {
+        finalIssueResp := io.vecLoadFinalIssueResp(i)(j)
+      }
+      else {
         finalIssueResp := 0.U.asTypeOf(finalIssueResp)
       }
     })

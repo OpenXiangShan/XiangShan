@@ -12,6 +12,13 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] David Kroft. "[Lockup-free instruction fetch/prefetch cache organization.]
+* (https://dl.acm.org/doi/10.5555/800052.801868)" 8th Annual Symposium on Computer Architecture (ISCA). 1981.
 ***************************************************************************************/
 
 package xiangshan.cache

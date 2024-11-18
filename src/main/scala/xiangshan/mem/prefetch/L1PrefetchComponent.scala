@@ -601,6 +601,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
     tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
@@ -642,7 +643,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
       when(!s2_tlb_resp.bits.miss) {
         l1_array(s2_tlb_update_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
+        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
           invalid_array(s2_tlb_update_index, false)
         }
       }
@@ -652,7 +653,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   
       when(!s2_tlb_resp.bits.miss) {
         l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
+        when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
           invalid_array(inner_index, true)
         }
       }
@@ -665,6 +666,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   XSPerfAccumulate("s2_tlb_resp_miss", s2_tlb_resp.valid && !s2_tlb_evict && s2_tlb_resp.bits.miss)
   XSPerfAccumulate("s2_tlb_resp_updated", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss)
   XSPerfAccumulate("s2_tlb_resp_page_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.pf.ld)
+  XSPerfAccumulate("s2_tlb_resp_guestpage_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.gpf.ld)
   XSPerfAccumulate("s2_tlb_resp_access_fault", s2_tlb_resp.valid && !s2_tlb_evict && !s2_tlb_resp.bits.miss && s2_tlb_resp.bits.excp.head.af.ld)
 
   // l1 pf

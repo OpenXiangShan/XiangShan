@@ -31,6 +31,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.fu.FuConfig.StaCfg
 
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -156,6 +157,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val bufferState = RegInit(s_idle)
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new SqWriteBundle))))
+  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentStores  = RegInit(0.U(maxSplitNum.W))
   val unWriteStores = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
@@ -242,7 +244,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SB -> 0.U,
     SH -> 1.U,
     SW -> 3.U,
-    SD -> 7.U 
+    SD -> 7.U
   )) + req.vaddr(4, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
@@ -443,21 +445,28 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitStoreReq.valid := req_valid && (bufferState === s_req)
   io.splitStoreReq.bits  := splitStoreReqs(curPtr)
+  // Restore the information of H extension store
+  // bit encoding: | hsv 1 | store 00 | size(2bit) |
+  val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
+  io.splitStoreReq.bits.uop.fuOpType := Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0))
 
   when (io.splitStoreResp.valid) {
+    val resp = io.splitStoreResp.bits
     splitStoreResp(curPtr) := io.splitStoreResp.bits
     when (isMMIO) {
       unWriteStores := 0.U
       unSentStores := 0.U
-      splitStoreResp(curPtr).uop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+      exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), StaCfg)
       // delegate to software
-      splitStoreResp(curPtr).uop.exceptionVec(storeAddrMisaligned) := true.B
+      exceptionVec(storeAddrMisaligned) := true.B
     } .elsewhen (hasException) {
       unWriteStores := 0.U
       unSentStores := 0.U
+      StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitStoreResp.bits.need_rep) {
       unSentStores := unSentStores & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
+      exceptionVec := 0.U.asTypeOf(ExceptionVec())
     }
   }
 
@@ -549,7 +558,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.sqControl.control.writeSb := bufferState === s_sq_req
   io.sqControl.control.wdata   := splitStoreData(curPtr).wdata
   io.sqControl.control.wmask   := splitStoreData(curPtr).wmask
-  // the paddr and vaddr is not corresponding to the exact addr of 
+  // the paddr and vaddr is not corresponding to the exact addr of
   io.sqControl.control.paddr   := splitStoreResp(curPtr).paddr
   io.sqControl.control.vaddr   := splitStoreResp(curPtr).vaddr
   io.sqControl.control.last    := !((unWriteStores & ~UIntToOH(curPtr)).orR)
@@ -560,24 +569,21 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       curPtr := curPtr + 1.U
     }
   }
-
   io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
   io.writeBack.bits.uop := req.uop
-  io.writeBack.bits.uop.exceptionVec := Mux(
-    globalMMIO || globalException,
-    splitStoreResp(curPtr).uop.exceptionVec,
-    0.U.asTypeOf(ExceptionVec()) // TODO: is this ok?
-  )
+  io.writeBack.bits.uop.exceptionVec := DontCare
+  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := unalignedStoreData
+  io.writeBack.bits.isFromLoadUnit := DontCare
   io.writeBack.bits.debug.isMMIO := globalMMIO
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
 
   io.sqControl.control.removeSq := req_valid && (bufferState === s_wait) && !(globalMMIO || globalException) && (io.rob.scommit =/= 0.U)
-  
+
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
   when (flush && (bufferState =/= s_idle)) {
@@ -592,11 +598,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
   // if exception happens in the higher page address part, overwrite the storeExceptionBuffer vaddr
-  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
-  val overwriteVaddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
-  val overwriteIsHyper = GatedRegNext(splitStoreResp(curPtr).isHyper)
-  val overwriteGpaddr = GatedRegNext(splitStoreResp(curPtr).gpaddr)
-  val overwriteIsForVSnonLeafPTE = GatedRegNext(splitStoreResp(curPtr).isForVSnonLeafPTE)
+  val shouldOverwrite = req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U)
+  val overwriteExpBuf = GatedValidRegNext(shouldOverwrite)
+  val overwriteVaddr = RegEnable(splitStoreResp(curPtr).vaddr, shouldOverwrite)
+  val overwriteIsHyper = RegEnable(splitStoreResp(curPtr).isHyper, shouldOverwrite)
+  val overwriteGpaddr = RegEnable(splitStoreResp(curPtr).gpaddr, shouldOverwrite)
+  val overwriteIsForVSnonLeafPTE = RegEnable(splitStoreResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
   io.overwriteExpBuf.valid := overwriteExpBuf
   io.overwriteExpBuf.vaddr := overwriteVaddr

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
 import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
@@ -32,8 +33,10 @@ import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
-import coupledL2.EnableCHI
+import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
+import openLLC.OpenLLCParam
+import xiangshan.PMParameKey
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -42,6 +45,11 @@ case class SoCParameters
   EnableILA: Boolean = false,
   PAddrBits: Int = 48,
   PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
+  CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
+  BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
+  PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
+  PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
+  UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -49,6 +57,13 @@ case class SoCParameters
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank
+  )),
+  OpenLLCParamsOpt: Option[OpenLLCParam] = Some(OpenLLCParam(
+    name = "LLC",
+    ways = 8,
+    sets = 2048,
+    banks = 4,
+    clientCaches = Seq(L2Param())
   )),
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
@@ -60,7 +75,7 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 4, sync = 3, safe = false)),
+  EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
 ){
   // L3 configurations
@@ -68,6 +83,7 @@ case class SoCParameters
   val L3BlockSize = 64
   // on chip network configurations
   val L3OuterBusWidth = 256
+  val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
 }
 
 trait HasSoCParameter {
@@ -101,10 +117,39 @@ trait HasSoCParameter {
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
 }
 
+trait HasPeripheralRanges {
+  implicit val p: Parameters
+
+  private def soc = p(SoCParamsKey)
+  private def dm = p(DebugModuleKey)
+  private def pmParams = p(PMParameKey)
+
+  private def mmpma = pmParams.mmpma
+
+  def onChipPeripheralRanges: Map[String, AddressSet] = Map(
+    "CLINT" -> soc.CLINTRange,
+    "BEU"   -> soc.BEURange,
+    "PLIC"  -> soc.PLICRange,
+    "PLL"   -> soc.PLLRange,
+    "UART"  -> soc.UARTLiteRange,
+    "DEBUG" -> dm.get.address,
+    "MMPMA" -> AddressSet(mmpma.address, mmpma.mask)
+  ) ++ (
+    if (soc.L3CacheParamsOpt.map(_.ctrl.isDefined).getOrElse(false))
+      Map("L3CTL" -> AddressSet(soc.L3CacheParamsOpt.get.ctrl.get.address, 0xffff))
+    else
+      Map()
+  )
+
+  def peripheralRange = onChipPeripheralRanges.values.foldLeft(Seq(AddressSet(0x0, 0x7fffffffL))) { (acc, x) =>
+    acc.flatMap(_.subtract(x))
+  }
+}
+
 class ILABundle extends Bundle {}
 
 
-abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
+abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCParameter with HasPeripheralRanges {
   val bankedNode = Option.when(!enableCHI)(BankBinder(L3NBanks, L3BlockSize))
   val peripheralXbar = Option.when(!enableCHI)(TLXbar())
   val l3_xbar = Option.when(!enableCHI)(TLXbar())
@@ -220,20 +265,14 @@ trait HaveAXI4MemPort {
 }
 
 trait HaveAXI4PeripheralPort { this: BaseSoC =>
-  // on-chip devices: 0x3800_0000 - 0x3fff_ffff 0x0000_0000 - 0x0000_0fff
-  val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-  val uartRange = AddressSet(0x40600000, 0x3f)
   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
   val uartParams = AXI4SlaveParameters(
-    address = Seq(uartRange),
+    address = Seq(soc.UARTLiteRange),
     regionType = RegionType.UNCACHED,
     supportsRead = TransferSizes(1, 32),
     supportsWrite = TransferSizes(1, 32),
     resources = uartDevice.reg
   )
-  val peripheralRange = AddressSet(
-    0x0, 0x7fffffff
-  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
       address = peripheralRange,
@@ -336,7 +375,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     }
   }
 
-  val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
+  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
   if (enableCHI) { clint.node := device_xbar.get }
   else { clint.node := peripheralXbar.get }
 
@@ -349,7 +388,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     lazy val module = new IntSourceNodeToModuleImp(this)
   }
 
-  val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
+  val plic = LazyModule(new TLPLIC(PLICParams(soc.PLICRange.base), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode
@@ -357,7 +396,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { plic.node := peripheralXbar.get }
 
   val pll_node = TLRegisterNode(
-    address = Seq(AddressSet(0x3a000000L, 0xfff)),
+    address = Seq(soc.PLLRange),
     device = new SimpleDevice("pll_ctrl", Seq()),
     beatBytes = 8,
     concurrency = 1

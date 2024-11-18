@@ -13,6 +13,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Gurindar S. Sohi, and Manoj Franklin. "[High-bandwidth data memory systems for superscalar processors.]
+* (https://doi.org/10.1145/106972.106980)" 4th International Conference on Architectural Support for Programming
+* Languages and Operating Systems (ASPLOS). 1991.
 ***************************************************************************************/
 
 package xiangshan.cache
@@ -46,6 +54,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
   val way_en = Bits(DCacheWays.W)
   val addr = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
+  val kill = Bool()
 }
 
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
@@ -187,6 +196,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
     )
     data_bank(w).io.r.req.valid := io.r.en
     data_bank(w).io.r.req.bits.apply(setIdx = io.r.addr)
+    data_bank(w).clock := ClockGate(false.B, io.r.en | (io.w.en & io.w.way_en(w)), clock)
   }
   XSPerfAccumulate("part_data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
 

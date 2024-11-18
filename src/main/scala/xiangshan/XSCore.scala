@@ -82,9 +82,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
+    val cpu_critical_error = Output(Bool())
     val resetInFrontend = Output(Bool())
     val l2_pf_enable = Output(Bool())
-    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
@@ -166,16 +167,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.io_perf
   backend.io.perf.perfEventsLsu := memBlock.io_perf
-  backend.io.perf.perfEventsHc := io.perfEvents
+  backend.io.perf.perfEventsHc := memBlock.io.inner_hc_perfEvents
   backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
+
+  backend.io.mem.storeDebugInfo <> memBlock.io.mem_to_ooo.storeDebugInfo
 
   // top -> memBlock
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
   memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
   memBlock.io.hartId := io.hartId
   memBlock.io.outer_reset_vector := io.reset_vector
+  memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
   memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
@@ -235,6 +239,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare

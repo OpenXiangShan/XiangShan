@@ -12,6 +12,13 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Robert. M. Tomasulo. "[An efficient algorithm for exploiting multiple arithmetic units.]
+* (https://doi.org/10.1147/rd.111.0025)" IBM Journal of Research and Development (IBMJ) 11.1: 25-33. 1967.
 ***************************************************************************************/
 
 package xiangshan.backend
@@ -20,6 +27,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import device.MsiInfoBundle
+import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility._
@@ -183,7 +191,8 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
 
 class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter
-  with HasPerfEvents {
+  with HasPerfEvents
+  with HasCriticalErrors {
   implicit private val params: BackendParams = wrapper.params
 
   val io = IO(new BackendIO()(p, wrapper.params))
@@ -202,6 +211,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
+  private val vecExcpMod = Module(new VecExcpDataMergeModule)
 
   private val iqWakeUpMappedBundle: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] = (
     intScheduler.io.toSchedulers.wakeupVec ++
@@ -229,6 +239,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val vlFromVfIsZero = vfExuBlock.io.vlIsZero.get
   private val vlFromVfIsVlmax = vfExuBlock.io.vlIsVlmax.get
 
+  private val backendCriticalError = Wire(Bool())
+
   ctrlBlock.io.intIQValidNumVec := intScheduler.io.intIQValidNumVec
   ctrlBlock.io.fpIQValidNumVec := fpScheduler.io.fpIQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -244,6 +256,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
+  ctrlBlock.io.robio.csr.criticalErrorState := intExuBlock.io.csrio.get.criticalErrorState
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
@@ -252,6 +265,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
+  ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -375,6 +389,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   dataPath.io.diffV0Rat .foreach(_ := ctrlBlock.io.diff_v0_rat.get)
   dataPath.io.diffVlRat .foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
+  dataPath.io.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
+  dataPath.io.fromVecExcpMod.w := vecExcpMod.o.toVPRF.w
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -415,7 +431,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   )
   bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
-    sink.bits.intWen := source.bits.uop.rfWen && FuType.isLoad(source.bits.uop.fuType)
+    sink.bits.intWen := source.bits.uop.rfWen && source.bits.isFromLoadUnit
     sink.bits.pdest := source.bits.uop.pdest
     sink.bits.data := source.bits.data
   }
@@ -447,6 +463,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
+  csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
+  csrin.criticalErrorState := backendCriticalError
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -562,9 +580,19 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       x.oldVdPsrc := source.bits.uop.psrc(2)
       x.isIndexed := VlduType.isIndexed(source.bits.uop.fuOpType)
       x.isMasked := VlduType.isMasked(source.bits.uop.fuOpType)
+      x.isStrided := VlduType.isStrided(source.bits.uop.fuOpType)
+      x.isWhole := VlduType.isWhole(source.bits.uop.fuOpType)
+      x.isVecLoad := VlduType.isVecLd(source.bits.uop.fuOpType)
+      x.isVlm := VlduType.isMasked(source.bits.uop.fuOpType) && VlduType.isVecLd(source.bits.uop.fuOpType)
     })
     sink.bits.trigger.foreach(_ := source.bits.uop.trigger)
   }
+  wbDataPath.io.fromCSR.vstart := csrio.vpu.vstart
+
+  vecExcpMod.i.fromExceptionGen := ctrlBlock.io.toVecExcpMod.excpInfo
+  vecExcpMod.i.fromRab.logicPhyRegMap := ctrlBlock.io.toVecExcpMod.logicPhyRegMap
+  vecExcpMod.i.fromRat := ctrlBlock.io.toVecExcpMod.ratOldPest
+  vecExcpMod.i.fromVprf := dataPath.io.toVecExcpMod
 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
@@ -577,8 +605,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   for (i <- toMem.indices) {
     for (j <- toMem(i).indices) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.mem(i)(j).bits.loadDependency, io.mem.ldCancel)
+      val needIssueTimeout = memExuBlocksHasLDU(i)(j) || memExuBlocksHasVecLoad(i)(j)
       val issueTimeout =
-        if (memExuBlocksHasLDU(i)(j))
+        if (needIssueTimeout)
           Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
         else
           false.B
@@ -591,6 +620,16 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
+      }
+
+      if (memScheduler.io.vecLoadFinalIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).valid := issueTimeout
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.resp := RespType.block
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
       }
 
       NewPipelineConnect(
@@ -701,6 +740,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   // mem io
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
+  io.mem.storeDebugInfo <> ctrlBlock.io.robio.storeDebugInfo
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
@@ -779,7 +819,21 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   csrio.perf.perfEventsBackend := VecInit(perfEvents.map(_._2.asTypeOf(new PerfEvent)))
-  generatePerfEvent()
+
+  val ctrlBlockError = ctrlBlock.getCriticalErrors
+  val intExuBlockError = intExuBlock.getCriticalErrors
+  val criticalErrors = ctrlBlockError ++ intExuBlockError
+
+  if (printCriticalError) {
+    for (((name, error), _) <- criticalErrors.zipWithIndex) {
+      XSError(error, s"critical error: $name \n")
+    }
+  }
+
+  // expand to collect frontend/memblock/L2 critical errors
+  backendCriticalError := criticalErrors.map(_._2).reduce(_ || _)
+
+  io.toTop.cpuCriticalError := csrio.criticalErrorState
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -868,6 +922,12 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
       writebackVldu ++
       writebackStd
   }
+
+  // store event difftest information
+  val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
+    val robidx = Input(new RobPtr)
+    val pc     = Output(UInt(VAddrBits.W))
+  })
 }
 
 class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
@@ -879,6 +939,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
 
 class BackendToTopBundle extends Bundle {
   val cpuHalted = Output(Bool())
+  val cpuCriticalError = Output(Bool())
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {

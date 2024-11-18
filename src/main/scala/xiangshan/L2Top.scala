@@ -75,7 +75,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableCHI && enableL2) None else Some(TLIdentityNode())
   val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
+    new XSL1BusErrors(),
+    BusErrorUnitParams(soc.BEURange.base, soc.BEURange.mask.toInt + 1)
   ))
 
   val i_mmio_port = TLTempNode()
@@ -95,6 +96,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val clint_int_node = IntIdentityNode()
   val debug_int_node = IntIdentityNode()
   val plic_int_node = IntIdentityNode()
+  val nmi_int_node = IntIdentityNode()
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
@@ -151,6 +153,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
+      val cpu_critical_error = new Bundle() {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
+      }
       val hartIsInReset = new Bundle() {
         val resetInFrontend = Input(Bool())
         val toTile = Output(Bool())
@@ -165,6 +171,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
+      val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       // val reset_core = IO(Output(Reset()))
     })
 
@@ -175,8 +182,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
+    io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
+    dontTouch(io.cpu_critical_error)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val hartIsInReset = RegInit(true.B)
@@ -202,6 +211,15 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
       io.l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
       io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
+      io.perfEvents := l2.io_perf
+
+      val allPerfEvents = l2.getPerfEvents
+      if (printEventCoding) {
+        for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+          println("L2 Cache perfEvents Set", name, inc, i)
+        }
+      }
+
       l2.io.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid
       l2.io.l2_tlb_req.req.ready := io.l2_tlb_req.req.ready
       l2.io.l2_tlb_req.resp.bits.paddr.head := io.l2_tlb_req.resp.bits.paddr.head
@@ -230,6 +248,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req.bits := DontCare
       io.l2_tlb_req.req_kill := DontCare
       io.l2_tlb_req.resp.ready := true.B
+      io.perfEvents := DontCare
     }
   }
 

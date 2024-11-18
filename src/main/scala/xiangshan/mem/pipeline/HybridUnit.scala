@@ -226,9 +226,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // load flow source select (OH)
   val s0_src_select_vec = WireInit(VecInit((0 until SRC_NUM).map{i => s0_src_valid_vec(i) && s0_src_ready_vec(i)}))
   val s0_hw_prf_select = s0_src_select_vec(high_pf_idx) || s0_src_select_vec(low_pf_idx)
-  dontTouch(s0_src_valid_vec)
-  dontTouch(s0_src_ready_vec)
-  dontTouch(s0_src_select_vec)
+
+  if (backendParams.debugEn){
+    dontTouch(s0_src_valid_vec)
+    dontTouch(s0_src_ready_vec)
+    dontTouch(s0_src_select_vec)
+  }
 
   s0_valid := s0_src_valid_vec.reduce(_ || _) && !s0_kill
 
@@ -647,6 +650,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   storeTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+  storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   when (s1_ld_flow) {
     when (!s1_late_kill) {
@@ -674,6 +679,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+  loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
+  loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
 
   when (s1_ld_flow) {
     s1_out.uop.exceptionVec(breakPoint) := TriggerAction.isExp(loadTrigger.io.toLoadStore.triggerAction)

@@ -43,9 +43,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
+  val nmiIntNode = IntIdentityNode()
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
+  tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))
@@ -57,6 +59,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
@@ -87,7 +90,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
-    io.cpu_halt := tile.module.io.cpu_halt 
+    io.cpu_halt := tile.module.io.cpu_halt
+    io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.hartIsInReset := tile.module.io.hartIsInReset
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)

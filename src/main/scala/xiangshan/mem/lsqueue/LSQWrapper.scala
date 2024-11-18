@@ -135,8 +135,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.hartId := io.hartId
   storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
 
+  if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
 
-  dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
@@ -267,10 +267,15 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.uncache.req.ready := false.B
   loadQueue.io.uncache.resp.valid := false.B
   storeQueue.io.uncache.resp.valid := false.B
-  when(loadQueue.io.uncache.req.valid){
-    io.uncache.req <> loadQueue.io.uncache.req
+  when(pendingstate === s_idle){
+    when(loadQueue.io.uncache.req.valid){
+      io.uncache.req <> loadQueue.io.uncache.req
+    }.otherwise{
+      io.uncache.req <> storeQueue.io.uncache.req
+    }
   }.otherwise{
-    io.uncache.req <> storeQueue.io.uncache.req
+    io.uncache.req.valid := false.B
+    io.uncache.req.bits := DontCare
   }
   when (io.uncacheOutstanding) {
     io.uncache.resp <> loadQueue.io.uncache.resp

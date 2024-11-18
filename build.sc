@@ -17,6 +17,7 @@
 
 import mill._
 import scalalib._
+import scalafmt._
 import $file.`rocket-chip`.common
 import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
@@ -27,6 +28,7 @@ import $file.openLLC.common
 /* for publishVersion */
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
+import java.io.{BufferedReader, InputStreamReader}
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -143,6 +145,16 @@ object coupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChis
 
 }
 
+object openNCB extends SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "openLLC" / "openNCB"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip
+  )
+
+}
+
 object openLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
 
   override def millSourcePath = os.pwd / "openLLC"
@@ -152,6 +164,9 @@ object openLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
   def rocketModule: ScalaModule = rocketchip
 
   def utilityModule: ScalaModule = utility
+
+  def openNCBModule: ScalaModule = openNCB
+
 }
 
 object difftest extends HasChisel {
@@ -216,7 +231,7 @@ trait XiangShanModule extends ScalaModule {
   override def forkEnv = Map("PATH" -> envPATH)
 }
 
-object xiangshan extends XiangShanModule with HasChisel {
+object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def millSourcePath = os.pwd
 
@@ -263,8 +278,28 @@ object xiangshan extends XiangShanModule with HasChisel {
       LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
+  def gitStatus: T[String] = {
+    val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
+    val gitRevParseProcess = gitRevParseBuilder.start()
+    val shaReader = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
+    val sha = shaReader.readLine()
+
+    val gitStatusBuilder = new ProcessBuilder("git", "status", "-uno", "--porcelain")
+    val gitStatusProcess = gitStatusBuilder.start()
+    val gitStatusReader = new BufferedReader(new InputStreamReader(gitStatusProcess.getInputStream))
+    val status = gitStatusReader.readLine()
+    val gitDirty = if (status == null) 0 else 1 
+
+    val str =
+      s"""|SHA=$sha
+          |dirty=$gitDirty
+          |""".stripMargin
+    str
+  }
+
   override def resources = T.sources {
     os.write(T.dest / "publishVersion", publishVersion())
+    os.write(T.dest / "gitStatus", gitStatus())
     super.resources() ++ Seq(PathRef(T.dest))
   }
 

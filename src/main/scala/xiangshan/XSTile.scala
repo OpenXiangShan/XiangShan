@@ -51,9 +51,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val clint_int_node = l2top.inner.clint_int_node
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
+  val nmi_int_node = l2top.inner.nmi_int_node
   memBlock.clint_int_sink := clint_int_node
   memBlock.plic_int_sink :*= plic_int_node
   memBlock.debug_int_sink := debug_int_node
+  memBlock.nmi_int_sink := nmi_int_node
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
@@ -109,6 +111,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
@@ -133,11 +136,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.reset_vector.fromTile := io.reset_vector
     l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
+    l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
+    io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
-
-    core.module.io.perfEvents <> DontCare
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
@@ -155,6 +158,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+
+      core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
@@ -169,6 +174,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
       core.module.io.l2_tlb_req.resp.ready := true.B
+
+      core.module.io.perfEvents <> DontCare
     }
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
