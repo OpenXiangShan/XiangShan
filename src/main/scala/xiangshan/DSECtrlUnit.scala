@@ -10,9 +10,9 @@ import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 import javax.swing.SwingWorker
 
-case class DSEParams(baseAddress: BigInt = 0x39002000L)
+case class DSEParams(baseAddress: BigInt = 0x39020000L)
 {
-  def address = AddressSet(baseAddress, 0x0fff)
+  def address = AddressSet(baseAddress, 0x0ffff)
   def beatBytes = 8
 }
 
@@ -45,6 +45,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val pingpong = RegInit(1.U(8.W))
     val ctrlSel = RegInit(0.U(8.W))
     val max_instr_cnt = RegInit(0x1000000.U(64.W))
+    val epoch = RegInit(0.U(64.W))
     val robSize0 = RegInit(RobSize.U(64.W))
     val robSize1 = RegInit(RobSize.U(64.W))
     val robSize = Wire(UInt(64.W))
@@ -55,8 +56,9 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x000 -> Seq(RegField(8, pingpong)),
       0x004 -> Seq(RegField(8, ctrlSel)),
       0x008 -> Seq(RegField(64, max_instr_cnt)),
-      0x010 -> Seq(RegField(64, robSize0)),
-      0x018 -> Seq(RegField(64, robSize1))
+      0x010 -> Seq(RegField(64, epoch)),
+      0x100 -> Seq(RegField(64, robSize0)),
+      0x108 -> Seq(RegField(64, robSize1))
     )
 
     // Mux logic

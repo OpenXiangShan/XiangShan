@@ -1,0 +1,10 @@
+robsize = 1024      ipc: 0.548546
+robsize = 512       ipc: 0.548546
+robsize = 256       ipc: 0.548546
+robsize = 128       ipc: 0.548546
+robsize = 64        ipc: 0.550934
+robsize = 32        ipc: 0.526288
+robsize = 16        ipc: 0.435863
+robsize = 8         ipc: 0.306063
+robsize = 4         ipc: 0.190299
+robsize = 2         ipc: 0.548546
