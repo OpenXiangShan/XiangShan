@@ -730,8 +730,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   val renamePerf = Seq(
-    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
-    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))),
+    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))),
     ("rename_stall               ", inHeadStall),
     ("rename_stall_cycle_walk    ", inHeadValid &&  io.rabCommits.isWalk),
     ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc),

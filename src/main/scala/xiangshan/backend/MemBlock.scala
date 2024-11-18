@@ -600,11 +600,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
 
-  val perfEventsPTW = Wire(Vec(19, new PerfEvent))
-  if (!coreParams.softPTW) {
-    perfEventsPTW := ptw.getPerf
+  val perfEventsPTW = if (!coreParams.softPTW) {
+    ptw.getPerfEvents
   } else {
-    perfEventsPTW := DontCare
+    Seq()
   }
 
   // dtlb
@@ -1930,13 +1929,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.slice(16,24)
 
-  val memBlockPerfEvents = Seq(
-    ("ldDeqCount", ldDeqCount),
-    ("stDeqCount", stDeqCount),
-  )
-
   val perfFromUnits = (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
-  val perfFromPTW    = perfEventsPTW.map(x => ("perfEventsPTW", x.value))
+  val perfFromPTW = perfEventsPTW.map(x => ("PTW_" + x._1, x._2))
   val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
                           ("stDeqCount", stDeqCount))
   // let index = 0 be no event

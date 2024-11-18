@@ -1239,8 +1239,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     ("l0_hit           ", l0Hit                           ),
     ("sp_hit           ", spHit                           ),
     ("pte_hit          ", l0Hit || spHit                  ),
-    ("rwHarzad         ",  io.req.valid && !io.req.ready  ),
-    ("out_blocked      ",  io.resp.valid && !io.resp.ready),
+    ("rwHarzad         ", io.req.valid && !io.req.ready   ),
+    ("out_blocked      ", io.resp.valid && !io.resp.ready ),
   )
   generatePerfEvent()
 }

@@ -456,12 +456,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val perfEvents = Seq(
     ("fsm_count         ", io.req.fire                                     ),
-    ("fsm_busy          ", !idle                                             ),
-    ("fsm_idle          ", idle                                              ),
-    ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
+    ("fsm_busy          ", !idle                                           ),
+    ("fsm_idle          ", idle                                            ),
+    ("resp_blocked      ", io.resp.valid && !io.resp.ready                 ),
     ("mem_count         ", mem.req.fire                                    ),
     ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire, true)),
-    ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
+    ("mem_blocked       ", mem.req.valid && !mem.req.ready                 ),
   )
   generatePerfEvent()
 }
