@@ -744,17 +744,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   // To improve Clock Gating Efficiency
   update.meta := RegEnable(io.update.bits.meta, io.update.valid && !io.update.bits.old_entry)
 
-  val update_valid = RegNext(io.update.valid, init = false.B)
-  val update       = Wire(new BranchPredictionUpdate)
-  update := RegEnable(io.update.bits, io.update.valid)
-
-  // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
-  // so io.update.bits.pc is used directly here
-  val update_pc = io.update.bits.pc
-
-  // To improve Clock Gating Efficiency
-  update.meta := RegEnable(io.update.bits.meta, io.update.valid && !io.update.bits.old_entry)
-
   // Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
   val needReopen    = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
