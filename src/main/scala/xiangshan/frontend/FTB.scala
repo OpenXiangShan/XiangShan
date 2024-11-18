@@ -497,7 +497,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       way = numWays,
       shouldReset = true,
       holdRead = false,
-      singlePort = true
+      singlePort = true,
+      withClockGate = true
     ))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
