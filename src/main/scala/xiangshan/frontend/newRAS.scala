@@ -714,7 +714,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.redirect_callAddr  := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
   val updateValid = RegNext(io.update.valid, init = false.B)
-  val update = Wire(new BranchPredictionUpdate)
+  val update      = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage

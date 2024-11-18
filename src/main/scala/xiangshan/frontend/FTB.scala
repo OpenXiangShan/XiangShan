@@ -734,7 +734,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   }
 
   val update_valid = RegNext(io.update.valid, init = false.B)
-  val update = Wire(new BranchPredictionUpdate)
+  val update       = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
@@ -745,7 +745,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   update.meta := RegEnable(io.update.bits.meta, io.update.valid && !io.update.bits.old_entry)
 
   val update_valid = RegNext(io.update.valid, init = false.B)
-  val update = Wire(new BranchPredictionUpdate)
+  val update       = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage

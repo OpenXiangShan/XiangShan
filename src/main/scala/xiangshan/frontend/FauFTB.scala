@@ -142,13 +142,13 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
 
   // s0
   val u_valid = RegNext(io.update.valid, init = false.B)
-  val u_bits = RegEnable(io.update.bits, io.update.valid)
+  val u_bits  = RegEnable(io.update.bits, io.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
-  val u_pc = io.update.bits.pc 
+  val u_pc = io.update.bits.pc
 
-  val u_meta = u_bits.meta.asTypeOf(new FauFTBMeta)
+  val u_meta   = u_bits.meta.asTypeOf(new FauFTBMeta)
   val u_s0_tag = getTag(u_pc)
   ways.foreach(_.io.update_req_tag := u_s0_tag)
   val u_s0_hit_oh = VecInit(ways.map(_.io.update_hit)).asUInt

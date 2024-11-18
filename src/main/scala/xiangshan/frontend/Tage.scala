@@ -680,25 +680,43 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // Update logic
   val u_valid = RegNext(io.update.valid, init = false.B)
   val update  = Wire(new BranchPredictionUpdate)
-  update     := RegEnable(io.update.bits, io.update.valid)
+  update := RegEnable(io.update.bits, io.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
   val update_pc = io.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  val u_valids_for_cge = VecInit((0 until TageBanks).map(w => io.update.bits.ftb_entry.brValids(w) && io.update.valid)) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
-  val u_meta           = io.update.bits.meta.asTypeOf(new TageMeta)
-  for(i <- 0 until numBr){
-    update.meta.asTypeOf(new TageMeta).providers(i).bits := RegEnable(u_meta.providers(i).bits, u_meta.providers(i).valid && u_valids_for_cge(i))
-    update.meta.asTypeOf(new TageMeta).providerResps(i)  := RegEnable(u_meta.providerResps(i), u_meta.providers(i).valid && u_valids_for_cge(i))
-    update.meta.asTypeOf(new TageMeta).altUsed(i)        := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
-    update.meta.asTypeOf(new TageMeta).allocates(i)      := RegEnable(u_meta.allocates(i), io.update.valid && io.update.bits.mispred_mask(i))
+  val u_valids_for_cge =
+    VecInit((0 until TageBanks).map(w =>
+      io.update.bits.ftb_entry.brValids(w) && io.update.valid
+    )) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
+  val u_meta = io.update.bits.meta.asTypeOf(new TageMeta)
+  for (i <- 0 until numBr) {
+    update.meta.asTypeOf(new TageMeta).providers(i).bits := RegEnable(
+      u_meta.providers(i).bits,
+      u_meta.providers(i).valid && u_valids_for_cge(i)
+    )
+    update.meta.asTypeOf(new TageMeta).providerResps(i) := RegEnable(
+      u_meta.providerResps(i),
+      u_meta.providers(i).valid && u_valids_for_cge(i)
+    )
+    update.meta.asTypeOf(new TageMeta).altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
+    update.meta.asTypeOf(new TageMeta).allocates(i) := RegEnable(
+      u_meta.allocates(i),
+      io.update.valid && io.update.bits.mispred_mask(i)
+    )
   }
-  if(EnableSC){
-    for(w <- 0 until TageBanks){
-      update.meta.asTypeOf(new TageMeta).scMeta.get.scPreds(w) := RegEnable(u_meta.scMeta.get.scPreds(w), u_valids_for_cge(w) && u_meta.providers(w).valid)
-      update.meta.asTypeOf(new TageMeta).scMeta.get.ctrs(w)    := RegEnable(u_meta.scMeta.get.ctrs(w), u_valids_for_cge(w) && u_meta.providers(w).valid)
+  if (EnableSC) {
+    for (w <- 0 until TageBanks) {
+      update.meta.asTypeOf(new TageMeta).scMeta.get.scPreds(w) := RegEnable(
+        u_meta.scMeta.get.scPreds(w),
+        u_valids_for_cge(w) && u_meta.providers(w).valid
+      )
+      update.meta.asTypeOf(new TageMeta).scMeta.get.ctrs(w) := RegEnable(
+        u_meta.scMeta.get.ctrs(w),
+        u_valids_for_cge(w) && u_meta.providers(w).valid
+      )
     }
   }
   update.ghist := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
