@@ -157,8 +157,8 @@ trait PMAMethod extends PMAConst {
     }
 
     addPMA(0x0L, range = 0x1000000000000L, a = 3)
-    addPMA(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)
-    addPMA(0x80000000L, a = 1, w = true, r = true)
+    addPMA(PMPPmemHighBounds(0), c = true, atomic = true, a = 1, x = true, w = true, r = true)
+    addPMA(PMPPmemLowBounds(0), a = 1, w = true, r = true)
     addPMA(0x3A000000L, a = 1)
     addPMA(0x39002000L, a = 1, w = true, r = true)
     addPMA(0x39000000L, a = 1)

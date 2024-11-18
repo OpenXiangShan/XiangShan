@@ -94,7 +94,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
   val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
   val vlSetThisUop = Mux(outVlFix > outVuopidx * vlMaxThisUop, outVlFix - outVuopidx * vlMaxThisUop, 0.U)
-  val vlThisUop = Wire(UInt(3.W))
+  val vlThisUop = Wire(UInt(4.W))
   vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)

@@ -15,13 +15,6 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val debugMode = ValidIO(Bool())
   val debugIntrEnable = ValidIO(Bool())
   val targetPc = ValidIO(new TargetPCBundle)
-
-  override def getBundleByName(name: String): ValidIO[CSRBundle] = {
-    name match {
-      case "dcsr" => this.dcsr
-      case "mstatus" => this.mstatus
-    }
-  }
 }
 
 class DretEventInput extends Bundle {
@@ -74,16 +67,10 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.targetPc.bits.raiseIGPF := instrAddrTransType.checkGuestPageFault(in.dpc.asUInt)
 }
 
-trait DretEventSinkBundle { self: CSRModule[_] =>
+trait DretEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val retFromD = IO(Flipped(new DretEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = retFromD.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(retFromD.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case(sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

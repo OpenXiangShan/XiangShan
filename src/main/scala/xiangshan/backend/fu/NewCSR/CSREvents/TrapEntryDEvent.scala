@@ -19,23 +19,17 @@ class TrapEntryDEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val targetPc        = ValidIO(new TargetPCBundle)
   val debugMode       = ValidIO(Bool())
   val debugIntrEnable = ValidIO(Bool())
-
-  def getBundleByName(name: String): Valid[CSRBundle] = {
-    name match {
-      case "dcsr" => this.dcsr
-      case "dpc"  => this.dpc
-    }
-  }
 }
 
 class TrapEntryDEventInput(implicit override val p: Parameters) extends TrapEntryEventInput{
-  val hasTrap                 = Input(Bool())
-  val debugMode               = Input(Bool())
-  val hasDebugIntr            = Input(Bool())
-  val triggerEnterDebugMode   = Input(Bool())
-  val hasDebugEbreakException = Input(Bool())
-  val hasSingleStep           = Input(Bool())
-  val breakPoint              = Input(Bool())
+  val hasTrap                      = Input(Bool())
+  val debugMode                    = Input(Bool())
+  val hasDebugIntr                 = Input(Bool())
+  val triggerEnterDebugMode        = Input(Bool())
+  val hasDebugEbreakException      = Input(Bool())
+  val hasSingleStep                = Input(Bool())
+  val breakPoint                   = Input(Bool())
+  val criticalErrorStateEnterDebug = Input(Bool())
 }
 
 class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSREventBase with DebugMMIO {
@@ -48,20 +42,22 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   private val vsatp   = current.vsatp
   private val hgatp   = current.hgatp
 
-  private val hasTrap                 = in.hasTrap
-  private val debugMode               = in.debugMode
-  private val hasDebugIntr            = in.hasDebugIntr
-  private val breakPoint              = in.breakPoint
-  private val triggerEnterDebugMode   = in.triggerEnterDebugMode
-  private val hasDebugEbreakException = in.hasDebugEbreakException
-  private val hasSingleStep           = in.hasSingleStep
+  private val hasTrap                      = in.hasTrap
+  private val debugMode                    = in.debugMode
+  private val hasDebugIntr                 = in.hasDebugIntr
+  private val breakPoint                   = in.breakPoint
+  private val triggerEnterDebugMode        = in.triggerEnterDebugMode
+  private val hasDebugEbreakException      = in.hasDebugEbreakException
+  private val hasSingleStep                = in.hasSingleStep
+  private val criticalErrorStateEnterDebug = in.criticalErrorStateEnterDebug
 
   private val hasExceptionInDmode = debugMode && hasTrap
   val causeIntr = DcsrCause.Haltreq.asUInt
-  val causeExp = MuxCase(0.U, Seq(
-    triggerEnterDebugMode   -> DcsrCause.Trigger.asUInt,
-    hasDebugEbreakException -> DcsrCause.Ebreak.asUInt,
-    hasSingleStep           -> DcsrCause.Step.asUInt
+  val causeExp = MuxCase(DcsrCause.None.asUInt, Seq(
+    criticalErrorStateEnterDebug -> DcsrCause.Other.asUInt,
+    triggerEnterDebugMode        -> DcsrCause.Trigger.asUInt,
+    hasDebugEbreakException      -> DcsrCause.Ebreak.asUInt,
+    hasSingleStep                -> DcsrCause.Step.asUInt
   ))
 
   private val trapPC = genTrapVA(
@@ -104,16 +100,10 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
 
 }
 
-trait TrapEntryDEventSinkBundle { self: CSRModule[_] =>
+trait TrapEntryDEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val trapToD = IO(Flipped(new TrapEntryDEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = trapToD.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(trapToD.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

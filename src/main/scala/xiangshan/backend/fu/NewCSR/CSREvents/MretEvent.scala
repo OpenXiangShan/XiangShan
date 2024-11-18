@@ -14,22 +14,15 @@ import xiangshan.AddrTransType
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
-  val tcontrol = ValidIO((new TcontrolBundle).addInEvent(_.MTE))
+  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV, _.MDT, _.SDT))
+  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val targetPc = ValidIO(new TargetPCBundle)
-
-  override def getBundleByName(name: String): ValidIO[CSRBundle] = {
-    name match {
-      case "mstatus"  => this.mstatus
-      case "tcontrol" => this.tcontrol
-    }
-  }
 }
 
 class MretEventInput extends Bundle {
   val mstatus  = Input(new MstatusBundle)
+  val vsstatus = Input(new SstatusBundle)
   val mepc     = Input(new Epc())
-  val tcontrol = Input(new TcontrolBundle)
   val satp     = Input(new SatpBundle)
   val vsatp    = Input(new SatpBundle)
   val hgatp    = Input(new HgatpBundle)
@@ -55,39 +48,43 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
     sv39x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv39x4,
     sv48x4 = nextPrivState.isVirtual && vsatp.MODE === SatpMode.Bare && hgatp.MODE === HgatpMode.Sv48x4
   )
+  val outPrivState   = Wire(new PrivState)
+  outPrivState.PRVM := in.mstatus.MPP
+  outPrivState.V    := Mux(in.mstatus.MPP === PrivMode.M, VirtMode.Off.asUInt, in.mstatus.MPV.asUInt)
+
+  val mretToM  = outPrivState.isModeM
+  val mretToS  = outPrivState.isModeHS
+  val mretToVu = outPrivState.isModeVU
 
   out := DontCare
 
   out.privState.valid := valid
   out.mstatus  .valid := valid
-  out.tcontrol .valid := valid
   out.targetPc .valid := valid
 
-  out.privState.bits.PRVM     := in.mstatus.MPP
-  out.privState.bits.V        := Mux(in.mstatus.MPP === PrivMode.M, VirtMode.Off.asUInt, in.mstatus.MPV.asUInt)
+  out.privState.bits          := outPrivState
   out.mstatus.bits.MPP        := PrivMode.U
   out.mstatus.bits.MPV        := VirtMode.Off.asUInt
   out.mstatus.bits.MIE        := in.mstatus.MPIE
   out.mstatus.bits.MPIE       := 1.U
   out.mstatus.bits.MPRV       := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
-  out.tcontrol.bits.MTE       := in.tcontrol.MPTE
+  // clear MDT when return mret always execute in M mode
+  out.mstatus.bits.MDT    := 0.U
+  // clear sstatus.SDT when return mode below M and HS
+  out.mstatus.bits.SDT    := Mux(mretToM || mretToS, in.mstatus.SDT.asBool, 0.U)
+  // clear vsstatus.SDT when return to VU
+  out.vsstatus.bits.SDT   := Mux(mretToVu, 0.U, in.vsstatus.SDT.asBool)
+
   out.targetPc.bits.pc        := in.mepc.asUInt
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(in.mepc.asUInt)
   out.targetPc.bits.raiseIAF  := instrAddrTransType.checkAccessFault(in.mepc.asUInt)
   out.targetPc.bits.raiseIGPF := instrAddrTransType.checkGuestPageFault(in.mepc.asUInt)
 }
 
-trait MretEventSinkBundle { self: CSRModule[_] =>
+trait MretEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val retFromM = IO(Flipped(new MretEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = retFromM.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(retFromM.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
-
+  reconnectReg()
 }

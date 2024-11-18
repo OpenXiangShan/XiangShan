@@ -20,8 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.HasPerfEvents
-import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate}
+import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate, HasPerfEvents}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
@@ -278,12 +277,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
-  val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
+  val s1_hit = s1_tag_match_dup_dc // && s1_has_permission && s1_hit_coh === s1_new_hit_coh
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
 
   // data read
-  io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill_data_read && !s1_is_prefetch
+  io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
   io.banked_data_read.bits.addr := s1_vaddr
+  io.banked_data_read.bits.kill := io.lsu.s1_kill_data_read
   io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
   io.banked_data_read.bits.bankMask := s1_bank_oh
   io.is128Req := s1_load128Req

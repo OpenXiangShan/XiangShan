@@ -59,7 +59,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
   val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent)
   val retiredInstr = UInt(7.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -85,6 +85,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
+  val criticalErrorState = Output(Bool())
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
@@ -99,8 +100,9 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
   // from LSQ
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
-  val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
+  val memExceptionVAddr = Input(UInt(XLEN.W))
+  val memExceptionGPAddr = Input(UInt(XLEN.W))
+  val memExceptionIsForVSnonLeafPTE = Input(Bool())
   // from outside cpu,externalInterrupt
   val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB

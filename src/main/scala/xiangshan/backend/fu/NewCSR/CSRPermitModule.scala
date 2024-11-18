@@ -231,8 +231,7 @@ class CSRPermitModule extends Module {
    * Sm/Ssstateen end
    */
 
-  private val rwStimecmp_EX_II = csrAccess && ((privState.isModeHS && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.vstimecmp.U ||
-    ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_II = csrAccess && !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
   private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
     wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
 

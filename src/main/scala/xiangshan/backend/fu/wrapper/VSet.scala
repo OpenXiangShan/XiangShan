@@ -79,8 +79,8 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid && isVsetvl
-  if (cfg.writeVlRf) io.vlIsZero.get := vl === 0.U
-  if (cfg.writeVlRf) io.vlIsVlmax.get := vl === vlmax
+  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && vl === vlmax
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
@@ -104,7 +104,8 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
   val isReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
-              Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
+              Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), 
+                Mux(oldVL < vlmax, oldVL, vlmax), vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype
 
   out.res.data := Mux(isReadVl, oldVL,
@@ -114,8 +115,8 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
-  if (cfg.writeVlRf) io.vlIsZero.get := !isReadVl && res.vl === 0.U
-  if (cfg.writeVlRf) io.vlIsVlmax.get := !isReadVl && res.vl === vlmax
+  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isReadVl && res.vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isReadVl && res.vl === vlmax
 
   debugIO.vconfig := res
 }

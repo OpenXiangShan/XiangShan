@@ -172,8 +172,12 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
       val muxLength = data.length
       val selDataMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLEN * 2).W)))) // 3 * 2 * 256
       val selMaskMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLENB * 2).W)))) // 3 * 2 * 16
-      dontTouch(selDataMatrix)
-      dontTouch(selMaskMatrix)
+
+      if (backendParams.debugEn){
+        dontTouch(selDataMatrix)
+        dontTouch(selMaskMatrix)
+      }
+
       for(i <- 0 until muxLength){
         if(i == 0){
           selDataMatrix(i)(0) := Cat(0.U(VLEN.W), data(i))
@@ -227,6 +231,9 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
+  val trigger = TriggerAction()
+  val vstart         = UInt(elemIdxBits.W)
+  val vecTriggerMask = UInt((VLEN/8).W)
   // val uopQueuePtr = new VluopPtr
   // val flowPtr = new VlflowPtr
 }
@@ -289,8 +296,11 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)
   val mask        = UInt(VLENB.W)
-  val vaddr       = UInt(VAddrBits.W)
+  val vaddr       = UInt(XLEN.W)
+  val vaNeedExt   = Bool()
   val gpaddr      = UInt(GPAddrBits.W)
+  val isForVSnonLeafPTE = Bool()
+  val vecTriggerMask = UInt((VLEN/8).W)
 }
 
 object MulNum {
@@ -731,8 +741,8 @@ object genVWdata {
 }
 
 object genUSSplitAddr{
-  def apply(addr: UInt, index: UInt): UInt = {
-    val tmpAddr = Cat(addr(38, 4), 0.U(4.W))
+  def apply(addr: UInt, index: UInt, width: Int): UInt = {
+    val tmpAddr = Cat(addr(width - 1, 4), 0.U(4.W))
     val nextCacheline = tmpAddr + 16.U
     LookupTree(index, List(
       0.U -> tmpAddr,
@@ -804,10 +814,10 @@ object genVUopOffset extends VLSUConstants {
   def apply(instType: UInt, isfof: Bool, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
     val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
 
-    val fofVUopOffset = (LookupTree(instType,List(
-      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
-      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
-    ))).asUInt
+//    val fofVUopOffset = (LookupTree(instType,List(
+//      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
+//      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
+//    ))).asUInt
 
     val otherVUopOffset = (LookupTree(instType,List(
       "b000".U -> ( uopInsidefield << alignedType                                   ) , // unit-stride
@@ -820,7 +830,8 @@ object genVUopOffset extends VLSUConstants {
       "b111".U -> ( 0.U                                                             )   // segment indexed-ordered
     ))).asUInt
 
-    Mux(isfof, fofVUopOffset, otherVUopOffset)
+//    Mux(isfof, fofVUopOffset, otherVUopOffset)
+    otherVUopOffset
   }
 }
 
@@ -895,7 +906,7 @@ object skidBuffer{
                         out: DecoupledIO[T],
                         flush: Bool,
                         moduleName: String
-                      ) {
+                      ): Unit = {
     val buffer = Module(new skidBufferConnect(in.bits))
     buffer.suggestName(moduleName)
     buffer.io.in <> in

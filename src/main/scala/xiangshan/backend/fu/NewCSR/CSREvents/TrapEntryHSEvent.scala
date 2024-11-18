@@ -15,7 +15,7 @@ import xiangshan.AddrTransType
 class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
   // Todo: use sstatus instead of mstatus
-  val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE))
+  val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE, _.SDT))
   val hstatus = ValidIO((new HstatusBundle ).addInEvent(_.SPV, _.SPVP, _.GVA))
   val sepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val scause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
@@ -23,18 +23,6 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val htval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val targetPc  = ValidIO(new TargetPCBundle)
-
-  def getBundleByName(name: String): Valid[CSRBundle] = {
-    name match {
-      case "mstatus" => this.mstatus
-      case "hstatus" => this.hstatus
-      case "sepc"    => this.sepc
-      case "scause"  => this.scause
-      case "stval"   => this.stval
-      case "htval"   => this.htval
-      case "htinst"  => this.htinst
-    }
-  }
 }
 
 class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
@@ -62,15 +50,9 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val trapPCGPA = SignExt(in.trapPcGPA, XLEN)
 
-  private val trapMemVA = genTrapVA(
-    dMode,
-    satp,
-    vsatp,
-    hgatp,
-    in.memExceptionVAddr,
-  )
+  private val trapMemVA = in.memExceptionVAddr
 
-  private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
+  private val trapMemGPA = in.memExceptionGPAddr
 
   private val trapInst = Mux(in.trapInst.valid, in.trapInst.bits, 0.U)
 
@@ -80,6 +62,8 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchExcp    = isException && ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && (ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
+  private val isFetchBkpt    = isBpExcp && in.isFetchBkpt
+  private val isMemBkpt      = isBpExcp && !in.isFetchBkpt
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
@@ -89,23 +73,21 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp
+  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isFetchBkpt
   private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
-  private val tvalFillMemVaddr = isMemExcp
+  private val tvalFillMemVaddr = isMemExcp || isMemBkpt
   private val tvalFillGVA      =
     isHlsExcp && isMemExcp ||
     isLSGuestExcp|| isFetchGuestExcp ||
-    (isFetchExcp || isBpExcp) && fetchIsVirt ||
-    isMemExcp && memIsVirt
+    (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
+    (isMemExcp || isMemBkpt) && memIsVirt
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
-    (tvalFillPc                     ) -> trapPC,
-    (tvalFillPcPlus2                ) -> (trapPC + 2.U),
-    (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
-    (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
-    (isLSGuestExcp                  ) -> trapMemVA,
-    (tvalFillInst                   ) -> trapInst,
+    (tvalFillPc                        ) -> trapPC,
+    (tvalFillPcPlus2                   ) -> (trapPC + 2.U),
+    (tvalFillMemVaddr || isLSGuestExcp ) -> trapMemVA,
+    (tvalFillInst                      ) -> trapInst,
   ))
 
   private val tval2 = Mux1H(Seq(
@@ -140,6 +122,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.mstatus.bits.SPP          := current.privState.PRVM.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.mstatus.bits.SPIE         := current.sstatus.SIE
   out.mstatus.bits.SIE          := 0.U
+  out.mstatus.bits.SDT          := in.menvcfg.DTE.asBool // when DTE open set SDT to 1, else SDT is readonly 0
   // hstatus
   out.hstatus.bits.SPV          := current.privState.V
     // SPVP is not PrivMode enum type, so asUInt and shrink the width
@@ -150,7 +133,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := Mux(isFetchMalAddr, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
-  out.htinst.bits.ALL           := 0.U
+  out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
   out.targetPc.bits.pc          := in.pcFromXtvec
   out.targetPc.bits.raiseIPF    := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF    := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
@@ -160,16 +143,10 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   dontTouch(tvalFillGVA)
 }
 
-trait TrapEntryHSEventSinkBundle { self: CSRModule[_] =>
+trait TrapEntryHSEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
   val trapToHS = IO(Flipped(new TrapEntryHSEventOutput))
 
-  private val updateBundle: ValidIO[CSRBundle] = trapToHS.getBundleByName(self.modName.toLowerCase())
+  addUpdateBundleInCSREnumType(trapToHS.getBundleByName(self.modName.toLowerCase()))
 
-  (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
-    if (updateBundle.bits.eventFields.contains(source)) {
-      when(updateBundle.valid) {
-        sink := source
-      }
-    }
-  }
+  reconnectReg()
 }

@@ -262,7 +262,7 @@ class XiangShan(object):
         if self.args.numa:
             numa_info = get_free_cores(self.args.threads)
             numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}"
-        fork_args = "--enable-fork" if self.args.fork else ""
+        fork_args = "--enable-fork -X 10" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
         gcpt_restore_args = f"-r {self.args.gcpt_restore_bin}" if len(self.args.gcpt_restore_bin) != 0 else ""
@@ -398,6 +398,101 @@ class XiangShan(object):
         rvv_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return rvv_test
 
+    def __get_ci_F16test(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/vector/F16-tests/build"
+        workloads = [
+            "rv64uzfhmin-p-fzfhmincvt.bin",
+            "rv64uzfh-p-fadd.bin",
+            "rv64uzfh-p-fclass.bin",
+            "rv64uzfh-p-fcmp.bin",
+            "rv64uzfh-p-fcvt.bin",
+            "rv64uzfh-p-fcvt_w.bin",
+            "rv64uzfh-p-fdiv.bin",
+            "rv64uzfh-p-fmadd.bin",
+            "rv64uzfh-p-fmin.bin",
+            "rv64uzfh-p-ldst.bin",
+            "rv64uzfh-p-move.bin",
+            "rv64uzfh-p-recoding.bin",
+            "rv64uzvfh-p-vfadd.bin",
+            "rv64uzvfh-p-vfclass.bin",
+            "rv64uzvfh-p-vfcvtfx.bin",
+            "rv64uzvfh-p-vfcvtfxu.bin",
+            "rv64uzvfh-p-vfcvtrxf.bin",
+            "rv64uzvfh-p-vfcvtrxuf.bin",
+            "rv64uzvfh-p-vfcvtxf.bin",
+            "rv64uzvfh-p-vfcvtxuf.bin",
+            "rv64uzvfh-p-vfdiv.bin",
+            "rv64uzvfh-p-vfdown.bin",
+            "rv64uzvfh-p-vfmacc.bin",
+            "rv64uzvfh-p-vfmadd.bin",
+            "rv64uzvfh-p-vfmax.bin",
+            "rv64uzvfh-p-vfmerge.bin",
+            "rv64uzvfh-p-vfmin.bin",
+            "rv64uzvfh-p-vfmsac.bin",
+            "rv64uzvfh-p-vfmsub.bin",
+            "rv64uzvfh-p-vfmul.bin",
+            "rv64uzvfh-p-vfmv.bin",
+            "rv64uzvfh-p-vfncvtff.bin",
+            "rv64uzvfh-p-vfncvtfx.bin",
+            "rv64uzvfh-p-vfncvtfxu.bin",
+            "rv64uzvfh-p-vfncvtrff.bin",
+            "rv64uzvfh-p-vfncvtrxf.bin",
+            "rv64uzvfh-p-vfncvtrxuf.bin",
+            "rv64uzvfh-p-vfncvtxf.bin",
+            "rv64uzvfh-p-vfncvtxuf.bin",
+            "rv64uzvfh-p-vfnmacc.bin",
+            "rv64uzvfh-p-vfnmadd.bin",
+            "rv64uzvfh-p-vfnmsac.bin",
+            "rv64uzvfh-p-vfnmsub.bin",
+            "rv64uzvfh-p-vfrdiv.bin",
+            "rv64uzvfh-p-vfrec7.bin",
+            "rv64uzvfh-p-vfredmax.bin",
+            "rv64uzvfh-p-vfredmin.bin",
+            "rv64uzvfh-p-vfredosum.bin",
+            "rv64uzvfh-p-vfredusum.bin",
+            "rv64uzvfh-p-vfrsqrt7.bin",
+            "rv64uzvfh-p-vfrsub.bin",
+            "rv64uzvfh-p-vfsgnj.bin",
+            "rv64uzvfh-p-vfsgnjn.bin",
+            "rv64uzvfh-p-vfsgnjx.bin",
+            "rv64uzvfh-p-vfsqrt.bin",
+            "rv64uzvfh-p-vfsub.bin",
+            "rv64uzvfh-p-vfup.bin",
+            "rv64uzvfh-p-vfwadd.bin",
+            "rv64uzvfh-p-vfwadd-w.bin",
+            "rv64uzvfh-p-vfwcvtff.bin",
+            "rv64uzvfh-p-vfwcvtfx.bin",
+            "rv64uzvfh-p-vfwcvtfxu.bin",
+            "rv64uzvfh-p-vfwcvtrxf.bin",
+            "rv64uzvfh-p-vfwcvtrxuf.bin",
+            "rv64uzvfh-p-vfwcvtxf.bin",
+            "rv64uzvfh-p-vfwcvtxuf.bin",
+            "rv64uzvfh-p-vfwmacc.bin",
+            "rv64uzvfh-p-vfwmsac.bin",
+            "rv64uzvfh-p-vfwmul.bin",
+            "rv64uzvfh-p-vfwnmacc.bin",
+            "rv64uzvfh-p-vfwnmsac.bin",
+            "rv64uzvfh-p-vfwredosum.bin",
+            "rv64uzvfh-p-vfwredusum.bin",
+            "rv64uzvfh-p-vfwsub.bin",
+            "rv64uzvfh-p-vfwsub-w.bin",
+            "rv64uzvfh-p-vmfeq.bin",
+            "rv64uzvfh-p-vmfge.bin",
+            "rv64uzvfh-p-vmfgt.bin",
+            "rv64uzvfh-p-vmfle.bin",
+            "rv64uzvfh-p-vmflt.bin",
+            "rv64uzvfh-p-vmfne.bin"
+        ]
+        f16_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return f16_test
+    def __get_ci_zcbtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/zcb-test"
+        workloads = [
+            "zcb-test-riscv64-xs.bin"
+        ]
+        zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return zcb_test
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -427,7 +522,6 @@ class XiangShan(object):
             "linux-hello-smp-opensbi": "fw_payload.bin",
             "linux-hello-new": "bbl.bin",
             "linux-hello-smp-new": "bbl.bin",
-            "linux-hello-smp-newcsr": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
@@ -478,8 +572,11 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
-            "rvv-test": self.__get_ci_rvvtest
+            "rvv-test": self.__get_ci_rvvtest,
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -504,8 +601,11 @@ class XiangShan(object):
             "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
+            "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
-            "rvv-test": self.__get_ci_rvvtest
+            "rvv-test": self.__get_ci_rvvtest,
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -542,6 +642,7 @@ def get_free_cores(n):
             if sum(window_usage) < 30 * n and True not in map(lambda x: x > 90, window_usage):
                 return (((i * n) % num_logical_core) // (num_logical_core // 2), i * n, i * n + n - 1)
         print(f"No free {n} cores found. CPU usage: {core_usage}\n")
+        time.sleep(random.uniform(1, 60))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Python wrapper for XiangShan')

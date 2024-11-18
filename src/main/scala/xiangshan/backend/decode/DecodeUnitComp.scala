@@ -171,7 +171,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val uopRes = RegInit(0.U(log2Up(maxUopSize).W))
   val uopResNext = WireInit(uopRes)
   val e64 = 3.U(2.W)
-  val isUsSegment = instFields.MOP === 0.U && nf =/= 0.U && (instFields.LUMOP === 0.U || instFields.LUMOP === "b10000".U)
+  val isUsSegment = instFields.MOP === 0.U && ((nf =/= 0.U && instFields.LUMOP === 0.U) || instFields.LUMOP === "b10000".U)
   val isIxSegment = instFields.MOP(0) === 1.U && nf =/= 0.U
   val isSdSegment = instFields.MOP === "b10".U && nf =/= 0.U
 
@@ -1682,6 +1682,40 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       }
       csBundle.head.waitForward := isUsSegment
       csBundle(numOfUop - 1.U).blockBackward := isUsSegment
+    }
+    is(UopSplitType.VEC_US_FF_LD) {
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
+      csBundle(0).fuType := FuType.i2v.U
+      csBundle(0).fuOpType := Cat(IF2VectorType.i2Vec(2, 0), e64)
+      csBundle(0).rfWen := false.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := true.B
+      csBundle(0).vlsInstr := true.B
+      //LMUL
+      for (i <- 0 until MAX_VLMUL) {
+        csBundle(i + 1).srcType(0) := SrcType.vp
+        csBundle(i + 1).lsrc(0) := VECTOR_TMP_REG_LMUL.U
+        csBundle(i + 1).lsrc(2) := dest + i.U // old vd
+        csBundle(i + 1).ldest := dest + i.U
+        csBundle(i + 1).uopIdx := i.U
+        csBundle(i + 1).vlsInstr := true.B
+      }
+      csBundle.head.waitForward := isUsSegment
+      csBundle(numOfUop - 1.U).blockBackward := isUsSegment
+      // last uop read vl and write vl
+      csBundle(numOfUop - 1.U).srcType(0) := SrcType.no
+      csBundle(numOfUop - 1.U).srcType(1) := SrcType.no
+      csBundle(numOfUop - 1.U).srcType(2) := SrcType.no
+      csBundle(numOfUop - 1.U).srcType(3) := SrcType.no
+      csBundle(numOfUop - 1.U).srcType(4) := SrcType.vp
+      csBundle(numOfUop - 1.U).lsrc(4) := Vl_IDX.U
+      // vtype
+      csBundle(numOfUop - 1.U).vecWen := false.B
+      csBundle(numOfUop - 1.U).vlWen := true.B
+      csBundle(numOfUop - 1.U).ldest := Vl_IDX.U
     }
     is(UopSplitType.VEC_S_LDST) {
       /*

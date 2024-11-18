@@ -103,10 +103,13 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr  := req.vaddr
+  io.exceptionAddr.vaddr  := req.fullva
+  io.exceptionAddr.vaNeedExt := req.vaNeedExt
+  io.exceptionAddr.isHyper := req.isHyper
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
   io.exceptionAddr.gpaddr := req.gpaddr
+  io.exceptionAddr.isForVSnonLeafPTE := req.isForVSnonLeafPTE
 
   when(req_valid && io.flushFrmMaBuf) {
     req_valid := false.B

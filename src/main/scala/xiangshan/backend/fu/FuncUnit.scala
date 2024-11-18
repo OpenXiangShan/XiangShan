@@ -3,7 +3,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.DataHoldBypass
+import utility._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
@@ -97,8 +97,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val instrAddrTransType = Option.when(cfg.isJmp || cfg.isBrh)(Input(new AddrTransType))
 }
 
-abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
+abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new FuncUnitIO(cfg))
+  val criticalErrors = Seq(("none", false.B))
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
@@ -114,6 +115,21 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
+  }
+
+  def connectNonPipedCtrlSingalForCSR: Unit = {
+    io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
+    io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.rfWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
+    io.out.bits.ctrl.fpWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpWen.get, io.in.fire))
+    io.out.bits.ctrl.vecWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
+    io.out.bits.ctrl.v0Wen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.v0Wen.get, io.in.fire))
+    io.out.bits.ctrl.vlWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vlWen.get, io.in.fire))
+    // io.out.bits.ctrl.flushPipe should be connected in fu
+    io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
+    io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
   }
 
   def connect0LatencyCtrlSingal: Unit = {

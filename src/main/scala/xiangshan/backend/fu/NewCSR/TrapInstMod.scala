@@ -62,7 +62,14 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
     valid := false.B
   }.elsewhen(newCSRInstValid) {
     valid := true.B
-    trapInstInfo := newCSRInst
+    when (!valid) {
+      trapInstInfo := newCSRInst
+    }.elsewhen(valid &&
+      (newCSRInst.ftqPtr === trapInstInfo.ftqPtr && newCSRInst.ftqOffset < trapInstInfo.ftqOffset ||
+      newCSRInst.ftqPtr < trapInstInfo.ftqPtr)
+    ) {
+      trapInstInfo := newCSRInst
+    }
   }.elsewhen(newTrapInstInfo.valid && !valid) {
     valid := true.B
     trapInstInfo := newTrapInstInfo.bits

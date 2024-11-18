@@ -23,9 +23,10 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.fu.vector.Bundles.VEew
+import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 
@@ -36,7 +37,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   // val fof            = Bool() // fof is only used for vector loads
   val excp_eew_index      = UInt(elemIdxBits.W)
   // val exceptionVec   = ExceptionVec() // uop has exceptionVec
-  val baseAddr            = UInt(VAddrBits.W)
+  val baseAddr            = UInt(XLEN.W)
   val stride              = UInt(VLEN.W)
   // val flow_counter = UInt(flowIdxBits.W)
 
@@ -56,6 +57,9 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val vd_last_uop         = Bool()
   val vd_first_uop        = Bool()
 
+  // Because the back-end needs to handle exceptions, it is necessary to retain the original NF.
+  // So we choose to pass the original value in the pipeline and override it when out.
+  val rawNf                = Nf()
   val indexedSrcMask     = UInt(VLENB.W)
   val indexedSplitOffset  = UInt(flowIdxBits.W)
   // Inst's uop
@@ -104,13 +108,19 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val isvec                = Bool()
   val flushState           = Bool()
   val sourceType           = VSFQFeedbackType()
+  val trigger              = TriggerAction()
   //val dataInvalidSqIdx = new SqPtr
   //val paddr                = UInt(PAddrBits.W)
   val mmio                 = Bool()
   //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()
-  val vaddr                = UInt(VAddrBits.W)
-  val gpaddr               = UInt(GPAddrBits.W)
+  val vaddr                = UInt(XLEN.W)
+  val vaNeedExt          = Bool()
+  val gpaddr               = UInt(XLEN.W)
+  val isForVSnonLeafPTE    = Bool()
+  val vstart               = UInt(elemIdxBits.W)
+  val vecTriggerMask       = UInt((VLEN/8).W)
+
   //val vec                  = new OnlyVecExuOutput
    // feedback
   val vecFeedback          = Bool()
@@ -126,7 +136,8 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
-  val vaddr               = UInt(VAddrBits.W)
+  val vaddr               = UInt(XLEN.W)
+  val basevaddr           = UInt(VAddrBits.W)
   val mask                = UInt(VLENB.W)
   val isvec               = Bool()
   val uop_unit_stride_fof = Bool()
@@ -191,8 +202,10 @@ class FeedbackToSplitIO(implicit p: Parameters) extends VLSUBundle{
 class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val robidx = new RobPtr
   val uopidx = UopIdx()
-  val vaddr = UInt(VAddrBits.W)
+  val vaddr = UInt(XLEN.W)
+  val vaNeedExt = Bool()
   val gpaddr = UInt(GPAddrBits.W)
+  val isForVSnonLeafPTE = Bool()
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
     // for exception
   val vstart           = UInt(elemIdxBits.W)
@@ -248,4 +261,14 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val feedback            = ValidIO(new RSFeedback(isVector = true))
   val redirect            = Flipped(ValidIO(new Redirect))
   val exceptionInfo       = ValidIO(new FeedbackToLsqIO)
+  //trigger
+  val fromCsrTrigger      = Input(new CsrTriggerBundle)
+}
+
+class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
+  val redirect            = Flipped(ValidIO(new Redirect))
+  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
+  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExuOutput(isVector=true))))
+
+  val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
 }

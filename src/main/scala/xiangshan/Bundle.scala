@@ -39,7 +39,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.backend.fu.NewCSR.{Mcontrol, Tdata1Bundle, Tdata2Bundle}
+import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
@@ -145,7 +145,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
-  val exceptionFromBackend = Bool()
+  val backendException = Bool()
   val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -161,13 +161,14 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isLastInFtqEntry = Bool()
 }
 
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(1.W)
-  val typeTagOut = UInt(1.W)
+  val typeTagIn = UInt(2.W)  // H S D
+  val typeTagOut = UInt(2.W) // H S D
   val fromInt = Bool()
   val wflags = Bool()
   val fpWen = Bool()
@@ -371,8 +372,9 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val nmi = new NonmaskableInterruptIO()
 }
 
-class NonmaskableInterruptIO(implicit p: Parameters) extends XSBundle {
-  val nmi = Input(Bool())
+class NonmaskableInterruptIO() extends Bundle {
+  val nmi_31 = Input(Bool())
+  val nmi_43 = Input(Bool())
   // reserve for other nmi type
 }
 
@@ -612,6 +614,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode
   val virtMode = Output(Bool())
+  // xstatus.fs field is off
+  val fsIsOff = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -753,16 +757,16 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val tdata2    = Output(UInt(64.W))
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: Tdata2Bundle): MatchTriggerIO = {
-    val mcontrol = Wire(new Mcontrol)
-    mcontrol := tdata1.DATA.asUInt
-    this.matchType := mcontrol.MATCH.asUInt
-    this.select    := mcontrol.SELECT.asBool
-    this.timing    := mcontrol.TIMING.asBool
-    this.action    := mcontrol.ACTION.asUInt
-    this.chain     := mcontrol.CHAIN.asBool
-    this.execute   := mcontrol.EXECUTE.asBool
-    this.load      := mcontrol.LOAD.asBool
-    this.store     := mcontrol.STORE.asBool
+    val mcontrol6 = Wire(new Mcontrol6)
+    mcontrol6 := tdata1.DATA.asUInt
+    this.matchType := mcontrol6.MATCH.asUInt
+    this.select    := mcontrol6.SELECT.asBool
+    this.timing    := false.B
+    this.action    := mcontrol6.ACTION.asUInt
+    this.chain     := mcontrol6.CHAIN.asBool
+    this.execute   := mcontrol6.EXECUTE.asBool
+    this.load      := mcontrol6.LOAD.asBool
+    this.store     := mcontrol6.STORE.asBool
     this.tdata2    := tdata2.asUInt
     this
   }

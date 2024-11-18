@@ -57,7 +57,7 @@ class ExeUnitImp(
   override val wrapper: ExeUnit
 )(implicit
   p: Parameters, exuParams: ExeUnitParams
-) extends LazyModuleImp(wrapper) with HasXSParameter{
+) extends LazyModuleImp(wrapper) with HasXSParameter with HasCriticalErrors {
   private val fuCfgs = exuParams.fuConfigs
 
   val io = IO(new ExeUnitIO(exuParams))
@@ -82,8 +82,8 @@ class ExeUnitImp(
       val lat0 = (latReal == 0 && !uncerLat).asBool
       val latN = (latReal >  0 && !uncerLat).asBool
 
-      val fuVldVec = (io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
-      val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ io.out.ready
+      val fuVldVec = (fu.io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
+      val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ fu.io.out.ready
 
       for (i <- 0 until latReal) {
         fuRdyVec(i) := !fuVldVec(i + 1) || fuRdyVec(i + 1)
@@ -99,17 +99,17 @@ class ExeUnitImp(
       fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
       fuVld_en_reg := fuVld_en
 
-      when(uncerLat.asBool && io.in.fire) {
+      when(uncerLat.asBool && fu.io.in.fire) {
         uncer_en_reg := true.B
-      }.elsewhen(uncerLat.asBool && io.out.fire) {
+      }.elsewhen(uncerLat.asBool && fu.io.out.fire) {
         uncer_en_reg := false.B
       }
 
-      when(lat0 && io.in.fire) {
+      when(lat0 && fu.io.in.fire) {
         clk_en := true.B
       }.elsewhen(latN && fuVld_en || fuVld_en_reg) {
         clk_en := true.B
-      }.elsewhen(uncerLat.asBool && io.in.fire || uncer_en_reg) {
+      }.elsewhen(uncerLat.asBool && fu.io.in.fire || uncer_en_reg) {
         clk_en := true.B
       }
 
@@ -117,7 +117,9 @@ class ExeUnitImp(
         clk_en := true.B
       }
 
-      fu.clock := ClockGate(false.B, clk_en, clock)
+      if (latReal != 0 || uncerLat) {
+        fu.clock := ClockGate(false.B, clk_en, clock)
+      }
       XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     }
   }
@@ -304,6 +306,9 @@ class ExeUnitImp(
     Option.when(funcUnits.exists(_.cfg.writeVlRf))
       (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
   ).flatten
+
+  val criticalErrors = funcUnits.filter(fu => fu.cfg.needCriticalErrors).flatMap(fu => fu.getCriticalErrors)
+  generateCriticalErrors()
 
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
