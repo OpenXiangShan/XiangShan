@@ -755,7 +755,7 @@ class SRAMTemplateWithFixedWidth[T <: Data](
       holdRead = holdRead,
       singlePort = singlePort,
       bypassWrite = bypassWrite,
-      withClockGate = withClockGate,
+      withClockGate = withClockGate
     ))
     // read req
     sramBank.io.r.req.valid       := io.r.req.valid
