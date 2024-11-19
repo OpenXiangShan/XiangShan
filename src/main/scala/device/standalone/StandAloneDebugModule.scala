@@ -41,6 +41,8 @@ class StandAloneDebugModule (
   useTL, baseAddress, addrWidth, dataWidth, hartNum
 ) with HasMasterInterface {
 
+  def masterAddrWidth: Int = 48
+
   def addressSet: AddressSet = p(DebugModuleKey).get.address
 
   val debugModule = LazyModule(new DebugModule(hartNum)(p))
