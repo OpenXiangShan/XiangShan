@@ -51,7 +51,7 @@ class InterruptFilter extends Module {
   private val hsie = hie.asUInt | sie.asUInt
 
   val mtopiIsNotZero: Bool = (mip & mie & (~mideleg).asUInt) =/= 0.U
-  val stopiIsNotZero: Bool = privState.isModeHS && ((hsip & hsie & (~hideleg).asUInt) =/= 0.U)
+  val stopiIsNotZero: Bool = (hsip & hsie & (~hideleg).asUInt) =/= 0.U
 
   val mIpriosIsZero : Bool = miprios  === 0.U
   val hsIpriosIsZero: Bool = hsiprios === 0.U
