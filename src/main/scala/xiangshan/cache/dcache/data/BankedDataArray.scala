@@ -256,6 +256,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
+    val ecc_inject = Flipped(DecoupledIO(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
@@ -806,6 +807,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
   dontTouch(bank_result)
   dontTouch(read_bank_error_delayed)
+  val ecc_mask = VecInit((0 until DCacheBanks).map(i => {
+    Mux(io.ecc_inject.valid, io.ecc_inject.bits(i), 0.U)
+  }))
+  io.ecc_inject.ready := data_banks.flatten.map(_.io.r.en).reduce(_|_)
+
   for (div_index <- 0 until DCacheSetDiv) {
     for (bank_index <- 0 until DCacheBanks) {
       //     Set Addr & Read Way Mask
@@ -842,7 +848,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       data_bank.io.r.en := read_enable
       data_bank.io.r.addr := bank_set_addr
       for (way_index <- 0 until DCacheWays) {
-        bank_result(div_index)(bank_index)(way_index).raw_data := data_bank.io.r.data(way_index)
+        if (EnableEccInject) {
+          bank_result(div_index)(bank_index)(way_index).raw_data := data_bank.io.r.data(way_index) ^ ecc_mask(bank_index)
+        } else {
+          bank_result(div_index)(bank_index)(way_index).raw_data := data_bank.io.r.data(way_index)
+        }
         bank_result_delayed(div_index)(bank_index)(way_index) := RegEnable(bank_result(div_index)(bank_index)(way_index), RegNext(read_enable))
       }
 

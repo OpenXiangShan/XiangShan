@@ -138,6 +138,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
+    val ecc_inject = Flipped(DecoupledIO(UInt(DCacheSRAMRowBits.W)))
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
@@ -148,6 +149,8 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
   }
 
   val tag_read_oh = WireInit(VecInit(Seq.fill(readPorts)(0.U(XLEN.W))))
+  val ecc_mask = Mux(io.ecc_inject.valid, io.ecc_inject.bits(tagBits-1, 0), 0.U)
+  io.ecc_inject.ready := io.read.map(_.valid).reduce(_|_)
   for (i <- 0 until readPorts) {
     // normal read / write
     array(i).io.write.valid := io.write.valid
@@ -161,7 +164,14 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
     array(i).io.read <> io.read(i)
     array(i).io.ecc_read.valid := io.read(i).valid
     array(i).io.ecc_read.bits := io.read(i).bits
-    io.resp(i) := (array(i).io.ecc_resp zip array(i).io.resp).map { case (e, r) => Cat(e, r) }
+    io.resp(i) := (array(i).io.ecc_resp zip array(i).io.resp).map {
+      case (e, r) =>
+        if (EnableEccInject) {
+          Cat(e, r ^ ecc_mask)
+        } else {
+          Cat(e, r)
+        }
+    }
     // extra ports for cache op
 //    array(i).io.ecc_write.valid := false.B
 //    array(i).io.ecc_write.bits := DontCare

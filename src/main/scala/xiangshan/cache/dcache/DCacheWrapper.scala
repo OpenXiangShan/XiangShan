@@ -22,7 +22,7 @@ import chisel3.util._
 import coupledL2.VaddrField
 import coupledL2.IsKeywordField
 import coupledL2.IsKeywordKey
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import huancun.{AliasField, PrefetchField}
@@ -57,7 +57,8 @@ case class DCacheParameters
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = false
+  enableTagEcc: Boolean = false,
+  enableEccInject: Boolean = false,
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -132,6 +133,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val releaseIdBase = cfg.nMissEntries
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
+  val EnableEccInject = cacheParams.enableEccInject
 
   // banked dcache support
   val DCacheSetDiv = 1
@@ -151,6 +153,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
   val DCacheSizeBytes = DCacheSizeBits / 8
   val DCacheSizeWords = DCacheSizeBits / 64 // TODO
+  val DCacheLineBits = DCacheBanks * DCacheSRAMRowBits
+  val DCacheLineBytes = DCacheLineBits / 8
 
   val DCacheSameVPAddrLength = 12
 
@@ -163,6 +167,11 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
+
+  // controll
+  val eccTagCtrl  = 0
+  val eccDataCtrl = 1
+  val nComponents = 2
 
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
@@ -872,7 +881,10 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 
 }
 
-class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+class DCache()(implicit p: Parameters) extends LazyModule
+  with HasCtrlUnitParameters
+  with HasDCacheParameters
+{
   override def shouldBeInlined: Boolean = false
 
   val reqFields: Seq[BundleFieldBase] = Seq(
@@ -896,6 +908,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
+
+  val ctrlUnit = OptionWrapper(EnableEccInject, LazyModule(new CtrlUnit))
 
   lazy val module = new DCacheImp(this)
 }
@@ -987,6 +1001,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
+
+  if (outer.ctrlUnit.isDefined) {
+    val ctrlUnit = outer.ctrlUnit.get.module
+    tagArray.io.ecc_inject.valid := ctrlUnit.io_eccCtrl(0).valid
+    tagArray.io.ecc_inject.bits := ctrlUnit.io_eccCtrl(0).bits(0)
+    ctrlUnit.io_eccCtrl(0).ready := tagArray.io.ecc_inject.ready
+    bankedDataArray.io.ecc_inject <> ctrlUnit.io_eccCtrl(1)
+  } else {
+    tagArray.io.ecc_inject.valid := false.B
+    tagArray.io.ecc_inject.bits  := DontCare
+    bankedDataArray.io.ecc_inject.valid := false.B
+    bankedDataArray.io.ecc_inject.bits  := DontCare
+  }
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
@@ -1114,7 +1141,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
-  
+
   //----------------------------------------
   // tag array
   if(StorePrefetchL1Enabled) {
@@ -1416,7 +1443,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   wb.io.miss_req_conflict_check(3) := mainPipe.io.wbq_conflict_check
   mainPipe.io.wbq_block_miss_req   := wb.io.block_miss_req(3)
-  
+
   wb.io.miss_req_conflict_check(4).valid := missReqArb.io.out.valid
   wb.io.miss_req_conflict_check(4).bits  := missReqArb.io.out.bits.addr
   missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
@@ -1480,8 +1507,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   mainPipe.io.refill_req <> missQueue.io.main_pipe_req
 
-  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
-  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
+  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
+  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
   mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
 
   //----------------------------------------
@@ -1683,14 +1710,21 @@ class AMOHelper() extends ExtModule {
   val rdata  = IO(Output(UInt(64.W)))
 }
 
-class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class DCacheWrapper()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasDCacheParameters
+{
   override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null
+  val uncacheNode = OptionWrapper(EnableEccInject, TLIdentityNode())
   val dcache = if (useDcache) LazyModule(new DCache()) else null
   if (useDcache) {
     clientNode := dcache.clientNode
+  }
+  if (uncacheNode.isDefined) {
+    dcache.ctrlUnit.get.node := uncacheNode.get
   }
 
   class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
