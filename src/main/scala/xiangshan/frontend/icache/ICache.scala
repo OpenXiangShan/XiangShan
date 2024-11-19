@@ -254,8 +254,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
       way = nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true,
-      withClockGate = true
+      singlePort = true
     ))
 
     // meta connection
@@ -394,8 +393,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
         width = ICacheDataSRAMWidth,
         shouldReset = true,
         holdRead = true,
-        singlePort = true,
-        withClockGate = true
+        singlePort = true
       ))
 
       // read
