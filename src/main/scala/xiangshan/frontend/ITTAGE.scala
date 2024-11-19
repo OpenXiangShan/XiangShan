@@ -209,7 +209,8 @@ class ITTageTable(
     shouldReset = true,
     holdRead = true,
     singlePort = true,
-    useBitmask = true
+    useBitmask = true,
+    withClockGate = true
   ))
 
   table.io.r.req.valid       := io.req.fire

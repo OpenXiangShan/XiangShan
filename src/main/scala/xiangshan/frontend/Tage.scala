@@ -162,7 +162,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true
+      bypassWrite = true,
+      withClockGate = true
     )
   )
 
@@ -345,7 +346,8 @@ class TageTable(
     shouldReset = true,
     extraReset = true,
     holdRead = true,
-    singlePort = true
+    singlePort = true,
+    withClockGate = true
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -357,7 +359,8 @@ class TageTable(
       way = numBr,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      withClockGate = true
     ))
   )
 

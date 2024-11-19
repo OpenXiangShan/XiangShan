@@ -79,7 +79,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     shouldReset = true,
     holdRead = true,
     singlePort = false,
-    bypassWrite = true
+    bypassWrite = true,
+    withClockGate = true
   ))
 
   // def getIdx(hist: UInt, pc: UInt) = {
