@@ -304,6 +304,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val mmioReq = Wire(chiselTypeOf(io.uncache.req))
   val ncReq = Wire(chiselTypeOf(io.uncache.req))
   val ncResp = Wire(chiselTypeOf(io.uncache.resp))
+  val ncDoReq = Wire(Bool())
+  val ncDoResp = Wire(Bool())
+  val ncReadNextTrigger = Mux(io.uncacheOutstanding, ncDoReq, ncDoResp)
+  // ncDoReq is double RegNexted, as ubuffer data write takes 3 cycles.
+  // TODO lyq: to eliminate coupling by passing signals through ubuffer
+  val ncDeqTrigger = Mux(io.uncacheOutstanding, RegNext(RegNext(ncDoReq)), ncDoResp)
+  val ncPtr = Mux(io.uncacheOutstanding, RegNext(RegNext(io.uncache.req.bits.id)), io.uncache.resp.bits.id)
   
   // store miss align info
   io.maControl.storeInfo.data := dataModule.io.rdata(0).data
@@ -320,7 +327,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   rdataPtrExtNext := rdataPtrExt.map(i => i +
     PopCount(dataBuffer.io.enq.map(_.fire)) +
-    PopCount(ncResp.fire || io.mmioStout.fire || io.vecmmioStout.fire)
+    PopCount(ncReadNextTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
   )
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -334,12 +341,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   deqPtrExtNext := deqPtrExt.map(i =>  i +
     RegNext(PopCount(VecInit(io.sbuffer.map(_.fire)))) +
-    PopCount(ncResp.fire || io.mmioStout.fire || io.vecmmioStout.fire)
+    PopCount(ncDeqTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
   )
 
   io.sqDeq := RegNext(
     RegNext(PopCount(VecInit(io.sbuffer.map(_.fire && !misalignBlock)))) +
-    PopCount(ncResp.fire || io.mmioStout.fire || io.vecmmioStout.fire || finishMisalignSt)
+    PopCount(ncDeqTrigger || io.mmioStout.fire || io.vecmmioStout.fire || finishMisalignSt)
   )
 
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && (io.mmioStout.fire || io.vecmmioStout.fire)))
@@ -804,11 +811,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(s_req) {
       when (mmioDoReq) {
-        when (io.uncacheOutstanding) {
-          mmioState := s_wb
-        } .otherwise {
-          mmioState := s_resp
-        }
+        mmioState := s_resp
       }
     }
     is(s_resp) {
@@ -841,6 +844,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mmioReq.bits := DontCare
   mmioReq.bits.cmd  := MemoryOpConstants.M_XWR
   mmioReq.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
+  mmioReq.bits.vaddr:= vaddrModule.io.rdata(0)
   mmioReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   mmioReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
   mmioReq.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
@@ -855,7 +859,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: CAN NOT deal with vector nc now!
   val nc_idle :: nc_req :: nc_resp :: Nil = Enum(3)
   val ncState = RegInit(nc_idle)
-  val ncDoReq = io.uncache.req.fire && io.uncache.req.bits.nc
   val rptr0 = rdataPtrExt(0).value
   switch(ncState){
     is(nc_idle) {
@@ -865,7 +868,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(nc_req) {
       when(ncDoReq) {
-        ncState := nc_resp
+        when(io.uncacheOutstanding) {
+          ncState := nc_idle
+        }.otherwise{
+          ncState := nc_resp
+        }
       }
     }
     is(nc_resp) {
@@ -874,23 +881,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     }
   }
+
+  ncDoReq := io.uncache.req.fire && io.uncache.req.bits.nc
+  ncDoResp := ncResp.fire
+
   ncReq.valid := ncState === nc_req
   ncReq.bits := DontCare
   ncReq.bits.cmd  := MemoryOpConstants.M_XWR
   ncReq.bits.addr := paddrModule.io.rdata(0)
+  ncReq.bits.vaddr:= vaddrModule.io.rdata(0)
   ncReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   ncReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
   ncReq.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
   ncReq.bits.nc := true.B
-  ncReq.bits.id := rdataPtrExt(0).value
+  ncReq.bits.id := rptr0
   
   ncResp.ready := io.uncache.resp.ready
   ncResp.valid := io.uncache.resp.fire && io.uncache.resp.bits.nc
   ncResp.bits <> io.uncache.resp.bits
-  when (ncResp.fire) {
-    val ptr = io.uncache.resp.bits.id
-    allocated(ptr) := false.B
-    XSDebug("nc fire: ptr %d\n", ptr)
+  when (ncDeqTrigger) {
+    allocated(ncPtr) := false.B
+    XSDebug("nc fire: ptr %d\n", ncPtr)
   }
   
   mmioReq.ready := io.uncache.req.ready

@@ -515,6 +515,7 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W) // for uncache buffer forwarding
   val data = UInt(XLEN.W)
   val mask = UInt((XLEN/8).W)
   val id   = UInt(uncacheIdxBits.W)
@@ -534,8 +535,9 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data      = UInt(XLEN.W)
   val data_delayed = UInt(XLEN.W)
-  val id        = UInt(uncacheIdxBits.W)
-  val nc        = Bool()
+  val id        = UInt(uncacheIdxBits.W) // resp identified signals
+  val nc        = Bool() // resp identified signals
+  val is2lq     = Bool() // resp identified signals
   val miss      = Bool()
   val replay    = Bool()
   val tag_error = Bool()

@@ -75,6 +75,16 @@ object shiftMaskToLow {
     Mux(addr(3),(mask >> 8).asUInt,mask)
   }
 }
+object shiftDataToHigh {
+  def apply(addr: UInt,data : UInt): UInt = {
+    Mux(addr(3), (data << 64).asUInt, data)
+  }
+}
+object shiftMaskToHigh {
+  def apply(addr: UInt,mask: UInt): UInt = {
+    Mux(addr(3), (mask << 8).asUInt, mask)
+  }
+}
 
 class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters

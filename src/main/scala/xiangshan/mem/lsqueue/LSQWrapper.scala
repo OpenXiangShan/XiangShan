@@ -247,8 +247,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   switch(pendingstate){
     is(s_idle){
       when(io.uncache.req.fire){
-        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load,
-                          Mux(io.uncacheOutstanding, s_idle, s_store))
+        pendingstate := 
+          Mux(io.uncacheOutstanding && io.uncache.req.bits.nc, s_idle,
+          Mux(loadQueue.io.uncache.req.valid, s_load,
+          s_store))
       }
     }
     is(s_load){
@@ -279,14 +281,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.uncache.req.valid := false.B
     io.uncache.req.bits := DontCare
   }
-  when (io.uncacheOutstanding) {
+  when (io.uncache.resp.bits.is2lq) {
     io.uncache.resp <> loadQueue.io.uncache.resp
   } .otherwise {
-    when(pendingstate === s_load){
-      io.uncache.resp <> loadQueue.io.uncache.resp
-    }.otherwise{
-      io.uncache.resp <> storeQueue.io.uncache.resp
-    }
+    io.uncache.resp <> storeQueue.io.uncache.resp
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
