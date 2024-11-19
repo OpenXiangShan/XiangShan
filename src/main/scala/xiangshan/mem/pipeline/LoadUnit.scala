@@ -1620,7 +1620,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec //||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
-  // Now vector instruction don't support mmio. 
+  // Now vector instruction don't support mmio.
     // io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
     //io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
