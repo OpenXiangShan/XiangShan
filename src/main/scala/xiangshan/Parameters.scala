@@ -141,7 +141,7 @@ case class XSCoreParameters
     (preds, ras.io.out)
   },
   ICacheForceMetaECCError: Boolean = false,
-  ICacheForceDataECCError: Boolean = false,
+  ICacheForceDataECCError: Boolean = true,
   IBufSize: Int = 48,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
