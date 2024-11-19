@@ -93,14 +93,6 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
-  def encWordBits = cacheParams.dataCode.width(wordBits)
-
-  def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
-  def eccBits = encWordBits - wordBits
-
-  def encTagBits = cacheParams.tagCode.width(tagBits)
-  def eccTagBits = encTagBits - tagBits
-
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 10
@@ -163,6 +155,16 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
+
+  def encWordBits = cacheParams.dataCode.width(wordBits)
+  def encRowBits  = encWordBits * rowWords // for DuplicatedDataArray only
+  def eccBits     = encWordBits - wordBits
+
+  def encTagBits = if (EnableTagEcc) cacheParams.tagCode.width(tagBits) else tagBits
+  def tagECCBits = encTagBits - tagBits
+
+  def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
+  def dataECCBits = encDataBits - DCacheSRAMRowBits
 
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
@@ -1114,7 +1116,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
-  
+
   //----------------------------------------
   // tag array
   if(StorePrefetchL1Enabled) {
@@ -1416,7 +1418,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   wb.io.miss_req_conflict_check(3) := mainPipe.io.wbq_conflict_check
   mainPipe.io.wbq_block_miss_req   := wb.io.block_miss_req(3)
-  
+
   wb.io.miss_req_conflict_check(4).valid := missReqArb.io.out.valid
   wb.io.miss_req_conflict_check(4).bits  := missReqArb.io.out.bits.addr
   missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
@@ -1480,8 +1482,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   mainPipe.io.refill_req <> missQueue.io.main_pipe_req
 
-  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
-  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
+  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
+  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
   mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
 
   //----------------------------------------
