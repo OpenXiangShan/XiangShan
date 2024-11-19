@@ -43,7 +43,8 @@ abstract class SCBundle(implicit p: Parameters) extends TageBundle with HasSCPar
 abstract class SCModule(implicit p: Parameters) extends TageModule with HasSCParameter {}
 
 class SCMeta(val ntables: Int)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-  val scPreds = Vec(numBr, Bool())
+  val scClosed = Bool()
+  val scPreds  = Vec(numBr, Bool())
   // Suppose ctrbits of all tables are identical
   val ctrs = Vec(numBr, Vec(ntables, SInt(SCCtrBits.W)))
 }
@@ -261,6 +262,11 @@ object SCThreshold {
 }
 
 trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
+  val s0_sc_closed = WireInit(false.B)
+  val s1_sc_closed = RegEnable(s0_sc_closed, io.s0_fire(3))
+  val s2_sc_closed = RegEnable(s1_sc_closed, io.s1_fire(3))
+  val s3_sc_closed = RegEnable(s2_sc_closed, io.s2_fire(3))
+
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info                          = Set[FoldedHistoryInfo]()
   if (EnableSC) {
@@ -268,7 +274,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       case (nRows, ctrBits, histLen) => {
         val t   = Module(new SCTable(nRows / TageBanks, ctrBits, histLen))
         val req = t.io.req
-        req.valid            := io.s0_fire(3)
+        req.valid            := io.s0_fire(3) && !s0_sc_closed
         req.bits.pc          := s0_pc_dup(3)
         req.bits.folded_hist := io.in.bits.folded_hist(3)
         req.bits.ghist       := DontCare
@@ -318,7 +324,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     def getPvdrCentered(ctr: UInt): SInt = Cat(ctr ^ (1 << (TageCtrBits - 1)).U, 1.U(1.W), 0.U(3.W)).asSInt
 
     val scMeta = resp_meta.scMeta.get
-    scMeta := DontCare
+    scMeta          := DontCare
+    scMeta.scClosed := RegEnable(s2_sc_closed, io.s2_fire(3))
     for (w <- 0 until TageBanks) {
       // do summation in s2
       val s1_scTableSums = VecInit(
@@ -326,28 +333,29 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
-      val s2_scTableSums         = RegEnable(s1_scTableSums, io.s1_fire(3))
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(3)))
+      val s2_scTableSums         = RegEnable(s1_scTableSums, io.s1_fire(3) && !s1_sc_closed)
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(3) && !s1_sc_closed))
       val s2_totalSums           = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds =
         VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val s2_scResps   = VecInit(RegEnable(s1_scResps, io.s1_fire(3)).map(_.ctrs(w)))
+      val s2_scResps   = VecInit(RegEnable(s1_scResps, io.s1_fire(3) && !s1_sc_closed).map(_.ctrs(w)))
       val s2_scCtrs    = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
       val s2_chooseBit = s2_tageTakens_dup(3)(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens_dup(3)(w))
 
-      val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3))
+      val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3) && !s2_sc_closed)
       io.out.last_stage_spec_info.sc_disagree.map(_ := s3_disagree)
 
-      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
-      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3))
+      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3) && !s2_sc_closed)
+      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3) && !s2_sc_closed)
 
+      // Combination Logic, Wire type
       when(s2_provideds(w)) {
-        s2_sc_used(w) := true.B
+        s2_sc_used(w) := !s2_sc_closed
         s2_unconf(w)  := !s2_sumAboveThresholds(s2_chooseBit)
         s2_conf(w)    := s2_sumAboveThresholds(s2_chooseBit)
         // Use prediction from Statistical Corrector
@@ -363,7 +371,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      val s3_pred_dup   = io.s2_fire.map(f => RegEnable(s2_pred, f))
+      val s3_pred_dup   = io.s2_fire.map(f => RegEnable(s2_pred, f && !s2_sc_closed))
       val sc_enable_dup = dup(RegNext(io.ctrl.sc_enable))
       for (
         sc_enable & fp & s3_pred <-
@@ -375,7 +383,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
 
       val updateTageMeta = updateMeta
-      when(updateValids(w) && updateTageMeta.providers(w).valid) {
+      when(!updateSCMeta.scClosed && updateValids(w) && updateTageMeta.providers(w).valid) {
         val scPred            = updateSCMeta.scPreds(w)
         val tagePred          = updateTageMeta.takens(w)
         val taken             = update.br_taken_mask(w)
@@ -389,7 +397,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scUpdateTakens(w)    := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach { case (t, c) => t := c }
 
-        update_sc_used(w)    := true.B
+        update_sc_used(w)    := !scClosed
         update_unconf(w)     := !sumAboveThreshold
         update_conf(w)       := sumAboveThreshold
         update_agree(w)      := scPred === tagePred
@@ -426,7 +434,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     val realWens = scUpdateMask.transpose.map(v => v.reduce(_ | _))
     for (b <- 0 until TageBanks) {
       for (i <- 0 until SCNTables) {
-        val realWen = realWens(i)
+        val realWen = realWens(i) && !s0_sc_closed
         scTables(i).io.update.mask(b)      := RegNext(scUpdateMask(b)(i))
         scTables(i).io.update.tagePreds(b) := RegEnable(scUpdateTagePreds(b), realWen)
         scTables(i).io.update.takens(b)    := RegEnable(scUpdateTakens(b), realWen)
