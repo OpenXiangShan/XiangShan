@@ -46,6 +46,7 @@ case class SoCParameters
   PAddrBits: Int = 48,
   PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
   CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
+  L1DCacheCtrlRange: AddressSet = AddressSet(0x38022000L, 0x7f),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
@@ -129,6 +130,7 @@ trait HasPeripheralRanges {
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
     "CLINT" -> soc.CLINTRange,
     "BEU"   -> soc.BEURange,
+    "L1DCacheCtrl" -> soc.L1DCacheCtrlRange,
     "PLIC"  -> soc.PLICRange,
     "PLL"   -> soc.PLLRange,
     "UART"  -> soc.UARTLiteRange,
@@ -140,9 +142,9 @@ trait HasPeripheralRanges {
     else
       Map()
   )
-
+  val l1DCacheCtrlRange = AddressSet(0x38022000, 0x7F)
   def peripheralRange = onChipPeripheralRanges.values.foldLeft(Seq(AddressSet(0x0, 0x7fffffffL))) { (acc, x) =>
-    acc.flatMap(_.subtract(x))
+    acc.flatMap(_.subtract(x)).map(_.subtract(l1DCacheCtrlRange)).flatten
   }
 }
 
