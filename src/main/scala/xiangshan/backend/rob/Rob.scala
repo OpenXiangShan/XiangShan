@@ -1497,11 +1497,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.code := trapCode
       difftest.pc := trapPC
     }
-
-    val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent)
-    diffCriticalErrorEvent.valid := criticalErrorState && !RegNext(criticalErrorState)
-    diffCriticalErrorEvent.coreid := io.hartId
-    diffCriticalErrorEvent.criticalError := criticalErrorState
   }
 
   //store evetn difftest information

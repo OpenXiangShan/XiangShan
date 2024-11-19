@@ -1372,6 +1372,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       diffArchEvent.exceptionInst := RegEnable(io.fromRob.trap.bits.instr, hasTrap)
     }
 
+    val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent, delay = 4, dontCare = true)
+    diffCriticalErrorEvent.valid := io.status.criticalErrorState && trapValid
+    diffCriticalErrorEvent.coreid := hartId
+    diffCriticalErrorEvent.criticalError := io.status.criticalErrorState
+
     val diffCSRState = DifftestModule(new DiffCSRState)
     diffCSRState.coreid         := hartId
     diffCSRState.privilegeMode  := privState.PRVM.asUInt
