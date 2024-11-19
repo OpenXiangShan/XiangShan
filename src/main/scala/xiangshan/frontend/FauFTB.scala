@@ -141,26 +141,32 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   // s1: alloc_way and write
 
   // s0
-  val u        = io.update
-  val u_meta   = u.bits.meta.asTypeOf(new FauFTBMeta)
-  val u_s0_tag = getTag(u.bits.pc)
+  val u_valid = RegNext(io.update.valid, init = false.B)
+  val u_bits  = RegEnable(io.update.bits, io.update.valid)
+
+  // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
+  // so io.update.bits.pc is used directly here
+  val u_pc = io.update.bits.pc
+
+  val u_meta   = u_bits.meta.asTypeOf(new FauFTBMeta)
+  val u_s0_tag = getTag(u_pc)
   ways.foreach(_.io.update_req_tag := u_s0_tag)
   val u_s0_hit_oh = VecInit(ways.map(_.io.update_hit)).asUInt
   val u_s0_hit    = u_s0_hit_oh.orR
   val u_s0_br_update_valids =
     VecInit((0 until numBr).map(w =>
-      u.bits.ftb_entry.brValids(w) && u.valid && !u.bits.ftb_entry.strong_bias(w) &&
-        !(PriorityEncoder(u.bits.br_taken_mask) < w.U)
+      u_bits.ftb_entry.brValids(w) && u_valid && !u_bits.ftb_entry.strong_bias(w) &&
+        !(PriorityEncoder(u_bits.br_taken_mask) < w.U)
     ))
 
   // s1
-  val u_s1_valid            = RegNext(u.valid)
-  val u_s1_tag              = RegEnable(u_s0_tag, u.valid)
-  val u_s1_hit_oh           = RegEnable(u_s0_hit_oh, u.valid)
-  val u_s1_hit              = RegEnable(u_s0_hit, u.valid)
+  val u_s1_valid            = RegNext(u_valid)
+  val u_s1_tag              = RegEnable(u_s0_tag, u_valid)
+  val u_s1_hit_oh           = RegEnable(u_s0_hit_oh, u_valid)
+  val u_s1_hit              = RegEnable(u_s0_hit, u_valid)
   val u_s1_alloc_way        = replacer.way
   val u_s1_write_way_oh     = Mux(u_s1_hit, u_s1_hit_oh, UIntToOH(u_s1_alloc_way))
-  val u_s1_ftb_entry        = RegEnable(u.bits.ftb_entry, u.valid)
+  val u_s1_ftb_entry        = RegEnable(u_bits.ftb_entry, u_valid)
   val u_s1_ways_write_valid = VecInit((0 until numWays).map(w => u_s1_write_way_oh(w).asBool && u_s1_valid))
   for (w <- 0 until numWays) {
     ways(w).io.write_valid := u_s1_ways_write_valid(w)
@@ -169,7 +175,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   // Illegal check for FTB entry writing
-  val uftb_write_pc          = RegEnable(u.bits.pc, u.valid)
+  val uftb_write_pc          = RegEnable(u_pc, u_valid)
   val uftb_write_fallThrough = u_s1_ftb_entry.getFallThrough(uftb_write_pc)
   when(u_s1_valid && u_s1_hit) {
     assert(
@@ -179,8 +185,8 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   // update saturating counters
-  val u_s1_br_update_valids = RegEnable(u_s0_br_update_valids, u.valid)
-  val u_s1_br_takens        = RegEnable(u.bits.br_taken_mask, u.valid)
+  val u_s1_br_update_valids = RegEnable(u_s0_br_update_valids, u_valid)
+  val u_s1_br_takens        = RegEnable(u_bits.br_taken_mask, u_valid)
   for (w <- 0 until numWays) {
     when(u_s1_ways_write_valid(w)) {
       for (br <- 0 until numBr) {
@@ -203,24 +209,24 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val u_pred_hit_way_map = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hit_way === w.U)
   XSPerfAccumulate("uftb_read_hits", s0_fire_next_cycle && s1_hit)
   XSPerfAccumulate("uftb_read_misses", s0_fire_next_cycle && !s1_hit)
-  XSPerfAccumulate("uftb_commit_hits", u.valid && u_meta.hit)
-  XSPerfAccumulate("uftb_commit_misses", u.valid && !u_meta.hit)
-  XSPerfAccumulate("uftb_commit_read_hit_pred_miss", u.valid && !u_meta.hit && u_s0_hit_oh.orR)
+  XSPerfAccumulate("uftb_commit_hits", u_valid && u_meta.hit)
+  XSPerfAccumulate("uftb_commit_misses", u_valid && !u_meta.hit)
+  XSPerfAccumulate("uftb_commit_read_hit_pred_miss", u_valid && !u_meta.hit && u_s0_hit_oh.orR)
   for (w <- 0 until numWays) {
     XSPerfAccumulate(f"uftb_pred_hit_way_${w}", u_pred_hit_way_map(w))
     XSPerfAccumulate(f"uftb_replace_way_${w}", !u_s1_hit && u_s1_alloc_way === w.U)
   }
 
   if (u_meta.pred_way.isDefined) {
-    val u_commit_hit_way_map = (0 until numWays).map(w => u.valid && u_meta.hit && u_meta.pred_way.get === w.U)
+    val u_commit_hit_way_map = (0 until numWays).map(w => u_valid && u_meta.hit && u_meta.pred_way.get === w.U)
     for (w <- 0 until numWays) {
       XSPerfAccumulate(f"uftb_commit_hit_way_${w}", u_commit_hit_way_map(w))
     }
   }
 
   override val perfEvents = Seq(
-    ("fauftb_commit_hit       ", u.valid && u_meta.hit),
-    ("fauftb_commit_miss      ", u.valid && !u_meta.hit)
+    ("fauftb_commit_hit       ", u_valid && u_meta.hit),
+    ("fauftb_commit_miss      ", u_valid && !u_meta.hit)
   )
   generatePerfEvent()
 
