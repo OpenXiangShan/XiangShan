@@ -303,7 +303,7 @@ class Sbuffer(implicit p: Parameters)
   // sbuffer_in_s1:
   // * read data and meta from fifo queue
   // * update sbuffer meta (vtag, ptag, flag)
-  // * prevert that line from being sent to dcache (add a block condition)
+  // * prevent that line from being sent to dcache (add a block condition)
   // * prepare cacheline level write enable signal, RegNext() data and mask
 
   // sbuffer_in_s2:

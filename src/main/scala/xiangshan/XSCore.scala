@@ -205,6 +205,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect := backend.io.mem.redirect
   memBlock.io.ooo_to_mem.csrCtrl := backend.io.mem.csrCtrl
+  
+  // XXX lyq: remove this before PR
+  val tmp_debug_uncache_otsd = Constantin.createRecord("uncache_outstanding_enable", 0)
+  memBlock.io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable := tmp_debug_uncache_otsd
+
   memBlock.io.ooo_to_mem.tlbCsr := backend.io.mem.tlbCsr
   memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
   memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit

@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.mem._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 
@@ -33,8 +34,9 @@ class UncacheFlushBundle extends Bundle {
 class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
   val data = UInt(XLEN.W)
-  val mask = UInt((XLEN/8).W)
+  val mask = UInt(DataBytes.W)
   val id = UInt(uncacheIdxBits.W)
   val nc = Bool()
   val atomic = Bool()
@@ -43,9 +45,14 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
   val resp_data = UInt(XLEN.W)
   val resp_nderr = Bool()
 
+  // FIXME lyq: Confirm the forward logic. if no forward, it can be removed
+  val fwd_data = UInt(XLEN.W)
+  val fwd_mask = UInt(DataBytes.W)
+
   def set(x: UncacheWordReq): Unit = {
     cmd := x.cmd
     addr := x.addr
+    vaddr := x.vaddr
     data := x.data
     mask := x.mask
     id := x.id
@@ -53,6 +60,8 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     atomic := x.atomic
     resp_nderr := false.B
     resp_data := 0.U
+    fwd_data := 0.U
+    fwd_mask := 0.U
   }
 
   def update(x: TLBundleD): Unit = {
@@ -60,10 +69,18 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     resp_nderr := x.denied
   }
 
+  def update(forwardData: UInt, forwardMask: UInt): Unit = {
+    fwd_data := forwardData
+    fwd_mask := forwardMask
+  }
+
   def toUncacheWordResp(): UncacheWordResp = {
+    val resp_fwd_data = VecInit((0 until DataBytes).map(j =>
+      Mux(fwd_mask(j), fwd_data(8*(j+1)-1, 8*j), resp_data(8*(j+1)-1, 8*j))
+    )).asUInt
     val r = Wire(new UncacheWordResp)
     r := DontCare
-    r.data := resp_data
+    r.data := resp_fwd_data
     r.id := id
     r.nderr := resp_nderr
     r.nc := nc
@@ -121,6 +138,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val enableOutstanding = Input(Bool())
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
+  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
 }
 
 // convert DCacheIO to TileLink
@@ -182,10 +200,19 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val uState = RegInit(s_idle)
   
   def sizeMap[T <: Data](f: Int => T) = VecInit((0 until UncacheBufferSize).map(f))
+  def isStore(e: UncacheEntry): Bool = e.cmd === MemoryOpConstants.M_XWR
+  def isStore(x: UInt): Bool = x === MemoryOpConstants.M_XWR
+
+  // drain buffer
+  val empty = Wire(Bool())
+  val f0_needDrain = Wire(Bool())
+  val do_uarch_drain = RegNext(f0_needDrain)
 
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
   val q0_canSent = Wire(Bool())
+
+
   /******************************************************************
    * uState for non-outstanding
    ******************************************************************/
@@ -234,28 +261,37 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     2. how to merge store and response precisely
   */
 
-  val e0_invalids = sizeMap(i => !states(i).isValid())
-  val e0_invalid_oh = VecInit(PriorityEncoderOH(e0_invalids)).asUInt
   val e0_fire = req.fire
   val e0_req = req.bits
-
-  req_ready := e0_invalid_oh.orR
+  /**
+    TODO lyq: prohibit or wait or forward?
+    NOW: strict block by same address; otherwise: exhaustive consideration is needed.
+      - ld->ld wait
+      - ld->st forward
+      - st->ld forward
+      - st->st block
+  */
+  val e0_existSameVec = sizeMap(j => 
+    e0_req.addr === entries(j).addr && states(j).isValid()
+  )
+  val e0_invalidVec = sizeMap(i => !states(i).isValid() && !e0_existSameVec(i))
+  val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
+  val e0_alloc = e0_canAlloc && e0_fire
+  req_ready := e0_invalidVec.asUInt.orR && !do_uarch_drain
   
-  for (i <- 0 until UncacheBufferSize) {
-    val alloc = e0_fire && e0_invalid_oh(i)
-    when(alloc){
-      entries(i).set(e0_req)
-      states(i).setValid(true.B)
-      
-      // judge whether wait same block: e0 & q0
-      val waitSameVec = sizeMap(j => 
-        e0_req.addr === entries(j).addr && states(j).isValid() && states(j).isInflight()
-      )
-      val waitQ0 = e0_req.addr === q0_entry.addr && q0_canSent
-      when (waitSameVec.reduce(_ || _) || waitQ0) {
-        states(i).setWaitSame(true.B)
-      }
+  when (e0_alloc) {
+    entries(e0_allocIdx).set(e0_req)
+    states(e0_allocIdx).setValid(true.B)
+    
+    // judge whether wait same block: e0 & q0
+    val waitSameVec = sizeMap(j => 
+      e0_req.addr === entries(j).addr && states(j).isValid() && states(j).isInflight()
+    )
+    val waitQ0 = e0_req.addr === q0_entry.addr && q0_canSent
+    when (waitSameVec.reduce(_ || _) || waitQ0) {
+      states(e0_allocIdx).setWaitSame(true.B)
     }
+    
   }
 
 
@@ -272,7 +308,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    ******************************************************************/
 
   val q0_canSentVec = sizeMap(i => 
-    // (io.enableOutstanding || uState === s_refill_req) && // FIXME lyq: comment for debug
+    (io.enableOutstanding || uState === s_refill_req) &&
     states(i).can2Uncache()
   )
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
@@ -360,9 +396,75 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    * 1. when io.flush.valid is true
    * 2. when io.lsq.req.bits.atomic is true
    ******************************************************************/
+  empty := !VecInit(states.map(_.isValid())).asUInt.orR
+  io.flush.empty := empty
 
-  val invalid_entries = PopCount(states.map(!_.isValid()))
-  io.flush.empty := invalid_entries === UncacheBufferSize.U
+
+  /******************************************************************
+   * Load Data Forward
+   * 
+   * 0. ld in ldu pipeline
+   *    f0: tag match, fast resp
+   *    f1: data resp
+   *
+   * 1. ld in buffer (in "Enter Buffer")
+   *    ld(en) -> st(in): ld entry.update, state.updateUncacheResp
+   *    st(en) -> ld(in): ld entry.update, state.updateUncacheResp
+   *    NOW: strict block by same address; there is no such forward.
+   *
+   ******************************************************************/
+  
+  val f0_validMask = sizeMap(i => isStore(entries(i)) && states(i).isValid())
+  val f0_tagMismatchVec = Wire(Vec(LoadPipelineWidth, Bool()))
+  f0_needDrain := f0_tagMismatchVec.asUInt.orR && !empty
+
+  for ((forward, i) <- io.forward.zipWithIndex) {
+    val f0_vtagMatches = sizeMap(w => entries(w).vaddr === forward.vaddr)
+    val f0_ptagMatches = sizeMap(w => entries(w).addr === forward.paddr)
+    f0_tagMismatchVec(i) := forward.valid && sizeMap(w =>
+      f0_vtagMatches(w) =/= f0_ptagMatches(w) && f0_validMask(w)
+    ).asUInt.orR
+    when (f0_tagMismatchVec(i)) {
+      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
+        RegNext(f0_ptagMatches.asUInt),
+        RegNext(f0_vtagMatches.asUInt),
+        RegNext(forward.vaddr),
+        RegNext(forward.paddr)
+      )
+    }
+
+    val f0_validTagMatches = sizeMap(w => f0_ptagMatches(w) && f0_validMask(w) && forward.valid)
+
+    val f0_fwdMaskCandidates = VecInit(entries.map(e => e.mask))
+    val f0_fwdDataCandidates = VecInit(entries.map(e => e.data))
+    val f0_fwdMask = shiftMaskToHigh(
+      forward.paddr,
+      Mux1H(f0_validTagMatches, f0_fwdMaskCandidates)
+    ).asTypeOf(Vec(VDataBytes, Bool()))
+    val f0_fwdData = shiftDataToHigh(
+      forward.paddr,
+      Mux1H(f0_validTagMatches, f0_fwdDataCandidates)
+    ).asTypeOf(Vec(VDataBytes, UInt(8.W)))
+
+    val f1_fwdValid = RegNext(forward.valid)
+    val f1_fwdMask = RegEnable(f0_fwdMask, forward.valid)
+    val f1_fwdData = RegEnable(f0_fwdData, forward.valid)
+
+    forward.addrInvalid := false.B // addr in ubuffer is always ready
+    forward.dataInvalid := false.B // data in ubuffer is always ready
+    forward.matchInvalid := f0_tagMismatchVec(i) // paddr / vaddr cam result does not match
+    for (j <- 0 until VDataBytes) {
+      forward.forwardMaskFast(j) := f0_fwdMask(j)
+
+      forward.forwardMask(j) := false.B
+      forward.forwardData(j) := DontCare
+      when(f1_fwdMask(j) && f1_fwdValid) {
+        forward.forwardMask(j) := true.B
+        forward.forwardData(j) := f1_fwdData(j)
+      }
+    }
+
+  }
 
 
   /******************************************************************
@@ -386,18 +488,18 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   }
 
   /* Performance Counters */
-  def isStore: Bool = io.lsq.req.bits.cmd === MemoryOpConstants.M_XWR
-  XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore && io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore && io.lsq.req.bits.nc)
+  XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
+  XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
+  XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
+  XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire)
+  XSPerfAccumulate("vaddr_match_failed", PopCount(f0_tagMismatchVec))
   
   val perfEvents = Seq(
-    ("uncache_mmio_store", io.lsq.req.fire && isStore && !io.lsq.req.bits.nc),
-    ("uncache_mmio_load", io.lsq.req.fire && !isStore && !io.lsq.req.bits.nc),
-    ("uncache_nc_store", io.lsq.req.fire && isStore && io.lsq.req.bits.nc),
-    ("uncache_nc_load", io.lsq.req.fire && !isStore && io.lsq.req.bits.nc),
+    ("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
+    ("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
+    ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
+    ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire)
   )
 

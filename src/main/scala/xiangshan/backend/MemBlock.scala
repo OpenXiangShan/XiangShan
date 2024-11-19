@@ -820,6 +820,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
+    loadUnits(i).io.ubuffer <> uncache.io.forward(i)
     loadUnits(i).io.tl_d_channel := dcache.io.lsu.forward_D(i)
     loadUnits(i).io.forward_mshr <> dcache.io.lsu.forward_mshr(i)
     // ld-ld violation check
@@ -963,6 +964,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.lsq.forward <> lsq.io.forward(LduCnt + i)
     // forward
     hybridUnits(i).io.ldu_io.sbuffer <> sbuffer.io.forward(LduCnt + i)
+    hybridUnits(i).io.ldu_io.ubuffer <> uncache.io.forward(LduCnt + i)
     // hybridUnits(i).io.ldu_io.vec_forward <> vsFlowQueue.io.forward(LduCnt + i)
     hybridUnits(i).io.ldu_io.vec_forward := DontCare
     hybridUnits(i).io.ldu_io.tl_d_channel := dcache.io.lsu.forward_D(LduCnt + i)
@@ -1332,8 +1334,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     is (s_idle) {
       when (uncacheReq.fire) {
         when (lsq.io.uncache.req.valid) {
-          val isStore = lsq.io.uncache.req.bits.cmd === MemoryOpConstants.M_XWR
-          when (!isStore || !io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+          when (!lsq.io.uncache.req.bits.nc || !io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
             uncacheState := s_scalar_uncache
           }
         }.otherwise {
