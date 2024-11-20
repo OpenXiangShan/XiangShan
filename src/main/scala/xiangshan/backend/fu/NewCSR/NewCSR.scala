@@ -136,7 +136,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
-        val pcGPA = UInt(VaddrMaxWidth.W)
+        val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
         val isFetchBkpt = Bool()

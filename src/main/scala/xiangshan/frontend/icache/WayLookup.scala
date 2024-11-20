@@ -39,7 +39,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  val gpaddr:            UInt = UInt(GPAddrBits.W)
+  // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
+  val gpaddr:            UInt = UInt(PAddrBitsMax.W)
   val isForVSnonLeafPTE: Bool = Bool()
 }
 

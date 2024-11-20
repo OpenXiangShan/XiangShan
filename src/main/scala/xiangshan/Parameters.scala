@@ -68,6 +68,7 @@ case class XSCoreParameters
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
+  PAddrBitsMax: Int = 56,   // The bits of physical address from Sv39/Sv48/Sv57 virtual address translation.
   VAddrBitsSv39: Int = 39,
   GPAddrBitsSv39x4: Int = 41,
   VAddrBitsSv48: Int = 48,
@@ -593,6 +594,7 @@ trait HasXSParameter {
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  def PAddrBitsMax = coreParams.PAddrBitsMax
   def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
   def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
   def GPAddrBits = {
