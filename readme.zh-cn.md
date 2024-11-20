@@ -8,6 +8,24 @@ English Readme is [here](README.md).
 
 ©2020-2022 鹏城实验室版权所有
 
+## 香山-DSE
+
+这个分支是为了进行香山敏捷设计空间探索（DSE），基于香山南湖-G分支。
+
+如果你想使用香山敏捷 DSE 框架，需要运行装载到 flash 中的驱动程序，我们提供了一个 DSE 驱动程序的例子，存放在 `dse-driver` 目录下。
+
+注意：我们的敏捷 DSE 框架需要特定的 Difftest 和 NEMU 版本。在运行之前，请自行到 NEMU 和 Difftest 仓库下切换至 `dse` 分支，并重新编译 NEMU。
+
+运行示例：
+```
+cd dse-driver
+make
+cd ..
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff $NEMU_HOME/build/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
+```
+
+这个驱动程序可以在不同的 RobSize 配置下 `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` 仿真运行 workload，并且评估不同配置下的 ipc，而不需要每次重新编译。
+
 ## 文档和报告
 
 [XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) 是我们的官方文档仓库，其中包含了设计文档、技术报告、使用教程等内容。

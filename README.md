@@ -11,11 +11,11 @@ Copyright 2020-2022 by Peng Cheng Laboratory.
 
 ## XiangShan-DSE
 
-This branch is agile Design Space Exploration(DSE) for XiangShan, which is based on nanhu-G branch.
+This branch is for agile Design Space Exploration (DSE) for XiangShan, which is based on the nanhu-G branch.
 
-If you want to use the agile DSE framework for XiangShan, you will need to run a driver program which is loaded in flash. We provide an example DSE driver program in `dse-driver` folder.
+If you want to use the agile DSE framework for XiangShan, you will need to run a driver program which is loaded in flash. We provide an example DSE driver program in the `dse-driver` folder.
 
-Note that our agile DSE framework need specific version of NEMU and Difftest, you need to change the branch for both the two submodules to `dse` branch, and re-compile the NEMU.
+Note that our agile DSE framework needs specific versions of NEMU and Difftest. You need to change the branch for both submodules to the `dse` branch and recompile NEMU.
 
 ```
 cd dse-driver
