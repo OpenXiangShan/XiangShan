@@ -278,6 +278,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     need_last_s2xlate := false.B
     hptw_pageFault := false.B
     hptw_accessFault := false.B
+    level := io.req.bits.SPlevel
+    pte_valid := true.B
+    accessFault := false.B
   }
 
   when (io.req.fire && io.req.bits.stage1Hit && (if(HasCVMExtension) !jmp_bitmap_check_w else true.B)){
