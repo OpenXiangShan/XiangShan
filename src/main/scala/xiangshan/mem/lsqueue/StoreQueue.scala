@@ -58,6 +58,15 @@ class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val resp = Vec(LSQEnqWidth, Output(new SqPtr))
 }
 
+class MdpVaReadIO(implicit p: Parameters) extends XSBundle {
+  val pipe = Vec(LoadPipelineWidth, new XSBundle {
+    // s0 read en
+    val raddr = Input(new SqPtr)
+    // s1 read data resp
+    val vaddr = Output(UInt(VAddrBits.W))
+  })
+}
+
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
@@ -197,6 +206,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
+    val mdpVaRead = new MdpVaReadIO
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
   })
 
@@ -223,7 +233,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vaddrModule = Module(new SQAddrModule(
     dataWidth = VAddrBits,
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth, // sbuffer; badvaddr will be sent from exceptionBuffer
+    numRead = EnsbufferWidth + LoadPipelineWidth, // sbuffer; badvaddr will be sent from exceptionBuffer; mdp false positive read
     numWrite = StorePipelineWidth,
     numForward = LoadPipelineWidth
   ))
@@ -347,6 +357,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataModule.io.raddr(i) := rdataPtrExtNext(i).value
     paddrModule.io.raddr(i) := rdataPtrExtNext(i).value
     vaddrModule.io.raddr(i) := rdataPtrExtNext(i).value
+  }
+
+  for (i <- 0 until LoadPipelineWidth) {
+    vaddrModule.io.raddr(i + EnsbufferWidth) := io.mdpVaRead.pipe(i).raddr.value
+    io.mdpVaRead.pipe(i).vaddr := vaddrModule.io.rdata(i + EnsbufferWidth)
   }
 
   /**

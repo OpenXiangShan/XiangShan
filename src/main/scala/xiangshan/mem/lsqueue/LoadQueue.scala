@@ -199,6 +199,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
+    val mdpVaRead = Flipped(new MdpVaReadIO)
 
     val lqDeqPtr = Output(new LqPtr)
 
@@ -320,6 +321,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
+  loadQueueReplay.io.mdpVaRead        <> io.mdpVaRead
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback

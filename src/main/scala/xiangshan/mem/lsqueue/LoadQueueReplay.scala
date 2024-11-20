@@ -207,6 +207,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val tlb_hint = Flipped(new TlbHintIO)
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 
+    // mdp false positive read
+    val mdpVaRead = Flipped(new MdpVaReadIO)
+
     val debugTopDown = new LoadQueueTopDownIO
   })
 
@@ -517,6 +520,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     vaddrModule.io.ren(i) := s1_oldestSel(i).valid && s1_can_go(i)
     vaddrModule.io.raddr(i) := s1_oldestSel(i).bits
+    // read sq for mdp false positive compare
+    io.mdpVaRead.pipe(i).raddr := blockSqIdx(s1_oldestSel(i).bits)
   }
 
   for (i <- 0 until LoadPipelineWidth) {
@@ -823,6 +828,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
+  XSPerfAccumulate("mdp_false_positive", PopCount(
+    io.replay.zipWithIndex.map {case (replay, i) => {
+      replay.fire && cause(replay.bits.uop.lqIdx.value)(LoadReplayCauses.C_MA) &&
+      (replay.bits.vaddr =/= io.mdpVaRead.pipe(i).vaddr)
+    }}
+  ))
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqNumber),
