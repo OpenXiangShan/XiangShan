@@ -130,7 +130,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           l2.mmioNode := mmio_port
       }
     case None =>
-      memory_port.get := l1_xbar
+      memory_port.get := l1_xbar :=* misc_l2_pmu
   }
   
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port

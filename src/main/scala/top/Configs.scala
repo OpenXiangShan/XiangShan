@@ -416,6 +416,15 @@ class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
+class NoL2L3Config(n: Int = 1) extends Config(
+    new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+      case XSTileKey => up(XSTileKey).map(p => p.copy(L2CacheParamsOpt = None)) // There will be no L2
+    })
+    ++ new WithNKBL1D(64, ways = 4)
+    ++ new BaseConfig(n)
+)
+
 class KunminghuV2Config(n: Int = 1) extends Config(
   new WithCHI
     ++ new Config((site, here, up) => {
