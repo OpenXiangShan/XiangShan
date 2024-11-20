@@ -8,6 +8,25 @@ Copyright 2020-2022 by Institute of Computing Technology, Chinese Academy of Sci
 
 Copyright 2020-2022 by Peng Cheng Laboratory.
 
+
+## XiangShan-DSE
+
+This branch is agile Design Space Exploration(DSE) for XiangShan, which is based on nanhu-G branch.
+
+If you want to use the agile DSE framework for XiangShan, you will need to run a driver program which is loaded in flash. We provide an example DSE driver program in `dse-driver` folder.
+
+Note that our agile DSE framework need specific version of NEMU and Difftest, you need to change the branch for both the two submodules to `dse` branch, and re-compile the NEMU.
+
+```
+cd dse-driver
+make
+cd ..
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff $NEMU_HOME/build/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
+```
+
+This driver can simulate worloads with RobSize varies in `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` , and evaluate the ipc for each config, no need to re-compile each time.
+
+
 ## Docs and slides
 
 [XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorial and more.
@@ -54,6 +73,7 @@ Some of the key directories are shown below.
 ├── fudian                 # floating unit submodule of XiangShan
 ├── huancun                # L2/L3 cache submodule of XiangShan
 ├── difftest               # difftest co-simulation framework
+├── dse-driver             # driver program for agile DSE framework
 └── ready-to-run           # pre-built simulation images
 ```
 
