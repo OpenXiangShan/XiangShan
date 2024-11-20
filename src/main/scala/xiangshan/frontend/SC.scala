@@ -262,14 +262,15 @@ object SCThreshold {
 }
 
 trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
-  val s0_sc_closed = WireInit(false.B)
-  val s1_sc_closed = RegEnable(s0_sc_closed, io.s0_fire(3))
-  val s2_sc_closed = RegEnable(s1_sc_closed, io.s1_fire(3))
-  val s3_sc_closed = RegEnable(s2_sc_closed, io.s2_fire(3))
-
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info                          = Set[FoldedHistoryInfo]()
   if (EnableSC) {
+    val scCloseConfCounter = RegInit(0.S(10.W))
+    val s0_sc_closed       = scCloseConfCounter >= 0.S
+    val s1_sc_closed       = RegEnable(s0_sc_closed, io.s0_fire(3))
+    val s2_sc_closed       = RegEnable(s1_sc_closed, io.s1_fire(3))
+    val s3_sc_closed       = RegEnable(s2_sc_closed, io.s2_fire(3))
+
     val scTables = SCTableInfos.map {
       case (nRows, ctrBits, histLen) => {
         val t   = Module(new SCTable(nRows / TageBanks, ctrBits, histLen))
@@ -383,7 +384,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
 
       val updateTageMeta = updateMeta
-      when(!updateSCMeta.scClosed && updateValids(w) && updateTageMeta.providers(w).valid) {
+      when(updateValids(w) && updateTageMeta.providers(w).valid) {
+        val scClosed          = updateSCMeta.scClosed
         val scPred            = updateSCMeta.scPreds(w)
         val tagePred          = updateTageMeta.takens(w)
         val taken             = update.br_taken_mask(w)
@@ -397,7 +399,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scUpdateTakens(w)    := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach { case (t, c) => t := c }
 
-        update_sc_used(w)    := !scClosed
+        update_sc_used(w)    := !updateSCMeta.scClosed
         update_unconf(w)     := !sumAboveThreshold
         update_conf(w)       := sumAboveThreshold
         update_agree(w)      := scPred === tagePred
@@ -405,14 +407,36 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
         sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
+        val increase  = WireInit(false.B)
+        val deltaType = WireInit(0.U(3.W))
+        when(scClosed) {
+          increase  := tagePred === taken
+          deltaType := Mux(tagePred === taken, 5.U, 6.U)
+        }.otherwise {
+          when(update_conf(w)) {
+            increase := true.B
+            deltaType := Mux(
+              tagePred === scPred,
+              // 1: sc agree and correct; 2: sc agree but wrong
+              Mux(tagePred === taken, 1.U, 2.U),
+              // 3: sc disagree and wrong; 4: sc disagree but correct
+              Mux(tagePred === taken, 3.U, 4.U)
+            )
+          }.otherwise {
+            increase  := false.B
+            deltaType := 0.U
+          }
+        }
+        scCloseConfCounter := signedSatUpdate(scCloseConfCounter, 10, increase, deltaType)
+
         val thres = useThresholds(w)
-        when(scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U) {
+        when(!scClosed && scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U) {
           val newThres = scThresholds(w).update(scPred =/= taken)
           scThresholds(w) := newThres
           XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
         }
 
-        when(scPred =/= taken || !sumAboveThreshold) {
+        when(!scClosed && (scPred =/= taken || !sumAboveThreshold)) {
           scUpdateMask(w).foreach(_ := true.B)
           XSDebug(
             tableSum < 0.S,
