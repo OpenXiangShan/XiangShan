@@ -19,7 +19,7 @@ package system
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device._
+import device.{DebugModule, TLPMA, TLPMAIO, AXI4MemEncrypt}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
@@ -50,6 +50,7 @@ case class SoCParameters
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
+  MEMENCRange: AddressSet = AddressSet(0x38030000L, 0xfff),
   KeyIDBits: Int = 5,
   MemencPipes: Int = 4,
   HasMEMencryption: Option[Boolean] = Some(false),
@@ -138,6 +139,7 @@ trait HasPeripheralRanges {
     "PLIC"  -> soc.PLICRange,
     "PLL"   -> soc.PLLRange,
     "UART"  -> soc.UARTLiteRange,
+    "MEMENC"  -> soc.MEMENCRange,
     "DEBUG" -> dm.get.address,
     "MMPMA" -> AddressSet(mmpma.address, mmpma.mask)
   ) ++ (
@@ -255,7 +257,7 @@ trait HaveAXI4MemPort {
       TLBuffer.chainNode(2) :=
       mem_xbar
   }
-  val axi4memencrpty = if(HasMEMencryption) Some(LazyModule(new AXI4MemEncrypt(AddressSet(0x38030000L, 0xfffL)))) else None
+  val axi4memencrpty = if(HasMEMencryption) Some(LazyModule(new AXI4MemEncrypt(soc.MEMENCRange))) else None
   if(HasMEMencryption){
     memAXI4SlaveNode :=
       AXI4Buffer() :=
