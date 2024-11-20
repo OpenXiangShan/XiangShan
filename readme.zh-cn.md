@@ -23,7 +23,7 @@ English Readme is [here](README.md).
 cd dse-driver
 make
 cd ..
-./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff $NEMU_HOME/build/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff $NEMU_HOME/build/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=100000
 ```
 
 这个驱动程序可以在不同的 RobSize 配置下 `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` 仿真运行 workload，并且评估不同配置下的 ipc，而不需要每次重新编译。

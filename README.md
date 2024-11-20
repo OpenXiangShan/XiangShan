@@ -24,7 +24,7 @@ Running Example:
 cd dse-driver
 make
 cd ..
-./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=100000
 ```
 
 This driver can simulate worloads with RobSize varies in `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` , and evaluate the ipc for each config, no need to re-compile each time.
