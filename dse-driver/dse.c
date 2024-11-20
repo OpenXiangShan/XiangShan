@@ -12,7 +12,7 @@ static const uint64_t robsize_array[] = {0, 1024, 512, 256, 128, 64, 32, 16, 8, 
 void main() {
 
     // 写入 MAX_INSTR_REG
-    *(volatile uint64_t *)MAX_INSTR_REG = 10000000;
+    *(volatile uint64_t *)MAX_INSTR_REG = 1000000;
 
     // 读取 ping-pong 寄存器并反转
     *(volatile uint8_t *)PINGPONG_REG ^= 1;
