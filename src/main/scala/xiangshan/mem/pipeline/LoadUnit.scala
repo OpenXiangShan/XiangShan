@@ -276,7 +276,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   private val SRC_NUM = 10
   private val Seq(
     mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, lsq_rep_idx,
-    high_pf_idx, vec_iss_idx, int_iss_idx, l2l_fwd_idx, low_pf_idx
+    int_iss_idx, high_pf_idx, vec_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
   val s0_src_valid_vec = WireInit(VecInit(Seq(
@@ -285,9 +285,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.fast_rep_in.valid,
     io.lsq.uncache.valid,
     io.replay.valid && !io.replay.bits.forward_tlDchannel && !s0_rep_stall,
+    io.ldin.valid, // int flow first issue or software prefetch
     io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U,
     io.vecldin.valid,
-    io.ldin.valid, // int flow first issue or software prefetch
     io.l2l_fwd_in.valid,
     io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U,
   )))
@@ -622,9 +622,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     fromFastReplaySource(io.fast_rep_in.bits),
     fromMmioSource(io.lsq.uncache.bits),
     fromNormalReplaySource(io.replay.bits),
+    fromIntIssueSource(io.ldin.bits),
     fromPrefetchSource(io.prefetch_req.bits),
     fromVecIssueSource(io.vecldin.bits),
-    fromIntIssueSource(io.ldin.bits),
     (if (EnableLoadToLoadForward) fromLoadToLoadSource(io.l2l_fwd_in) else fromNullSource()),
     fromPrefetchSource(io.prefetch_req.bits)
   )
@@ -632,7 +632,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast replay and hardware prefetch don't need to query tlb
   val int_issue_vaddr = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
-  val int_vec_vaddr = Mux(s0_src_valid_vec(vec_iss_idx), io.vecldin.bits.vaddr(VAddrBits - 1, 0), int_issue_vaddr)
+  val int_vec_vaddr = Mux(s0_src_valid_vec(int_iss_idx), int_issue_vaddr, io.vecldin.bits.vaddr(VAddrBits - 1, 0))
   s0_tlb_vaddr := Mux(
     s0_src_valid_vec(mab_idx),
     io.misalign_ldin.bits.vaddr,
@@ -791,7 +791,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   val s0_wakeup_uop = ParallelPriorityMux(s0_wakeup_selector, s0_wakeup_format)
   io.wakeup.valid := s0_fire && !s0_sel_src.isvec && !s0_sel_src.frm_mabuf &&
-                    (s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(fast_rep_idx) || s0_src_valid_vec(lsq_rep_idx) || ((s0_src_valid_vec(int_iss_idx) && !s0_sel_src.prf) && !s0_src_valid_vec(vec_iss_idx) && !s0_src_valid_vec(high_pf_idx))) || s0_mmio_fire
+                    (s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(fast_rep_idx) || s0_src_valid_vec(lsq_rep_idx) || (s0_src_valid_vec(int_iss_idx) && !s0_sel_src.prf)) || s0_mmio_fire
   io.wakeup.bits := s0_wakeup_uop
 
   // prefetch.i(Zicbop)
