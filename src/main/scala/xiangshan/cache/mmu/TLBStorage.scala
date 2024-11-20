@@ -137,10 +137,10 @@ class TLBFA(
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
-        resp.bits.pbmt(d) := pbmtReg(0)
-        resp.bits.g_pbmt(d) := gpbmtReg(0)
-        resp.bits.perm(d) := permReg(0)
-        resp.bits.g_perm(d) := gPermReg(0)
+        resp.bits.pbmt(d) := pbmt(0)
+        resp.bits.g_pbmt(d) := gpbmt(0)
+        resp.bits.perm(d) := perm(0)
+        resp.bits.g_perm(d) := gPerm(0)
         resp.bits.s2xlate(d) := s2xLate(0)
       }
     } else {
