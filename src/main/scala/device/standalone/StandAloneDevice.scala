@@ -35,13 +35,15 @@ import utils.VerilogAXI4Record
 
 trait HasMasterInterface { this: StandAloneDevice =>
 
+  def masterAddrWidth: Int
+
   protected val masternode = TLIdentityNode()
   // tilelink master io
   private val tlmaster = Option.when(useTL)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
       managers = Seq(
         TLSlaveParameters.v1(
-          address = Seq(AddressSet(0, (BigInt(1) << addrWidth) - 1)),
+          address = Seq(AddressSet(0, (BigInt(1) << masterAddrWidth) - 1)),
           regionType = RegionType.UNCACHED,
           supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
@@ -60,7 +62,7 @@ trait HasMasterInterface { this: StandAloneDevice =>
     AXI4SlavePortParameters(
       slaves = Seq(
         AXI4SlaveParameters(
-          address = Seq(AddressSet(0, (BigInt(1) << addrWidth) - 1)),
+          address = Seq(AddressSet(0, (BigInt(1) << masterAddrWidth) - 1)),
           regionType = RegionType.UNCACHED,
           supportsRead = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsWrite = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
