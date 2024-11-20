@@ -13,3 +13,6 @@
 [submodule "fudian"]
 	path = fudian
 	url = https://github.com/OpenXiangShan/fudian.git
+[submodule "dse-driver"]
+	path = dse-driver
+	url = https://github.com/rezado/dse-driver.git
