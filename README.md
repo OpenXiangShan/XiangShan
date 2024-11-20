@@ -17,11 +17,14 @@ If you want to use the agile DSE framework for XiangShan, you will need to run a
 
 Note that our agile DSE framework needs specific versions of NEMU and Difftest. You need to change the branch for both submodules to the `dse` branch and recompile NEMU.
 
+You can also use the NEMU so file provided by us, by swtiching the `ready-to-run` to the `dse` branch.
+
+Running Example:
 ```
 cd dse-driver
 make
 cd ..
-./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff $NEMU_HOME/build/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
+./build/emu -i $AM_HOME/apps/coremark/build/coremark-riscv64-xs.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so --flash ./dse-driver/build/dse.bin --dse-max-instr=1000000
 ```
 
 This driver can simulate worloads with RobSize varies in `[1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]` , and evaluate the ipc for each config, no need to re-compile each time.

@@ -16,6 +16,8 @@ English Readme is [here](README.md).
 
 注意：我们的敏捷 DSE 框架需要特定的 Difftest 和 NEMU 版本。在运行之前，请自行到 NEMU 和 Difftest 仓库下切换至 `dse` 分支，并重新编译 NEMU。
 
+你也可以把 `ready-to-run` 子仓库的分支切换成 `dse`，以使用我们提供的 NEMU so 文件。
+
 运行示例：
 ```
 cd dse-driver
