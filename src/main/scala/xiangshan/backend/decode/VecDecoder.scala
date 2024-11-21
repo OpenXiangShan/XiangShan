@@ -355,7 +355,7 @@ object VecDecoder extends DecodeConstants {
     VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
     VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
-    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WXV),
+    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
 
     VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmv1r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
     VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmv2r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
