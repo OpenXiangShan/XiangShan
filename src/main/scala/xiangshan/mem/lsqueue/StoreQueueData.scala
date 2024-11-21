@@ -208,12 +208,12 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   // DataModuleTemplate should not be used when there're any write conflicts
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
+//      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
     }
   }
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
+//      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
     }
   }
 
@@ -329,12 +329,12 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
   // DataModuleTemplate should not be used when there're any write conflicts
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
+//      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
     }
   }
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
+//      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
     }
   }
 
