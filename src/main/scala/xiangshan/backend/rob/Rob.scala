@@ -961,7 +961,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
 
   private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
-    req => FuType.isAMO(req.bits.fuType) || FuType.isStore(req.bits.fuType)
+    req => FuType.isStore(req.bits.fuType)
   })
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
