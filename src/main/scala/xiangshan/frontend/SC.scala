@@ -275,7 +275,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       case (nRows, ctrBits, histLen) => {
         val t   = Module(new SCTable(nRows / TageBanks, ctrBits, histLen))
         val req = t.io.req
-        req.valid            := io.s0_fire(3) && !s0_sc_closed
+        req.valid := (if (DynCloseSC) { io.s0_fire(3) && !s0_sc_closed }
+                      else { io.s0_fire(3) })
         req.bits.pc          := s0_pc_dup(3)
         req.bits.folded_hist := io.in.bits.folded_hist(3)
         req.bits.ghist       := DontCare
@@ -334,31 +335,59 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
-      val s2_scTableSums         = RegEnable(s1_scTableSums, io.s1_fire(3) && !s1_sc_closed)
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire(3) && !s1_sc_closed))
-      val s2_totalSums           = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
+
+      val s2_scTableSums = RegEnable(
+        s1_scTableSums,
+        if (DynCloseSC) { io.s1_fire(3) && !s1_sc_closed }
+        else { io.s1_fire(3) }
+      )
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(
+        s1_providerResps(w).ctr,
+        if (DynCloseSC) { io.s1_fire(3) && !s1_sc_closed }
+        else { io.s1_fire(3) }
+      ))
+
+      val s2_totalSums = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds =
         VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val s2_scResps   = VecInit(RegEnable(s1_scResps, io.s1_fire(3) && !s1_sc_closed).map(_.ctrs(w)))
+      val s2_scResps = VecInit(RegEnable(
+        s1_scResps,
+        if (DynCloseSC) { io.s1_fire(3) && !s1_sc_closed }
+        else { io.s1_fire(3) }
+      ).map(_.ctrs(w)))
+
       val s2_scCtrs    = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
       val s2_chooseBit = s2_tageTakens_dup(3)(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens_dup(3)(w))
 
-      val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3) && !s2_sc_closed)
+      val s3_disagree = RegEnable(
+        s2_disagree,
+        if (DynCloseSC) { io.s2_fire(3) && !s2_sc_closed }
+        else { io.s2_fire(3) }
+      )
       io.out.last_stage_spec_info.sc_disagree.map(_ := s3_disagree)
 
-      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3) && !s2_sc_closed)
-      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3) && !s2_sc_closed)
+      scMeta.scPreds(w) := RegEnable(
+        s2_scPreds(s2_chooseBit),
+        if (DynCloseSC) { io.s2_fire(3) && !s2_sc_closed }
+        else { io.s2_fire(3) }
+      )
+      scMeta.ctrs(w) := RegEnable(
+        s2_scCtrs,
+        if (DynCloseSC) { io.s2_fire(3) && !s2_sc_closed }
+        else { io.s2_fire(3) }
+      )
 
       // Combination Logic, Wire type
       when(s2_provideds(w)) {
-        s2_sc_used(w) := !s2_sc_closed
-        s2_unconf(w)  := !s2_sumAboveThresholds(s2_chooseBit)
-        s2_conf(w)    := s2_sumAboveThresholds(s2_chooseBit)
+        s2_sc_used(w) := (if (DynCloseSC) { !s2_sc_closed }
+                          else { true.B })
+        s2_unconf(w) := !s2_sumAboveThresholds(s2_chooseBit)
+        s2_conf(w)   := s2_sumAboveThresholds(s2_chooseBit)
         // Use prediction from Statistical Corrector
         XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
         when(s2_sumAboveThresholds(s2_chooseBit)) {
@@ -372,7 +401,14 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      val s3_pred_dup   = io.s2_fire.map(f => RegEnable(s2_pred, f && !s2_sc_closed))
+      val s3_pred_dup = io.s2_fire.map(f =>
+        RegEnable(
+          s2_pred,
+          if (DynCloseSC) { f && !s2_sc_closed }
+          else { f }
+        )
+      )
+
       val sc_enable_dup = dup(RegNext(io.ctrl.sc_enable))
       for (
         sc_enable & fp & s3_pred <-
@@ -407,28 +443,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
         sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
-        val increase  = WireInit(false.B)
-        val deltaType = WireInit(0.U(3.W))
-        when(scClosed) {
-          increase  := tagePred === taken
-          deltaType := Mux(tagePred === taken, 5.U, 6.U)
-        }.otherwise {
-          when(update_conf(w)) {
-            increase := true.B
-            deltaType := Mux(
-              tagePred === scPred,
-              // 1: sc agree and correct; 2: sc agree but wrong
-              Mux(tagePred === taken, 1.U, 2.U),
-              // 3: sc disagree and wrong; 4: sc disagree but correct
-              Mux(tagePred === taken, 3.U, 4.U)
-            )
-          }.otherwise {
-            increase  := false.B
-            deltaType := 0.U
-          }
-        }
-        scCloseConfCounter := signedSatUpdate(scCloseConfCounter, 10, increase, deltaType)
-
         val thres = useThresholds(w)
         when(!scClosed && scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U) {
           val newThres = scThresholds(w).update(scPred =/= taken)
@@ -458,7 +472,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     val realWens = scUpdateMask.transpose.map(v => v.reduce(_ | _))
     for (b <- 0 until TageBanks) {
       for (i <- 0 until SCNTables) {
-        val realWen = realWens(i) && !s0_sc_closed
+        val realWen = if (DynCloseSC) { realWens(i) && !s0_sc_closed }
+        else { realWens(i) }
         scTables(i).io.update.mask(b)      := RegNext(scUpdateMask(b)(i))
         scTables(i).io.update.tagePreds(b) := RegEnable(scUpdateTagePreds(b), realWen)
         scTables(i).io.update.takens(b)    := RegEnable(scUpdateTakens(b), realWen)
@@ -466,6 +481,37 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scTables(i).io.update.pc           := RegEnable(update_pc, realWen)
         scTables(i).io.update.ghist        := RegEnable(update.ghist, realWen)
       }
+    }
+
+    if (DynCloseSC) {
+      val satUpdateMask = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+      val deltaType     = WireInit(0.U.asTypeOf(Vec(TageBanks, UInt(3.W))))
+      for (w <- 0 until TageBanks) {
+        val updateTageMeta = updateMeta
+        val scClosed       = updateSCMeta.scClosed
+        when(updateValids(w) && updateTageMeta.providers(w).valid) {
+          satUpdateMask(w) := true.B
+          when(scClosed) {
+            deltaType(w) := Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 5.U, 6.U)
+          }.otherwise {
+            when(update_conf(w)) {
+              deltaType(w) := Mux(
+                update_agree(w),
+                // 1: sc agree and correct; 2: sc agree but wrong
+                Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 1.U, 2.U),
+                // 3: sc disagree and wrong; 4: sc disagree but correct
+                Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 3.U, 4.U)
+              )
+            }.otherwise {
+              deltaType(w) := 0.U
+            }
+          }
+        }.otherwise {
+          satUpdateMask(w) := false.B
+          deltaType(w)     := 0.U
+        }
+      }
+      scCloseConfCounter := signedSatUpdate(satUpdateMask, scCloseConfCounter, 10, deltaType)
     }
 
     tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
@@ -477,6 +523,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
     XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
     XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+
+    XSPerfAccumulate("sc_close_tick", PopCount(scCloseConfCounter >= 0.S))
 
   }
 

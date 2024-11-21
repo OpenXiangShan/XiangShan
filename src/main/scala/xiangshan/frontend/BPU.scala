@@ -107,23 +107,30 @@ trait BPUUtils extends HasXSParameter {
     )
   }
 
-  def signedSatUpdate(old: SInt, len: Int, taken: Bool, deltaType: UInt): SInt = {
-    val delta = MuxLookup(deltaType, 0.S)(
-      Seq(
-        0.U -> 0.S,
-        1.U -> 1.S,  // SC opened, SC agree and correct, can be closed
-        2.U -> 1.S,  // SC opened, SC agree but wrong, should be closed more
-        3.U -> 5.S,  // SC opened, SC disagree and wrong, should definitely be closed
-        4.U -> 50.S, // SC opened, SC disagree but correct, should stay open
-        5.U -> 1.S,  // SC closed, TAGE pred correct, SC can be closed
-        6.U -> 30.S  // SC closed, TAGE pred wrong, SC should be opened
-      )
-    )
-
+  def signedSatUpdate(umask: Vec[Bool], old: SInt, len: Int, deltaType: Vec[UInt]): SInt = {
     val maxValue = ((1 << (len - 1)) - 1).S
     val minValue = (-(1 << (len - 1))).S
+    val finalDelta = deltaType.zip(umask).map { case (dt, mask) =>
+      Mux(
+        mask,
+        MuxLookup(dt, 0.S)(
+          Seq(
+            0.U -> 0.S,
+            1.U -> 1.S,   // SC opened, SC agree and correct, can be closed
+            2.U -> 1.S,   // SC opened, SC agree but wrong, should be closed more
+            3.U -> 5.S,   // SC opened, SC disagree and wrong, should definitely be closed
+            4.U -> -50.S, // SC opened, SC disagree but correct, should stay open
+            5.U -> 1.S,   // SC closed, TAGE pred correct, SC can be closed
+            6.U -> -30.S  // SC closed, TAGE pred wrong, SC should be opened
+          )
+        ),
+        0.S
+      )
+    }.reduce(_ +& _)
 
-    val updated = Mux(taken, old +& delta, old -& delta)
+    val updated = old +& finalDelta
+
+    // printf(p"umask: ${umask}, old: ${old}, deltaType: ${deltaType}, finalDelta: ${finalDelta} \n")
 
     MuxCase(
       updated,

@@ -84,6 +84,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
   EnableSC: Boolean = true,
+  DynCloseSC: Boolean = false,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
@@ -641,6 +642,7 @@ trait HasXSParameter {
   def EnableLB = coreParams.EnableLB
   def EnableLoop = coreParams.EnableLoop
   def EnableSC = coreParams.EnableSC
+  def DynCloseSC = coreParams.DynCloseSC
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def HistoryLength = coreParams.HistoryLength
   def EnableGHistDiff = coreParams.EnableGHistDiff
