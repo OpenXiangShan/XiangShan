@@ -48,8 +48,8 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 香山的第三代微架构（昆明湖）正在 master 分支上不断开发中。
 
-南湖微架构概览：
-![xs-arch-nanhu](images/xs-arch-nanhu.svg)
+昆明湖微架构概览：
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 ## 目录概览
 
