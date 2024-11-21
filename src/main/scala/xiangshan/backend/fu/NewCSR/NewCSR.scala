@@ -191,8 +191,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       // Instruction fetch address translation type
       val instrAddrTransType = new AddrTransType
       // trace
-      val traceTrapInfo = ValidIO(new TraceTrap)
-      val tracePriv = Output(new TracePriv)
+      val traceCSR = Output(new TraceCSR)
       // custom
       val custom = new CSRCustomState
       val criticalErrorState = Bool()
@@ -1138,14 +1137,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   val currentPriv = privForTrace
   val lastPriv = RegEnable(privForTrace, Priv.M, (xret || io.fromRob.trap.valid))
 
-  io.status.tracePriv.lastPriv       := lastPriv
-  io.status.tracePriv.currentPriv    := privForTrace
-  io.status.traceTrapInfo.valid      := RegNext(io.fromRob.trap.valid)
-  io.status.traceTrapInfo.bits.cause := Mux1H(
+  io.status.traceCSR.lastPriv       := lastPriv
+  io.status.traceCSR.currentPriv    := privForTrace
+  io.status.traceCSR.cause := Mux1H(
     Seq(privState.isModeM, privState.isModeHS, privState.isModeVS),
     Seq(mcause.rdata,      scause.rdata,       vscause.rdata)
   )
-  io.status.traceTrapInfo.bits.tval  := Mux1H(
+  io.status.traceCSR.tval  := Mux1H(
     Seq(privState.isModeM, privState.isModeHS, privState.isModeVS),
     Seq(mtval.rdata,       stval.rdata,        vstval.rdata)
   )

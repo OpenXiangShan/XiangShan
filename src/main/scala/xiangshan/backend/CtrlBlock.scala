@@ -245,38 +245,30 @@ class CtrlBlockImp(
    * trace begin
    */
   val trace = Module(new Trace)
-  if(HasEncoder){
-    trace.io.fromEncoder.stall  := io.traceCoreInterface.fromEncoder.stall
-    trace.io.fromEncoder.enable := io.traceCoreInterface.fromEncoder.enable
-  } else if(!HasEncoder && TraceEnable) {
-    trace.io.fromEncoder.enable := true.B
-    trace.io.fromEncoder.stall  := false.B
-  } else if(!HasEncoder && !TraceEnable) {
-    trace.io.fromEncoder.enable := false.B
-    trace.io.fromEncoder.stall  := false.B
-  }
-
-  trace.io.fromRob         := rob.io.trace.traceCommitInfo
-  rob.io.trace.blockCommit := trace.io.blockRobCommit
-
-  if(backendParams.debugEn){
-    dontTouch(trace.io.toEncoder)
-  }
-
+  trace.io.in.fromEncoder.stall  := io.traceCoreInterface.fromEncoder.stall
+  trace.io.in.fromEncoder.enable := io.traceCoreInterface.fromEncoder.enable
+  trace.io.in.fromRob            := rob.io.trace.traceCommitInfo
+  rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
+  
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
-    val traceValid = trace.toPcMem(i).valid
+    val traceValid = trace.toPcMem.blocks(i).valid
     pcMem.io.ren.get(pcMemIdx) := traceValid
-    pcMem.io.raddr(pcMemIdx) := trace.toPcMem(i).bits.ftqIdx.get.value
-    trace.io.fromPcMem(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(trace.toPcMem(i).bits.ftqOffset.get, traceValid))
+    pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
+    trace.io.in.fromPcMem(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(trace.toPcMem.blocks(i).bits.ftqOffset.get, traceValid))
   }
 
-  io.traceCoreInterface.toEncoder.cause     := trace.io.toEncoder.trap.cause.asUInt
-  io.traceCoreInterface.toEncoder.tval      := trace.io.toEncoder.trap.tval.asUInt
-  io.traceCoreInterface.toEncoder.priv      := trace.io.toEncoder.priv.asUInt
-  io.traceCoreInterface.toEncoder.iaddr     := VecInit(trace.io.toEncoder.blocks.map(_.bits.iaddr.get)).asUInt
-  io.traceCoreInterface.toEncoder.itype     := VecInit(trace.io.toEncoder.blocks.map(_.bits.tracePipe.itype)).asUInt
-  io.traceCoreInterface.toEncoder.iretire   := VecInit(trace.io.toEncoder.blocks.map(_.bits.tracePipe.iretire)).asUInt
-  io.traceCoreInterface.toEncoder.ilastsize := VecInit(trace.io.toEncoder.blocks.map(_.bits.tracePipe.ilastsize)).asUInt
+  // Trap/Xret only occor in block(0).
+  val tracePriv = Mux(Itype.isTrapOrXret(trace.toEncoder.blocks(0).bits.tracePipe.itype),
+    io.fromCSR.traceCSR.lastPriv,
+    io.fromCSR.traceCSR.currentPriv
+  )
+  io.traceCoreInterface.toEncoder.cause     := io.fromCSR.traceCSR.cause.asUInt
+  io.traceCoreInterface.toEncoder.tval      := io.fromCSR.traceCSR.tval.asUInt
+  io.traceCoreInterface.toEncoder.priv      := tracePriv
+  io.traceCoreInterface.toEncoder.iaddr     := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.iaddr.get)).asUInt
+  io.traceCoreInterface.toEncoder.itype     := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.itype)).asUInt
+  io.traceCoreInterface.toEncoder.iretire   := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.iretire)).asUInt
+  io.traceCoreInterface.toEncoder.ilastsize := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.ilastsize)).asUInt
 
   /**
    * trace end
@@ -730,6 +722,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val frontend = Flipped(new FrontendToCtrlIO())
   val fromCSR = new Bundle{
     val toDecode = Input(new CSRToDecode)
+    val traceCSR = Input(new TraceCSR)
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
