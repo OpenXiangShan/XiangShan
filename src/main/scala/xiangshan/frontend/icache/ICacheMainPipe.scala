@@ -37,12 +37,13 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle {
 }
 
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
-  val vaddr            = UInt(VAddrBits.W)
+  val doubleline       = Bool()
+  val vaddr            = Vec(PortNumber, UInt(VAddrBits.W))
   val data             = UInt(blockBits.W)
-  val paddr            = UInt(PAddrBits.W)
-  val exception        = UInt(ExceptionType.width.W)
-  val pmp_mmio         = Bool()
-  val itlb_pbmt        = UInt(Pbmt.width.W)
+  val paddr            = Vec(PortNumber, UInt(PAddrBits.W))
+  val exception        = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val pmp_mmio         = Vec(PortNumber, Bool())
+  val itlb_pbmt        = Vec(PortNumber, UInt(Pbmt.width.W))
   val backendException = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
@@ -56,7 +57,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
   val req               = Flipped(Decoupled(new FtqToICacheRequestBundle))
-  val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
+  val resp              = ValidIO(new ICacheMainPipeResp)
   val topdownIcacheMiss = Output(Bool())
   val topdownItlbMiss   = Output(Bool())
 }
@@ -491,26 +492,21 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
     * response to IFU
     ******************************************************************************
     */
+  toIFU.valid                 := s2_fire
+  toIFU.bits.doubleline       := s2_doubleline
+  toIFU.bits.data             := s2_datas.asTypeOf(UInt(blockBits.W))
+  toIFU.bits.backendException := s2_backendException
   (0 until PortNumber).foreach { i =>
-    if (i == 0) {
-      toIFU(i).valid          := s2_fire
-      toIFU(i).bits.exception := s2_exception_out(i)
-      toIFU(i).bits.pmp_mmio  := s2_pmp_mmio(i) // pass pmp_mmio instead of merged mmio to IFU
-      toIFU(i).bits.itlb_pbmt := s2_itlb_pbmt(i)
-      toIFU(i).bits.data      := s2_datas.asTypeOf(UInt(blockBits.W))
-    } else {
-      toIFU(i).valid          := s2_fire && s2_doubleline
-      toIFU(i).bits.exception := Mux(s2_doubleline, s2_exception_out(i), ExceptionType.none)
-      toIFU(i).bits.pmp_mmio  := s2_pmp_mmio(i) && s2_doubleline
-      toIFU(i).bits.itlb_pbmt := Mux(s2_doubleline, s2_itlb_pbmt(i), Pbmt.pma)
-      toIFU(i).bits.data      := DontCare
-    }
-    toIFU(i).bits.backendException := s2_backendException
-    toIFU(i).bits.vaddr            := s2_req_vaddr(i)
-    toIFU(i).bits.paddr            := s2_req_paddr(i)
-    toIFU(i).bits.gpaddr           := s2_req_gpaddr // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
-    toIFU(i).bits.isForVSnonLeafPTE := s2_req_isForVSnonLeafPTE
+    toIFU.bits.vaddr(i) := s2_req_vaddr(i)
+    toIFU.bits.paddr(i) := s2_req_paddr(i)
+    val needThisLine = if (i == 0) true.B else s2_doubleline
+    toIFU.bits.exception(i) := Mux(needThisLine, s2_exception_out(i), ExceptionType.none)
+    toIFU.bits.pmp_mmio(i)  := Mux(needThisLine, s2_pmp_mmio(i), false.B)
+    toIFU.bits.itlb_pbmt(i) := Mux(needThisLine, s2_itlb_pbmt(i), Pbmt.pma)
   }
+  // valid only for the first gpf
+  toIFU.bits.gpaddr            := s2_req_gpaddr
+  toIFU.bits.isForVSnonLeafPTE := s2_req_isForVSnonLeafPTE
 
   s2_flush := io.flush
   s2_ready := (s2_fetch_finish && !io.respStall) || !s2_valid
@@ -587,9 +583,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
     */
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
-      val discard = ExceptionType.hasException(toIFU(i).bits.exception) || toIFU(i).bits.pmp_mmio ||
-        Pbmt.isUncache(toIFU(i).bits.itlb_pbmt)
-      discard
+      ExceptionType.hasException(toIFU.bits.exception(i)) ||
+      toIFU.bits.pmp_mmio(i) ||
+      Pbmt.isUncache(toIFU.bits.itlb_pbmt(i))
     }
     val blkPaddrAll = s2_req_paddr.map(addr => addr(PAddrBits - 1, blockOffBits) << blockOffBits)
     (0 until ICacheDataBanks).map { i =>

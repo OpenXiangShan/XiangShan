@@ -366,9 +366,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f2_ready := f2_fire || !f2_valid
   // TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire =
-    fromICache(0).valid && (fromICache(0).bits.vaddr === f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(
-      1
-    ).bits.vaddr === f2_ftq_req.nextlineStart)) || !f2_doubleLine)
+    fromICache.valid &&
+      fromICache.bits.vaddr(0) === f2_ftq_req.startAddr &&
+      fromICache.bits.doubleline && (fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
   val f2_icache_all_resp_reg = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
@@ -386,20 +386,21 @@ class NewIFU(implicit p: Parameters) extends XSModule
     .elsewhen(f1_fire && !f1_flush)(f2_valid := true.B)
     .elsewhen(f2_fire)(f2_valid := false.B)
 
-  val f2_exception_in     = VecInit((0 until PortNumber).map(i => fromICache(i).bits.exception))
-  val f2_backendException = fromICache(0).bits.backendException
+  val f2_exception_in     = fromICache.bits.exception
+  val f2_backendException = fromICache.bits.backendException
   // paddr and gpaddr of [startAddr, nextLineAddr]
-  val f2_paddrs            = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
-  val f2_gpaddr            = fromICache(0).bits.gpaddr
-  val f2_isForVSnonLeafPTE = fromICache(0).bits.isForVSnonLeafPTE
+  val f2_paddrs            = fromICache.bits.paddr
+  val f2_gpaddr            = fromICache.bits.gpaddr
+  val f2_isForVSnonLeafPTE = fromICache.bits.isForVSnonLeafPTE
 
   // FIXME: raise af if one fetch block crosses the cacheable-noncacheable boundary, might not correct
   val f2_mmio_mismatch_exception = VecInit(Seq.fill(2)(Mux(
     // not double-line, skip check
-    !fromICache(1).valid ||
+    !fromICache.bits.doubleline || (
       // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-      fromICache(0).bits.pmp_mmio === fromICache(1).bits.pmp_mmio &&
-      fromICache(0).bits.itlb_pbmt === fromICache(1).bits.itlb_pbmt,
+      fromICache.bits.pmp_mmio(0) === fromICache.bits.pmp_mmio(1) &&
+        fromICache.bits.itlb_pbmt(0) === fromICache.bits.itlb_pbmt(1)
+    ),
     ExceptionType.none,
     ExceptionType.af
   )))
@@ -408,8 +409,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_exception = ExceptionType.merge(f2_exception_in, f2_mmio_mismatch_exception)
 
   // we need only the first port, as the second is asked to be the same
-  val f2_pmp_mmio  = fromICache(0).bits.pmp_mmio
-  val f2_itlb_pbmt = fromICache(0).bits.itlb_pbmt
+  val f2_pmp_mmio  = fromICache.bits.pmp_mmio(0)
+  val f2_itlb_pbmt = fromICache.bits.itlb_pbmt(0)
 
   /**
     * reduce the number of registers, origin code
@@ -467,25 +468,24 @@ class NewIFU(implicit p: Parameters) extends XSModule
     // }
   }
 
-  val f2_cache_response_data = fromICache.map(_.bits.data)
-  /* NOTE: the following `Cat(_data(0), _data(0))` *is* intentional, _data(1) is technically useless in current design.
+  /* NOTE: the following `Cat(_data, _data)` *is* intentional.
    * Explanation:
    * In the old design, IFU is responsible for selecting requested data from two adjacent cachelines,
    *    so IFU has to receive 2*64B (2cacheline * 64B) data from ICache, and do `Cat(_data(1), _data(0))` here.
    * However, a fetch block is 34B at max, sending 2*64B is quiet a waste of power.
    * In current design (2024.06~), ICacheDataArray is responsible for selecting data from two adjacent cachelines,
-   *    so IFU only need to receive 40B (5bank * 8B) valid data, and use only the first port is enough.
+   *    so IFU only need to receive 40B (5bank * 8B) valid data, and use only one port is enough.
    * For example, when pc falls on the 6th bank in cacheline0(so this is a doubleline request):
    *                                MSB                                         LSB
    *                  cacheline 1 || 1-7 | 1-6 | 1-5 | 1-4 | 1-3 | 1-2 | 1-1 | 1-0 ||
    *                  cacheline 0 || 0-7 | 0-6 | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | 0-0 ||
    *    and ICacheDataArray will respond:
-   *      fromICache(0).bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *         fromICache.bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
    *    therefore simply make a copy of the response and `Cat` together, and obtain the requested data from centre:
    *          f2_data_2_cacheline || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 | 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
    *                                             requested data: ^-----------------------------^
    * For another example, pc falls on the 1st bank in cacheline 0, we have:
-   *      fromICache(0).bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *         fromICache.bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
    *          f2_data_2_cacheline || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx | xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
    *                                                                           requested data: ^-----------------------------^
    * Each "| x-y |" block is a 8B bank from cacheline(x).bank(y)
@@ -496,7 +496,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
    * - ICache respond to IFU:
    * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
    */
-  val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
+  val f2_data_2_cacheline = Cat(fromICache.bits.data, fromICache.bits.data)
 
   val f2_cut_data = cut(f2_data_2_cacheline, f2_cut_ptr)
 
