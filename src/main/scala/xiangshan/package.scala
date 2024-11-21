@@ -605,6 +605,7 @@ package object xiangshan {
     def amomax_w  = "b100010".U
     def amominu_w = "b100110".U
     def amomaxu_w = "b101010".U
+    def amocas_w  = "b101110".U
 
     def lr_d      = "b000011".U
     def sc_d      = "b000111".U
@@ -617,6 +618,11 @@ package object xiangshan {
     def amomax_d  = "b100011".U
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
+    def amocas_d  = "b101111".U
+
+    def amocas_q  = "b101100".U
+
+    def isAmocas(op: UInt): Bool = op(5, 2) === "b1011".U
 
     def size(op: UInt) = op(1,0)
 
@@ -792,12 +798,18 @@ package object xiangshan {
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def VEC_MVNR         = "b000100".U // vmvnr
+    
+    def AMO_CAS_W        = "b110101".U // amocas_w
+    def AMO_CAS_D        = "b110110".U // amocas_d
+    def AMO_CAS_Q        = "b110111".U // amocas_q
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")
 
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
+
+    def isAmocas(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
   }
 
   object ExceptionNO {
