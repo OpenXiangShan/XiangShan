@@ -69,7 +69,7 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
     val testNum = 1000
 
     val printModuleNameAnno = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
+      case s"3.$_.$_" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
       case _ => Seq()
     }
 

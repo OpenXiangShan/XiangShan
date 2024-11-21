@@ -25,11 +25,15 @@ import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer, LogPerfHelper, LogPerfIO}
 import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
+
+  val logPerfSignal = WireDefault(0.U.asTypeOf(new LogPerfIO))
+  dontTouch(logPerfSignal)
+  LogPerfHelper.registerSignal(logPerfSignal)
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -86,15 +90,14 @@ class SimTop(implicit p: Parameters) extends Module {
   val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
   val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
   val hasPerfLog = hasPerf || hasLog
-  val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
-  val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
-  val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
-  val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
-
-  dontTouch(timer)
-  dontTouch(logEnable)
-  dontTouch(clean)
-  dontTouch(dump)
+  if (hasPerfLog) {
+    logPerfSignal.timer := GTimer()
+    logPerfSignal.logEnable := difftest.logCtrl.enable(logPerfSignal.timer)
+  }
+  if (hasPerf) {
+    logPerfSignal.clean := difftest.perfCtrl.clean
+    logPerfSignal.dump := difftest.perfCtrl.dump
+  }
 }
 
 object SimTop extends App {

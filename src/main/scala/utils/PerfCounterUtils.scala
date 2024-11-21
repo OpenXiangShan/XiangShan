@@ -42,17 +42,15 @@ object XSPerfAccumulate extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
-      val helper = Module(new LogPerfHelper)
-      val perfClean = helper.io.clean
-      val perfDump = helper.io.dump
+      val logPerfSignal = LogPerfHelper.getSignal
 
       val counter = RegInit(0.U(64.W)).suggestName(perfName + "Counter")
       val next_counter = WireInit(0.U(64.W)).suggestName(perfName + "Next")
       next_counter := counter + perfCnt
-      counter := Mux(perfClean, 0.U, next_counter)
+      counter := Mux(logPerfSignal.clean, 0.U, next_counter)
 
-      when (perfDump) {
-        XSPerfPrint(p"$perfName, $next_counter\n")(helper.io)
+      when (logPerfSignal.dump) {
+        XSPerfPrint(p"$perfName, $next_counter\n")(logPerfSignal)
       }
     }
   }
@@ -76,15 +74,13 @@ object XSPerfHistogram extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
-      val helper = Module(new LogPerfHelper)
-      val perfClean = helper.io.clean
-      val perfDump = helper.io.dump
+      val logPerfSignal = LogPerfHelper.getSignal
 
       val sum = RegInit(0.U(64.W)).suggestName(perfName + "Sum")
       val nSamples = RegInit(0.U(64.W)).suggestName(perfName + "NSamples")
       val underflow = RegInit(0.U(64.W)).suggestName(perfName + "Underflow")
       val overflow = RegInit(0.U(64.W)).suggestName(perfName + "Overflow")
-      when (perfClean) {
+      when (logPerfSignal.clean) {
         sum := 0.U
         nSamples := 0.U
         underflow := 0.U
@@ -100,12 +96,12 @@ object XSPerfHistogram extends HasRegularPerfName {
         }
       }
 
-      when (perfDump) {
-        XSPerfPrint(p"${perfName}_sum, ${sum}\n")(helper.io)
-        XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")(helper.io)
-        XSPerfPrint(p"${perfName}_sampled, ${nSamples}\n")(helper.io)
-        XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(helper.io)
-        XSPerfPrint(p"${perfName}_overflow, ${overflow}\n")(helper.io)
+      when (logPerfSignal.dump) {
+        XSPerfPrint(p"${perfName}_sum, ${sum}\n")(logPerfSignal)
+        XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")(logPerfSignal)
+        XSPerfPrint(p"${perfName}_sampled, ${nSamples}\n")(logPerfSignal)
+        XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(logPerfSignal)
+        XSPerfPrint(p"${perfName}_overflow, ${overflow}\n")(logPerfSignal)
       }
 
       // drop each perfCnt value into a bin
@@ -133,14 +129,14 @@ object XSPerfHistogram extends HasRegularPerfName {
 
         val histName = s"${perfName}_${binRangeStart}_${binRangeStop}"
         val counter = RegInit(0.U(64.W)).suggestName(histName)
-        when (perfClean) {
+        when (logPerfSignal.clean) {
           counter := 0.U
         } .elsewhen(enable && inc) {
           counter := counter + 1.U
         }
 
-        when (perfDump) {
-          XSPerfPrint(p"${histName}, $counter\n")(helper.io)
+        when (logPerfSignal.dump) {
+          XSPerfPrint(p"${histName}, $counter\n")(logPerfSignal)
         }
       }
     }
@@ -152,16 +148,14 @@ object XSPerfMax extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
-      val helper = Module(new LogPerfHelper)
-      val perfClean = helper.io.clean
-      val perfDump = helper.io.dump
+      val logPerfSignal = LogPerfHelper.getSignal
 
       val max = RegInit(0.U(64.W))
       val next_max = Mux(enable && (perfCnt > max), perfCnt, max)
-      max := Mux(perfClean, 0.U, next_max)
+      max := Mux(logPerfSignal.clean, 0.U, next_max)
 
-      when (perfDump) {
-        XSPerfPrint(p"${perfName}_max, $next_max\n")(helper.io)
+      when (logPerfSignal.dump) {
+        XSPerfPrint(p"${perfName}_max, $next_max\n")(logPerfSignal)
       }
     }
   }

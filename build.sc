@@ -112,6 +112,10 @@ trait Utility extends HasChisel {
 
   override def millSourcePath = os.pwd / "utility"
 
+  override def sources = T.sources {
+    super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
+  }
+
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip(crossValue)
   )

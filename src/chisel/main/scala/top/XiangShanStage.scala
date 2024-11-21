@@ -55,6 +55,7 @@ class XiangShanStage extends ChiselStage {
         Dependency[chisel3.stage.phases.Convert],
         Dependency[xiangshan.transforms.PrintModuleName],
         Dependency[xiangshan.transforms.PrintControl],
+        Dependency[utility.transforms.LogPerfDedup],
         Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
         Dependency[chisel3.stage.phases.MaybeInjectingPhase],
         Dependency[circt.stage.phases.AddImplicitOutputFile],

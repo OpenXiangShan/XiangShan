@@ -43,12 +43,10 @@ object XSLog {
     val enableDebug = debugOpts.EnableDebug && debugLevel != XSLogLevel.PERF
     val enablePerf = debugOpts.EnablePerfDebug && debugLevel == XSLogLevel.PERF
     if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR)) {
-      val ctrlInfo = ctrlInfoOpt.getOrElse(Module(new LogPerfHelper).io)
-      val logEnable = ctrlInfo.logEnable
-      val logTimestamp = ctrlInfo.timer
-      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
+      val logPerfSignal = ctrlInfoOpt.getOrElse(LogPerfHelper.getSignal)
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logPerfSignal.logEnable) && cond
       when (check_cond) {
-        val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
+        val commonInfo = p"[$debugLevel][time=${logPerfSignal.timer}] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {
           assert(false.B)

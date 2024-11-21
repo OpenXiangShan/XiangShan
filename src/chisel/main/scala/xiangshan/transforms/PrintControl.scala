@@ -29,7 +29,7 @@ class PrintControl extends Phase {
 
   override def transform(annotations: AnnotationSeq): AnnotationSeq = {
 
-    import xiangshan.transforms.Helpers._
+    import utility.transforms.Helpers._
 
     val disableList = annotations.collect {
       case DisablePrintfAnnotation(m) => m
@@ -85,8 +85,7 @@ class PrintControl extends Phase {
         val enable = enableList.isEmpty || inRange(enableList)
         val disable = disableAll || inRange(disableList) || !enable
         def onStmt(s: Statement): Statement = s match {
-          case _: Print if disable =>
-            EmptyStmt
+          case _: Print if disable => EmptyStmt
           case _: Stop if removeAssert => EmptyStmt
           case _: Verification if removeAssert => EmptyStmt
           case other => other.mapStmt(onStmt)

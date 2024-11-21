@@ -24,7 +24,7 @@ import xiangshan.transforms._
 object Generator {
   def execute(args: Array[String], mod: => chisel3.RawModule, firtoolOpts: Array[String]) = {
     val annotations = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(
+      case s"3.$_.$_" => Seq(
         RunFirrtlTransformAnnotation(new PrintControl),
         RunFirrtlTransformAnnotation(new PrintModuleName)
       )

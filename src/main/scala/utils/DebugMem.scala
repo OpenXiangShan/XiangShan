@@ -29,22 +29,22 @@ class DebugMem[T <: Data](size: Int, data: T) extends IndexedSeq[T] {
   private var debugReg: Option[Vec[T]] = None
 
   BuildInfo.version match {
-    case "3.6.0" => debugMem = Some(Mem(size, data))
+    case s"3.$_.$_" => debugMem = Some(Mem(size, data))
     case _       => debugReg = Some(Reg(Vec(size, data)))
   }
 
   def apply(addr: Int): T = BuildInfo.version match {
-    case "3.6.0" => debugMem.get(addr)
+    case s"3.$_.$_" => debugMem.get(addr)
     case _       => debugReg.get(addr)
   }
 
   def apply(addr: UInt): T = BuildInfo.version match {
-    case "3.6.0" => debugMem.get(addr)
+    case s"3.$_.$_" => debugMem.get(addr)
     case _       => debugReg.get(addr)
   }
 
   def length: Int = BuildInfo.version match {
-    case "3.6.0" => debugMem.get.length.intValue
+    case s"3.$_.$_" => debugMem.get.length.intValue
     case _       => debugReg.get.length
   }
 }

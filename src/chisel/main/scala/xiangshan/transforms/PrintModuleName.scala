@@ -28,7 +28,7 @@ class PrintModuleName extends Phase {
 
   override def transform(annotations: AnnotationSeq): AnnotationSeq = {
 
-    import xiangshan.transforms.Helpers._
+    import utility.transforms.Helpers._
 
     val (Seq(circuitAnno: FirrtlCircuitAnnotation), otherAnnos) = annotations.partition {
       case _: FirrtlCircuitAnnotation => true

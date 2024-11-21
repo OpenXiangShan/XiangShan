@@ -39,7 +39,7 @@ class DecodeUnitTest extends XSTester {
   behavior of "DecodeUnit"
   it should "pass" in {
     val printModuleNameAnno = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
+      case s"3.$_.$_" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
       case _ => Seq()
     }
 
