@@ -563,8 +563,6 @@ case class XSCoreParameters
   // Parameters for trace extension.
   // Trace parameters is useful for XSTOP.
   val traceParams: TraceParams = new TraceParams(
-    HasEncoder     = true,
-    TraceEnable    = true,
     TraceGroupNum  = 3,
     IaddrWidth     = GPAddrBitsSv48x4,
     PrivWidth      = 3,
@@ -917,8 +915,6 @@ trait HasXSParameter {
 
   // Parameters for Trace extension
   def TraceGroupNum          = coreParams.traceParams.TraceGroupNum
-  def HasEncoder             = coreParams.traceParams.HasEncoder
-  def TraceEnable            = coreParams.traceParams.TraceEnable
   def CauseWidth             = XLEN
   def TvalWidth              = coreParams.traceParams.IaddrWidth
   def PrivWidth              = coreParams.traceParams.PrivWidth

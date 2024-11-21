@@ -1233,48 +1233,32 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * trace
    */
-  val trapTraceInfoFromCsr = io.csr.traceTrapInfo
 
   // trace output
-  val traceTrap = io.trace.traceCommitInfo.trap
   val traceValids = io.trace.traceCommitInfo.blocks.map(_.valid)
   val traceBlocks = io.trace.traceCommitInfo.blocks
   val traceBlockInPipe = io.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
 
-  traceTrap := trapTraceInfoFromCsr.bits
-
   for (i <- 0 until CommitWidth) {
     traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
     traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
-    traceBlockInPipe(i).itype :=  rawInfo(i).traceBlockInPipe.itype
-    traceBlockInPipe(i).iretire := Mux(io.commits.isCommit && io.commits.commitValid(i), rawInfo(i).traceBlockInPipe.iretire, 0.U)
+    traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
+    traceBlockInPipe(i).iretire := rawInfo(i).traceBlockInPipe.iretire
     traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
-  }
-
-  for (i <- 0 until CommitWidth) {
-    val iretire = traceBlocks(i).bits.tracePipe.iretire
-    val itype   = traceBlocks(i).bits.tracePipe.itype
-    traceValids(i) := iretire =/= 0.U
-  }
-
-  val t_idle :: t_waiting :: Nil = Enum(2)
-  val traceState = RegInit(t_idle)
-  when(traceState === t_idle){
-    when(io.exception.valid){
-      traceState := t_waiting
-    }
-  }.elsewhen(traceState === t_waiting){
-    when(trapTraceInfoFromCsr.valid){
-      traceState := t_idle
-
-      traceBlocks(0).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
-        Itype.Interrupt,
-        Itype.Exception
-      )
-      traceValids(0) := true.B
+    traceValids(i) := io.commits.isCommit && io.commits.commitValid(i)
+    // exception only occor block(0).
+    if(i == 0) {
+      when(io.exception.valid){
+        traceBlocks(i).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
+          Itype.Interrupt,
+          Itype.Exception
+        )
+        traceValids(i) := true.B
+        traceBlockInPipe(i).iretire := 0.U
+      }
     }
   }
-
+  
   /**
    * debug info
    */
