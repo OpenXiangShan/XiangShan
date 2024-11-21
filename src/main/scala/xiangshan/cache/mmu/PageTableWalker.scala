@@ -816,7 +816,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = GatedValidRegNext(enq_state === state_addr_check && io.in.fire && !flush)
+  val need_addr_check = GatedValidRegNext(enq_state === state_addr_check && io.in.fire && !io.in.bits.jmp_bitmap_check && !flush)
 
   val hasHptwResp = ParallelOR(state.map(_ === state_hptw_resp)).asBool
   val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
@@ -893,7 +893,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when(bitmap_arb.io.out.fire){
     for(i <- state.indices) {
-      when(is_bitmap_req(i) && bitmap_arb.io.out.bits.bmppn === entries(i).ppn) {
+      when(is_bitmap_req(i) && bitmap_arb.io.out.bits.bmppn === entries(i).ppn(ppnLen - 1, 0)) {
         state(i) := state_bitmap_resp
         entries(i).wait_id := bitmap_arb.io.chosen
       }

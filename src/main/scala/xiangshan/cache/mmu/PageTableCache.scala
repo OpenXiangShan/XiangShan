@@ -325,7 +325,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         }
       }.otherwise{
         val wakeup_setindex = io.wakeup.bits.setIndex
-        l0BitmapReg(wakeup_setindex)(OHToUInt(io.wakeup.bits.way_info))(OHToUInt(io.wakeup.bits.pte_index)) := io.wakeup.bits.check_success
+        l0BitmapReg(wakeup_setindex)(OHToUInt(io.wakeup.bits.way_info))(io.wakeup.bits.pte_index) := io.wakeup.bits.check_success
         assert(l0v(wakeup_setindex * l2tlbParams.l0nWays.U + OHToUInt(io.wakeup.bits.way_info)) === 1.U,
           "Wakeuped entry must be valid!")
       }

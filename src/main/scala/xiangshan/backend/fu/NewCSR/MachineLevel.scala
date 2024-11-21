@@ -19,7 +19,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
-  
+  // Machine level Custom Read/Write
   val mcvm = if(HasCVMExtension) Some(Module(new CSRModule("Mcvm", new McvmBundle) {
     val mcvm_lock = reg.BME.asBool
     if(!HasBitmapCheckDefault) {
@@ -33,7 +33,7 @@ trait MachineLevel { self: NewCSR =>
     }
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
   })
-    .setAddr(CSRs.mcvm))  else  None
+    .setAddr(0xBC0))  else  None
   
 
   val mstatus = Module(new MstatusModule)
