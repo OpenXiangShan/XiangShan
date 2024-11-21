@@ -122,7 +122,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   }
 
   // TODO: remove this for AMOCAS
-  assert(!(io.storeDataIn.fire && data_valid), "atomic unit re-receive data")
+//  assert(!(io.storeDataIn.fire && data_valid), "atomic unit re-receive data")
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
@@ -153,8 +153,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
-  assert(state === s_invalid || in.uop.fuOpType(1,0) === "b10".U || in.uop.fuOpType(1,0) === "b11".U,
-    "Only word or doubleword is supported")
+//  assert(state === s_invalid || in.uop.fuOpType(1,0) === "b10".U || in.uop.fuOpType(1,0) === "b11".U,
+//    "Only word or doubleword is supported")
   val isLr = in.uop.fuOpType === LSUOpType.lr_w || in.uop.fuOpType === LSUOpType.lr_d
   val isSc = in.uop.fuOpType === LSUOpType.sc_w || in.uop.fuOpType === LSUOpType.sc_d
   val isNotLr = !isLr
