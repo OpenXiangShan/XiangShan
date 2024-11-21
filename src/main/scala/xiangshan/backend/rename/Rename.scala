@@ -472,7 +472,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
       }
     }
-
     uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
       Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
       (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))

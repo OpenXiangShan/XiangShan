@@ -316,7 +316,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.debugMode := csrMod.io.status.debugMode
 
-  csrOut.trapTraceInfo := csrMod.io.status.trapTraceInfo
+  csrOut.traceCSR := csrMod.io.status.traceCSR
 
   csrOut.customCtrl match {
     case custom =>
