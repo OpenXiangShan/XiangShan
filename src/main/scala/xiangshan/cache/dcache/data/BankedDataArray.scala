@@ -184,7 +184,8 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
       way = 1,
       shouldReset = false,
       holdRead = false,
-      singlePort = true
+      singlePort = true,
+      withClockGate = true
     ))
   }
 
@@ -198,7 +199,6 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
     )
     data_bank(w).io.r.req.valid := io.r.en
     data_bank(w).io.r.req.bits.apply(setIdx = io.r.addr)
-    data_bank(w).clock := ClockGate(false.B, io.r.en | (io.w.en & io.w.way_en(w)), clock)
   }
   XSPerfAccumulate("part_data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
 

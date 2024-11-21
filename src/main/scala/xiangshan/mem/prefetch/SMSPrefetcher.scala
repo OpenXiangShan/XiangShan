@@ -592,7 +592,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val pht_ram = Module(new SRAMTemplate[PhtEntry](new PhtEntry,
     set = smsParams.pht_size / smsParams.pht_ways,
     way =smsParams.pht_ways,
-    singlePort = true
+    singlePort = true,
+    withClockGate = true
   ))
   def PHT_SETS = smsParams.pht_size / smsParams.pht_ways
   // clockgated on pht_valids
@@ -805,7 +806,6 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   pht_ram.io.w(
     s3_ram_en, s3_ram_wdata, s3_ram_waddr, s3_way_mask
   )
-  pht_ram.clock := ClockGate(false.B, s1_valid | s3_ram_en, clock)
   when(s3_valid && s3_hit){
     assert(!Cat(s3_hit_vec).andR, "sms_pht: multi-hit!")
   }
