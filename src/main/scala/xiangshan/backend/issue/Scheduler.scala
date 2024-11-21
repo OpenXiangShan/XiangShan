@@ -608,7 +608,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   d2IqStaOut.zip(staEnqs).zip(stdEnqs).foreach{ case((dp, staIQ), stdIQ) =>
     val isAllReady = staIQ.ready && stdIQ.ready
     dp.ready := isAllReady
-    staIQ.valid := dp.valid && isAllReady
+    val isDropAmocasSta = dp.bits.isAmocas && dp.bits.uopIdx(0) === 1.U
+    staIQ.valid := dp.valid && isAllReady && !isDropAmocasSta
     stdIQ.valid := dp.valid && isAllReady && FuType.FuTypeOrR(dp.bits.fuType, FuType.stu, FuType.mou)
   }
 
