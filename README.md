@@ -48,9 +48,9 @@ The second stable micro-architecture of XiangShan is called Nanhu (南湖) and i
 
 The current version of XiangShan, also known as Kunminghu (昆明湖), is still under development on the master branch.
 
-The micro-architecture overview of Nanhu (南湖) is shown below.
+The micro-architecture overview of Kunminghu (昆明湖) is shown below.
 
-![xs-arch-nanhu](images/xs-arch-nanhu.svg)
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 
 
