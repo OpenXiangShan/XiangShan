@@ -10,7 +10,11 @@ import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
 class TraceTrap(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
   val tval  = UInt(TvalWidth.W)
-  val priv  = Priv()
+}
+
+class TracePriv extends Bundle  {
+  val lastPriv    = Priv()
+  val currentPriv = Priv()
 }
 
 class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
@@ -27,6 +31,7 @@ class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameter
 }
 
 class TraceBundle(hasIaddr: Boolean, blockSize: Int, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
+  val priv = Priv()
   val trap = Output(new TraceTrap)
   val blocks = Vec(blockSize, ValidIO(new TraceBlock(hasIaddr, iretireWidth)))
 }
@@ -119,6 +124,8 @@ object Itype extends NamedUInt(4) {
   }
 
   def isTrap(itype: UInt) = Seq(Exception, Interrupt).map(_ === itype).reduce(_ || _)
+
+  def isTrapOrXret(itype: UInt) = Seq(Exception, Interrupt, ExpIntReturn).map(_ === itype).reduce(_ || _)
 
   def isNotNone(itype: UInt) = itype =/= None
 

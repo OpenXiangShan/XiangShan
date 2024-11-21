@@ -1231,20 +1231,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * trace
    */
-  val trapTraceInfoFromCsr = io.csr.traceTrapInfo
+  val traceTrapInfoFromCsr = io.csr.traceTrapInfo
+  val tracePrivInfoFromCsr = io.csr.tracePriv
 
   // trace output
   val traceTrap = io.trace.traceCommitInfo.trap
+  val tracePriv = io.trace.traceCommitInfo.priv
   val traceValids = io.trace.traceCommitInfo.blocks.map(_.valid)
   val traceBlocks = io.trace.traceCommitInfo.blocks
   val traceBlockInPipe = io.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
 
-  traceTrap := trapTraceInfoFromCsr.bits
-
   for (i <- 0 until CommitWidth) {
     traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
     traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
-    traceBlockInPipe(i).itype :=  rawInfo(i).traceBlockInPipe.itype
+    traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
     traceBlockInPipe(i).iretire := Mux(io.commits.isCommit && io.commits.commitValid(i), rawInfo(i).traceBlockInPipe.iretire, 0.U)
     traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
   }
@@ -1262,9 +1262,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       traceState := t_waiting
     }
   }.elsewhen(traceState === t_waiting){
-    when(trapTraceInfoFromCsr.valid){
+    when(traceTrapInfoFromCsr.valid){
       traceState := t_idle
-
       traceBlocks(0).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
         Itype.Interrupt,
         Itype.Exception
@@ -1272,6 +1271,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       traceValids(0) := true.B
     }
   }
+  traceTrap := traceTrapInfoFromCsr.bits
+  tracePriv := Mux(traceValids(0) && Itype.isTrapOrXret(traceBlocks(0).bits.tracePipe.itype),
+    tracePrivInfoFromCsr.lastPriv,
+    tracePrivInfoFromCsr.currentPriv
+  )
 
   /**
    * debug info

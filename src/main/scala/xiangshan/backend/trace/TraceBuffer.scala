@@ -24,8 +24,10 @@ class TraceBuffer(implicit val p: Parameters) extends Module
 
   // buffer: compress info from robCommit
   val traceTrap    = Reg(new TraceTrap)
+  val tracePriv    = Reg(Priv())
   val traceEntries = Reg(Vec(CommitWidth, ValidIO(new TraceBlock(false, IretireWidthCompressed))))
   traceTrap := io.in.fromRob.trap
+  tracePriv := io.in.fromRob.priv
 
   val blockCommit = RegInit(false.B) // to rob
 
@@ -80,6 +82,7 @@ class TraceBuffer(implicit val p: Parameters) extends Module
    * deq from traceEntries
    */
   val blockOut = WireInit(0.U.asTypeOf(io.out.groups))
+  blockOut.priv := tracePriv
   blockOut.trap := traceTrap
   for(i <- 0 until TraceGroupNum) {
     when(deqPtrPre + i.U < enqPtr) {

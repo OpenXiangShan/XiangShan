@@ -100,7 +100,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
-  val trapTraceInfo = ValidIO(new TraceTrap)
+  val traceTrapInfo = ValidIO(new TraceTrap)
+  val tracePriv = Output(new TracePriv)
   // from LSQ
   val memExceptionVAddr = Input(UInt(XLEN.W))
   val memExceptionGPAddr = Input(UInt(XLEN.W))
