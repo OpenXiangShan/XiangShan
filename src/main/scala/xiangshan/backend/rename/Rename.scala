@@ -357,6 +357,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       compressMasksVec(i) & Cat(io.in.map(in =>
         // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
         in.bits.uopSplitType =/= UopSplitType.SCA_SIM &&
+        !UopSplitType.isAmocas(input.bits.uopSplitType) &&
         // vfmv.f.s, vcpop.m, vfirst.m and vmv.x.s don't change vector state
         !Seq(
           (FuType.vfalu, VfaluType.vfmv_f_s), // vfmv.f.s
