@@ -70,7 +70,7 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true))
 
   val wen = rst || io.write.valid
   io.write.ready := !rst
@@ -86,7 +86,6 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   io.read.ready := !wen
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
-  tag_array.clock := ClockGate(false.B, ren | wen, clock)
   io.resp := tag_array.io.r.resp.data
 
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
