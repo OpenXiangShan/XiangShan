@@ -15,7 +15,6 @@ class TraceBuffer(implicit val p: Parameters) extends Module
       val fromEncoder = Input(new FromEncoder)
       val fromRob     = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCompressed))
     }
-
     val out = new Bundle { // output groups to pcMem
       val blockCommit = Output(Bool())
       val groups = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
@@ -23,12 +22,7 @@ class TraceBuffer(implicit val p: Parameters) extends Module
   })
 
   // buffer: compress info from robCommit
-  val traceTrap    = Reg(new TraceTrap)
-  val tracePriv    = Reg(Priv())
   val traceEntries = Reg(Vec(CommitWidth, ValidIO(new TraceBlock(false, IretireWidthCompressed))))
-  traceTrap := io.in.fromRob.trap
-  tracePriv := io.in.fromRob.priv
-
   val blockCommit = RegInit(false.B) // to rob
 
   /**
@@ -71,7 +65,6 @@ class TraceBuffer(implicit val p: Parameters) extends Module
   deqPtrNext := Mux(deqPtr + TraceGroupNum.U > enqPtrNext, enqPtrNext, deqPtr + TraceGroupNum.U)
 
   val traceIdxVec = VecInit(countVec.map(count => (enqPtr + count - 1.U).value))
-
   for(i <- 0 until CommitWidth){
     when(needPcVec(i)){
       traceEntries(traceIdxVec(i)) := blocksUpdate(i)
@@ -82,8 +75,6 @@ class TraceBuffer(implicit val p: Parameters) extends Module
    * deq from traceEntries
    */
   val blockOut = WireInit(0.U.asTypeOf(io.out.groups))
-  blockOut.priv := tracePriv
-  blockOut.trap := traceTrap
   for(i <- 0 until TraceGroupNum) {
     when(deqPtrPre + i.U < enqPtr) {
       blockOut.blocks(i) := traceEntries((deqPtrPre + i.U).value)
@@ -92,15 +83,14 @@ class TraceBuffer(implicit val p: Parameters) extends Module
     }
   }
 
+  io.out.blockCommit := blockCommit
+  io.out.groups := blockOut
+
   if(backendParams.debugEn){
     dontTouch(countVec)
     dontTouch(numNeedPc)
     dontTouch(traceIdxVec)
   }
-
-  io.out.blockCommit := blockCommit
-  io.out.groups := blockOut
-
 }
 
 class TracePtr(entries: Int) extends CircularQueuePtr[TracePtr](

@@ -7,12 +7,9 @@ import utils.NamedUInt
 import xiangshan.HasXSParameter
 import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
 
-class TraceTrap(implicit val p: Parameters) extends Bundle with HasXSParameter {
+class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
   val tval  = UInt(TvalWidth.W)
-}
-
-class TracePriv extends Bundle  {
   val lastPriv    = Priv()
   val currentPriv = Priv()
 }
@@ -31,8 +28,6 @@ class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameter
 }
 
 class TraceBundle(hasIaddr: Boolean, blockSize: Int, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val priv = Priv()
-  val trap = Output(new TraceTrap)
   val blocks = Vec(blockSize, ValidIO(new TraceBlock(hasIaddr, iretireWidth)))
 }
 

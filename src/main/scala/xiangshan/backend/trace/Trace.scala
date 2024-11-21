@@ -6,8 +6,6 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.HasXSParameter
 
 class TraceParams(
-  val HasEncoder     : Boolean,
-  val TraceEnable    : Boolean,
   val TraceGroupNum  : Int,
   val IaddrWidth     : Int,
   val PrivWidth      : Int,
@@ -16,37 +14,34 @@ class TraceParams(
 )
 
 class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val fromEncoder    = Input(new FromEncoder)
-  val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe))
-  val blockRobCommit = Output(Bool())
-  val toPcMem        = Vec(TraceGroupNum, ValidIO(new TraceBlock(false, IretireWidthCompressed)))
-  val fromPcMem      = Input(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
-  val toEncoder      = new TraceBundle(hasIaddr = true, TraceGroupNum, IretireWidthCompressed)
+  val in = new Bundle {
+    val fromEncoder    = Input(new FromEncoder)
+    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe))
+    val fromPcMem      = Input(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
+  }
+  val out = new Bundle {
+    val toPcMem        = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
+    val toEncoder      = new TraceBundle(hasIaddr = true,  TraceGroupNum, IretireWidthCompressed)
+    val blockRobCommit = Output(Bool())
+  }
 }
 
 class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new TraceIO)
-  val (fromEncoder, fromRob, toPcMem, fromPcMem, toEncoder) = (io.fromEncoder, io.fromRob, io.toPcMem, io.fromPcMem, io.toEncoder)
+  val (fromEncoder, fromRob, fromPcMem, toPcMem, toEncoder) = (io.in.fromEncoder, io.in.fromRob, io.in.fromPcMem, io.out.toPcMem, io.out.toEncoder)
 
   /**
    * stage 0: CommitInfo from rob
    */
   val blockCommit = Wire(Bool())
-  io.blockRobCommit := blockCommit
+  io.out.blockRobCommit := blockCommit
 
   /**
    * stage 1: regNext(robCommitInfo)
    */
   val s1_in = fromRob
   val s1_out = WireInit(0.U.asTypeOf(s1_in))
-
   for(i <- 0 until CommitWidth) {
-    // Trap/Xret only occor in block(0).
-    if(i == 0) {
-      s1_out.priv := RegEnable(s1_in.priv, s1_in.blocks(0).valid)
-      s1_out.trap.cause := RegEnable(s1_in.trap.cause, 0.U, s1_in.blocks(0).valid && Itype.isTrap(s1_in.blocks(0).bits.tracePipe.itype))
-      s1_out.trap.tval := RegEnable(s1_in.trap.tval, 0.U, s1_in.blocks(0).valid && Itype.isTrap(s1_in.blocks(0).bits.tracePipe.itype))
-    }
     s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, false.B, !blockCommit)
     s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, 0.U.asTypeOf(s1_in.blocks(i).bits), s1_in.blocks(i).valid)
   }
@@ -66,23 +61,14 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
    */
   val s3_in_groups = s2_out_groups
   val s3_out_groups = RegNext(s3_in_groups)
-
-  toPcMem := s3_in_groups.blocks
+  toPcMem := s3_in_groups
 
   for(i <- 0 until TraceGroupNum) {
-    toEncoder.priv := s3_out_groups.priv
-    toEncoder.trap := s3_out_groups.trap
     toEncoder.blocks(i).valid := s3_out_groups.blocks(i).valid
     toEncoder.blocks(i).bits.iaddr.foreach(_ := Mux(s3_out_groups.blocks(i).valid, fromPcMem(i), 0.U))
     toEncoder.blocks(i).bits.tracePipe := s3_out_groups.blocks(i).bits.tracePipe
   }
-  if(backendParams.debugEn){
-    dontTouch(io.toEncoder)
+  if(backendParams.debugEn) {
+    dontTouch(io.out.toEncoder)
   }
 }
-
-
-
-
-
-
