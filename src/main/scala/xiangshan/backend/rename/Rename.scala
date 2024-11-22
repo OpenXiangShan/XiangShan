@@ -398,6 +398,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)
+    // dirty code
+    if (i == 0) {
+      io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+    }
     // Todo: move these shit in decode stage
     // dirty code for fence. The lsrc is passed by imm.
     when (io.out(i).bits.fuType === FuType.fence.U) {
@@ -534,9 +538,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
       bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
     }
-    io.out(i).bits.psrc(0) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
+    // For the LUI instruction: psrc(0) is from register file and should always be zero.
+    io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
       (z, next) => Mux(next._2, next._1, z)
-    }
+    })
     io.out(i).bits.psrc(1) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(1)(i-1).asBools).foldLeft(uops(i).psrc(1)) {
       (z, next) => Mux(next._2, next._1, z)
     }
