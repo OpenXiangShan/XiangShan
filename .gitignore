@@ -363,5 +363,8 @@ stack.info*
 
 !ready-to-run/*
 
+# Log files
 simulator_err.txt
 simulator_out.txt
+*.log
+*.err
