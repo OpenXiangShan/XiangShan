@@ -42,13 +42,23 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
   childReset := io.rst
   val ctrlnode = wrapper.ctrlnode
   withClockAndReset(childClock, childReset) {
-    val pingpong = RegInit(1.U(8.W))
+    val pingpong = RegInit(0.U(8.W))
     val ctrlSel = RegInit(0.U(8.W))
     val max_instr_cnt = RegInit(0x1000000.U(64.W))
     val epoch = RegInit(0.U(64.W))
+
     val robSize0 = RegInit(RobSize.U(64.W))
     val robSize1 = RegInit(RobSize.U(64.W))
     val robSize = Wire(UInt(64.W))
+
+    val lqSize0 = RegInit(LoadQueueSize.U(64.W))
+    val lqSize1 = RegInit(LoadQueueSize.U(64.W))
+    val lqSize = Wire(UInt(64.W))
+
+    val sqSize0 = RegInit(StoreQueueSize.U(64.W))
+    val sqSize1 = RegInit(StoreQueueSize.U(64.W))
+    val sqSize = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
 
@@ -58,16 +68,25 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x008 -> Seq(RegField(64, max_instr_cnt)),
       0x010 -> Seq(RegField(64, epoch)),
       0x100 -> Seq(RegField(64, robSize0)),
-      0x108 -> Seq(RegField(64, robSize1))
+      0x108 -> Seq(RegField(64, robSize1)),
+      0x110 -> Seq(RegField(64, lqSize0)),
+      0x118 -> Seq(RegField(64, lqSize1)),
+      0x120 -> Seq(RegField(64, sqSize0)),
+      0x128 -> Seq(RegField(64, sqSize1))
     )
 
     // Mux logic
     robSize := Mux(ctrlSel.orR, robSize1, robSize0)
-
+    lqSize := Mux(ctrlSel.orR, lqSize1, lqSize0)
+    sqSize := Mux(ctrlSel.orR, sqSize1, sqSize0)
 
     // Bore to ROB
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
+    ExcitingUtils.addSource(lqSize, "DSE_LQSIZE")
+    ExcitingUtils.addSource(sqSize, "DSE_SQSIZE")
+
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
+
 
     // core reset generation
     val coreResetReg = RegInit(false.B)

@@ -138,7 +138,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cmtPtr = cmtPtrExt(0).value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
-  val allowEnqueue = validCount <= (StoreQueueSize - 2).U
+
+  val pStoreQueueSize = WireInit(StoreQueueSize.U((log2Up(StoreQueueSize + 1)).W))
+  ExcitingUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
+  val allowEnqueue = validCount <= (pStoreQueueSize - 2.U)
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)

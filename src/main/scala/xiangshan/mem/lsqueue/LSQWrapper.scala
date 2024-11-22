@@ -227,10 +227,20 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     val enqLsq = Flipped(new LsqEnqIO)
   })
 
+  val pLoadQueueSize = WireInit(LoadQueueSize.U((log2Up(LoadQueueSize + 1)).W))
+  val pStoreQueueSize = WireInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+//  val pLoadQueueSize = Wire(log2Up(LoadQueueSize + 1)).W))
+  ExcitingUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+  ExcitingUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
   val lqPtr = RegInit(0.U.asTypeOf(new LqPtr))
   val sqPtr = RegInit(0.U.asTypeOf(new SqPtr))
-  val lqCounter = RegInit(LoadQueueSize.U(log2Up(LoadQueueSize + 1).W))
-  val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  val lqCounter = withReset(reset.asBool) {
+    RegInit(pLoadQueueSize)
+  }
+//  val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  val sqCounter = withReset(reset.asBool) {
+    RegInit(pStoreQueueSize)
+  }
   val canAccept = RegInit(false.B)
 
   val loadEnqNumber = PopCount(io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0)))

@@ -111,7 +111,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
   })
 
-  println("LoadQueue: size:" + LoadQueueSize)
+  val pLoadQueueSize = WireInit(LoadQueueSize.U)
+  ExcitingUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+
+  println("LoadQueue: size:" + pLoadQueueSize)
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
@@ -142,7 +145,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val deqPtr = deqPtrExt.value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
-  val allowEnqueue = validCount <= (LoadQueueSize - 2).U
+  val allowEnqueue = validCount <= (pLoadQueueSize - 2.U)
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
