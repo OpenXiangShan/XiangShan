@@ -84,7 +84,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
   EnableSC: Boolean = true,
-  DynCloseSC: Boolean = false,
+  DynCloseSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,

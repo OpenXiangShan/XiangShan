@@ -361,8 +361,13 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s2_scCtrs    = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
       val s2_chooseBit = s2_tageTakens_dup(3)(w)
 
-      val s2_pred =
-        Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens_dup(3)(w))
+      // If SC was closed, use TAGE's pred
+      val s2_pred = Mux(
+        s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit) && (if (DynCloseSC) { !s2_sc_closed }
+                                                                   else { true.B }),
+        s2_scPreds(s2_chooseBit),
+        s2_tageTakens_dup(3)(w)
+      )
 
       val s3_disagree = RegEnable(
         s2_disagree,
@@ -401,13 +406,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      val s3_pred_dup = io.s2_fire.map(f =>
-        RegEnable(
-          s2_pred,
-          if (DynCloseSC) { f && !s2_sc_closed }
-          else { f }
-        )
-      )
+      val s3_pred_dup = io.s2_fire.map(f => RegEnable(s2_pred, f))
 
       val sc_enable_dup = dup(RegNext(io.ctrl.sc_enable))
       for (
@@ -435,7 +434,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scUpdateTakens(w)    := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach { case (t, c) => t := c }
 
-        update_sc_used(w)    := !updateSCMeta.scClosed
+        update_sc_used(w)    := scClosed
         update_unconf(w)     := !sumAboveThreshold
         update_conf(w)       := sumAboveThreshold
         update_agree(w)      := scPred === tagePred
@@ -450,16 +449,16 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
         }
 
-        when(!scClosed && (scPred =/= taken || !sumAboveThreshold)) {
-          scUpdateMask(w).foreach(_ := true.B)
+        when(scPred =/= taken || !sumAboveThreshold) {
+          scUpdateMask(w).foreach(_ := !scClosed)
           XSDebug(
             tableSum < 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scClosed: ${scClosed}, scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
               p"scSum(-${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
           )
           XSDebug(
             tableSum >= 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scClosed: ${scClosed}, scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
               p"scSum(+${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
           )
           XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
