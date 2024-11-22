@@ -368,7 +368,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_icache_all_resp_wire =
     fromICache.valid &&
       fromICache.bits.vaddr(0) === f2_ftq_req.startAddr &&
-      fromICache.bits.doubleline && (fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
+      (fromICache.bits.doubleline && fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
   val f2_icache_all_resp_reg = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
