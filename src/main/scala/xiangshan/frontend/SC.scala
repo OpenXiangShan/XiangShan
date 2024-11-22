@@ -35,7 +35,9 @@ import scala.math.min
 import utility._
 import xiangshan._
 
-trait HasSCParameter extends TageParams {}
+trait HasSCParameter extends TageParams {
+  val scCloseConfCounterWidth = 10 // SInt Width
+}
 
 class SCReq(implicit p: Parameters) extends TageReq
 
@@ -265,7 +267,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   var sc_fh_info                          = Set[FoldedHistoryInfo]()
   if (EnableSC) {
-    val scCloseConfCounter = RegInit(0.S(10.W))
+    val scCloseConfCounter = WireInit(0.S(scCloseConfCounterWidth.W))
     val s0_sc_closed       = scCloseConfCounter >= 0.S
     val s1_sc_closed       = RegEnable(s0_sc_closed, io.s0_fire(3))
     val s2_sc_closed       = RegEnable(s1_sc_closed, io.s1_fire(3))
@@ -487,30 +489,30 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val deltaType     = WireInit(0.U.asTypeOf(Vec(TageBanks, UInt(3.W))))
       for (w <- 0 until TageBanks) {
         val updateTageMeta = updateMeta
-        val scClosed       = updateSCMeta.scClosed
-        when(updateValids(w) && updateTageMeta.providers(w).valid) {
-          satUpdateMask(w) := true.B
-          when(scClosed) {
-            deltaType(w) := Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 5.U, 6.U)
-          }.otherwise {
-            when(update_conf(w)) {
-              deltaType(w) := Mux(
-                update_agree(w),
-                // 1: sc agree and correct; 2: sc agree but wrong
-                Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 1.U, 2.U),
-                // 3: sc disagree and wrong; 4: sc disagree but correct
-                Mux(updateTageMeta.takens(w) === update.br_taken_mask(w), 3.U, 4.U)
-              )
-            }.otherwise {
-              deltaType(w) := 0.U
-            }
-          }
-        }.otherwise {
-          satUpdateMask(w) := false.B
-          deltaType(w)     := 0.U
-        }
+        val updateValid    = updateValids(w) && updateTageMeta.providers(w).valid
+
+        val scClosed_d1    = RegEnable(updateSCMeta.scClosed, updateValid)
+        val scPred_d1      = RegEnable(updateSCMeta.scPreds(w), updateValid)
+        val tagePred_d1    = RegEnable(updateTageMeta.takens(w), updateValid)
+        val taken_d1       = RegEnable(update.br_taken_mask(w), updateValid)
+        val update_conf_d1 = RegEnable(update_conf(w), updateValid)
+
+        satUpdateMask(w) := RegNext(updateValid)
+        deltaType(w) := Mux(
+          !scClosed_d1 && update_conf_d1,
+          Mux(
+            scPred_d1 === tagePred_d1,
+            Mux(tagePred_d1 === taken_d1, 0.U, 1.U),
+            Mux(tagePred_d1 === taken_d1, 2.U, 3.U)
+          ),
+          Mux(tagePred_d1 === taken_d1, 4.U, 5.U)
+        )
       }
-      scCloseConfCounter := signedSatUpdate(satUpdateMask, scCloseConfCounter, 10, deltaType)
+      scCloseConfCounter := RegEnable(
+        signedSatUpdate(satUpdateMask, scCloseConfCounter, scCloseConfCounterWidth, deltaType),
+        0.S,
+        satUpdateMask.reduce(_ || _)
+      )
     }
 
     tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
