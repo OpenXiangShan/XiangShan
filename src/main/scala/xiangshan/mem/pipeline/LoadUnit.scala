@@ -1413,7 +1413,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop.fpWen       := s3_in.uop.fpWen
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
-  s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
+  s3_out.bits.uop.replayInst  := false.B
   s3_out.bits.data            := s3_in.data
   s3_out.bits.isFromLoadUnit  := true.B
   s3_out.bits.debug.isMMIO    := s3_in.mmio
