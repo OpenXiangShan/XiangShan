@@ -242,8 +242,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   private val backendCriticalError = Wire(Bool())
 
-  ctrlBlock.io.intIQValidNumVec := intScheduler.io.intIQValidNumVec
-  ctrlBlock.io.fpIQValidNumVec := fpScheduler.io.fpIQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
   ctrlBlock.io.fromCSR.toDecode := intExuBlock.io.csrToDecode.get
@@ -253,6 +251,41 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
   ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
+
+  io.mem.lsqEnqIO <> ctrlBlock.io.toMem.lsqEnqIO
+  ctrlBlock.io.fromMemToDispatch.scommit := io.mem.sqDeq
+  ctrlBlock.io.fromMemToDispatch.lcommit := io.mem.lqDeq
+  ctrlBlock.io.fromMemToDispatch.sqDeqPtr := io.mem.sqDeqPtr
+  ctrlBlock.io.fromMemToDispatch.lqDeqPtr := io.mem.lqDeqPtr
+  ctrlBlock.io.fromMemToDispatch.sqCancelCnt := io.mem.sqCancelCnt
+  ctrlBlock.io.fromMemToDispatch.lqCancelCnt := io.mem.lqCancelCnt
+  ctrlBlock.io.toDispatch.wakeUpInt := intScheduler.io.toSchedulers.wakeupVec
+  ctrlBlock.io.toDispatch.wakeUpFp  := fpScheduler.io.toSchedulers.wakeupVec
+  ctrlBlock.io.toDispatch.wakeUpVec := vfScheduler.io.toSchedulers.wakeupVec
+  ctrlBlock.io.toDispatch.wakeUpMem := memScheduler.io.toSchedulers.wakeupVec
+  ctrlBlock.io.toDispatch.IQValidNumVec := intScheduler.io.IQValidNumVec ++ fpScheduler.io.IQValidNumVec ++ vfScheduler.io.IQValidNumVec ++ memScheduler.io.IQValidNumVec
+  ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
+  ctrlBlock.io.toDispatch.og0Cancel := og0Cancel
+  ctrlBlock.io.toDispatch.wbPregsInt.zip(wbDataPath.io.toIntPreg).map(x => {
+    x._1.valid := x._2.wen && x._2.intWen
+    x._1.bits := x._2.addr
+  })
+  ctrlBlock.io.toDispatch.wbPregsFp.zip(wbDataPath.io.toFpPreg).map(x => {
+    x._1.valid := x._2.wen && x._2.fpWen
+    x._1.bits := x._2.addr
+  })
+  ctrlBlock.io.toDispatch.wbPregsVec.zip(wbDataPath.io.toVfPreg).map(x => {
+    x._1.valid := x._2.wen && x._2.vecWen
+    x._1.bits := x._2.addr
+  })
+  ctrlBlock.io.toDispatch.wbPregsV0.zip(wbDataPath.io.toV0Preg).map(x => {
+    x._1.valid := x._2.wen && x._2.v0Wen
+    x._1.bits := x._2.addr
+  })
+  ctrlBlock.io.toDispatch.wbPregsVl.zip(wbDataPath.io.toVlPreg).map(x => {
+    x._1.valid := x._2.wen && x._2.vlWen
+    x._1.bits := x._2.addr
+  })
   ctrlBlock.io.csrCtrl <> intExuBlock.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
@@ -264,14 +297,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
   ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
   ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
-  ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
-  ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
-  ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
+  ctrlBlock.io.debugEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
+  ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
+  ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
-  intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   intScheduler.io.fpWriteBack := 0.U.asTypeOf(intScheduler.io.fpWriteBack)
@@ -291,7 +323,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   fpScheduler.io.fromTop.hartId := io.fromTop.hartId
   fpScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
-  fpScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   fpScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.fpUops
   fpScheduler.io.intWriteBack := 0.U.asTypeOf(fpScheduler.io.intWriteBack)
   fpScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
@@ -310,7 +341,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
-  memScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
@@ -350,7 +380,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
-  vfScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.vfUops
   vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
   vfScheduler.io.fpWriteBack := 0.U.asTypeOf(vfScheduler.io.fpWriteBack)
@@ -740,7 +769,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
 
   // mem io
-  io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
   io.mem.storeDebugInfo <> ctrlBlock.io.robio.storeDebugInfo
 
