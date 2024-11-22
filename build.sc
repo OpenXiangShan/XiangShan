@@ -263,7 +263,7 @@ object xiangshan extends XiangShanModule with HasChisel with HasLogging with Sca
 
   def macrosModule = macros
 
-  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m", "-Dlogback.configurationFile=src/main/resources/logback.xml")
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
@@ -334,7 +334,8 @@ object xiangshan extends XiangShanModule with HasChisel with HasLogging with Sca
   }
 
   object test extends SbtTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
+    override def forkArgs = Seq("-Xmx40G", "-Xss256m",
+    "-Dlogback.configurationFile=src/main/resources/logback.xml", "-XX:+UseShenandoahGC")
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions("chiseltest")

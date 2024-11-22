@@ -683,17 +683,17 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     with HasXSParameter {
 
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
-  println(s"[Dispatch2IqArithImp] portFuSets: $portFuSets")
+  logger.debug(s"[Dispatch2IqArithImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
-  println(s"[Dispatch2IqArithImp] fuDeqMap: $fuDeqMap")
+  logger.debug(s"[Dispatch2IqArithImp] fuDeqMap: $fuDeqMap")
   val mergedFuDeqMap = mergeFuDeqMap(fuDeqMap)
-  println(s"[Dispatch2IqArithImp] mergedFuDeqMap: $mergedFuDeqMap")
+  logger.debug(s"[Dispatch2IqArithImp] mergedFuDeqMap: $mergedFuDeqMap")
   val expendedFuDeqMap = expendFuDeqMap(mergedFuDeqMap, params.issueBlockParams.map(_.numEnq))
-  println(s"[Dispatch2IqArithImp] expendedFuDeqMap: $expendedFuDeqMap")
+  logger.debug(s"[Dispatch2IqArithImp] expendedFuDeqMap: $expendedFuDeqMap")
 
   // sort by count of port. Port less, priority higher.
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-  println(s"[Dispatch2IqArithImp] finalFuDeqMap: $finalFuDeqMap")
+  logger.debug(s"[Dispatch2IqArithImp] finalFuDeqMap: $finalFuDeqMap")
 
   val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
   outReadyMatrix.foreach(_.foreach(_ := false.B))
@@ -731,9 +731,9 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   }
 
   val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map{ case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq)}.toMap
-  println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
+  logger.trace(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
   val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
-  println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
+  logger.trace(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
   finalportSelIdxOH.foreach{ case (portId, selSeq) =>
     val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid).toSeq, selSeq.map(_.bits).toSeq)
     outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
@@ -967,17 +967,17 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.filterNot(_.hasStdFu).flatMap(_.fuConfigs).map(_.fuType).toSet)
-  println(s"[Dispatch2IqMemImp] portFuSets: $portFuSets")
+  logger.debug(s"[Dispatch2IqMemImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
-  println(s"[Dispatch2IqMemImp] fuDeqMap: $fuDeqMap")
+  logger.debug(s"[Dispatch2IqMemImp] fuDeqMap: $fuDeqMap")
   val mergedFuDeqMap = mergeFuDeqMap(fuDeqMap)
-  println(s"[Dispatch2IqMemImp] mergedFuDeqMap: $mergedFuDeqMap")
+  logger.debug(s"[Dispatch2IqMemImp] mergedFuDeqMap: $mergedFuDeqMap")
   val expendedFuDeqMap = expendFuDeqMap(mergedFuDeqMap, params.issueBlockParams.map(_.numEnq))
-  println(s"[Dispatch2IqMemImp] expendedFuDeqMap: $expendedFuDeqMap")
+  logger.debug(s"[Dispatch2IqMemImp] expendedFuDeqMap: $expendedFuDeqMap")
 
   // sort by count of port. Port less, priority higher.
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-  println(s"[Dispatch2IqMemImp] finalFuDeqMap: $finalFuDeqMap")
+  logger.debug(s"[Dispatch2IqMemImp] finalFuDeqMap: $finalFuDeqMap")
 
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
@@ -1019,10 +1019,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   require(loadMoreHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
   require(loadLessHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
-  println(storeDeq)
-  println(storeDeq.sorted)
-  println(expendedStuDeq)
-  println(expendedStuDeq.sorted)
+  logger.trace(storeDeq.toString())
+  logger.trace(storeDeq.sorted.toString())
+  logger.trace(expendedStuDeq.toString())
+  logger.trace(expendedStuDeq.sorted.toString())
   require(storeDeq.sorted == expendedStuDeq.sorted)
 
   // Seq(storeCnt)(priority)
@@ -1114,7 +1114,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   finalFuDeqMap.zipWithIndex.foreach {
     case ((Seq(FuType.ldu), deqPortIdSeq), i) =>
-      println(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use ldu policy")
+      logger.trace(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use ldu policy")
       val maxSelNum = wrapper.numIn
       val selNum = deqPortIdSeq.length
       val portReadyVec = loadReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
@@ -1130,7 +1130,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         }
       }
     case ((fuTypeSeq, deqPortIdSeq), i) if fuTypeSeq.contains(FuType.stu) =>
-      println(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use stu policy")
+      logger.trace(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use stu policy")
       val maxSelNum = wrapper.numIn
       val selNum = deqPortIdSeq.length
       val portReadyVec = storeReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
@@ -1163,9 +1163,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map { case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq) }.toMap
-  println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
+  logger.trace(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
   val deqSelIdxOHSeq: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
-  println(s"[Dispatch2IQ] finalportSelIdxOH: $deqSelIdxOHSeq")
+  logger.trace(s"[Dispatch2IQ] finalportSelIdxOH: $deqSelIdxOHSeq")
 
   // Todo: split this matrix into more deq parts
   // deqSelIdxVec(deqIdx)(enqIdx): enqIdx uop can be accepted by deqIdx

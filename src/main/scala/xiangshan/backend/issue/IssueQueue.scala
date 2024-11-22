@@ -82,7 +82,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   override def desiredName: String = s"${params.getIQName}"
 
-  println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
+  logger.debug(s"${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
     s"wakeup exu in(${params.wakeUpInExuSources.size}): ${params.wakeUpInExuSources.map(_.name).mkString("{",",","}")}, " +
     s"wakeup exu out(${params.wakeUpOutExuSources.size}): ${params.wakeUpOutExuSources.map(_.name).mkString("{",",","}")}, " +
     s"numEntries: ${params.numEntries}, numRegSrc: ${params.numRegSrc}, " +
@@ -100,8 +100,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
   val wakeupFuLatencyMaps : Seq[Map[FuType.OHType, Int]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap)
 
-  println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${wakeupFuLatencyMaps}")
-  println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
+  logger.trace(s"${params.getIQName} fuLatencyMaps: ${wakeupFuLatencyMaps}")
+  logger.trace(s"${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
 
   // Modules
@@ -1070,7 +1070,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
 
   require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
     s"StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
-  println(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
+  logger.trace(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
@@ -1143,7 +1143,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
 
   require((params.VlduCnt + params.VstuCnt) > 0, "IssueQueueVecMemImp can only be instance of VecMem IQ")
-  println(s"[IssueQueueVecMemImp] VlduCnt: ${params.VlduCnt}, VstuCnt: ${params.VstuCnt}")
+  logger.trace(s"[IssueQueueVecMemImp] VlduCnt: ${params.VlduCnt}, VstuCnt: ${params.VstuCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")

@@ -362,11 +362,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.wakeupFromIQ.foreach { wakeUp =>
       val wakeUpIn = iqWakeUpInMap(wakeUp.bits.exuIdx)
       val exuIdx = wakeUp.bits.exuIdx
-      println(s"[Backend] Connect wakeup exuIdx ${exuIdx}")
+      logger.debug(s"[Backend] Connect wakeup exuIdx ${exuIdx}")
       connectSamePort(wakeUp,wakeUpIn)
       backendParams.connectWakeup(exuIdx)
       if (backendParams.isCopyPdest(exuIdx)) {
-        println(s"[Backend] exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
+        logger.trace(s"[Backend] exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
         wakeUp.bits.pdest := wakeUpIn.bits.pdestCopy.get(backendParams.getCopyPdestIndex(exuIdx))
         if (wakeUpIn.bits.rfWenCopy.nonEmpty) wakeUp.bits.rfWen := wakeUpIn.bits.rfWenCopy.get(backendParams.getCopyPdestIndex(exuIdx))
         if (wakeUpIn.bits.fpWenCopy.nonEmpty) wakeUp.bits.fpWen := wakeUpIn.bits.fpWenCopy.get(backendParams.getCopyPdestIndex(exuIdx))
@@ -460,8 +460,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       iq := in
     }
 
-    println(s"[Scheduler] numWriteRegCache: ${params.numWriteRegCache}")
-    println(s"[Scheduler] iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
+    logger.info(s"numWriteRegCache: ${params.numWriteRegCache}")
+    logger.debug(s"iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
   }
 
   // perfEvent
@@ -475,11 +475,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     ("issueQueue_enq_fire_cnt",  PopCount(lastCycleIqEnqFireVec)                    )
   )  ++ issueQueueFullVecPerf
 
-  println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
-  println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
+  logger.debug(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
+  logger.debug(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
 
-  println(s"[Scheduler] iqWakeUpOutKeys: ${iqWakeUpOutMap.keys}")
-  println(s"[Scheduler] io.toSchedulers.wakeupVec: ${io.toSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
+  logger.debug(s"[Scheduler] iqWakeUpOutKeys: ${iqWakeUpOutMap.keys}")
+  logger.debug(s"[Scheduler] io.toSchedulers.wakeupVec: ${io.toSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
 }
 
 class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
@@ -488,7 +488,7 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     with HasPerfEvents
 {
 //  dontTouch(io.vfWbFuBusyTable)
-  println(s"[SchedulerArithImp] " +
+  logger.trace(s"[SchedulerArithImp] " +
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
 
@@ -519,7 +519,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     with HasXSParameter
     with HasPerfEvents
 {
-  println(s"[SchedulerMemImp] " +
+  logger.trace(s"[SchedulerMemImp] " +
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
 
@@ -530,11 +530,11 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val vecMemIQs = issueQueues.filter(_.params.isVecMemIQ)
   val (hyuIQs, hyuIQIdxs) = issueQueues.zipWithIndex.filter(_._1.params.HyuCnt > 0).unzip
 
-  println(s"[SchedulerMemImp] memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] stAddrIQs.size:  ${stAddrIQs.size }, enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] ldAddrIQs.size:  ${ldAddrIQs.size }, enq.size: ${ldAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] stDataIQs.size:  ${stDataIQs.size }, enq.size: ${stDataIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] hyuIQs.size:     ${hyuIQs.size    }, enq.size: ${hyuIQs.map(_.io.enq.size).sum}")
+  logger.info(s"memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
+  logger.info(s"stAddrIQs.size:  ${stAddrIQs.size }, enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
+  logger.info(s"ldAddrIQs.size:  ${ldAddrIQs.size }, enq.size: ${ldAddrIQs.map(_.io.enq.size).sum}")
+  logger.info(s"stDataIQs.size:  ${stDataIQs.size }, enq.size: ${stDataIQs.map(_.io.enq.size).sum}")
+  logger.info(s"hyuIQs.size:     ${hyuIQs.size    }, enq.size: ${hyuIQs.map(_.io.enq.size).sum}")
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
   io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
@@ -590,8 +590,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   private val staIdxSeq = (stAddrIQs).map(iq => iq.params.idxInSchBlk)
   private val hyaIdxSeq = (hyuIQs).map(iq => iq.params.idxInSchBlk)
 
-  println(s"[SchedulerMemImp] sta iq idx in memSchdBlock: $staIdxSeq")
-  println(s"[SchedulerMemImp] hya iq idx in memSchdBlock: $hyaIdxSeq")
+  logger.debug(s"[SchedulerMemImp] sta iq idx in memSchdBlock: $staIdxSeq")
+  logger.debug(s"[SchedulerMemImp] hya iq idx in memSchdBlock: $hyaIdxSeq")
 
   private val staEnqs = stAddrIQs.map(_.io.enq).flatten
   private val stdEnqs = stDataIQs.map(_.io.enq).flatten.take(staEnqs.size)
