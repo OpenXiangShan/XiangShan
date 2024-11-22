@@ -77,15 +77,18 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
 
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
+  // ldu -> lsq UncacheBuffer
   val ldin            = DecoupledIO(new LqWriteBundle)
-  // uncache-mmio
+  // uncache-mmio -> ldu
   val uncache         = Flipped(DecoupledIO(new MemExuOutput))
   val ld_raw_data     = Input(new LoadDataFromLQBundle)
-  // uncache-nc
-  // TODO lyq: use .data(VLEN.W) to transfer nc data is to big, it only needs 64 bits. Refactor?
+  // uncache-nc -> ldu
   val nc_ldin = Flipped(DecoupledIO(new LsPipelineBundle))
+  // storequeue -> ldu
   val forward         = new PipeLoadForwardQueryIO
+  // ldu -> lsq LQRAW
   val stld_nuke_query = new LoadNukeQueryIO
+  // ldu -> lsq LQRAR
   val ldld_nuke_query = new LoadNukeQueryIO
 }
 
@@ -1583,10 +1586,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
    *  dcache hit: [D channel, mshr, sbuffer, sq] 
    *  nc_with_data: [sq]
    */
-  // bug lyq: why not s3_fwd_frm_d_chan?
   
-  // it's ugly, but useful
-  val s2_ld_data_frm_nc = Mux(s2_out.paddr(3), s2_out.data << 64, s2_out.data)
+  val s2_ld_data_frm_nc = shiftDataToHigh(s2_out.paddr, s2_out.data)
 
   val s3_ld_raw_data_frm_pipe = Wire(new LoadDataFromDcacheBundle)
   s3_ld_raw_data_frm_pipe.respDcacheData       := Mux(s2_nc_with_data, s2_ld_data_frm_nc, io.dcache.resp.bits.data)

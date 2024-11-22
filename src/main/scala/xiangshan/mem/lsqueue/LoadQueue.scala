@@ -293,7 +293,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   ioBuffer.io.ld_raw_data <> io.ld_raw_data
   ioBuffer.io.rob <> io.rob
   for ((mmio, w) <- ioBuffer.io.req.zipWithIndex) {
-    mmio.valid := io.ldu.ldin(w).valid // from load_s3
+    mmio.valid := io.ldu.ldin(w).valid && !io.ldu.ldin(w).bits.nc // from load_s3
     mmio.bits := io.ldu.ldin(w).bits // from load_s3
   }
   ioBuffer.io.uncache.resp.valid := io.uncache.resp.valid && !io.uncache.resp.bits.nc
@@ -302,7 +302,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   ncBuffer.io.redirect <> io.redirect
   ncBuffer.io.ncOut <> io.ncOut
   for ((nc, w) <- ncBuffer.io.req.zipWithIndex) {
-    nc.valid := io.ldu.ldin(w).valid // from load_s3
+    nc.valid := io.ldu.ldin(w).valid && io.ldu.ldin(w).bits.nc // from load_s3
     nc.bits := io.ldu.ldin(w).bits // from load_s3
   }
   ncBuffer.io.uncache.resp.valid := io.uncache.resp.valid && io.uncache.resp.bits.nc
@@ -318,12 +318,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.uncache.req.bits := ncBuffer.io.uncache.req.bits
   }
   io.uncache.resp.ready := true.B
-  //TODO lyq: uncache resp ready arbiter? always true?
-  // when(io.uncache.resp.bits.nc){
-  //   io.uncache.resp.ready := ncBuffer.io.uncache.resp.ready
-  // }.otherwise{
-  //   io.uncache.resp.ready := ioBuffer.io.uncache.resp.ready
-  // }
 
   io.nuke_rollback := loadQueueRAW.io.rollback
   io.nack_rollback(0) := ioBuffer.io.rollback

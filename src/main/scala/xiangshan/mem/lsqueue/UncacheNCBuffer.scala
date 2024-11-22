@@ -60,9 +60,19 @@ class NCBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val uncacheState = RegInit(s_idle)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
+  // direct flush during idle, otherwise delayed flush until receiving uncache resp
+  val needFlush = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val needFlushReg = RegInit(false.B)
+  val flush = (needFlush && uncacheState===s_idle) || (io.uncache.resp.fire && needFlushReg)
+  
+  when(flush){
+    needFlushReg := false.B
+  }.elsewhen(needFlush){
+    needFlushReg := true.B
+  }
 
   // enqueue
-  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
+  when (flush) {
     req_valid := false.B
   } .elsewhen (io.req.valid) {
     XSError(req_valid, p"UncacheNCBuffer: You can not write an valid entry: $entryIndex")
@@ -73,7 +83,7 @@ class NCBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     req_valid := false.B
   }
 
-  io.flush := req_valid && req.uop.robIdx.needFlush(io.redirect)
+  io.flush := flush
   /**
    * NC operations
    *
@@ -97,7 +107,11 @@ class NCBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     }
     is (s_resp) {
       when (io.uncache.resp.fire) {
-        uncacheState := s_wait
+        when (needFlushReg) {
+          uncacheState := s_idle
+        }.otherwise{
+          uncacheState := s_wait
+        }
       }
     }
     is (s_wait) {
