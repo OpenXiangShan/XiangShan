@@ -136,7 +136,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
-        val pcGPA = UInt(VaddrMaxWidth.W)
+        val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
         val isFetchBkpt = Bool()
@@ -372,6 +372,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val nmi = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)
   val virtualInterruptIsHvictlInject = RegEnable(intrMod.io.out.virtualInterruptIsHvictlInject, false.B, intrMod.io.out.interruptVec.valid)
+  val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
+  val irToVS = RegEnable(intrMod.io.out.irToVS, false.B, intrMod.io.out.interruptVec.valid)
 
   val trapHandleMod = Module(new TrapHandleModule)
 
@@ -380,6 +382,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.trapInfo.bits.nmi := nmi
   trapHandleMod.io.in.trapInfo.bits.intrVec := intrVec
   trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
+  trapHandleMod.io.in.trapInfo.bits.irToHS := irToHS
+  trapHandleMod.io.in.trapInfo.bits.irToVS := irToVS
   trapHandleMod.io.in.privState := privState
   trapHandleMod.io.in.mstatus  := mstatus.regOut
   trapHandleMod.io.in.vsstatus := vsstatus.regOut
@@ -843,8 +847,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // perf
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
-    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
-    Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR
+    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
   )
 
   // flush
@@ -1486,6 +1489,12 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
+    val diffAIAXtopeiEvent = DifftestModule(new DiffAIAXtopeiEvent)
+    diffAIAXtopeiEvent.coreid := hartId
+    diffAIAXtopeiEvent.valid := fromAIA.rdata.valid
+    diffAIAXtopeiEvent.mtopei := mtopei.rdata
+    diffAIAXtopeiEvent.stopei := stopei.rdata
+    diffAIAXtopeiEvent.vstopei := vstopei.rdata
   }
 }
 

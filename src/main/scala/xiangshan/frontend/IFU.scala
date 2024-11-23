@@ -636,11 +636,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /*** MMIO State Machine***/
-  val f3_mmio_data                  = Reg(Vec(2, UInt(16.W)))
-  val mmio_is_RVC                   = RegInit(false.B)
-  val mmio_resend_addr              = RegInit(0.U(PAddrBits.W))
-  val mmio_resend_exception         = RegInit(0.U(ExceptionType.width.W))
-  val mmio_resend_gpaddr            = RegInit(0.U(GPAddrBits.W))
+  val f3_mmio_data          = Reg(Vec(2, UInt(16.W)))
+  val mmio_is_RVC           = RegInit(false.B)
+  val mmio_resend_addr      = RegInit(0.U(PAddrBits.W))
+  val mmio_resend_exception = RegInit(0.U(ExceptionType.width.W))
+  // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
+  val mmio_resend_gpaddr            = RegInit(0.U(PAddrBitsMax.W))
   val mmio_resend_isForVSnonLeafPTE = RegInit(false.B)
 
   // last instuction finish

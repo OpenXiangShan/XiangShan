@@ -434,7 +434,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
-  resp.bits.tag_error := s2_tag_error // report tag_error in load s2
+  resp.bits.tag_error := false.B
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := s2_miss_req_fire && !io.mq_enq_cancel && !io.wbq_block_miss_req && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
