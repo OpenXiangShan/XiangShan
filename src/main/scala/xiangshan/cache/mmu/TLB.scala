@@ -76,15 +76,22 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
   val redirect = io.redirect
+  val EffectiveVa = Wire(Vec(Width, UInt(XLEN.W)))
   val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire))
+  val req_out = Reg(Vec(Width, new TlbReq))
+  for (i <- 0 until Width) {
+    when (req(i).fire) {
+      req_out(i) := req(i).bits
+      req_out(i).fullva := EffectiveVa(i)
+    }
+  }
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
   val isHyperInst = (0 until Width).map(i => req_out_v(i) && req_out(i).hyperinst)
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
-  val ifecth = if (q.fetchi) true.B else false.B
+  val ifetch = if (q.fetchi) true.B else false.B
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
   val virt_in = csr.priv.virt
@@ -128,17 +135,57 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val preaf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val premode = (0 until Width).map(i => Mux(req_in(i).bits.hyperinst, csr.priv.spvp, mode_tmp))
+  for (i <- 0 until Width) {
+    resp(i).bits.fullva := RegEnable(EffectiveVa(i), req(i).valid)
+  }
   val prevmEnable = (0 until Width).map(i => !(virt_in || req_in(i).bits.hyperinst) && (
     if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
-    else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
+    else (Sv39Enable || Sv48Enable) && (premode(i) < ModeM))
   )
-  val pres2xlateEnable = (0 until Width).map(i => (virt_in || req_in(i).bits.hyperinst) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
+  val pres2xlateEnable = (0 until Width).map(i => (virt_in || req_in(i).bits.hyperinst) && (Sv39x4Enable || Sv48x4Enable) && (premode(i) < ModeM))
+
   (0 until Width).foreach{i =>
-    val pf48 = SignExt(req(i).bits.fullva(47, 0), XLEN) =/= req(i).bits.fullva
-    val pf39 = SignExt(req(i).bits.fullva(38, 0), XLEN) =/= req(i).bits.fullva
-    val gpf48 = req(i).bits.fullva(XLEN - 1, 48 + 2) =/= 0.U
-    val gpf39 = req(i).bits.fullva(XLEN - 1, 39 + 2) =/= 0.U
-    val af = req(i).bits.fullva(XLEN - 1, PAddrBits) =/= 0.U
+
+    val pmm = WireInit(0.U(2.W))
+
+    when (ifetch || req(i).bits.hlvx) {
+      pmm := 0.U
+    } .elsewhen (premode(i) === ModeM) {
+      pmm := csr.pmm.mseccfg
+    } .elsewhen (!(virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
+      pmm := csr.pmm.menvcfg
+    } .elsewhen ((virt_in || req_in(i).bits.hyperinst) && premode(i) === ModeS) {
+      pmm := csr.pmm.henvcfg
+    } .elsewhen (req_in(i).bits.hyperinst && csr.priv.imode === ModeU) {
+      pmm := csr.pmm.hstatus
+    } .elsewhen (premode(i) === ModeU) {
+      pmm := csr.pmm.senvcfg
+    }
+
+    when (prevmEnable(i) || (pres2xlateEnable(i) && vsatp.mode =/= 0.U)) {
+      when (pmm === PMLEN7) {
+        EffectiveVa(i) := SignExt(req_in(i).bits.fullva(56, 0), XLEN)
+      } .elsewhen (pmm === PMLEN16) {
+        EffectiveVa(i) := SignExt(req_in(i).bits.fullva(47, 0), XLEN)
+      } .otherwise {
+        EffectiveVa(i) := req_in(i).bits.fullva
+      }
+    } .otherwise {
+      when (pmm === PMLEN7) {
+        EffectiveVa(i) := ZeroExt(req_in(i).bits.fullva(56, 0), XLEN)
+      } .elsewhen (pmm === PMLEN16) {
+        EffectiveVa(i) := ZeroExt(req_in(i).bits.fullva(47, 0), XLEN)
+      } .otherwise {
+        EffectiveVa(i) := req_in(i).bits.fullva
+      }
+    }
+
+    val pf48 = SignExt(EffectiveVa(i)(47, 0), XLEN) =/= EffectiveVa(i)
+    val pf39 = SignExt(EffectiveVa(i)(38, 0), XLEN) =/= EffectiveVa(i)
+    val gpf48 = EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U
+    val gpf39 = EffectiveVa(i)(XLEN - 1, 39 + 2) =/= 0.U
+    val af = EffectiveVa(i)(XLEN - 1, PAddrBits) =/= 0.U
     when (req(i).valid && req(i).bits.checkfullva) {
       when (prevmEnable(i) || pres2xlateEnable(i)) {
         when (req_in_s2xlate(i) === onlyStage2) {
@@ -347,7 +394,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ldUpdate = !perm.a && isLd // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
     val instrUpdate = !perm.a && isInst // update A/D through exception
-    val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifecth))
+    val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifetch))
     val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
@@ -393,7 +440,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
-      resp(idx).bits.gpaddr(nDups) := RegNext(req(idx).bits.fullva)
+      resp(idx).bits.gpaddr(nDups) := req_out(idx).fullva
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.

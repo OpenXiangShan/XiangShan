@@ -186,6 +186,14 @@ object CSRDefines {
     override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Off, Flush, Inval)
   }
 
+  object EnvPMM extends CSREnum with WARLApply {
+    val Disable  = Value("b00".U)
+    val PMLEN7   = Value("b10".U)
+    val PMLEN16  = Value("b11".U)
+
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Disable, PMLEN7, PMLEN16)
+  }
+
   object ReflectHelper {
     val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
 

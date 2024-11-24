@@ -264,6 +264,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_isHyper   = io.tlb.resp.bits.excp(0).isHyper
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
+  val s1_fullva    = io.tlb.resp.bits.fullva
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
@@ -316,6 +317,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out           := s1_in
   s1_out.paddr     := s1_paddr
   s1_out.gpaddr    := s1_gpaddr
+  s1_out.fullva    := s1_fullva
   s1_out.vaNeedExt := s1_vaNeedExt
   s1_out.isHyper   := s1_isHyper
   s1_out.miss      := false.B

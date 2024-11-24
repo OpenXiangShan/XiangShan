@@ -70,7 +70,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   // paddr after translation
   val paddr = Reg(UInt())
   val gpaddr = Reg(UInt())
-  val vaddr = in.src(0)
+  val vaddr = Reg(UInt())
   val is_mmio = Reg(Bool())
   val isForVSnonLeafPTE = Reg(Bool())
 
@@ -89,7 +89,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionInfo.valid := atom_override_xtval
-  io.exceptionInfo.bits.vaddr := in.src(0)
+  io.exceptionInfo.bits.vaddr := vaddr
   io.exceptionInfo.bits.gpaddr := gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
 
@@ -217,6 +217,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     when (io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr   := io.dtlb.resp.bits.paddr(0)
       gpaddr  := io.dtlb.resp.bits.gpaddr(0)
+      vaddr   := io.dtlb.resp.bits.fullva
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
@@ -313,7 +314,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     pipe_req.probe_need_data := false.B
     pipe_req.source := AMO_SOURCE.U
     pipe_req.addr   := get_block_addr(paddr)
-    pipe_req.vaddr  := get_block_addr(in.src(0)) // vaddr
+    pipe_req.vaddr  := get_block_addr(vaddr) // vaddr
     pipe_req.word_idx  := get_word(paddr)
     pipe_req.amo_data  := genWdata(in.src(1), in.uop.fuOpType(1,0))
     pipe_req.amo_mask  := genWmask(paddr, in.uop.fuOpType(1,0))

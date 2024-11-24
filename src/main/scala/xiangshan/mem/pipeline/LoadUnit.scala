@@ -898,6 +898,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
+  s1_out.fullva            := io.tlb.resp.bits.fullva
   s1_out.vaNeedExt         := io.tlb.resp.bits.excp(0).vaNeedExt
   s1_out.isHyper           := io.tlb.resp.bits.excp(0).isHyper
   s1_out.paddr             := s1_paddr_dup_lsu

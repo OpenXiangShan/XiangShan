@@ -266,6 +266,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE
   tlb.hPBMTE := csrMod.io.tlb.hPBMTE
 
+  // pointer masking extension
+  tlb.pmm := csrMod.io.tlb.pmm
+
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.out.valid := csrModOutValid

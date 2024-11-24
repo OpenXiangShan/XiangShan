@@ -138,6 +138,10 @@ trait HasTlbConst extends HasXSParameter {
   def Sv39x4 = "h8".U
   def Sv48x4 = "h9".U
 
+  def PMLEN7  = "b10".U
+  def PMLEN16 = "b11".U
+  def MaxMaskedWidth = 16
+
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
     addr(addr.getWidth-1, offLen)
