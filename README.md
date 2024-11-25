@@ -122,3 +122,7 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+
+## Acknowledgement
+
+The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
