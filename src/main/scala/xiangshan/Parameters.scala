@@ -875,6 +875,7 @@ trait HasXSParameter {
   def TraceSoftL1TLB = false
   def TraceSoftL1TLBCheck = false
   def TraceDummyFixCycleDivSqrt = false
+  def TraceDummyFixCycleIntDiv = false
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25

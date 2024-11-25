@@ -86,7 +86,7 @@ abstract class TraceDummyIntFpDividerBase(implicit p: Parameters) extends XSModu
 class TraceDummyIntDivider(implicit p: Parameters) extends TraceDummyIntFpDividerBase {
 
   override def getCycle(format: UInt, is_sqrt: Bool): UInt = {
-    return Mux(format === 3.U, 9.U, 5.U)
+    return Mux(format === 3.U, 10.U, 6.U)
   }
 }
 
@@ -94,7 +94,7 @@ class TraceDummyFpDivider(implicit p: Parameters) extends TraceDummyIntFpDivider
 
   override def getCycle(format: UInt, is_sqrt: Bool): UInt = {
     Mux(is_sqrt,
-      Mux(format === 3.U, 13.U, 7.U),
-      Mux(format === 3.U, 11.U, 5.U))
+      Mux(format === 3.U, 15.U, 10.U),
+      Mux(format === 3.U, 12.U, 7.U))
   }
 }
