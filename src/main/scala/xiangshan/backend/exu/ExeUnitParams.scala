@@ -115,9 +115,6 @@ case class ExeUnitParams(
   val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
 
 
-
-  require(needPc && needTarget || !needPc && !needTarget, "The ExeUnit must need both PC and Target PC")
-
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
     iqWakeUpSourcePairs.map(_.sink).foreach{ wakeupSink =>

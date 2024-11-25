@@ -84,15 +84,14 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := state =/= s_idle && state =/= s_wait
   io.out.bits.res.data := 0.U
   io.out.bits.ctrl.robIdx := uop.ctrl.robIdx
-  io.out.bits.res.pc.get := uop.data.pc.get
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
   io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
   io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
 
-  XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.data.pc.get)} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
+  XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
-  XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.res.pc.get)} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
+  XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
 
   assert(!io.out.valid || io.out.ready, "when fence is out valid, out ready should always be true")
 }

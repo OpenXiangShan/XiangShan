@@ -65,7 +65,6 @@ class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val data      = UInt(cfg.destDataBits.W)
   val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
   val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
-  val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
   val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
 }
 
@@ -221,7 +220,6 @@ trait HasPipelineReg { this: FuncUnit =>
 
   io.in.ready := fixRdyVec.head
   io.out.valid := fixValidVec.last
-  io.out.bits.res.pc.zip(pcVec.last).foreach { case (l, r) => l := r }
 
   io.out.bits.ctrl.robIdx := fixCtrlVec.last.robIdx
   io.out.bits.ctrl.pdest := fixCtrlVec.last.pdest

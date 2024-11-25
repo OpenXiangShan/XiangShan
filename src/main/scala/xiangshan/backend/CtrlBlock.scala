@@ -72,6 +72,8 @@ class CtrlBlockImp(
     "redirect"  -> 1,
     "memPred"   -> 1,
     "robFlush"  -> 1,
+    "bjuPc"     -> params.BrhCnt,
+    "bjuTarget" -> params.BrhCnt,
     "load"      -> params.LduCnt,
     "hybrid"    -> params.HyuCnt,
     "store"     -> (if(EnableStorePrefetchSMS) params.StaCnt else 0),
@@ -213,11 +215,32 @@ class CtrlBlockImp(
   pcMem.io.raddr(pcMemRdIndexes("memPred").head) := memViolation.bits.stFtqIdx.value
   redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegEnable(memViolation.bits.stFtqOffset, memViolation.valid))
 
+  for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
+    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
+    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
+    val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
+    pcMem.io.ren.get(pcMemIdx) := ren
+    pcMem.io.raddr(pcMemIdx) := raddr
+    io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(roffset, ren))
+  }
+
+  for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
+    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
+    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
+    pcMem.io.ren.get(pcMemIdx) := ren
+    pcMem.io.raddr(pcMemIdx) := raddr
+    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).startAddr
+  }
+
+  val baseIdx = params.BrhCnt
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
-    pcMem.io.ren.get(pcMemIdx) := io.memLdPcRead(i).valid
-    pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
-    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memLdPcRead(i).offset, io.memLdPcRead(i).valid))
+    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(baseIdx+i)
+    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(baseIdx+i).value
+    val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(baseIdx+i)
+    pcMem.io.ren.get(pcMemIdx) := ren
+    pcMem.io.raddr(pcMemIdx) := raddr
+    io.toDataPath.pcToDataPathIO.toDataPathPC(baseIdx+i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(roffset, ren))
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
@@ -764,6 +787,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toDataPath = new Bundle {
     val flush = ValidIO(new Redirect)
+    val pcToDataPathIO = new PcToDataPathIO(params)
   }
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
@@ -779,7 +803,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
     val violation = Flipped(ValidIO(new Redirect))
   }
-  val memLdPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val memStPcRead = Vec(params.StaCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val memHyPcRead = Vec(params.HyuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 

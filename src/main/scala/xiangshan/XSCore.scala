@@ -195,7 +195,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issueUops.map(_.bits.uop.clearExceptions())
-  memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
