@@ -17,8 +17,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
   // io alias
   private val is_sqrt_i = fuOpType(0)
-  private val src0 = inData.src(0)
-  private val src1 = inData.src(1)
+  private val src0 = if (env.TraceRTLMode) inData.src(1) else inData.src(0)
+  private val src1 = if (env.TraceRTLMode) inData.src(0) else inData.src(1)
 
   // modules
   private val fdiv = Module(new FloatDivider)
