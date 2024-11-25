@@ -221,7 +221,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
-    val fencei   = Input(Bool())
+    val flush    = Vec(PortNumber, Flipped(ValidIO(new ICacheMetaFlushBundle)))
+    val flushAll = Input(Bool())
   })
 
   val port_0_read_0 = io.read.valid && !io.read.bits.vSetIdx(0)(0)
@@ -293,7 +294,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
   )
   io.readResp.entryValid := valid_metas
 
-  io.read.ready := !io.write.valid && !io.fencei && tagArrays.map(_.io.r.req.ready).reduce(_ && _)
+  io.read.ready := !io.write.valid && !io.flush.map(_.valid).reduce(_ || _) && !io.flushAll &&
+    tagArrays.map(_.io.r.req.ready).reduce(_ && _)
 
   // valid write
   val way_num = OHToUInt(io.write.bits.waymask)
@@ -332,12 +334,31 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
 
   io.write.ready := true.B // TODO : has bug ? should be !io.cacheOp.req.valid
 
-  // fencei logic : reset valid_array
-  when(io.fencei) {
-    (0 until nWays).foreach(way =>
-      valid_array(way) := 0.U
-    )
+  /*
+   * flush logic
+   */
+  // flush standalone set (e.g. flushed by mainPipe before doing re-fetch)
+  when(io.flush.map(_.valid).reduce(_ || _)) {
+    (0 until nWays).foreach { w =>
+      valid_array(w) := (0 until PortNumber).map { i =>
+        Mux(
+          // check if set `virIdx` in way `w` is requested to be flushed by port `i`
+          io.flush(i).valid && io.flush(i).bits.waymask(w),
+          valid_array(w).bitSet(io.flush(i).bits.virIdx, false.B),
+          valid_array(w)
+        )
+      }.reduce(_ & _)
+    }
   }
+
+  // flush all (e.g. fence.i)
+  when(io.flushAll) {
+    (0 until nWays).foreach(w => valid_array(w) := 0.U)
+  }
+
+  // PERF: flush counter
+  XSPerfAccumulate("flush", io.flush.map(_.valid).reduce(_ || _))
+  XSPerfAccumulate("flush_all", io.flushAll)
 }
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
@@ -550,7 +571,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   dataArray.io.read <> mainPipe.io.dataArray.toIData
   dataArray.io.readResp <> mainPipe.io.dataArray.fromIData
 
-  metaArray.io.fencei := io.fencei
+  metaArray.io.flushAll := io.fencei
+  metaArray.io.flush <> mainPipe.io.metaArrayFlush
   metaArray.io.write <> missUnit.io.meta_write
   metaArray.io.read <> prefetcher.io.metaRead.toIMeta
   metaArray.io.readResp <> prefetcher.io.metaRead.fromIMeta

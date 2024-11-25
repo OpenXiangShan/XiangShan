@@ -45,7 +45,11 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
     this.waymask := waymask
     this.bankIdx := bankIdx
   }
+}
 
+class ICacheMetaFlushBundle(implicit p: Parameters) extends ICacheBundle {
+  val virIdx  = UInt(idxBits.W)
+  val waymask = UInt(nWays.W)
 }
 
 class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle {
@@ -60,7 +64,6 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle {
     this.waymask := waymask
     this.bankIdx := bankIdx
   }
-
 }
 
 class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle {
@@ -75,11 +78,6 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle {
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle {
   val datas = Vec(ICacheDataBanks, UInt(ICacheDataBits.W))
   val codes = Vec(ICacheDataBanks, UInt(ICacheDataCodeBits.W))
-}
-
-class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle {
-  val req  = Flipped(DecoupledIO(new ICacheReadBundle))
-  val resp = Output(new ICacheMetaRespBundle)
 }
 
 class ReplacerTouch(implicit p: Parameters) extends ICacheBundle {
