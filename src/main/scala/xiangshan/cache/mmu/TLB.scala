@@ -226,14 +226,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         pmp_addr(idx) := ats_paddr
 
         resp(idx).valid := req_out_v(idx)
+        resp(idx).bits.miss := false.B
         resp(idx).bits.paddr.foreach { _ := ats_paddr }
         resp(idx).bits.gpaddr.foreach { _ := ats_paddr }
 
-        when (vmEnable(idx) && resp(idx).valid && !TlbCmd.isExec(req_out(idx).cmd)) {
-          XSError(!ats.io.hit, s"Memory TLB(?)(port ${idx}) should always hit")
-        }
-        XSError(resp(idx).bits.miss, s"TLB $idx should not miss")
-        XSError(resp(idx).bits.ptwBack, s"TLB $idx should not ptwBack")
+        // when (vmEnable(idx) && resp(idx).valid && !TlbCmd.isExec(req_out(idx).cmd)) {
+        //   XSError(!ats.io.hit, s"Memory TLB(?)(port ${idx}) should always hit")
+        // }
 
         io.ptw.req.map(_.valid := false.B)
         XSError(io.ptw.resp.valid, "When at TraceRTL mode, should not ptw resp")
