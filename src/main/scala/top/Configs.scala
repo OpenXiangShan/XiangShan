@@ -129,6 +129,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           nProbeEntries = 4,
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
+          enableTagEcc = true,
+          enableDataEcc = true,
           cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
         )),
         // ============ BPU ===============

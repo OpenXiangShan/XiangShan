@@ -333,10 +333,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
                                   0.U(tagBits.W)
                               )
   val pseudo_enc_tag_resp = Wire(io.tag_resp.cloneType)
-  pseudo_enc_tag_resp.zip(enc_tag_resp).map {
-    case (pseudo_enc, real_enc) =>
-      val ecc = real_enc(encTagBits - 1, tagBits)
-      pseudo_enc := Cat(ecc, real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask)
+  if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
+    pseudo_enc_tag_resp.zip(enc_tag_resp).map {
+      case (pseudo_enc, real_enc) =>
+        val ecc = real_enc(encTagBits - 1, tagBits)
+        pseudo_enc := Cat(ecc, real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask)
+    }
+  } else {
+    pseudo_enc_tag_resp := DontCare
   }
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
@@ -488,6 +492,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR && s2_need_tag
+  }
+  if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
     s2_pseudo_tag_error := s2_pseudo_tag_errors.orR && s2_need_tag
   }
   io.pseudo_error.ready := s2_fire_to_s3 && (s2_tag_error || s2_pseudo_tag_error || s2_hit && s2_may_report_data_error)
@@ -519,11 +525,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.readline_error_delayed && RegNext(s2_may_report_data_error),
     RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
   )
-  val s3_pseudo_data_error = Wire(Bool())
-  s3_pseudo_data_error := Mux(GatedValidRegNextN(s1_fire, 2),
-    io.readline_pseudo_error_delayed && RegNext(s2_may_report_data_error),
-    RegNext(s3_pseudo_data_error)
-  )
+  val s3_pseudo_data_error = WireInit(false.B)
+  if (cacheCtrlParamsOpt.nonEmpty && EnableDataEcc) {
+    s3_pseudo_data_error := Mux(GatedValidRegNextN(s1_fire, 2),
+      io.readline_pseudo_error_delayed && RegNext(s2_may_report_data_error),
+      RegNext(s3_pseudo_data_error)
+    )
+  }
   // error signal for amo inst
   // s3_error = s3_flag_error || s3_tag_error || s3_l2_error || s3_data_error
   val s3_error = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error || s3_pseudo_data_error

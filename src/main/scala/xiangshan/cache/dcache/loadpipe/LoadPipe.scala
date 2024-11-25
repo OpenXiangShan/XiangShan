@@ -205,10 +205,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
                                 0.U(tagBits.W)
                             )
   val s1_pseudo_tag_resp = Wire(io.tag_resp.cloneType)
-  s1_pseudo_tag_resp.zip(io.tag_resp).map {
-    case (pseudo_enc, real_enc) =>
-      val ecc = real_enc(encTagBits - 1, tagBits)
-      pseudo_enc := Cat(ecc, real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask)
+  if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
+    s1_pseudo_tag_resp.zip(io.tag_resp).map {
+      case (pseudo_enc, real_enc) =>
+        val ecc = real_enc(encTagBits - 1, tagBits)
+        pseudo_enc := Cat(ecc, real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask)
+    }
+  } else {
+    s1_pseudo_tag_resp := DontCare
   }
 
   // resp in s1
@@ -398,6 +402,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR
+  }
+  if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
     s2_pseudo_tag_error := s2_pseudo_tag_errors.orR
   }
   io.pseudo_error.ready := s2_fire && (s2_tag_error || s2_pseudo_tag_error || s2_hit && !io.bank_conflict_slow)
