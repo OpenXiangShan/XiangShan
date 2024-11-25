@@ -176,7 +176,6 @@ class BackendInlined(val params: BackendParams)(implicit p: Parameters) extends 
   println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
   params.allExuParams.map(_.copyNum)
   val ctrlBlock = LazyModule(new CtrlBlock(params))
-  val pcTargetMem = LazyModule(new PcTargetMem(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
   val fpScheduler = params.fpSchdParams.map(x => LazyModule(new Scheduler(x)))
   val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
@@ -199,7 +198,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val io = IO(new BackendIO()(p, wrapper.params))
 
   private val ctrlBlock = wrapper.ctrlBlock.module
-  private val pcTargetMem = wrapper.pcTargetMem.module
   private val intScheduler: SchedulerImpBase = wrapper.intScheduler.get.module
   private val fpScheduler = wrapper.fpScheduler.get.module
   private val vfScheduler = wrapper.vfScheduler.get.module
@@ -484,8 +482,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     }
   }
 
-  pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
-  pcTargetMem.io.toDataPath <> dataPath.io.fromPcTargetMem
+  ctrlBlock.io.toDataPath.pcToDataPathIO <> dataPath.io.fromPcTargetMem
 
   private val csrin = intExuBlock.io.csrin.get
   csrin.hartId := io.fromTop.hartId
@@ -744,13 +741,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.sfence := fenceio.sfence
   io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
-  require(io.mem.loadPcRead.size == params.LduCnt)
-  io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
-    loadPcRead := ctrlBlock.io.memLdPcRead(i).data
-    ctrlBlock.io.memLdPcRead(i).valid := io.mem.issueLda(i).valid
-    ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueLda(i).bits.uop.ftqPtr
-    ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueLda(i).bits.uop.ftqOffset
-  }
 
   io.mem.storePcRead.zipWithIndex.foreach { case (storePcRead, i) =>
     storePcRead := ctrlBlock.io.memStPcRead(i).data
@@ -806,7 +796,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       ModuleNode(wbDataPath)
     ))
     val leftResetTree = ResetGenNode(Seq(
-      ModuleNode(pcTargetMem),
       ModuleNode(intScheduler),
       ModuleNode(fpScheduler),
       ModuleNode(vfScheduler),
@@ -883,7 +872,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
   val ldCancel = Vec(params.LdExuCnt, Input(new LoadCancelIO))
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
-  val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input

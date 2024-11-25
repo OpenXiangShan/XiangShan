@@ -1131,6 +1131,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   require(!loadWakeUpIter.hasNext)
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
+    deq.bits.common.pc.foreach(_ := 0.U)
     deq.bits.common.loadWaitBit.foreach(_ := deqEntryVec(i).bits.payload.loadWaitBit)
     deq.bits.common.waitForRobIdx.foreach(_ := deqEntryVec(i).bits.payload.waitForRobIdx)
     deq.bits.common.storeSetHit.foreach(_ := deqEntryVec(i).bits.payload.storeSetHit)

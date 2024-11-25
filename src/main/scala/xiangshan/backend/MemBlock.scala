@@ -106,7 +106,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
 
-  val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
   val storePc = Vec(StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
   val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 
@@ -417,10 +416,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
           source.bits.miss || isFromStride(source.bits.meta_prefetch)
         )
         l1Prefetcher.stride_train(i).bits := source.bits
+        val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
         l1Prefetcher.stride_train(i).bits.uop.pc := Mux(
           loadUnits(i).io.s2_ptr_chasing,
-          RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s2_prefetch_spec),
-          RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
+          RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec),
+          RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
         )
       }
       for (i <- 0 until HyuCnt) {
@@ -877,10 +877,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         source.valid && source.bits.isFirstIssue && source.bits.miss
       )
       pf.io.ld_in(i).bits := source.bits
+      val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
       pf.io.ld_in(i).bits.uop.pc := Mux(
         loadUnits(i).io.s2_ptr_chasing,
-        RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s2_prefetch_spec),
-        RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
+        RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec),
+        RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
       )
     })
     l1PrefetcherOpt.foreach(pf => {
