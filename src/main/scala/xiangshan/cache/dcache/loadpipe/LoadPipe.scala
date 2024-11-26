@@ -80,7 +80,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // ecc error
     val error = Output(ValidIO(new L1CacheErrorInfo))
-    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))))
+    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
 
     val prefetch_info = new Bundle {
       val naive = new Bundle {
@@ -200,8 +200,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_resp = io.tag_resp.map(r => r(tagBits - 1, 0))
   // pseudo enc ecc tag
   val pseudo_tag_toggle_mask = Mux(
-                                io.pseudo_error.valid,
-                                io.pseudo_error.bits(0)(tagBits - 1, 0),
+                                io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
+                                io.pseudo_error.bits(0).mask(tagBits - 1, 0),
                                 0.U(tagBits.W)
                             )
   val s1_pseudo_tag_resp = Wire(io.tag_resp.cloneType)

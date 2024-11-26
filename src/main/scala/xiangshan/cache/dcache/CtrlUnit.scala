@@ -48,9 +48,15 @@ case class L1CacheCtrlParams (
 
 class CtrlUnitCtrlBundle(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val zero0 = UInt((60-DCacheBanks).W)  // padding bits
+  val bank  = UInt(DCacheBanks.W) // bank enable
   val comp  = UInt(2.W)   // components: 2'b01 tag, 2'b10 data
   val ede   = Bool()      // error delay enable
   val ese   = Bool()      // error signaling enable
+}
+
+class CtrlUnitSignalingBundle(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+  val valid = Bool()
+  val mask  = UInt(DCacheSRAMRowBits.W)
 }
 
 class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyModule
@@ -68,7 +74,7 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
   lazy val module = new CtrlUnitImp
 
   class CtrlUnitImp extends LazyModuleImp(this) {
-    val io_pseudoError = IO(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))))
+    val io_pseudoError = IO(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
 
     require(params.maxBanks > 0, "At least one bank!")
     require(params.maxBanks == 1, "Is it necessary to have more than 1 bank?")
@@ -85,7 +91,11 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
 
         require(io_pseudoError.length == ctrlRegBundle.comp.getWidth, "io_pseudoError must equal number of components!")
         pErr.valid := ctrlRegBundle.ese && ctrlRegBundle.comp(i) && (!ctrlRegBundle.ede || delayReg === 0.U)
-        pErr.bits := maskRegs
+        pErr.bits.zip(ctrlRegBundle.bank.asBools).zip(maskRegs).map {
+          case ((bankOut, bankEnable), mask) =>
+            bankOut.valid := bankEnable
+            bankOut.mask  := mask
+        }
 
         when (pErr.fire) {
           val newCtrlReg = WireInit(0.U.asTypeOf(ctrlRegBundle))

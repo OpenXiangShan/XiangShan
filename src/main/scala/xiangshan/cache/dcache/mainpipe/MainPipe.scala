@@ -192,7 +192,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
     // ecc error
     val error = Output(ValidIO(new L1CacheErrorInfo))
-    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))))
+    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
     // force write
     val force_write = Input(Bool())
 
@@ -328,8 +328,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // pseudo ecc enc tag
   val pseudo_tag_toggle_mask = Mux(
-                                  io.pseudo_error.valid,
-                                  io.pseudo_error.bits(0)(tagBits - 1, 0),
+                                  io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
+                                  io.pseudo_error.bits(0).mask(tagBits - 1, 0),
                                   0.U(tagBits.W)
                               )
   val pseudo_enc_tag_resp = Wire(io.tag_resp.cloneType)

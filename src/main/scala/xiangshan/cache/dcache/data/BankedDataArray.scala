@@ -272,7 +272,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
-    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))))
+    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
@@ -440,10 +440,17 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(read_error_delayed_result)
   dontTouch(read_pseudo_error_delayed_result)
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
-    case mask =>
-      Mux(io.pseudo_error.valid, mask, 0.U)
+    case bank =>
+      Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
   }
-  io.pseudo_error.ready := false.B
+  val pseudo_error_hit = io.readline.fire ||
+                         io.read.zip(bank_addrs.zip(io.is128Req)).map {
+                          case (read, (bank_addr, is128Req)) =>
+                            val error_bank0 = io.pseudo_error.bits(bank_addr(0))
+                            val error_bank1 = io.pseudo_error.bits(bank_addr(1))
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req)
+                         }.reduce(_|_)
+  io.pseudo_error.ready := RegNext(pseudo_error_hit)
   for (div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
       for (way_index <- 0 until DCacheWays) {
@@ -687,10 +694,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.readline.ready := !(wrl_bank_conflict)
   io.read.zipWithIndex.map{case(x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard)}
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
-    case mask =>
-      Mux(io.pseudo_error.valid, mask, 0.U)
+    case bank =>
+      Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
   }
-  io.pseudo_error.ready := RegNext(io.readline.fire) || io.read.zip(io.bank_conflict_slow).map(x => RegNext(x._1.fire) && !x._2).reduce(_|_)
+  val pseudo_error_hit = io.readline.fire ||
+                         io.read.zip(bank_addrs.zip(io.is128Req)).map {
+                          case (read, (bank_addr, is128Req)) =>
+                            val error_bank0 = io.pseudo_error.bits(bank_addr(0))
+                            val error_bank1 = io.pseudo_error.bits(bank_addr(1))
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req)
+                         }.reduce(_|_)
+  io.pseudo_error.ready := RegNext(pseudo_error_hit)
   val perf_multi_read = PopCount(io.read.map(_.valid)) >= 2.U
   (0 until LoadPipelineWidth).foreach(i => {
     // remove fake rr_bank_conflict situation in s2
