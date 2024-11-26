@@ -402,6 +402,7 @@ object TopMain extends App {
   // generate difftest bundles (w/o DifftestTopIO)
   if (enableDifftest) {
     DifftestModule.finish("XiangShan", false)
+    DifftestBuilder.build("build", config)
   }
 
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
