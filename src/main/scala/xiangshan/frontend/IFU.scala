@@ -716,7 +716,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   switch(mmio_state) {
     is(m_idle) {
       when(f3_req_is_mmio) {
-        mmio_state := m_waitLastCmt
+        // in idempotent spaces, we can send request directly (i.e. can do speculative fetch)
+        mmio_state := Mux(f3_itlb_pbmt === Pbmt.nc, m_sendReq, m_waitLastCmt)
       }
     }
 
@@ -790,7 +791,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     is(m_waitResendResp) {
       when(fromUncache.fire) {
-        mmio_state      := m_waitCommit
+        // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
+        mmio_state      := Mux(f3_itlb_pbmt === Pbmt.nc, m_commited, m_waitCommit)
         f3_mmio_data(1) := fromUncache.bits.data(15, 0)
       }
     }
