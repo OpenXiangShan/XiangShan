@@ -242,7 +242,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   ))
 
   // number of writeback num
-  val numOfWB = Mux(UopSplitType.isAmocas(typeOfSplit), numOfUop >> 1, numOfUop)
+  val numOfWB = Mux(UopSplitType.isAMOCAS(typeOfSplit), numOfUop >> 1, numOfUop)
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
   isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
