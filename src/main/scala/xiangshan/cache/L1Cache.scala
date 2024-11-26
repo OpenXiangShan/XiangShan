@@ -73,6 +73,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def wordBits = DataBits
   def wordBytes = wordBits / 8
   def wordOffBits = log2Up(wordBytes)
+  def quadWordOffBits = log2Up(QuadWordBytes)
   // the number of words in a block
   def blockWords = blockBytes / wordBytes
   def refillWords = refillBytes / wordBytes
@@ -89,6 +90,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_row(addr: UInt) = addr(blockOffBits - 1, rowOffBits)
   def get_word(addr: UInt) = addr(blockOffBits - 1, wordOffBits)
+  def get_quad_word(addr: UInt) = addr(blockOffBits - 1, quadWordOffBits)
 
   def beatRows = beatBits/rowBits
   def rowWords = rowBits/wordBits

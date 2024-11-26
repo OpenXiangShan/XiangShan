@@ -56,8 +56,9 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // which word does amo work on?
   val word_idx = UInt(log2Up(cfg.blockBytes * 8 / DataBits).W)
-  val amo_data   = UInt(DataBits.W)
-  val amo_mask   = UInt((DataBits / 8).W)
+  val amo_data   = UInt(QuadWordBits.W)
+  val amo_mask   = UInt(QuadWordBytes.W)
+  val amo_cmp    = UInt(QuadWordBits.W) // data to be compared in AMOCAS
 
   // error
   val error = Bool()
@@ -75,6 +76,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   def isLoad: Bool = source === LOAD_SOURCE.U
   def isStore: Bool = source === STORE_SOURCE.U
   def isAMO: Bool = source === AMO_SOURCE.U
+
+  def quad_word_idx = word_idx >> 1
 
   def convertStoreReq(store: DCacheLineReq): MainPipeReq = {
     val req = Wire(new MainPipeReq)
@@ -125,7 +128,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
     val store_hit_resp = ValidIO(new DCacheLineResp)
-    val release_update = ValidIO(new ReleaseUpdate)
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
@@ -468,6 +470,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
+  val s2_data_quad_word = VecInit((0 until DCacheBanks).map(i => {
+    if (i == (DCacheBanks - 1)) s2_data(i)
+    else Cat(s2_data(i + 1), s2_data(i))
+  }))(s2_req.word_idx)
 
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
@@ -488,6 +494,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire_to_s3)
   val s3_data_word = RegEnable(s2_data_word, s2_fire_to_s3)
+  val s3_data_quad_word = RegEnable(s2_data_quad_word, s2_fire_to_s3)
   val s3_data = RegEnable(s2_data, s2_fire_to_s3)
   val s3_l2_error = RegEnable(s2_l2_error, s2_fire_to_s3)
   // data_error will be reported by data array 1 cycle after data read resp
@@ -544,7 +551,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val probe_update_meta = s3_req_probe_dup(0) && s3_tag_match_dup && s3_coh_dup(0) =/= probe_new_coh
   val store_update_meta = s3_req.isStore && !s3_req_probe_dup(1) && s3_hit_coh =/= s3_new_hit_coh_dup(0)
   val amo_update_meta = s3_req.isAMO && !s3_req_probe_dup(2) && s3_hit_coh_dup =/= s3_new_hit_coh_dup(1)
-  val amo_wait_amoalu = s3_req.isAMO && s3_req_cmd_dup(0) =/= M_XLR && s3_req_cmd_dup(1) =/= M_XSC
+  val amo_wait_amoalu = s3_req.isAMO && s3_req_cmd_dup(0) =/= M_XLR && s3_req_cmd_dup(1) =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val update_meta = (miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta) && !s3_req_replace_dup(0)
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
@@ -573,13 +581,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_addr  = Reg(UInt())
   val s3_lr = !s3_req_probe_dup(3) && s3_req.isAMO && s3_req_cmd_dup(3) === M_XLR
   val s3_sc = !s3_req_probe_dup(4) && s3_req.isAMO && s3_req_cmd_dup(4) === M_XSC
+  val s3_cas = !s3_req_probe_dup(3) && s3_req.isAMO && isAMOCAS(s3_req_cmd_dup(3))
   val s3_lrsc_addr_match = lrsc_valid_dup(0) && lrsc_addr === get_block_addr(s3_req.addr)
   val s3_sc_fail = s3_sc && !s3_lrsc_addr_match
   val debug_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid_dup(0)
-  val s3_sc_resp = Mux(s3_sc_fail, 1.U, 0.U)
+
+  val s3_cas_fail = FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_data_quad_word) =/= 0.U
 
   val s3_can_do_amo = (s3_req_miss_dup(0) && !s3_req_probe_dup(5) && s3_req.isAMO) || s3_amo_hit
-  val s3_can_do_amo_write = s3_can_do_amo && isWrite(s3_req_cmd_dup(5)) && !s3_sc_fail
+  val s3_can_do_amo_write = s3_can_do_amo && isWrite(s3_req_cmd_dup(5)) && !s3_sc_fail && !s3_cas_fail
 
   val lrsc_valid = lrsc_count > 0.U
 
@@ -662,9 +672,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   amoalu.io.rhs  := s3_req.amo_data
 
   // merge amo write data
-//  val amo_bitmask = FillInterleaved(8, s3_req.amo_mask)
-  val s3_amo_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+  val s3_amo_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))) // exclude AMOCAS
   val s3_sc_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+  val s3_cas_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {
     val old_data = s3_store_data_merged(i)
     val new_data = amoalu.io.out
@@ -676,6 +686,22 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
     s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
       Mux(s3_req_word_idx_dup(i) === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
+    )
+    val l_select = !s3_cas_fail && s3_req_word_idx_dup(i) === i.U
+    val h_select = !s3_cas_fail && s3_req_cmd_dup(0) === M_XA_CASQ &&
+      (if (i % 2 == 1) s3_req_word_idx_dup(i) === (i - 1).U else false.B)
+    s3_cas_data_merged(i) := mergePutData(
+      old_data = old_data,
+      new_data = Mux(h_select, s3_req.amo_data >> DataBits, s3_req.amo_data.take(DataBits)),
+      wmask = Mux(
+        h_select,
+        s3_req.amo_mask >> wordBytes,
+        Mux(
+          l_select,
+          s3_req.amo_mask.take(wordBytes),
+          0.U(wordBytes.W)
+        )
+      )
     )
   }
   val s3_amo_data_merged_reg = RegEnable(s3_amo_data_merged, do_amoalu)
@@ -746,7 +772,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_s_amoalu_dup_for_meta_w_valid = RegInit(false.B)
   val amo_wait_amoalu_dup_for_meta_w_valid = s3_req_source_dup_for_meta_w_valid === AMO_SOURCE.U &&
     s3_req_cmd_dup_for_meta_w_valid =/= M_XLR &&
-    s3_req_cmd_dup_for_meta_w_valid =/= M_XSC
+    s3_req_cmd_dup_for_meta_w_valid =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val do_amoalu_dup_for_meta_w_valid = amo_wait_amoalu_dup_for_meta_w_valid && s3_valid_dup_for_meta_w_valid && !s3_s_amoalu_dup_for_meta_w_valid
 
   val s3_store_hit_dup_for_meta_w_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -775,7 +802,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_valid_dup_for_meta_w_valid = lrsc_count_dup_for_meta_w_valid > LRSCBackOff.U
   val s3_lrsc_addr_match_dup_for_meta_w_valid = lrsc_valid_dup_for_meta_w_valid && lrsc_addr_dup_for_meta_w_valid === get_block_addr(s3_req_addr_dup_for_meta_w_valid)
   val s3_sc_fail_dup_for_meta_w_valid = s3_sc_dup_for_meta_w_valid && !s3_lrsc_addr_match_dup_for_meta_w_valid
-  val s3_can_do_amo_write_dup_for_meta_w_valid = s3_can_do_amo_dup_for_meta_w_valid && isWrite(s3_req_cmd_dup_for_meta_w_valid) && !s3_sc_fail_dup_for_meta_w_valid
+  val s3_can_do_amo_write_dup_for_meta_w_valid = s3_can_do_amo_dup_for_meta_w_valid &&
+    isWrite(s3_req_cmd_dup_for_meta_w_valid) && !s3_sc_fail_dup_for_meta_w_valid && !s3_cas_fail
   val update_data_dup_for_meta_w_valid = s3_req_miss_dup_for_meta_w_valid || s3_store_hit_dup_for_meta_w_valid || s3_can_do_amo_write_dup_for_meta_w_valid
 
   val s3_probe_can_go_dup_for_meta_w_valid = s3_req_probe_dup_for_meta_w_valid &&
@@ -861,7 +889,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_s_amoalu_dup_for_err_w_valid = RegInit(false.B)
   val amo_wait_amoalu_dup_for_err_w_valid = s3_req_source_dup_for_err_w_valid === AMO_SOURCE.U &&
     s3_req_cmd_dup_for_err_w_valid =/= M_XLR &&
-    s3_req_cmd_dup_for_err_w_valid =/= M_XSC
+    s3_req_cmd_dup_for_err_w_valid =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val do_amoalu_dup_for_err_w_valid = amo_wait_amoalu_dup_for_err_w_valid && s3_valid_dup_for_err_w_valid && !s3_s_amoalu_dup_for_err_w_valid
 
   val s3_store_hit_dup_for_err_w_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -890,7 +919,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_valid_dup_for_err_w_valid = lrsc_count_dup_for_err_w_valid > LRSCBackOff.U
   val s3_lrsc_addr_match_dup_for_err_w_valid = lrsc_valid_dup_for_err_w_valid && lrsc_addr_dup_for_err_w_valid === get_block_addr(s3_req_addr_dup_for_err_w_valid)
   val s3_sc_fail_dup_for_err_w_valid = s3_sc_dup_for_err_w_valid && !s3_lrsc_addr_match_dup_for_err_w_valid
-  val s3_can_do_amo_write_dup_for_err_w_valid = s3_can_do_amo_dup_for_err_w_valid && isWrite(s3_req_cmd_dup_for_err_w_valid) && !s3_sc_fail_dup_for_err_w_valid
+  val s3_can_do_amo_write_dup_for_err_w_valid = s3_can_do_amo_dup_for_err_w_valid &&
+    isWrite(s3_req_cmd_dup_for_err_w_valid) && !s3_sc_fail_dup_for_err_w_valid && !s3_cas_fail
   val update_data_dup_for_err_w_valid = s3_req_miss_dup_for_err_w_valid || s3_store_hit_dup_for_err_w_valid || s3_can_do_amo_write_dup_for_err_w_valid
 
   val s3_probe_can_go_dup_for_err_w_valid = s3_req_probe_dup_for_err_w_valid &&
@@ -957,7 +987,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_s_amoalu_dup_for_tag_w_valid = RegInit(false.B)
   val amo_wait_amoalu_dup_for_tag_w_valid = s3_req_source_dup_for_tag_w_valid === AMO_SOURCE.U &&
     s3_req_cmd_dup_for_tag_w_valid =/= M_XLR &&
-    s3_req_cmd_dup_for_tag_w_valid =/= M_XSC
+    s3_req_cmd_dup_for_tag_w_valid =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val do_amoalu_dup_for_tag_w_valid = amo_wait_amoalu_dup_for_tag_w_valid && s3_valid_dup_for_tag_w_valid && !s3_s_amoalu_dup_for_tag_w_valid
 
   val s3_store_hit_dup_for_tag_w_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -986,7 +1017,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_valid_dup_for_tag_w_valid = lrsc_count_dup_for_tag_w_valid > LRSCBackOff.U
   val s3_lrsc_addr_match_dup_for_tag_w_valid = lrsc_valid_dup_for_tag_w_valid && lrsc_addr_dup_for_tag_w_valid === get_block_addr(s3_req_addr_dup_for_tag_w_valid)
   val s3_sc_fail_dup_for_tag_w_valid = s3_sc_dup_for_tag_w_valid && !s3_lrsc_addr_match_dup_for_tag_w_valid
-  val s3_can_do_amo_write_dup_for_tag_w_valid = s3_can_do_amo_dup_for_tag_w_valid && isWrite(s3_req_cmd_dup_for_tag_w_valid) && !s3_sc_fail_dup_for_tag_w_valid
+  val s3_can_do_amo_write_dup_for_tag_w_valid = s3_can_do_amo_dup_for_tag_w_valid &&
+    isWrite(s3_req_cmd_dup_for_tag_w_valid) && !s3_sc_fail_dup_for_tag_w_valid && !s3_cas_fail
   val update_data_dup_for_tag_w_valid = s3_req_miss_dup_for_tag_w_valid || s3_store_hit_dup_for_tag_w_valid || s3_can_do_amo_write_dup_for_tag_w_valid
 
   val s3_probe_can_go_dup_for_tag_w_valid = s3_req_probe_dup_for_tag_w_valid &&
@@ -1053,7 +1085,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_s_amoalu_dup_for_data_w_valid = RegInit(false.B)
   val amo_wait_amoalu_dup_for_data_w_valid = s3_req_source_dup_for_data_w_valid === AMO_SOURCE.U &&
     s3_req_cmd_dup_for_data_w_valid =/= M_XLR &&
-    s3_req_cmd_dup_for_data_w_valid =/= M_XSC
+    s3_req_cmd_dup_for_data_w_valid =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val do_amoalu_dup_for_data_w_valid = amo_wait_amoalu_dup_for_data_w_valid && s3_valid_dup_for_data_w_valid && !s3_s_amoalu_dup_for_data_w_valid
 
   val s3_store_hit_dup_for_data_w_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -1082,7 +1115,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_valid_dup_for_data_w_valid = lrsc_count_dup_for_data_w_valid > LRSCBackOff.U
   val s3_lrsc_addr_match_dup_for_data_w_valid = lrsc_valid_dup_for_data_w_valid && lrsc_addr_dup_for_data_w_valid === get_block_addr(s3_req_addr_dup_for_data_w_valid)
   val s3_sc_fail_dup_for_data_w_valid = s3_sc_dup_for_data_w_valid && !s3_lrsc_addr_match_dup_for_data_w_valid
-  val s3_can_do_amo_write_dup_for_data_w_valid = s3_can_do_amo_dup_for_data_w_valid && isWrite(s3_req_cmd_dup_for_data_w_valid) && !s3_sc_fail_dup_for_data_w_valid
+  val s3_can_do_amo_write_dup_for_data_w_valid = s3_can_do_amo_dup_for_data_w_valid &&
+    isWrite(s3_req_cmd_dup_for_data_w_valid) && !s3_sc_fail_dup_for_data_w_valid && !s3_cas_fail
   val update_data_dup_for_data_w_valid = s3_req_miss_dup_for_data_w_valid || s3_store_hit_dup_for_data_w_valid || s3_can_do_amo_write_dup_for_data_w_valid
 
   val s3_probe_can_go_dup_for_data_w_valid = s3_req_probe_dup_for_data_w_valid &&
@@ -1124,7 +1158,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       s3_banked_store_wmask_dup_for_data_w_valid,
       Mux(
         s3_can_do_amo_write_dup_for_data_w_valid,
-        UIntToOH(s3_req_word_idx_dup_for_data_w_valid),
+        Mux(
+          isAMOCASQ(s3_req_cmd_dup(0)),
+          FillInterleaved(2, UIntToOH(s3_req.quad_word_idx)),
+          UIntToOH(s3_req_word_idx_dup_for_data_w_valid)
+        ),
         banked_none_wmask
       )
     )
@@ -1184,7 +1222,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val s3_s_amoalu_dup_for_data_w_bank = RegInit(false.B)
     val amo_wait_amoalu_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U &&
       s3_req_cmd_dup_for_data_w_bank =/= M_XLR &&
-      s3_req_cmd_dup_for_data_w_bank =/= M_XSC
+      s3_req_cmd_dup_for_data_w_bank =/= M_XSC &&
+      isAMOCAS(s3_req_cmd_dup(0))
     val do_amoalu_dup_for_data_w_bank = amo_wait_amoalu_dup_for_data_w_bank && s3_valid_dup_for_data_w_bank(i) && !s3_s_amoalu_dup_for_data_w_bank
 
     val s3_store_hit_dup_for_data_w_bank = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -1213,7 +1252,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val lrsc_valid_dup_for_data_w_bank = lrsc_count_dup_for_data_w_bank > LRSCBackOff.U
     val s3_lrsc_addr_match_dup_for_data_w_bank = lrsc_valid_dup_for_data_w_bank && lrsc_addr_dup_for_data_w_bank === get_block_addr(s3_req_addr_dup_for_data_w_bank)
     val s3_sc_fail_dup_for_data_w_bank = s3_sc_dup_for_data_w_bank && !s3_lrsc_addr_match_dup_for_data_w_bank
-    val s3_can_do_amo_write_dup_for_data_w_bank = s3_can_do_amo_dup_for_data_w_bank && isWrite(s3_req_cmd_dup_for_data_w_bank) && !s3_sc_fail_dup_for_data_w_bank
+    val s3_can_do_amo_write_dup_for_data_w_bank = s3_can_do_amo_dup_for_data_w_bank &&
+      isWrite(s3_req_cmd_dup_for_data_w_bank) && !s3_sc_fail_dup_for_data_w_bank && !s3_cas_fail
     val update_data_dup_for_data_w_bank = s3_req_miss_dup_for_data_w_bank || s3_store_hit_dup_for_data_w_bank || s3_can_do_amo_write_dup_for_data_w_bank
 
     val s3_probe_can_go_dup_for_data_w_bank = s3_req_probe_dup_for_data_w_bank &&
@@ -1289,7 +1329,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_s_amoalu_dup_for_wb_valid = RegInit(false.B)
   val amo_wait_amoalu_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === AMO_SOURCE.U &&
     s3_req_cmd_dup_for_wb_valid =/= M_XLR &&
-    s3_req_cmd_dup_for_wb_valid =/= M_XSC
+    s3_req_cmd_dup_for_wb_valid =/= M_XSC &&
+    !isAMOCAS(s3_req_cmd_dup(0))
   val do_amoalu_dup_for_wb_valid = amo_wait_amoalu_dup_for_wb_valid && s3_valid_dup_for_wb_valid && !s3_s_amoalu_dup_for_wb_valid
 
   val s3_store_hit_dup_for_wb_valid = RegEnable(s2_store_hit, s2_fire_to_s3)
@@ -1318,7 +1359,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val lrsc_valid_dup_for_wb_valid = lrsc_count_dup_for_wb_valid > LRSCBackOff.U
   val s3_lrsc_addr_match_dup_for_wb_valid = lrsc_valid_dup_for_wb_valid && lrsc_addr_dup_for_wb_valid === get_block_addr(s3_req_addr_dup_for_wb_valid)
   val s3_sc_fail_dup_for_wb_valid = s3_sc_dup_for_wb_valid && !s3_lrsc_addr_match_dup_for_wb_valid
-  val s3_can_do_amo_write_dup_for_wb_valid = s3_can_do_amo_dup_for_wb_valid && isWrite(s3_req_cmd_dup_for_wb_valid) && !s3_sc_fail_dup_for_wb_valid
+  val s3_can_do_amo_write_dup_for_wb_valid = s3_can_do_amo_dup_for_wb_valid &&
+    isWrite(s3_req_cmd_dup_for_wb_valid) && !s3_sc_fail_dup_for_wb_valid && !s3_cas_fail
   val update_data_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid || s3_store_hit_dup_for_wb_valid || s3_can_do_amo_write_dup_for_wb_valid
 
   val s3_probe_can_go_dup_for_wb_valid = s3_req_probe_dup_for_wb_valid &&
@@ -1464,22 +1506,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := s3_req.id
 
-  io.release_update.valid := s3_valid_dup(9) && (s3_store_can_go || s3_amo_can_go) && s3_hit && update_data
-  io.release_update.bits.addr := s3_req_addr_dup(3)
-  io.release_update.bits.mask := Mux(s3_store_hit_dup(1), s3_banked_store_wmask, banked_amo_wmask)
-  io.release_update.bits.data := Mux(
-    amo_wait_amoalu,
-    s3_amo_data_merged_reg,
-    Mux(
-      s3_sc,
-      s3_sc_data_merged,
-      s3_store_data_merged
-    )
-  ).asUInt
-
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source
-  atomic_hit_resp.data := Mux(s3_sc, s3_sc_resp, s3_data_word)
+  atomic_hit_resp.data := Mux(s3_sc, s3_sc_fail.asUInt, s3_data_quad_word)
   atomic_hit_resp.miss := false.B
   atomic_hit_resp.miss_id := s3_req.miss_id
   atomic_hit_resp.error := s3_error
@@ -1569,7 +1598,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     Mux(
       s3_sc_dup_for_data_w_valid,
       s3_sc_data_merged_dup_for_data_w_valid,
-      s3_store_data_merged
+      Mux(
+        s3_cas,
+        s3_cas_data_merged,
+        s3_store_data_merged
+      )
     )
   )
   //assert(RegNext(!io.meta_write.valid || !s3_req.replace))

@@ -651,6 +651,8 @@ trait HasXSParameter {
   def AddrBytes = AddrBits / 8 // unused
   def DataBits = XLEN
   def DataBytes = DataBits / 8
+  def QuadWordBits = DataBits * 2
+  def QuadWordBytes = QuadWordBits / 8
   def VDataBytes = VLEN / 8
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
