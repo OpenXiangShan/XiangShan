@@ -201,7 +201,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.vaddr        := s0_vaddr
   s0_out.fullva       := s0_fullva
   // Now data use its own io
-  // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
   s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B

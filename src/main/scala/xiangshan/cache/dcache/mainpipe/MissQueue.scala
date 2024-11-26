@@ -25,6 +25,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import coupledL2.VaddrKey
 import coupledL2.IsKeywordKey
 import difftest._
@@ -55,10 +56,11 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // store
   val full_overwrite = Bool()
 
-  // which word does amo work on?
+  // amo
   val word_idx = UInt(log2Up(blockWords).W)
-  val amo_data = UInt(DataBits.W)
-  val amo_mask = UInt((DataBits / 8).W)
+  val amo_data   = UInt(QuadWordBits.W)
+  val amo_mask   = UInt(QuadWordBytes.W)
+  val amo_cmp    = UInt(QuadWordBits.W) // data to be compared in AMOCAS
 
   val req_coh = new ClientMetadata
   val id = UInt(reqIdWidth.W)
@@ -113,22 +115,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   }
 
   def toMissReqWoStoreData(): MissReqWoStoreData = {
-    val out = Wire(new MissReqWoStoreData)
-    out.source := source
-    out.pf_source := pf_source
-    out.cmd := cmd
-    out.addr := addr
-    out.vaddr := vaddr
-    out.full_overwrite := full_overwrite
-    out.word_idx := word_idx
-    out.amo_data := amo_data
-    out.amo_mask := amo_mask
-    out.req_coh := req_coh
-    out.id := id
-    out.cancel := cancel
-    out.pc := pc
-    out.lqIdx := lqIdx
-    out
+    this.viewAsSupertype(new MissReqWoStoreData)
   }
 }
 
