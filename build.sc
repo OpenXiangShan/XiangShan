@@ -299,10 +299,29 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     str
   }
 
+  def packDifftestResources(destDir: os.Path): Unit = {
+    // package difftest source as resources, only git tracked files were collected
+    val difftest_srcs = os.proc("git", "ls-files").call(cwd = pwd / "difftest").out
+                          .text().split("\n").filter(_.nonEmpty).toSeq
+                          .map(os.RelPath(_))
+    difftest_srcs.foreach { f =>
+      os.copy(pwd / "difftest" / f, destDir / "difftest-src" / f, createFolders = true)
+    }
+
+    // package ready-to-run binary as resources
+    val ready_to_run = Seq("riscv64-nemu-interpreter-dual-so",
+                           "riscv64-nemu-interpreter-so",
+                           "riscv64-spike-so")
+    ready_to_run.foreach { f =>
+      os.copy(pwd / "ready-to-run" / f, destDir / "ready-to-run" / f, createFolders = true)
+    }
+  }
+
   override def resources = T.sources {
     os.write(T.dest / "publishVersion", publishVersion())
     os.write(T.dest / "gitStatus", gitStatus())
     os.write(T.dest / "gitModules", os.proc("git", "submodule", "status").call().out.text())
+    packDifftestResources(T.dest)
     super.resources() ++ Seq(PathRef(T.dest))
   }
 
