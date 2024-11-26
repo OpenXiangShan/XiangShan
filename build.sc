@@ -302,6 +302,7 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
   override def resources = T.sources {
     os.write(T.dest / "publishVersion", publishVersion())
     os.write(T.dest / "gitStatus", gitStatus())
+    os.write(T.dest / "gitModules", os.proc("git", "submodule", "status").call().out.text())
     super.resources() ++ Seq(PathRef(T.dest))
   }
 
