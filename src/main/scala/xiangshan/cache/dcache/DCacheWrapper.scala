@@ -562,7 +562,7 @@ class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 class MainPipeResp(implicit p: Parameters) extends DCacheBundle {
   //distinguish amo
   val source  = UInt(sourceTypeWidth.W)
-  val data    = UInt(DataBits.W)
+  val data    = UInt(QuadWordBits.W)
   val miss    = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val replay  = Bool()
@@ -1377,8 +1377,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.atomics.resp.valid := RegNext(atomic_resp_valid)
   io.lsu.atomics.resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, atomic_resp_valid)
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
-  // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
-  // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   // Request
   val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))

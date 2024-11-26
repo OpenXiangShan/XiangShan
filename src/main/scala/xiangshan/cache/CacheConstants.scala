@@ -48,10 +48,15 @@ trait MemoryOpConstants {
   def M_CLEAN   = "b10011".U // write back dirty data and retain R/W permissions
   def M_SFENCE  = "b10100".U // flush TLB
   def M_WOK     = "b10111".U // check write permissions but don't perform a write
+  def M_XA_CASQ = "b11000".U // AMOCAS.Q
+  def M_XA_CASW = "b11010".U // AMOCAS.W
+  def M_XA_CASD = "b11011".U // AMOCAS.D
 
   def isAMOLogical(cmd: UInt) = cmd === M_XA_SWAP || cmd === M_XA_XOR || cmd === M_XA_OR || cmd === M_XA_AND
   def isAMOArithmetic(cmd: UInt) = cmd === M_XA_ADD || cmd === M_XA_MIN || cmd === M_XA_MAX || cmd === M_XA_MINU || cmd === M_XA_MAXU
-  def isAMO(cmd: UInt) = isAMOLogical(cmd) || isAMOArithmetic(cmd)
+  def isAMOCAS(cmd: UInt) = cmd === M_XA_CASW || cmd === M_XA_CASD || cmd === M_XA_CASQ
+  def isAMOCASQ(cmd: UInt) = cmd === M_XA_CASQ
+  def isAMO(cmd: UInt) = isAMOLogical(cmd) || isAMOArithmetic(cmd) || isAMOCAS(cmd)
   def isPrefetch(cmd: UInt) = cmd === M_PFR || cmd === M_PFW
   def isRead(cmd: UInt) = cmd === M_XRD || cmd === M_XLR || cmd === M_XSC || isAMO(cmd)
   def isWrite(cmd: UInt) = cmd === M_XWR || cmd === M_PWR || cmd === M_XSC || isAMO(cmd)

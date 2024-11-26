@@ -263,7 +263,7 @@ object Bundles {
       fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
     }
 
-    def isAmocas: Bool = FuType.isAMO(fuType) && LSUOpType.isAmocas(fuOpType)
+    def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
 
     def srcIsReady: Vec[Bool] = {
       VecInit(this.srcType.zip(this.srcState).map {

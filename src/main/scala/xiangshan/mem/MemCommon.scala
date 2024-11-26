@@ -54,17 +54,6 @@ object genVWmask {
   }
 }
 
-object genWdata {
-  def apply(data: UInt, sizeEncode: UInt): UInt = {
-    LookupTree(sizeEncode, List(
-      "b00".U -> Fill(16, data(7, 0)),
-      "b01".U -> Fill(8, data(15, 0)),
-      "b10".U -> Fill(4, data(31, 0)),
-      "b11".U -> Fill(2, data(63,0))
-    ))
-  }
-}
-
 object shiftDataToLow {
   def apply(addr: UInt, data : UInt): UInt = {
     Mux(addr(3), (data >> 64).asUInt, data)

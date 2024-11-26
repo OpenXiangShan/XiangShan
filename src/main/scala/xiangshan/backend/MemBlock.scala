@@ -472,7 +472,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.writebackStd.zip(stdExeUnits).foreach {x =>
     x._1.bits  := x._2.io.out.bits
-    x._1.valid := x._2.io.out.fire
+    // AMOs do not need to write back std now.
+    x._1.valid := x._2.io.out.fire && !FuType.storeIsAMO(x._2.io.out.bits.uop.fuType)
   }
   io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
@@ -1608,7 +1609,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
-    assert((0 until StaCnt + HyuCnt).map(state === s_atomics(_)).reduce(_ || _))
     state := s_normal
   }
 
@@ -1616,9 +1616,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.in.bits  := Mux1H(Seq.tabulate(StaCnt)(i =>
     st_atomics(i) -> io.ooo_to_mem.issueSta(i).bits) ++
     Seq.tabulate(HyuCnt)(i => st_atomics(StaCnt+i) -> io.ooo_to_mem.issueHya(i).bits))
-  atomicsUnit.io.storeDataIn.valid := st_data_atomics.reduce(_ || _)
-  atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(StdCnt)(i =>
-    st_data_atomics(i) -> stData(i).bits))
+  atomicsUnit.io.storeDataIn.zipWithIndex.foreach { case (stdin, i) =>
+    stdin.valid := st_data_atomics(i)
+    stdin.bits := stData(i).bits
+  }
   atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support
