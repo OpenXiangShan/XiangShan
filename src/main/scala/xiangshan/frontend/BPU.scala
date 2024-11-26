@@ -367,7 +367,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
   val redirect_req    = io.ftq_to_bpu.redirect
-  val do_redirect_dup = dup_seq(RegNextWithEnable(redirect_req))
+  val do_redirect_dup = dup_seq(redirect_req)
 
   // Pipeline logic
   s2_redirect_dup.map(_ := false.B)
@@ -381,7 +381,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   s1_components_ready_dup.map(_ := predictors.io.s1_ready)
   for (((s1_ready, s1_fire), s1_valid) <- s1_ready_dup zip s1_fire_dup zip s1_valid_dup)
-    s1_ready := s1_fire || !s1_valid
+    s1_ready := s1_fire || !s1_valid || io.ftq_to_bpu.redirect.valid
   for (((s0_fire, s1_components_ready), s1_ready) <- s0_fire_dup zip s1_components_ready_dup zip s1_ready_dup)
     s0_fire             := s1_components_ready && s1_ready
   predictors.io.s0_fire := s0_fire_dup
@@ -405,8 +405,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s2_fire := s2_valid && s3_components_ready && s3_ready
 
   for ((((s0_fire, s1_flush), s1_fire), s1_valid) <- s0_fire_dup zip s1_flush_dup zip s1_fire_dup zip s1_valid_dup) {
-    when(redirect_req.valid)(s1_valid := false.B)
-      .elsewhen(s0_fire)(s1_valid := true.B)
+    when(s0_fire)(s1_valid := true.B)
       .elsewhen(s1_flush)(s1_valid := false.B)
       .elsewhen(s1_fire)(s1_valid := false.B)
   }

@@ -37,9 +37,9 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestExuRedirect = io.oldestExuRedirect
   val oldestExuPredecode = io.oldestExuOutPredecode
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)
-  val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)
-  val s1_redirect_onehot = VecInit(oldestOneHot.map(x => GatedValidRegNext(x)))
+  val s1_redirect_bits_reg = oldestRedirect.bits
+  val s1_redirect_valid_reg = oldestValid
+  val s1_redirect_onehot = oldestOneHot
 
   if (backendParams.debugEn){
     dontTouch(oldestValid)
@@ -61,7 +61,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush.valid
   io.stage2Redirect.bits := s1_redirect_bits_reg
-  io.stage2Redirect.bits.cfiUpdate.pd := RegEnable(oldestExuPredecode, oldestValid)
+  io.stage2Redirect.bits.cfiUpdate.pd := oldestExuPredecode
   io.stage2oldestOH := s1_redirect_onehot.asUInt
 
   val s1_isReplay = s1_redirect_onehot.last

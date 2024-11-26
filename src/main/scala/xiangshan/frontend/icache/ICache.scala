@@ -593,9 +593,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.hartId            := io.hartId
   mainPipe.io.mshr.resp         := missUnit.io.fetch_resp
   mainPipe.io.fetch.req <> io.fetch.req
+  mainPipe.io.fetch.flushFromBpu := io.fetch.flushFromBpu
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 
-  wayLookup.io.flush := io.flush
+  wayLookup.io.flush    := io.flush
+  wayLookup.io.recovery := mainPipe.io.toWayLookupRecovery
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
   wayLookup.io.update := missUnit.io.fetch_resp
 

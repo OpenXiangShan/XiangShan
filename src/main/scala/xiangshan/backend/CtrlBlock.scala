@@ -271,8 +271,8 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s6_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s6_flushFromRobValid))
 
   //jmp/brh, sel oldest first, only use one read port
-  io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
-  io.frontend.toFtq.ftqIdxAhead(0).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
+  io.frontend.toFtq.ftqIdxAhead(0).valid := oldestExuRedirect.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead(0).bits := oldestExuRedirect.bits.ftqIdx
   //loadreplay
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx

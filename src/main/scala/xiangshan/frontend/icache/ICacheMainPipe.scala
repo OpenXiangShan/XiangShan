@@ -27,6 +27,7 @@ import xiangshan._
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
+import xiangshan.frontend.BpuFlushInfo
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqICacheInfo
 import xiangshan.frontend.FtqToICacheRequestBundle
@@ -53,6 +54,7 @@ class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
   val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
   val topdownIcacheMiss = Output(Bool())
   val topdownItlbMiss   = Output(Bool())
+  val flushFromBpu      = Flipped(new BpuFlushInfo)
 }
 
 class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle {
@@ -114,6 +116,8 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val csr_parity_enable = Input(Bool())
   val flush             = Input(Bool())
 
+  val toWayLookupRecovery = Output(Bool())
+
   val perfInfo = Output(new ICachePerfInfo)
 }
 
@@ -139,9 +143,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
   XSPerfHistogram("ftq2icache_fire", cntFtqFireInterval, fromFtq.fire, 1, 300, 1, right_strict = true)
 
   /** pipeline control signal */
-  val s1_ready, s2_ready           = Wire(Bool())
-  val s0_fire, s1_fire, s2_fire    = Wire(Bool())
-  val s0_flush, s1_flush, s2_flush = Wire(Bool())
+  val s1_ready, s2_ready                   = Wire(Bool())
+  val s0_fire, s1_fire, s2_fire            = Wire(Bool())
+  val s0_flush, s1_flush, s2_flush         = Wire(Bool())
+  val s0_flush_from_bpu, s1_flush_from_bpu = Wire(Bool())
 
   /**
     ******************************************************************************
@@ -155,6 +160,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
   // 0,1,2,3 -> dataArray(data); 4 -> mainPipe
   // Ftq RegNext Register
   val fromFtqReq       = fromFtq.bits.pcMemRead
+  val s0_req_ftqIdx    = fromFtqReq(4).ftqIdx
   val s0_valid         = fromFtq.valid
   val s0_req_valid_all = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i))
   val s0_req_vaddr_all =
@@ -216,7 +222,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
   }
 
   val s0_can_go = toData.last.ready && fromWayLookup.valid && s1_ready
-  s0_flush := io.flush
+  s0_flush_from_bpu := s0_valid && (io.fetch.flushFromBpu.shouldFlushByStage2(s0_req_ftqIdx) ||
+    io.fetch.flushFromBpu.shouldFlushByStage3(s0_req_ftqIdx))
+  s0_flush := io.flush || s0_flush_from_bpu || s1_flush
   s0_fire  := s0_valid && s0_can_go && !s0_flush
 
   fromFtq.ready := s0_can_go
@@ -231,6 +239,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
+  val s1_req_ftqIdx            = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
   val s1_req_vaddr             = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
   val s1_req_ptags             = RegEnable(s0_req_ptags, 0.U.asTypeOf(s0_req_ptags), s0_fire)
   val s1_req_gpaddr            = RegEnable(s0_req_gpaddr, 0.U.asTypeOf(s0_req_gpaddr), s0_fire)
@@ -321,9 +330,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
   ))
   val s1_codes = DataHoldBypass(fromData.codes, RegNext(s0_fire))
 
-  s1_flush := io.flush
-  s1_ready := s2_ready || !s1_valid
-  s1_fire  := s1_valid && s2_ready && !s1_flush
+  s1_flush_from_bpu      := s1_valid && io.fetch.flushFromBpu.shouldFlushByStage3(s1_req_ftqIdx)
+  s1_flush               := io.flush || s1_flush_from_bpu
+  s1_ready               := s2_ready || !s1_valid
+  s1_fire                := s1_valid && s2_ready && !s1_flush
+  io.toWayLookupRecovery := s1_flush_from_bpu
 
   /**
     ******************************************************************************
