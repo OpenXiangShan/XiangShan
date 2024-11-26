@@ -238,6 +238,8 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
+  val uncache_port = TLTempNode()
+  val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
@@ -260,6 +262,12 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
   }
+
+  uncache_xbar := TLBuffer() := uncache.clientNode
+  if (dcache.uncacheNode.isDefined) {
+    dcache.uncacheNode.get := TLBuffer.chainNode(2) := uncache_xbar
+  }
+  uncache_port := TLBuffer.chainNode(2) := uncache_xbar
 
   lazy val module = new MemBlockInlinedImp(this)
 }
