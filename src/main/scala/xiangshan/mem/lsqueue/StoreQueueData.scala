@@ -35,6 +35,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
     // sync read
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt(dataWidth.W))) // rdata: store addr
+    val rmask = Output(Vec(numRead, UInt((VLEN/8).W))) // rmask: store mask
     val rlineflag = Output(Vec(numRead, Bool())) // rdata: line op flag
     // write
     val wen   = Input(Vec(numWrite, Bool()))
@@ -59,6 +60,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
   // read ports
   for (i <- 0 until numRead) {
     io.rdata(i) := data(GatedRegNext(io.raddr(i)))
+    io.rmask(i) := mask(GatedRegNext(io.raddr(i)))
     io.rlineflag(i) := lineflag(GatedRegNext(io.raddr(i)))
   }
 

@@ -521,7 +521,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     vaddrModule.io.ren(i) := s1_oldestSel(i).valid && s1_can_go(i)
     vaddrModule.io.raddr(i) := s1_oldestSel(i).bits
     // read sq for mdp false positive compare
-    io.mdpVaRead.pipe(i).raddr := blockSqIdx(s1_oldestSel(i).bits)
+    io.mdpVaRead.pipe(i).raddr := Mux(s1_can_go(i), blockSqIdx(s1_oldestSel(i).bits), RegNext(io.mdpVaRead.pipe(i).raddr))
   }
 
   for (i <- 0 until LoadPipelineWidth) {
@@ -830,8 +830,16 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
   XSPerfAccumulate("mdp_false_positive", PopCount(
     io.replay.zipWithIndex.map {case (replay, i) => {
-      replay.fire && cause(replay.bits.uop.lqIdx.value)(LoadReplayCauses.C_MA) &&
-      (replay.bits.vaddr =/= io.mdpVaRead.pipe(i).vaddr)
+      val loadIs128bit = replay.bits.isvec && replay.bits.is128bit
+      val loadIsMemAmb = cause(replay.bits.schedIndex)(LoadReplayCauses.C_MA)
+      val loadAddrMatch = replay.bits.vaddr(VAddrBits - 1, 4) === io.mdpVaRead.pipe(i).vaddr(VAddrBits - 1, 4)
+      val loadMaskMatch = Mux(
+        loadIs128bit,
+        (replay.bits.mask & io.mdpVaRead.pipe(i).mask).orR,
+        (genVWmask(replay.bits.vaddr, replay.bits.uop.fuOpType(1, 0)) & io.mdpVaRead.pipe(i).mask).orR
+      )
+
+      replay.fire && loadIsMemAmb && (!loadAddrMatch || !loadMaskMatch)
     }}
   ))
 

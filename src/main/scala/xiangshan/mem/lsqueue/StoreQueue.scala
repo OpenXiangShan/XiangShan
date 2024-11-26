@@ -64,6 +64,7 @@ class MdpVaReadIO(implicit p: Parameters) extends XSBundle {
     val raddr = Input(new SqPtr)
     // s1 read data resp
     val vaddr = Output(UInt(VAddrBits.W))
+    val mask = Output(UInt((VLEN/8).W))
   })
 }
 
@@ -362,6 +363,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     vaddrModule.io.raddr(i + EnsbufferWidth) := io.mdpVaRead.pipe(i).raddr.value
     io.mdpVaRead.pipe(i).vaddr := vaddrModule.io.rdata(i + EnsbufferWidth)
+    io.mdpVaRead.pipe(i).mask  := vaddrModule.io.rmask(i + EnsbufferWidth)
   }
 
   /**
