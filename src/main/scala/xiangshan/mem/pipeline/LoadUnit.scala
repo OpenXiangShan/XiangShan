@@ -741,7 +741,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     "b11".U   -> (s0_dcache_vaddr(2, 0) === 0.U)  //d
   ))
   XSError(s0_sel_src.isvec && s0_dcache_vaddr(3, 0) =/= 0.U && s0_sel_src.alignedType(2), "unit-stride 128 bit element is not aligned!")
-  XSError(s0_sel_src.isnc && s0_dcache_vaddr(3, 0) =/= 0.U && s0_sel_src.alignedType(2), "nc element is not aligned!")
 
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag

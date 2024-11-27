@@ -51,16 +51,15 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
   //  LoadQueueRAR field
-  //  +-------+-------+-------+----------+----+
-  //  | Valid |  Uop  | PAddr | Released | NC |
-  //  +-------+-------+-------+----------+----+
+  //  +-------+-------+-------+----------+
+  //  | Valid |  Uop  | PAddr | Released |
+  //  +-------+-------+-------+----------+
   //
   //  Field descriptions:
   //  Allocated   : entry is valid.
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released.
-  //  NC          : is NC with data.
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
@@ -74,7 +73,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val nc = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
@@ -144,13 +142,15 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      released(enqIndex) :=
+      //  NC is uncachable and will not be explicitly released.
+      //  So NC requests are not allowed to have RAR
+      released(enqIndex) := enq.bits.is_nc || (
         enq.bits.data_valid &&
         (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
-      nc(enqIndex) := enq.bits.is_nc
+      )
     }
   }
 
@@ -214,7 +214,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       matchMaskReg(i) := (allocated(i) &
                          paddrModule.io.releaseViolationMmask(w)(i) &
                          robIdxMask(i) &&
-                         (nc(i) || released(i)))
+                         released(i))
       }
     val matchMask = GatedValidRegNext(matchMaskReg)
     //  Load-to-Load violation check result

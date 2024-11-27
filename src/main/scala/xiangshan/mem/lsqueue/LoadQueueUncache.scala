@@ -28,7 +28,7 @@ import utility._
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
-import _root_.xiangshan.backend.HasMemBlockParameters
+import xiangshan.backend.HasMemBlockParameters
 
 class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper

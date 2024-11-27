@@ -201,6 +201,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   def sizeMap[T <: Data](f: Int => T) = VecInit((0 until UncacheBufferSize).map(f))
   def isStore(e: UncacheEntry): Bool = e.cmd === MemoryOpConstants.M_XWR
   def isStore(x: UInt): Bool = x === MemoryOpConstants.M_XWR
+  def addrMatch(x: UncacheEntry, y: UncacheWordReq): Bool = x.addr(PAddrBits - 1, 3) === y.addr(PAddrBits - 1, 3)
+  def addrMatch(x: UncacheWordReq, y: UncacheEntry): Bool = x.addr(PAddrBits - 1, 3) === y.addr(PAddrBits - 1, 3)
+  def addrMatch(x: UncacheEntry, y: UncacheEntry): Bool = x.addr(PAddrBits - 1, 3) === y.addr(PAddrBits - 1, 3)
+  def addrMatch(x: UInt, y: UInt): Bool = x(PAddrBits - 1, 3) === y(PAddrBits - 1, 3)
 
   // drain buffer
   val empty = Wire(Bool())
@@ -261,6 +265,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   */
 
   val e0_fire = req.fire
+  val e0_req_valid = req.valid
   val e0_req = req.bits
   /**
     TODO lyq: block or wait or forward?
@@ -270,7 +275,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       - st->ld forward
       - st->st block
   */
-  val e0_existSame = sizeMap(j => e0_req.addr === entries(j).addr && states(j).isValid()).asUInt.orR
+  val e0_existSame = sizeMap(j => e0_req_valid && states(j).isValid() && addrMatch(e0_req, entries(j))).asUInt.orR
   val e0_invalidVec = sizeMap(i => !states(i).isValid())
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_alloc = e0_canAlloc && !e0_existSame && e0_fire
@@ -282,9 +287,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // judge whether wait same block: e0 & q0
     val waitSameVec = sizeMap(j =>
-      e0_req.addr === entries(j).addr && states(j).isValid() && states(j).isInflight()
+      e0_req_valid && states(j).isValid() && states(j).isInflight() && addrMatch(e0_req, entries(j))
     )
-    val waitQ0 = e0_req.addr === q0_entry.addr && q0_canSent
+    val waitQ0 = q0_canSent && addrMatch(e0_req, q0_entry)
     when (waitSameVec.reduce(_ || _) || waitQ0) {
       states(e0_allocIdx).setWaitSame(true.B)
     }
@@ -345,7 +350,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // q0 should judge whether wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(q0_entry.addr === entries(j).addr && states(j).isValid() && !states(j).isWaitReturn()){
+      when(states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
         states(j).setWaitSame(true.B)
       }
     )
@@ -367,7 +372,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // remove state of wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(entries(id).addr === entries(j).addr && states(j).isValid() && states(j).isWaitSame()){
+      when(states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))){
         states(j).setWaitSame(false.B)
       }
     )
@@ -421,7 +426,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_fwdValid = RegNext(f0_fwdValid)
 
     // f0 vaddr match
-    val f0_vtagMatches = sizeMap(w => entries(w).vaddr === forward.vaddr)
+    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
     val f0_validTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid)
     // f0 select
     val f0_fwdMask = shiftMaskToHigh(
@@ -437,8 +442,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_fwdMask = RegEnable(f0_fwdMask, f0_fwdValid)
     val f1_fwdData = RegEnable(f0_fwdData, f0_fwdValid)
     // forward.paddr from dtlb, which is far from uncache
-    val f1_ptagMatches = sizeMap(w => RegEnable(entries(w).addr, f0_fwdValid) === RegEnable(forward.paddr, f0_fwdValid))
-    f1_tagMismatchVec(i) := f0_fwdValid && sizeMap(w =>
+    val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), RegEnable(forward.paddr, f0_fwdValid)))
+    f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
     ).asUInt.orR
     when(f1_tagMismatchVec(i)) {
@@ -456,11 +461,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     for (j <- 0 until VDataBytes) {
       forward.forwardMaskFast(j) := f0_fwdMask(j)
 
+      forward.forwardData(j) := f1_fwdData(j)
       forward.forwardMask(j) := false.B
-      forward.forwardData(j) := DontCare
       when(f1_fwdMask(j) && f1_fwdValid) {
         forward.forwardMask(j) := true.B
-        forward.forwardData(j) := f1_fwdData(j)
       }
     }
 

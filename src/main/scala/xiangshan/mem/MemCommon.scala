@@ -66,22 +66,22 @@ object genWdata {
 }
 
 object shiftDataToLow {
-  def apply(addr: UInt,data : UInt): UInt = {
-    Mux(addr(3), (data >> 64).asUInt,data)
+  def apply(addr: UInt, data : UInt): UInt = {
+    Mux(addr(3), (data >> 64).asUInt, data)
   }
 }
 object shiftMaskToLow {
-  def apply(addr: UInt,mask: UInt): UInt = {
-    Mux(addr(3),(mask >> 8).asUInt,mask)
+  def apply(addr: UInt, mask: UInt): UInt = {
+    Mux(addr(3), (mask >> 8).asUInt, mask)
   }
 }
 object shiftDataToHigh {
-  def apply(addr: UInt,data : UInt): UInt = {
+  def apply(addr: UInt, data : UInt): UInt = {
     Mux(addr(3), (data << 64).asUInt, data)
   }
 }
 object shiftMaskToHigh {
-  def apply(addr: UInt,mask: UInt): UInt = {
+  def apply(addr: UInt, mask: UInt): UInt = {
     Mux(addr(3), (mask << 8).asUInt, mask)
   }
 }
