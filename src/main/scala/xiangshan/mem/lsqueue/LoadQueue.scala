@@ -187,7 +187,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
-    val nack_rollback = Vec(2, Output(Valid(new Redirect))) // mmio, nc
+    val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncachebuffer
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
@@ -211,8 +211,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
-  val ioBuffer = Module(new IOBuffer) // uncache io buffer
-  val ncBuffer = Module(new NCBuffer) // uncache nc buffer
+  val uncacheBuffer = Module(new LoadQueueUncache) // uncache
   /**
    * LoadQueueRAR
    */
@@ -276,10 +275,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.exceptionVec := io.vecFeedback(i).bits.exceptionVec
   }
   // mmio non-data error exception
-  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth) := ioBuffer.io.exception
+  exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth) := uncacheBuffer.io.exception
   exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth).bits.vaNeedExt := true.B
-  exceptionBuffer.io.req.last := ncBuffer.io.exception
-  exceptionBuffer.io.req.last.bits.vaNeedExt := true.B
   exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
@@ -287,41 +284,24 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * Load uncache buffer
    */
-  //mmio
-  ioBuffer.io.redirect <> io.redirect
-  ioBuffer.io.ldout <> io.ldout
-  ioBuffer.io.ld_raw_data <> io.ld_raw_data
-  ioBuffer.io.rob <> io.rob
-  for ((mmio, w) <- ioBuffer.io.req.zipWithIndex) {
-    mmio.valid := io.ldu.ldin(w).valid && !io.ldu.ldin(w).bits.nc // from load_s3
-    mmio.bits := io.ldu.ldin(w).bits // from load_s3
+  uncacheBuffer.io.redirect <> io.redirect
+  uncacheBuffer.io.mmioOut <> io.ldout
+  uncacheBuffer.io.ncOut <> io.ncOut
+  uncacheBuffer.io.mmioRawData <> io.ld_raw_data
+  uncacheBuffer.io.rob <> io.rob
+  uncacheBuffer.io.uncache <> io.uncache
+
+  for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
+    // from load_s3
+    val ldinBits = io.ldu.ldin(w).bits
+    buff.valid := io.ldu.ldin(w).valid && (ldinBits.nc || ldinBits.mmio) && !ldinBits.rep_info.need_rep
+    buff.bits := ldinBits
   }
-  ioBuffer.io.uncache.resp.valid := io.uncache.resp.valid && !io.uncache.resp.bits.nc
-  ioBuffer.io.uncache.resp.bits := io.uncache.resp.bits
-  //nc
-  ncBuffer.io.redirect <> io.redirect
-  ncBuffer.io.ncOut <> io.ncOut
-  for ((nc, w) <- ncBuffer.io.req.zipWithIndex) {
-    nc.valid := io.ldu.ldin(w).valid && io.ldu.ldin(w).bits.nc // from load_s3
-    nc.bits := io.ldu.ldin(w).bits // from load_s3
-  }
-  ncBuffer.io.uncache.resp.valid := io.uncache.resp.valid && io.uncache.resp.bits.nc
-  ncBuffer.io.uncache.resp.bits := io.uncache.resp.bits
-  //uncache arbiter
-  ioBuffer.io.uncache.req.ready := io.uncache.req.ready
-  ncBuffer.io.uncache.req.ready := io.uncache.req.ready && !ioBuffer.io.uncache.req.valid
-  when(ioBuffer.io.uncache.req.valid){
-    io.uncache.req.valid := ioBuffer.io.uncache.req.valid
-    io.uncache.req.bits := ioBuffer.io.uncache.req.bits
-  }.otherwise{
-    io.uncache.req.valid := ncBuffer.io.uncache.req.valid
-    io.uncache.req.bits := ncBuffer.io.uncache.req.bits
-  }
+
   io.uncache.resp.ready := true.B
 
   io.nuke_rollback := loadQueueRAW.io.rollback
-  io.nack_rollback(0) := ioBuffer.io.rollback
-  io.nack_rollback(1) := ncBuffer.io.rollback
+  io.nack_rollback(0) := uncacheBuffer.io.rollback
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
