@@ -232,12 +232,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
       val vlIsNonZero = !vlSrcIsZeroVec.get(i)
       val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
       val ignoreWhole = (vm =/= 0.U || vma) && vta
-      val isFof = VlduType.isFof(io.in(i).bits.fuOpType)
       for (j <- 0 until numRegSrcVf) {
         val ignoreOldVd = Wire(Bool())
         if (j == numRegSrcVf - 1) {
           // check whether can ignore the old vd dependency
-          ignoreOldVd := SrcState.isReady(vlSrcStateVec.get(i)) && !isFof && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
+          ignoreOldVd := SrcState.isReady(vlSrcStateVec.get(i)) && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
         } else {
           // check whether can ignore the src
           ignoreOldVd := false.B
