@@ -938,10 +938,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("refill           ", io.dcache.valid),
     ("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire())))),
     ("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))),
-    ("ltq_1_4_valid    ", (perfValidCount < (LoadQueueSize.U/4.U))),
-    ("ltq_2_4_valid    ", (perfValidCount > (LoadQueueSize.U/4.U)) & (perfValidCount <= (LoadQueueSize.U/2.U))),
-    ("ltq_3_4_valid    ", (perfValidCount > (LoadQueueSize.U/2.U)) & (perfValidCount <= (LoadQueueSize.U*3.U/4.U))),
-    ("ltq_4_4_valid    ", (perfValidCount > (LoadQueueSize.U*3.U/4.U)))
+    ("ltq_1_4_valid    ", (perfValidCount < (pLoadQueueSize/4.U))),
+    ("ltq_2_4_valid    ", (perfValidCount > (pLoadQueueSize/4.U)) & (perfValidCount <= (pLoadQueueSize/2.U))),
+    ("ltq_3_4_valid    ", (perfValidCount > (pLoadQueueSize/2.U)) & (perfValidCount <= (pLoadQueueSize*3.U/4.U))),
+    ("ltq_4_4_valid    ", (perfValidCount > (pLoadQueueSize*3.U/4.U)))
   )
   generatePerfEvent()
 

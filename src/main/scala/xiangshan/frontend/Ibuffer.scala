@@ -107,9 +107,11 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numDeq = Mux(io.out.head.ready, numTryDeq, 0.U)
   deqPtrVecNext := Mux(io.out.head.ready, VecInit(deqPtrVec.map(_ + numTryDeq)), deqPtrVec)
 
+  val pIBufSize = WireInit(IBufSize.U(log2Up(IBufSize + 1).W))
+  ExcitingUtils.addSink(pIBufSize, "DSE_IBUFSIZE")
   val numAfterEnq = validEntries +& numEnq
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
-  allowEnq := (IBufSize - PredictWidth).U >= nextValidEntries
+  allowEnq := (pIBufSize - PredictWidth.U) >= nextValidEntries
 
   // Enque
   io.in.ready := allowEnq
@@ -206,10 +208,10 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val perfEvents = Seq(
     ("IBuffer_Flushed  ", io.flush                                                                     ),
     ("IBuffer_hungry   ", instrHungry                                                                  ),
-    ("IBuffer_1_4_valid", (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)   ),
-    ("IBuffer_2_4_valid", (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)   ),
-    ("IBuffer_3_4_valid", (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)   ),
-    ("IBuffer_4_4_valid", (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)   ),
+    ("IBuffer_1_4_valid", (validEntries >  (0.U * (pIBufSize/4.U))) & (validEntries < (1.U * (pIBufSize/4.U)))   ),
+    ("IBuffer_2_4_valid", (validEntries >= (1.U * (pIBufSize/4.U))) & (validEntries < (2.U * (pIBufSize/4.U)))   ),
+    ("IBuffer_3_4_valid", (validEntries >= (2.U * (pIBufSize/4.U))) & (validEntries < (3.U * (pIBufSize/4.U)))   ),
+    ("IBuffer_4_4_valid", (validEntries >= (3.U * (pIBufSize/4.U))) & (validEntries < (4.U * (pIBufSize/4.U)))   ),
     ("IBuffer_full     ",  validEntries.andR                                                           ),
     ("Front_Bubble     ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid)))
   )

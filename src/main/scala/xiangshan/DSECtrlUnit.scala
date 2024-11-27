@@ -8,6 +8,8 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortParameters, 
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, RegWriteFn}
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
+import xiangshan.backend.regfile.Regfile
+
 import javax.swing.SwingWorker
 
 case class DSEParams(baseAddress: BigInt = 0x39020000L)
@@ -36,6 +38,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val core_reset = Output(Bool())
     val reset_vector = Output(UInt(PAddrBits.W))
     val instrCnt = Input(UInt(64.W))
+    val max_epoch = Output(UInt(64.W))
+    val epoch = Output(UInt(64.W))
   })
 
   childClock := io.clk
@@ -46,6 +50,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val ctrlSel = RegInit(0.U(8.W))
     val max_instr_cnt = RegInit(0x1000000.U(64.W))
     val epoch = RegInit(0.U(64.W))
+    val max_epoch = RegInit(0.U(64.W))
 
     val robSize0 = RegInit(RobSize.U(64.W))
     val robSize1 = RegInit(RobSize.U(64.W))
@@ -59,33 +64,58 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val sqSize1 = RegInit(StoreQueueSize.U(64.W))
     val sqSize = Wire(UInt(64.W))
 
+    val ftqSize0 = RegInit(FtqSize.U(64.W))
+    val ftqSize1 = RegInit(FtqSize.U(64.W))
+    val ftqSize = Wire(UInt(64.W))
+
+    val ibufSize0 = RegInit(IBufSize.U(64.W))
+    val ibufSize1 = RegInit(IBufSize.U(64.W))
+    val ibufSize = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
+    io.max_epoch := max_epoch
+    io.epoch := epoch
 
     ctrlnode.regmap(
       0x000 -> Seq(RegField(8, pingpong)),
       0x004 -> Seq(RegField(8, ctrlSel)),
       0x008 -> Seq(RegField(64, max_instr_cnt)),
       0x010 -> Seq(RegField(64, epoch)),
+      0x018 -> Seq(RegField(64, max_epoch)),
       0x100 -> Seq(RegField(64, robSize0)),
       0x108 -> Seq(RegField(64, robSize1)),
       0x110 -> Seq(RegField(64, lqSize0)),
       0x118 -> Seq(RegField(64, lqSize1)),
       0x120 -> Seq(RegField(64, sqSize0)),
-      0x128 -> Seq(RegField(64, sqSize1))
+      0x128 -> Seq(RegField(64, sqSize1)),
+      0x130 -> Seq(RegField(64, ftqSize0)),
+      0x138 -> Seq(RegField(64, ftqSize1)),
+      0x140 -> Seq(RegField(64, ibufSize0)),
+      0x148 -> Seq(RegField(64, ibufSize1))
     )
 
     // Mux logic
     robSize := Mux(ctrlSel.orR, robSize1, robSize0)
     lqSize := Mux(ctrlSel.orR, lqSize1, lqSize0)
     sqSize := Mux(ctrlSel.orR, sqSize1, sqSize0)
+    ftqSize := Mux(ctrlSel.orR, ftqSize1, ftqSize0)
+    ibufSize := Mux(ctrlSel.orR, ibufSize1, ibufSize0)
 
-    // Bore to ROB
+    // Bore to/from ROB
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
     ExcitingUtils.addSource(lqSize, "DSE_LQSIZE")
     ExcitingUtils.addSource(sqSize, "DSE_SQSIZE")
-
+    ExcitingUtils.addSource(ftqSize, "DSE_FTQSIZE")
+    ExcitingUtils.addSource(ibufSize, "DSE_IBUFSIZE")
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
+
+    // assertion
+    assert(robSize <= RobSize.U, "DSE parameter must not exceed ROBSZIE")
+    assert(lqSize <= LoadQueueSize.U, "DSE parameter must not exceed LoadQueueSize")
+    assert(sqSize <= StoreQueueSize.U, "DSE parameter must not exceed StoreQueueSize")
+    assert(ftqSize <= FtqSize.U, "DSE parameter must not exceed FtqSize")
+    assert(ibufSize <= IBufSize.U, "DSE parameter must not exceed IBufSize")
 
 
     // core reset generation

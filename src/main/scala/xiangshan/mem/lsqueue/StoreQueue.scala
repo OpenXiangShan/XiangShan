@@ -683,10 +683,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     ("mmioCnt        ", io.uncache.req.fire()),
     ("mmio_wb_success", io.mmioStout.fire()),
     ("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready),
-    ("stq_1_4_valid  ", (perfValidCount < (StoreQueueSize.U/4.U))),
-    ("stq_2_4_valid  ", (perfValidCount > (StoreQueueSize.U/4.U)) & (perfValidCount <= (StoreQueueSize.U/2.U))),
-    ("stq_3_4_valid  ", (perfValidCount > (StoreQueueSize.U/2.U)) & (perfValidCount <= (StoreQueueSize.U*3.U/4.U))),
-    ("stq_4_4_valid  ", (perfValidCount > (StoreQueueSize.U*3.U/4.U))),
+    ("stq_1_4_valid  ", (perfValidCount < (pStoreQueueSize/4.U))),
+    ("stq_2_4_valid  ", (perfValidCount > (pStoreQueueSize/4.U)) & (perfValidCount <= (pStoreQueueSize/2.U))),
+    ("stq_3_4_valid  ", (perfValidCount > (pStoreQueueSize/2.U)) & (perfValidCount <= (pStoreQueueSize*3.U/4.U))),
+    ("stq_4_4_valid  ", (perfValidCount > (pStoreQueueSize*3.U/4.U))),
   )
   generatePerfEvent()
 

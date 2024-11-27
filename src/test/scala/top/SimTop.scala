@@ -75,6 +75,8 @@ class SimTop(implicit p: Parameters) extends Module {
     val reset_vector = Input(UInt(36.W))
     val dse_reset_valid = Output(Bool())
     val dse_reset_vec = Output(UInt(36.W))
+    val dse_max_epoch = Output(UInt(64.W))
+    val dse_epoch = Output(UInt(64.W))
   })
 
   simMMIO.io.uart <> io.uart
@@ -84,6 +86,8 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.reset_vector := io.reset_vector
   io.dse_reset_valid := soc.io.dse_reset_valid
   io.dse_reset_vec := soc.io.dse_reset_vec
+  io.dse_max_epoch := soc.io.dse_max_epoch
+  io.dse_epoch := soc.io.dse_epoch
 
   if(useDRAMSim){
     io.memAXI <> soc.memory

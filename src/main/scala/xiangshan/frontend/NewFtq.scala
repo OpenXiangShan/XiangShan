@@ -486,11 +486,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     dontTouch(ptr)
   }
   val validEntries = distanceBetween(bpuPtr, commPtr)
+  val pFtqSize = WireInit(FtqSize.U(log2Up(FtqSize + 1).W))
+  ExcitingUtils.addSink(pFtqSize, "DSE_FTQSIZE")
 
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U
+  val new_entry_ready = validEntries < pFtqSize
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
