@@ -236,28 +236,21 @@ case class IssueBlockParams(
 
   def iqWakeUpSourcePairs: Seq[WakeUpConfig] = exuBlockParams.flatMap(_.iqWakeUpSourcePairs)
 
-  /** Get exu source wake up
-    * @todo replace with
-    *       exuBlockParams
-    *       .flatMap(_.iqWakeUpSinkPairs)
-    *       .map(_.source)
-    *       .distinctBy(_.name)
-    *       when xiangshan is updated to 2.13.11
+  /**
+    * Get exu source wake up
     */
   def wakeUpInExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      exuBlockParams
-        .flatMap(_.iqWakeUpSinkPairs)
-        .map(_.source)
-    )(_.name)
+    exuBlockParams
+      .flatMap(_.iqWakeUpSinkPairs)
+      .map(_.source)
+      .distinctBy(_.name)
   }
 
   def wakeUpOutExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      exuBlockParams
-        .flatMap(_.iqWakeUpSourcePairs)
-        .map(_.source)
-    )(_.name)
+    exuBlockParams
+      .flatMap(_.iqWakeUpSourcePairs)
+      .map(_.source)
+      .distinctBy(_.name)
   }
 
   def wakeUpToExuSinks = exuBlockParams
