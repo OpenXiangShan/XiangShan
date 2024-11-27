@@ -44,13 +44,11 @@ class XiangShanStage extends ChiselStage {
       targets = Seq(
         firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputFile],
         firrtl.options.Dependency[chisel3.stage.phases.AddImplicitOutputAnnotationFile],
-        firrtl.options.Dependency[chisel3.stage.phases.MaybeAspectPhase],
         firrtl.options.Dependency[chisel3.stage.phases.AddSerializationAnnotations],
         firrtl.options.Dependency[chisel3.stage.phases.Convert],
         firrtl.options.Dependency[xiangshan.transforms.PrintModuleName],
         firrtl.options.Dependency[xiangshan.transforms.PrintControl],
         firrtl.options.Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
-        firrtl.options.Dependency[chisel3.stage.phases.MaybeInjectingPhase],
         firrtl.options.Dependency[circt.stage.phases.AddImplicitOutputFile],
         firrtl.options.Dependency[circt.stage.phases.CIRCT]
       ),
