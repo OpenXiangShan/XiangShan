@@ -37,10 +37,13 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   with MemoryOpConstants
   with HasDCacheParameters
   with SdtrigExt{
+
+  val StdCnt  = backendParams.StdCnt
+
   val io = IO(new Bundle() {
     val hartId        = Input(UInt(hartIdLen.W))
     val in            = Flipped(Decoupled(new MemExuInput))
-    val storeDataIn   = Flipped(Valid(new MemExuOutput)) // src2 from rs
+    val storeDataIn   = Flipped(Vec(StdCnt, Valid(new MemExuOutput)))
     val out           = Decoupled(new MemExuOutput)
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
@@ -113,7 +116,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
   // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
   // therefore the MSBs are reused to identify uopIdx
-  val stdUopIdx = io.storeDataIn.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth
+  val stdUopIdxs = io.storeDataIn.map(_.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth)
   val staUopIdx = io.in.bits.uop.fuOpType >> LSUOpType.AMOFuOpWidth
 
   // assign default value to output signals
@@ -151,13 +154,15 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     }
   }
 
-  when (io.storeDataIn.fire) {
-    stds.zipWithIndex.foreach { case (data, i) =>
-      when (stdUopIdx === i.U) { data := io.storeDataIn.bits.data }
+  stds.zipWithIndex.foreach { case (data, i) =>
+    val sels = io.storeDataIn.zip(stdUopIdxs).map { case (in, uopIdx) =>
+      val sel = in.fire && uopIdx === i.U
+      when (sel) { data := in.bits.data }
+      sel
     }
-    assert(stdUopIdx < stds.length.U, "unrecognized std uopIdx")
-    stdCnt := stdCnt + 1.U
+    OneHot.checkOneHot(sels)
   }
+  stdCnt := stdCnt + PopCount(io.storeDataIn.map(_.fire))
 
   val StdCntNCAS = 1 // LR/SC and AMO need only 1 src besides rs1
   val StdCntCASWD = 2 // AMOCAS.W/D needs 2 src regs (rs2 and rd) besides rs1
@@ -170,7 +175,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     )
   }
   assert(stdCnt <= stds.length.U, "unexpected std")
-  assert(!(io.storeDataIn.fire && data_valid), "atomic unit re-receive data")
+  assert(!(Cat(io.storeDataIn.map(_.fire)).orR && data_valid), "atomic unit re-receive data")
 
   // atomic trigger
   val csrCtrl = io.csrCtrl

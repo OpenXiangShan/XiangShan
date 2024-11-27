@@ -1618,9 +1618,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.in.bits  := Mux1H(Seq.tabulate(StaCnt)(i =>
     st_atomics(i) -> io.ooo_to_mem.issueSta(i).bits) ++
     Seq.tabulate(HyuCnt)(i => st_atomics(StaCnt+i) -> io.ooo_to_mem.issueHya(i).bits))
-  atomicsUnit.io.storeDataIn.valid := st_data_atomics.reduce(_ || _)
-  atomicsUnit.io.storeDataIn.bits  := Mux1H(Seq.tabulate(StdCnt)(i =>
-    st_data_atomics(i) -> stData(i).bits))
+  atomicsUnit.io.storeDataIn.zipWithIndex.foreach { case (stdin, i) =>
+    stdin.valid := st_data_atomics(i)
+    stdin.bits := stData(i).bits
+  }
   atomicsUnit.io.redirect <> redirect
 
   // TODO: complete amo's pmp support
