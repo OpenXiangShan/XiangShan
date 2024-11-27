@@ -166,24 +166,35 @@ class InterruptFilter extends Module {
   private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
   private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
 
-  private val mIidNum  = findNum(mIidIdx)
-  private val hsIidNum = findNum(hsIidIdx)
+  private val mIidIdxReg = RegNext(mIidIdx)
+  private val mPrioNumReg = RegNext(mPrioNum)
 
-  private val mIidDefaultPrioHighMEI: Bool = mIidIdx < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
-  private val mIidDefaultPrioLowMEI : Bool = mIidIdx > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val hsIidIdxReg = RegNext(hsIidIdx)
+  private val hsPrioNumReg = RegNext(hsPrioNum)
 
-  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdx < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdx > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+  private val mIidNum  = findNum(mIidIdxReg)
+  private val hsIidNum = findNum(hsIidIdxReg)
 
-  val mtopiPrioNumReal = mPrioNum
-  val stopiPrioNumReal = hsPrioNum
+  private val mIidDefaultPrioHighMEI: Bool = mIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val mIidDefaultPrioLowMEI : Bool = mIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+
+  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+
+  val mtopiPrioNumReal = mPrioNumReg
+  val stopiPrioNumReal = hsPrioNumReg
+
+  val mtopiIsNotZeroReg = RegNext(mtopiIsNotZero)
+  val stopiIsNotZeroReg = RegNext(stopiIsNotZero)
+  val mIpriosIsZeroReg = RegNext(mIpriosIsZero)
+  val hsIpriosIsZeroReg = RegNext(hsIpriosIsZero)
 
   // update mtopi
-  io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
+  io.out.mtopi.IID := Mux(mtopiIsNotZeroReg, mIidNum, 0.U)
   io.out.mtopi.IPRIO := Mux(
-    mtopiIsNotZero,
+    mtopiIsNotZeroReg,
     Mux(
-      mIpriosIsZero,
+      mIpriosIsZeroReg,
       1.U,
       Mux1H(Seq(
         (mtopiPrioNumReal >= 1.U && mtopiPrioNumReal <= 255.U) -> mtopiPrioNumReal(7, 0),
@@ -195,11 +206,11 @@ class InterruptFilter extends Module {
   )
 
   // upadte stopi
-  io.out.stopi.IID := Mux(stopiIsNotZero, hsIidNum, 0.U)
+  io.out.stopi.IID := Mux(stopiIsNotZeroReg, hsIidNum, 0.U)
   io.out.stopi.IPRIO := Mux(
-    stopiIsNotZero,
+    stopiIsNotZeroReg,
     Mux(
-      hsIpriosIsZero,
+      hsIpriosIsZeroReg,
       1.U,
       Mux1H(Seq(
         (stopiPrioNumReal >= 1.U && stopiPrioNumReal <= 255.U) -> stopiPrioNumReal(7, 0),
@@ -223,7 +234,10 @@ class InterruptFilter extends Module {
 
   private val (vsIidIdx, vsPrioNum) = highIprio(hvipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
 
-  private val vsIidNum = findNum(vsIidIdx)
+  private val vsIidIdxReg = RegNext(vsIidIdx)
+  private val vsPrioNumReg = RegNext(vsPrioNum)
+
+  private val vsIidNum = findNum(vsIidIdxReg)
 
   val iidCandidate123   = Wire(UInt(12.W))
   val iidCandidate45    = Wire(UInt(12.W))
@@ -240,7 +254,7 @@ class InterruptFilter extends Module {
     Candidate5 -> hvictl.IID.asUInt,
   ))
   iprioCandidate45 := Mux1H(Seq(
-    Candidate4 -> vsPrioNum,
+    Candidate4 -> vsPrioNumReg,
     Candidate5 -> hvictl.IPRIO.asUInt,
   ))
 
