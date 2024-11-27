@@ -539,7 +539,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     difftest.mask   := RegEnable(io.dcache.req.bits.amo_mask, en)
     difftest.cmp    := RegEnable(io.dcache.req.bits.amo_cmp.asTypeOf(difftest.cmp), en)
     difftest.fuop   := RegEnable(uop.fuOpType, en)
-    difftest.out    := resp_data_wire
+    difftest.out    := resp_data_wire.asTypeOf(difftest.out)
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
