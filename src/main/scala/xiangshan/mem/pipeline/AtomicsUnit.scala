@@ -485,7 +485,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     io.dcache.req.bits.cmd === M_XLR,
     !io.dcache.block_lr, // block lr to survive in lr storm
     data_valid // wait until src(1) is ready
-  )
+  ) && state === s_cache_req
   val pipe_req = io.dcache.req.bits
   pipe_req := DontCare
   pipe_req.cmd := LookupTree(uop.fuOpType, List(
