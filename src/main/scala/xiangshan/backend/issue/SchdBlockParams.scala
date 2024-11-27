@@ -146,17 +146,15 @@ case class SchdBlockParams(
   }
 
   def wakeUpInExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      issueBlockParams
-        .flatMap(_.wakeUpInExuSources)
-    )(_.name)
+    issueBlockParams
+      .flatMap(_.wakeUpInExuSources)
+      .distinctBy(_.name)
   }
 
   def wakeUpOutExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      issueBlockParams
-        .flatMap(_.wakeUpOutExuSources)
-    )(_.name)
+    issueBlockParams
+      .flatMap(_.wakeUpOutExuSources)
+      .distinctBy(_.name)
   }
 
   def genIQWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
