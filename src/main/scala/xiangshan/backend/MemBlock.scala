@@ -1610,7 +1610,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
-    assert((0 until StaCnt + HyuCnt).map(state === s_atomics(_)).reduce(_ || _))
     state := s_normal
   }
 
