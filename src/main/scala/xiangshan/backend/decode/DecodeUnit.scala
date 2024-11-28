@@ -1039,19 +1039,22 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
     val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
     val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
-    val isVle = decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse
-    val isVlm = decodedInst.fuOpType === VlduType.vlm
+    val isVload = FuType.isVLoad(decodedInst.fuType)
+    val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
+    val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
+    val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
+    val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
     val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
     val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
     val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
+    val vstartIsNotZero = io.enq.vstart =/= 0.U
     decodedInst.vpu.isNarrow := isNarrow
     decodedInst.vpu.isDstMask := isDstMask
     decodedInst.vpu.isOpMask := isOpMask
-    decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma
+    decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
     decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
     decodedInst.vpu.vstart := io.enq.vstart
-    decodedInst.vpu.isVleff := decodedInst.fuOpType === VlduType.vleff && inst.NF === 0.U
+    decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
   }
   decodedInst.vpu.specVill := io.enq.vtype.illegal
   decodedInst.vpu.specVma := io.enq.vtype.vma
