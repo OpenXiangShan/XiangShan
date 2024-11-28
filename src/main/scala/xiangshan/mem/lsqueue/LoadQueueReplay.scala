@@ -806,6 +806,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
   val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_TM)))
   val replayMemAmbCount       = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MA)))
+  val replayMemAmbAllCount    = PopCount(io.enq.map(enq => enq.fire &&  enq.bits.rep_info.cause(LoadReplayCauses.C_MA)))
   val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
   val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAR)))
   val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAW)))
@@ -821,6 +822,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_raw_nack", replayRAWRejectCount)
   XSPerfAccumulate("replay_nuke", replayNukeCount)
   XSPerfAccumulate("replay_mem_amb", replayMemAmbCount)
+  XSPerfAccumulate("replay_mem_amb_all", replayMemAmbAllCount)
   XSPerfAccumulate("replay_tlb_miss", replayTlbMissCount)
   XSPerfAccumulate("replay_bank_conflict", replayBankConflictCount)
   XSPerfAccumulate("replay_dcache_replay", replayDCacheReplayCount)
@@ -838,8 +840,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         (replay.bits.mask & io.mdpVaRead.pipe(i).mask).orR,
         (genVWmask(replay.bits.vaddr, replay.bits.uop.fuOpType(1, 0)) & io.mdpVaRead.pipe(i).mask).orR
       )
+      val storeIsOlder = isBefore(io.mdpVaRead.pipe(i).robIdx, replay.bits.uop.robIdx)
 
-      replay.fire && loadIsMemAmb && (!loadAddrMatch || !loadMaskMatch)
+      replay.fire && loadIsMemAmb && storeIsOlder && (!loadAddrMatch || !loadMaskMatch)
     }}
   ))
 
