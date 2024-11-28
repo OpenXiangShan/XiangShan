@@ -32,11 +32,10 @@ import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.{DebugOptionsKey, FakeL3, PMParameKey, XSTileKey}
 import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
 import openLLC.OpenLLCParam
-import xiangshan.PMParameKey
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -357,7 +356,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   if(soc.L3CacheParamsOpt.isEmpty){
-    l3_out :*= l3_in
+    l3_out := FakeL3() :*= l3_in
   }
 
   if (!enableCHI) {

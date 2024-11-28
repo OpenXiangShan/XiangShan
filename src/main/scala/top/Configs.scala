@@ -317,8 +317,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
       t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
     }.sum
     up(SoCParamsKey).copy(
-      L3NBanks = banks,
-      L3CacheParamsOpt = Some(HCCacheParameters(
+      L3NBanks = 1/*banks*/,
+      L3CacheParamsOpt = None/*Some(HCCacheParameters(
         name = "L3",
         level = 3,
         ways = ways,
@@ -341,7 +341,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         simulation = !site(DebugOptionsKey).FPGAPlatform,
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
-      )),
+      ))*/,
       OpenLLCParamsOpt = Some(OpenLLCParam(
         name = "LLC",
         ways = ways,
@@ -407,7 +407,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
