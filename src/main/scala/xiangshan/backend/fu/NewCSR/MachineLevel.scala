@@ -500,9 +500,13 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   }
   // when DTE is zero, SDT field is read-only zero(write any, read zero, side effect of write 1 is block)
   val writeSDT = Wire(Bool())
-  writeSDT := Mux(this.menvcfg.DTE.asBool, (w.wdataFields.SDT && w.wen) || (wAliasSstatus.wdataFields.SDT && wAliasSstatus.wen), 0.U)
-  when (!this.menvcfg.DTE) {
-    regOut.SDT := false.B
+  writeSDT := (w.wdataFields.SDT && w.wen) || (this.menvcfg.DTE.asBool && wAliasSstatus.wdataFields.SDT && wAliasSstatus.wen)
+  // menvcfg.DTE only control Smode dbltrp. Thus mstatus.sdt will not control by DTE.
+  // as sstatus is alias of mstatus, when menvcfg.DTE close write,
+  // sstatus.sdt cannot lead to shadow write of mstatus.sdt. \
+  // As a result, we add wmask of sdt, when write source is from alias write.
+  when (!this.menvcfg.DTE.asBool && wAliasSstatus.wdataFields.SDT && wAliasSstatus.wen ) {
+    reg.SDT := reg.SDT
   }
   // SDT and SIE is the same as MDT and MIE
   when (writeSDT) {
@@ -511,6 +515,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   // read connection
   mstatus :|= regOut
   sstatus := mstatus
+  sstatus.SDT := regOut.SDT && menvcfg.DTE
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
 }
