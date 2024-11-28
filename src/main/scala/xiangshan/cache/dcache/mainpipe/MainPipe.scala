@@ -1223,7 +1223,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val amo_wait_amoalu_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === AMO_SOURCE.U &&
       s3_req_cmd_dup_for_data_w_bank =/= M_XLR &&
       s3_req_cmd_dup_for_data_w_bank =/= M_XSC &&
-      isAMOCAS(s3_req_cmd_dup(0))
+      !isAMOCAS(s3_req_cmd_dup(0))
     val do_amoalu_dup_for_data_w_bank = amo_wait_amoalu_dup_for_data_w_bank && s3_valid_dup_for_data_w_bank(i) && !s3_s_amoalu_dup_for_data_w_bank
 
     val s3_store_hit_dup_for_data_w_bank = RegEnable(s2_store_hit, s2_fire_to_s3)
