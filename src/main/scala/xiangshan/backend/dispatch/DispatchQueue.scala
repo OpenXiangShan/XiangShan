@@ -36,6 +36,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
   val deqNext = Vec(deqnum, Output(new MicroOp))
+  val psize = Input(UInt(64.W))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -198,7 +199,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
       currentValidCounter,
       validCounter + numEnq - numDeq)
   )
-  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
+  allowEnqueue := Mux(currentValidCounter > (io.psize - enqnum.U), false.B, numEnq <= (io.psize - enqnum.U) - currentValidCounter)
 
   /**
    * Part 3: set output valid and data bits
@@ -260,7 +261,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   XSPerfAccumulate("in", numEnq)
   XSPerfAccumulate("out", PopCount(io.deq.map(_.fire)))
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
-  val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
+  val fake_block = currentValidCounter <= (io.psize - enqnum.U) && !canEnqueue
   XSPerfAccumulate("fake_block", fake_block)
 
   val validEntries = RegNext(PopCount(stateEntries.map(_ =/= s_invalid)))
@@ -269,10 +270,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     ("dispatchq_out",        PopCount(io.deq.map(_.fire))                                    ),
     ("dispatchq_out_try",    PopCount(io.deq.map(_.valid))                                   ),
     ("dispatchq_fake_block", fake_block                                                      ),
-    ("dispatchq_1_4_valid ", validEntries <  (size / 4).U                                    ),
-    ("dispatchq_2_4_valid ", validEntries >= (size / 4).U && validEntries <= (size / 2).U    ),
-    ("dispatchq_3_4_valid ", validEntries >= (size / 2).U && validEntries <= (size * 3 / 4).U),
-    ("dispatchq_4_4_valid ", validEntries >= (size * 3 / 4).U                                )
+    ("dispatchq_1_4_valid ", validEntries <  (io.psize / 4.U)                                    ),
+    ("dispatchq_2_4_valid ", validEntries >= (io.psize / 4.U) && validEntries <= (io.psize / 2.U)    ),
+    ("dispatchq_3_4_valid ", validEntries >= (io.psize / 2.U) && validEntries <= (io.psize * 3.U / 4.U)),
+    ("dispatchq_4_4_valid ", validEntries >= (io.psize * 3.U / 4.U)                                )
   )
   generatePerfEvent()
 }

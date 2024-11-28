@@ -72,6 +72,18 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val ibufSize1 = RegInit(IBufSize.U(64.W))
     val ibufSize = Wire(UInt(64.W))
 
+    val intDqSize0 = RegInit(dpParams.IntDqSize.U(64.W))
+    val intDqSize1 = RegInit(dpParams.IntDqSize.U(64.W))
+    val intDqSize = Wire(UInt(64.W))
+
+    val fpDqSize0 = RegInit(dpParams.FpDqSize.U(64.W))
+    val fpDqSize1 = RegInit(dpParams.FpDqSize.U(64.W))
+    val fpDqSize = Wire(UInt(64.W))
+
+    val lsDqSize0 = RegInit(dpParams.LsDqSize.U(64.W))
+    val lsDqSize1 = RegInit(dpParams.LsDqSize.U(64.W))
+    val lsDqSize = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -92,7 +104,13 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x130 -> Seq(RegField(64, ftqSize0)),
       0x138 -> Seq(RegField(64, ftqSize1)),
       0x140 -> Seq(RegField(64, ibufSize0)),
-      0x148 -> Seq(RegField(64, ibufSize1))
+      0x148 -> Seq(RegField(64, ibufSize1)),
+      0x150 -> Seq(RegField(64, intDqSize0)),
+      0x158 -> Seq(RegField(64, intDqSize1)),
+      0x160 -> Seq(RegField(64, fpDqSize0)),
+      0x168 -> Seq(RegField(64, fpDqSize1)),
+      0x170 -> Seq(RegField(64, lsDqSize0)),
+      0x178 -> Seq(RegField(64, lsDqSize1))
     )
 
     // Mux logic
@@ -101,6 +119,9 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     sqSize := Mux(ctrlSel.orR, sqSize1, sqSize0)
     ftqSize := Mux(ctrlSel.orR, ftqSize1, ftqSize0)
     ibufSize := Mux(ctrlSel.orR, ibufSize1, ibufSize0)
+    intDqSize := Mux(ctrlSel.orR, intDqSize1, intDqSize0)
+    fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
+    lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
 
     // Bore to/from ROB
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -116,6 +137,9 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(sqSize <= StoreQueueSize.U, "DSE parameter must not exceed StoreQueueSize")
     assert(ftqSize <= FtqSize.U, "DSE parameter must not exceed FtqSize")
     assert(ibufSize <= IBufSize.U, "DSE parameter must not exceed IBufSize")
+    assert(intDqSize <= dpParams.IntDqSize.U, "DSE parameter must not exceed IntDqSize")
+    assert(fpDqSize <= dpParams.FpDqSize.U, "DSE parameter must not exceed FpDqSize")
+    assert(lsDqSize <= dpParams.LsDqSize.U, "DSE parameter must not exceed LsDqSize")
 
 
     // core reset generation

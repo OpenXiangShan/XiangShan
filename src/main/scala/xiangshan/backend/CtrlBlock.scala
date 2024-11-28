@@ -265,6 +265,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
 //  rob.io.pRobSize := io.robSize
 
+  val pIntDqSize = WireInit(dpParams.IntDqSize.U(log2Up(dpParams.IntDqSize + 1).W))
+  val pFpDqSize = WireInit(dpParams.FpDqSize.U(log2Up(dpParams.FpDqSize + 1).W))
+  val pLsDqSize = WireInit(dpParams.LsDqSize.U(log2Up(dpParams.LsDqSize + 1).W))
+  ExcitingUtils.addSink(pIntDqSize, "DSE_INTDQSIZE")
+  ExcitingUtils.addSink(pFpDqSize, "DSE_FPDQSIZE")
+  ExcitingUtils.addSink(pLsDqSize, "DSE_LSDQSIZE")
+
+  intDq.io.psize := pIntDqSize
+  fpDq.io.psize := pFpDqSize
+  lsDq.io.psize := pLsDqSize
+
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
