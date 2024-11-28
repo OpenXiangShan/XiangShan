@@ -586,7 +586,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_sc_fail = s3_sc && !s3_lrsc_addr_match
   val debug_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid_dup(0)
 
-  val s3_cas_fail = FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_data_quad_word) =/= 0.U
+  val s3_cas_fail = (FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_data_quad_word)) =/= 0.U
 
   val s3_can_do_amo = (s3_req_miss_dup(0) && !s3_req_probe_dup(5) && s3_req.isAMO) || s3_amo_hit
   val s3_can_do_amo_write = s3_can_do_amo && isWrite(s3_req_cmd_dup(5)) && !s3_sc_fail && !s3_cas_fail
