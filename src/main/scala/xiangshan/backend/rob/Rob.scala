@@ -347,7 +347,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.io.snpt := io.snpt
   rab.io.snpt.snptEnq := snptEnq
 
-  io.rabCommits := rab.io.commits
+  // pipe rab commits for better timing and area
+  io.rabCommits := RegNext(rab.io.commits)
   io.diffCommits.foreach(_ := rab.io.diffCommits.get)
 
   /**
