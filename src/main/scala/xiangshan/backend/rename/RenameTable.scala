@@ -129,6 +129,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   val t1_wSpec = RegNext(Mux(io.redirect, 0.U.asTypeOf(io.specWritePorts), io.specWritePorts))
 
   val t1_snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
+  val t2_snpt = RegNext(t1_snpt, 0.U.asTypeOf(io.snpt))
 
   val snapshots = SnapshotGenerator(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect, t1_snpt.flushVec)
 
@@ -139,8 +140,8 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     val wMatch = ParallelPriorityMux(matchVec.reverse, t1_wSpec.map(_.data).reverse)
     // When there's a flush, we use arch_table to update spec_table.
     next := Mux(
-      t1_redirect,
-      Mux(t1_snpt.useSnpt, snapshots(t1_snpt.snptSelect)(i), arch_table(i)),
+      RegNext(t1_redirect),
+      Mux(t2_snpt.useSnpt, snapshots(t2_snpt.snptSelect)(i), arch_table(i)),
       Mux(VecInit(matchVec).asUInt.orR, wMatch, spec_table(i))
     )
   }
