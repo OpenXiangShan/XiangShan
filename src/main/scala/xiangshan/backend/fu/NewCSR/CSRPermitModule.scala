@@ -141,8 +141,6 @@ class CSRPermitModule extends Module {
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
-  private val rwCustom_EX_II = csrAccess && privState.isModeVS && csrIsCustom
-
   private val accessHPM = ren && csrIsHPM
   private val accessHPM_EX_II = accessHPM && (
     !privState.isModeM && !mcounteren(counterAddr) ||
@@ -184,9 +182,10 @@ class CSRPermitModule extends Module {
   // AIA bit 59
   private val ssAiaHaddr = Seq(CSRs.hvien.U, CSRs.hvictl.U, CSRs.hviprio1.U, CSRs.hviprio2.U)
   private val ssAiaVSaddr = addr === CSRs.vstopi.U
-  private val csrIsAIA = ssAiaHaddr.map(_ === addr).reduce(_ || _) || ssAiaVSaddr
+  private val ssAiaSaddr = addr === CSRs.stopi.U
+  private val csrIsAIA = ssAiaHaddr.map(_ === addr).reduce(_ || _) || ssAiaVSaddr || ssAiaSaddr
   private val accessAIA_EX_II = csrIsAIA && !privState.isModeM && !mstateen0.AIA.asBool
-  private val accessAIA_EX_VI = csrIsAIA && mstateen0.AIA.asBool && privState.isVirtual
+  private val accessAIA_EX_VI = ssAiaSaddr && privState.isVirtual && !hstateen0.AIA.asBool
 
   // IMSIC bit 58 (Ssaia extension)
   private val csrIsStopei = addr === CSRs.stopei.U
@@ -212,7 +211,7 @@ class CSRPermitModule extends Module {
   // [0x5c0, 0x5ff], [0x9c0, 0x9ff], [0xdc0, 0xdff]
   private val csrIsSCustom   = (addr(11, 10) =/= "b00".U) && (addr(9, 8) === "b01".U) && (addr(7, 6) === "b11".U)
   // [0x800, 0x8ff], [0xcc0, 0xcff]
-  private val csrIsUCustom   = (addr(11, 8) =/= "b1000".U) || (addr(11, 6) =/= "b100011".U)
+  private val csrIsUCustom   = (addr(11, 8) === "b1000".U) || (addr(11, 6) === "b110011".U)
   private val allCustom      = csrIsHVSCustom || csrIsSCustom || csrIsUCustom
   private val accessCustom_EX_II = allCustom && (
     !privState.isModeM && !mstateen0.C.asBool ||
@@ -266,7 +265,7 @@ class CSRPermitModule extends Module {
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
     rwIllegal || mnret_EX_II || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
-    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
+    rwStimecmp_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
     rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
     mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
