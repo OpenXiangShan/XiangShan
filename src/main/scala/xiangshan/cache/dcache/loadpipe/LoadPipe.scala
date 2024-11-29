@@ -131,7 +131,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.tag_read.valid := io.lsu.req.fire && !io.nack
 
   val s0_valid = io.lsu.req.fire
-  val s0_req = io.lsu.req.bits
+  val s0_req = WireInit(io.lsu.req.bits)
+  s0_req.vaddr := Mux(io.load128Req, Cat(io.lsu.req.bits.vaddr(io.lsu.req.bits.vaddr.getWidth - 1, 4), 0.U(4.W)), io.lsu.req.bits.vaddr)
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.vaddr
   val s0_replayCarry = s0_req.replayCarry
@@ -179,7 +180,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_load128Req = RegEnable(s0_load128Req, s0_fire)
   val s1_is_prefetch = s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
-  val s1_vaddr = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  val s1_vaddr_update = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  val s1_vaddr = Mux(s1_load128Req, Cat(s1_vaddr_update(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update)
   val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
