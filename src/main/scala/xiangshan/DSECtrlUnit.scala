@@ -123,13 +123,18 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
     lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
 
-    // Bore to/from ROB
+    // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
     ExcitingUtils.addSource(lqSize, "DSE_LQSIZE")
     ExcitingUtils.addSource(sqSize, "DSE_SQSIZE")
     ExcitingUtils.addSource(ftqSize, "DSE_FTQSIZE")
     ExcitingUtils.addSource(ibufSize, "DSE_IBUFSIZE")
+    ExcitingUtils.addSource(intDqSize, "DSE_INTDQSIZE")
+    ExcitingUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
+    ExcitingUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
+
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
+
 
     // assertion
     assert(robSize <= RobSize.U, "DSE parameter must not exceed ROBSZIE")
