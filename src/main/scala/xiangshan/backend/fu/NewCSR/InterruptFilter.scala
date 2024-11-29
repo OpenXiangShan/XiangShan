@@ -2,7 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import utility.DelayN
+import utility.{DelayN, GatedValidRegNext}
 import utils._
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
@@ -59,13 +59,16 @@ class InterruptFilter extends Module {
   val mtopigather = mip & mie & (~mideleg).asUInt
   val hstopigather = hsip & hsie & (~hideleg).asUInt
   val vstopigather = vsip & vsie
-  val mipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
+  val mipriosSort:  Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
   val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
   val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
+  val indexSort   : Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W)))
+
   InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (value, index) =>
     mipriosSort(index)  := Mux(mtopigather(value), Cat(1.U, miprios(7 + 8 * value, 8 * value)), 0.U)
     hsipriosSort(index) := Mux(hstopigather(value), Cat(1.U, hsiprios(7 + 8 * value, 8 * value)), 0.U)
     hvipriosSort(index) := Mux(vstopigather(value), Cat(1.U, 0.U(8.W)), 0.U)
+    indexSort(index) := index.U
   }
   hvipriosSort(findIndex(1.U)) := Mux(vstopigather(1).asBool, Cat(1.U, hviprio1.PrioSSI.asUInt), 0.U)
   hvipriosSort(findIndex(5.U)) := Mux(vstopigather(5).asBool, Cat(1.U, hviprio1.PrioSTI.asUInt), 0.U)
@@ -154,29 +157,85 @@ class InterruptFilter extends Module {
     }
   }
 
-  def highIprio(iprios: Vec[UInt], xei: UInt = 0.U): (UInt, UInt) = {
-    val index = WireInit(VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W))))
-    InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (prio, i) =>
-      index(i) := i.U
-    }
+  def highIprio(index: Vec[UInt], iprios: Vec[UInt], xei: UInt = 0.U): (UInt, UInt, UInt) = {
     val result = minSelect(index, iprios, xei)
-    (result._1(0), result._2(0)(7, 0))
+    (result._1(0), result._2(0)(8), result._2(0)(7, 0))
   }
 
-  private val (mIidIdx,  mPrioNum)  = highIprio(mipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
-  private val (hsIidIdx, hsPrioNum) = highIprio(hsipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
+  private val indexTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(6.W)))))
+  (0 until 8).foreach { i =>
+    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
+    val slice = indexSort.slice(8*i, end).map(_.asUInt)
+    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(6.W))
+    indexTmp(i) := VecInit(paddingSlice)
+  }
 
-  private val mIidNum  = findNum(mIidIdx)
-  private val hsIidNum = findNum(hsIidIdx)
+  private val mipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
+  (0 until 8).foreach { i =>
+    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
+    val slice = mipriosSort.slice(8*i, end).map(_.asUInt)
+    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
+    mipriosSortTmp(i) := VecInit(paddingSlice)
+  }
 
-  private val mIidDefaultPrioHighMEI: Bool = mIidIdx < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
-  private val mIidDefaultPrioLowMEI : Bool = mIidIdx > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val hsipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
+  (0 until 8).foreach { i =>
+    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
+    val slice = hsipriosSort.slice(8 * i, end).map(_.asUInt)
+    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
+    hsipriosSortTmp(i) := VecInit(paddingSlice)
+  }
 
-  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdx < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdx > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+  private val mIidIdx   = VecInit(Seq.fill(8)(0.U(6.W)))
+  private val hsIidIdx  = VecInit(Seq.fill(8)(0.U(6.W)))
+  private val mEnable   = VecInit(Seq.fill(8)(0.U(1.W)))
+  private val hsEnable  = VecInit(Seq.fill(8)(0.U(1.W)))
+  private val mPrioNum  = VecInit(Seq.fill(8)(0.U(8.W)))
+  private val hsPrioNum = VecInit(Seq.fill(8)(0.U(8.W)))
 
-  val mtopiPrioNumReal = mPrioNum
-  val stopiPrioNumReal = hsPrioNum
+  indexTmp.zip(mipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
+    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
+    mIidIdx(i) := iidTmp
+    mEnable(i) := enableTmp
+    mPrioNum(i) := prioTmp
+  }
+
+
+  indexTmp.zip(hsipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
+    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
+    hsIidIdx(i) := iidTmp
+    hsEnable(i) := enableTmp
+    hsPrioNum(i) := prioTmp
+  }
+
+  private val mIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
+  (0 until 8).foreach(i => mIndexReg(i) := mIidIdx(i))
+
+  private val hsIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
+  (0 until 8).foreach(i => hsIndexReg(i) := hsIidIdx(i))
+
+  private val mipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
+  (0 until 8).foreach(i => mipriosSortReg(i) := Cat(mEnable(i), mPrioNum(i)))
+
+  private val hsipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
+  (0 until 8).foreach(i => hsipriosSortReg(i) := Cat(hsEnable(i), hsPrioNum(i)))
+
+
+  private val (mIidIdxReg, mEnableReg, mPrioNumReg)  = highIprio(mIndexReg, mipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U)
+  private val (hsIidIdxReg, hsEnableReg, hsPrioNumReg) = highIprio(hsIndexReg, hsipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U)
+
+
+  private val mIidNum  = findNum(mIidIdxReg)
+  private val hsIidNum = findNum(hsIidIdxReg)
+
+  private val mIidDefaultPrioHighMEI: Bool = mIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+  private val mIidDefaultPrioLowMEI : Bool = mIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
+
+  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdxReg < InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdxReg > InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
+
+  val mtopiPrioNumReal = mPrioNumReg
+  val stopiPrioNumReal = hsPrioNumReg
 
   // update mtopi
   io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
@@ -221,9 +280,35 @@ class InterruptFilter extends Module {
   assert(PopCount(Cat(Candidate1, Candidate2, Candidate3)) < 2.U, "Only one Candidate could be select from Candidate1/2/3 in VS-level!")
   assert(PopCount(Cat(Candidate4, Candidate5)) < 2.U, "Only one Candidate could be select from Candidate4/5 in VS-level!")
 
-  private val (vsIidIdx, vsPrioNum) = highIprio(hvipriosSort, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
+  private val hvipriosSortTmp = VecInit(Seq.fill(8)(VecInit(Seq.fill(8)(0.U(9.W)))))
+  (0 until 8).foreach { i =>
+    val end = math.min(8*(i+1), InterruptNO.interruptDefaultPrio.size)
+    val slice = hvipriosSort.slice(8*i, end).map(_.asUInt)
+    val paddingSlice = slice ++ Seq.fill(8 - slice.length)(0.U(9.W))
+    hvipriosSortTmp(i) := VecInit(paddingSlice)
+  }
 
-  private val vsIidNum = findNum(vsIidIdx)
+  private val vsIidIdx  = VecInit(Seq.fill(8)(0.U(6.W)))
+  private val vsEnable  = VecInit(Seq.fill(8)(0.U(1.W)))
+  private val vsPrioNum = VecInit(Seq.fill(8)(0.U(8.W)))
+
+  indexTmp.zip(hvipriosSortTmp).zipWithIndex.foreach { case ((index, iprios), i) =>
+    val (iidTmp, enableTmp, prioTmp) = highIprio(index, iprios, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
+    vsIidIdx(i) := iidTmp
+    vsEnable(i) := enableTmp
+    vsPrioNum(i) := prioTmp
+  }
+
+  private val vsIndexReg = RegInit(VecInit(Seq.fill(8)(0.U(6.W))))
+  (0 until 8).foreach(i => vsIndexReg(i) := vsIidIdx(i))
+
+  private val hvipriosSortReg = RegInit(VecInit(Seq.fill(8)(0.U(9.W))))
+  (0 until 8).foreach(i => hvipriosSortReg(i) := Cat(vsEnable(i), vsPrioNum(i)))
+
+  private val (vsIidIdxReg, vsEnableReg, vsPrioNumReg) = highIprio(vsIndexReg, hvipriosSortReg, InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U)
+
+  private val vsIidNum = findNum(vsIidIdxReg)
+
 
   val iidCandidate123   = Wire(UInt(12.W))
   val iidCandidate45    = Wire(UInt(12.W))
@@ -240,7 +325,7 @@ class InterruptFilter extends Module {
     Candidate5 -> hvictl.IID.asUInt,
   ))
   iprioCandidate45 := Mux1H(Seq(
-    Candidate4 -> vsPrioNum,
+    Candidate4 -> vsPrioNumReg,
     Candidate5 -> hvictl.IPRIO.asUInt,
   ))
 
