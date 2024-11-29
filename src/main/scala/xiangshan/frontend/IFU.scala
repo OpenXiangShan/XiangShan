@@ -394,16 +394,19 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_isForVSnonLeafPTE = fromICache.bits.isForVSnonLeafPTE
 
   // FIXME: raise af if one fetch block crosses the cacheable-noncacheable boundary, might not correct
-  val f2_mmio_mismatch_exception = VecInit(Seq.fill(2)(Mux(
-    // not double-line, skip check
-    !fromICache.bits.doubleline || (
-      // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-      fromICache.bits.pmp_mmio(0) === fromICache.bits.pmp_mmio(1) &&
-        fromICache.bits.itlb_pbmt(0) === fromICache.bits.itlb_pbmt(1)
-    ),
-    ExceptionType.none,
-    ExceptionType.af
-  )))
+  val f2_mmio_mismatch_exception = VecInit(Seq(
+    ExceptionType.none, // mark the exception only on the second line
+    Mux(
+      // not double-line, skip check
+      !fromICache.bits.doubleline || (
+        // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
+        fromICache.bits.pmp_mmio(0) === fromICache.bits.pmp_mmio(1) &&
+          fromICache.bits.itlb_pbmt(0) === fromICache.bits.itlb_pbmt(1)
+      ),
+      ExceptionType.none,
+      ExceptionType.af
+    )
+  ))
 
   // merge exceptions
   val f2_exception = ExceptionType.merge(f2_exception_in, f2_mmio_mismatch_exception)
