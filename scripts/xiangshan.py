@@ -29,20 +29,19 @@ import shlex
 import psutil
 import re
 
-def load_all_gcpt(gcpt_path, json_path):
+def find_files_with_suffix(root_dir, suffixes):
+    matching_files = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for filename in filenames:
+            if any(filename.endswith(suffix) for suffix in suffixes):
+                absolute_path = os.path.join(dirpath, filename)
+                matching_files.append(absolute_path)
+    return matching_files
+
+def load_all_gcpt(gcpt_paths):
     all_gcpt = []
-    with open(json_path) as f:
-        data = json.load(f)
-    for benchspec in data:
-        for point in data[benchspec]:
-            weight = data[benchspec][point]
-            gcpt = os.path.join(gcpt_path, "_".join([benchspec, point, weight]))
-            bin_dir = os.path.join(gcpt, "0")
-            bin_file = list(os.listdir(bin_dir))
-            assert(len(bin_file) == 1)
-            bin_path = os.path.join(bin_dir, bin_file[0])
-            assert(os.path.isfile(bin_path))
-            all_gcpt.append(bin_path)
+    for gcpt_path in gcpt_paths:
+        all_gcpt.extend(find_files_with_suffix(gcpt_path, ['.zstd', '.gz']))
     return all_gcpt
 
 class XSArgs(object):
@@ -537,7 +536,7 @@ class XiangShan(object):
             return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
         # select a random SPEC checkpoint
         assert(name == "random")
-        all_cpt = [
+        all_cpt_dir = [
             "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
             "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
             "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
@@ -545,21 +544,11 @@ class XiangShan(object):
             "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
             "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
             "/nfs/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
-            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt"
+            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/zstd-checkpoint-0-0-0",
+            "/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcbv_O3_lto_base_nemu_single_core_NEMU_archgroup_2024-10-12-16-05/checkpoint-0-0-0"
         ]
-        all_json = [
-            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/simpoint_summary.json"
-        ]
-        assert(len(all_cpt) == len(all_json))
-        cpt_path, json_path = random.choice(list(zip(all_cpt, all_json)))
-        all_gcpt = load_all_gcpt(cpt_path, json_path)
+        all_gcpt = load_all_gcpt(all_cpt_dir)
         return [random.choice(all_gcpt)]
 
     def run_ci(self, test):
