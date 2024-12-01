@@ -577,6 +577,15 @@ class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
   val block_lr = Input(Bool())
 }
 
+class CMOReq(implicit p: Parameters) extends Bundle {
+  val opcode = UInt(3.W)   // 0-cbo.clean, 1-cbo.flush, 2-cbo.inval, 3-cbo.zero
+  val address = UInt(64.W)
+}
+
+class CMOResp(implicit p: Parameters) extends Bundle {
+  val address = UInt(64.W)
+}
+
 // used by load unit
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
@@ -784,6 +793,8 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
   val l2_hint = Input(Valid(new L2ToL1Hint()))
+  val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
+  val cmoOpResp = DecoupledIO(new CMOResp)
 }
 
 private object ArbiterCtrl {
@@ -1423,6 +1434,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missReqArb.io.out <> missQueue.io.req
   missReadyGen.io.queryMQ <> missQueue.io.queryMQ
+  io.cmoOpReq <> missQueue.io.cmo_req
+  io.cmoOpResp <> missQueue.io.cmo_resp
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
@@ -1512,7 +1525,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // in L1DCache, we ony expect Grant[Data] and ReleaseAck
   bus.d.ready := false.B
-  when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData) {
+  when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.CBOAck) {
     missQueue.io.mem_grant <> bus.d
   } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
     wb.io.mem_grant <> bus.d
