@@ -359,6 +359,21 @@ case class XSCoreParameters
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1
 ){
+  def ISABase = "rv64i"
+  def ISAExtensions = Seq(
+    // single letter extensions, in canonical order
+    "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
+    // multi-letter extensions, sorted alphanumerically
+    "sdtrig", "sha", "shcounterenw", "shgatpa", "shtvala", "shvsatpa", "shvstvala", "shvstvecd",
+    "smaia", "smstateen", "ss1p13", "ssaia", "ssccptr", "sscofpmf", "sscounterenw", "ssstateen",
+    "sstc", "sstvala", "sstvecd", "ssu64xl", "sv39", "sv48", "svade", "svbare", "svinval",
+    "svpbmt", "za64rs", "zba", "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop",
+    "zfa", "zfh", "zfhmin", "zic64b", "zicbom", "zicbop", "zicboz", "ziccif", "zicclsm",
+    "ziccrse", "zicntr", "zicond", "zicsr", "zifencei", "zihintpause", "zihpm", "zimop", "zkn",
+    "zknd", "zkne", "zknh", "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt",
+    "zvl128b", "zvl32b", "zvl64b"
+  )
+
   def vlWidth = log2Up(VLEN) + 1
 
   /**
@@ -577,6 +592,8 @@ trait HasXSParameter {
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
 
+  def ISABase = coreParams.ISABase
+  def ISAExtensions = coreParams.ISAExtensions
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
   def ELEN = coreParams.ELEN

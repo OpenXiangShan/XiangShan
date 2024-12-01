@@ -314,7 +314,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
   //uopwriteback(deq)
   for (i <- 0 until uopSize){
-    when(allocated(i) && entries(i).allReady()){
+    when(allocated(i) && entries(i).allReady() && !needCancel(i)){
       uopFinish(i) := true.B
     }
   }

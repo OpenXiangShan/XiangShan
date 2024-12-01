@@ -520,15 +520,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
-    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),
-    ("dispatch_empty",              !hasValidInstr                                                                 ),
-    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                                           ),
-    ("dispatch_waitinstr",          PopCount(io.fromRename.map(!_.valid && canAccept))                 ),
-    ("dispatch_stall_cycle_lsq",    false.B                                                                        ),
-    ("dispatch_stall_cycle_rob",    stall_rob                                                                      ),
-    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                                   ),
-    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                                    ),
-    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                                    )
+    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))),
+    ("dispatch_empty",              !hasValidInstr                                               ),
+    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                         ),
+    ("dispatch_waitinstr",          PopCount(io.fromRename.map(!_.valid && canAccept))           ),
+    ("dispatch_stall_cycle_lsq",    false.B                                                      ),
+    ("dispatch_stall_cycle_rob",    stall_rob                                                    ),
+    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                 ),
+    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                  ),
+    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                  )
   )
   generatePerfEvent()
 }

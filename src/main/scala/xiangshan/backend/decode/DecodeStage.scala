@@ -253,7 +253,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val inValidNotReady = io.in.map(in => GatedValidRegNext(in.valid && !in.ready))
   val perfEvents = Seq(
     ("decoder_fused_instr", PopCount(fusionValid)       ),
-    ("decoder_waitInstr",   PopCount(inValidNotReady)            ),
+    ("decoder_waitInstr",   PopCount(inValidNotReady)   ),
     ("decoder_stall_cycle", hasValid && !io.out(0).ready),
     ("decoder_utilization", PopCount(io.in.map(_.valid))),
   )

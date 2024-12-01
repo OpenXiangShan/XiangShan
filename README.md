@@ -48,9 +48,9 @@ The second stable micro-architecture of XiangShan is called Nanhu (南湖) and i
 
 The current version of XiangShan, also known as Kunminghu (昆明湖), is still under development on the master branch.
 
-The micro-architecture overview of Nanhu (南湖) is shown below.
+The micro-architecture overview of Kunminghu (昆明湖) is shown below.
 
-![xs-arch-nanhu](images/xs-arch-nanhu.svg)
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 
 
@@ -122,3 +122,7 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+
+## Acknowledgement
+
+The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.

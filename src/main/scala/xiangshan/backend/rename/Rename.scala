@@ -35,6 +35,7 @@ import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.util.CSRConst
+import yunsuan.{VfaluType, VipuType}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -352,8 +353,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
-    // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
-    uops(i).dirtyVs := (compressMasksVec(i) & Cat(io.in.map(_.bits.uopSplitType =/= UopSplitType.SCA_SIM).reverse)).orR
+    uops(i).dirtyVs := (
+      compressMasksVec(i) & Cat(io.in.map(in =>
+        // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
+        in.bits.uopSplitType =/= UopSplitType.SCA_SIM &&
+        // vfmv.f.s, vcpop.m, vfirst.m and vmv.x.s don't change vector state
+        !Seq(
+          (FuType.vfalu, VfaluType.vfmv_f_s), // vfmv.f.s
+          (FuType.vipu, VipuType.vcpop_m),    // vcpop.m
+          (FuType.vipu, VipuType.vfirst_m),   // vfirst.m
+          (FuType.vipu, VipuType.vmv_x_s)     // vmv.x.s
+        ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
+      ).reverse)
+    ).orR
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
@@ -730,8 +742,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   val renamePerf = Seq(
-    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
-    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))),
+    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))),
     ("rename_stall               ", inHeadStall),
     ("rename_stall_cycle_walk    ", inHeadValid &&  io.rabCommits.isWalk),
     ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc),

@@ -48,8 +48,8 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 香山的第三代微架构（昆明湖）正在 master 分支上不断开发中。
 
-南湖微架构概览：
-![xs-arch-nanhu](images/xs-arch-nanhu.svg)
+昆明湖微架构概览：
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 ## 目录概览
 
@@ -120,11 +120,4 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 
 ## 致谢
 
-在香山的开发过程中，我们采用了来自开源社区的子模块。具体情况如下：
-
-| 子模块         | 来源                                                       | 详细用途                                                       |
-| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | 我们的新 L2/L3 缓存设计受到了 Sifive `block-inclusivecache` 的启发. |
-| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | 我们复用了来自 rocket-chip 的 Diplomacy 框架和 Tilelink 工具，来协商总线. |
-
-我们深深地感谢来自开源社区的支持，我们也鼓励其他开源项目在[木兰宽松许可证](LICENSE)的范围下复用我们的代码。
+香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。

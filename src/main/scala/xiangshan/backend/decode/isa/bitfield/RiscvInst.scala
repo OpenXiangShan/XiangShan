@@ -117,12 +117,21 @@ trait BitFieldsVec { this: Riscv32BitInst =>
   }
 }
 
+trait BitFieldsRVK { this: Riscv32BitInst =>
+  def RNUM          : UInt = inst(23, 20)
+
+  def isRnumIllegal = {
+    this.RNUM > 0xA.U
+  }
+}
+
 class XSInstBitFields extends Riscv32BitInst
   with BitFieldsI
   with BitFieldsS
   with BitFieldsCSR
   with BitFieldsFp
   with BitFieldsVec
+  with BitFieldsRVK
 
 class InstVType extends Bundle {
   val reserved = UInt(3.W)

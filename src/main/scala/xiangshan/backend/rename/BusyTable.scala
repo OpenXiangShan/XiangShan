@@ -177,10 +177,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("bt_std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                      ),
+    ("bt_std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                        ),
     ("bt_std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U    ),
     ("bt_std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U),
-    ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                  )
+    ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                    )
   )
   generatePerfEvent()
 }
@@ -205,22 +205,22 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
   val zeroTableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val vlmaxTableUpdate = Wire(Vec(numPhyPregs, Bool()))
 
-  val wb0Mask = Mux(io.wbPregs(intSchdVlWbPort).valid, UIntToOH(io.wbPregs(intSchdVlWbPort).bits), 0.U)
-  val wb1Mask = Mux(io.wbPregs(vfSchdVlWbPort).valid, UIntToOH(io.wbPregs(vfSchdVlWbPort).bits), 0.U)
+  val intVlWb = Mux(io.wbPregs(intSchdVlWbPort).valid, UIntToOH(io.wbPregs(intSchdVlWbPort).bits), 0.U)
+  val vfVlWb = Mux(io.wbPregs(vfSchdVlWbPort).valid, UIntToOH(io.wbPregs(vfSchdVlWbPort).bits), 0.U)
 
   val zeroTable = VecInit((0 until numPhyPregs).zip(zeroTableUpdate).map{ case (idx, update) =>
-    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wb0Mask(idx) || wb1Mask(idx))
+    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || intVlWb(idx) || vfVlWb(idx))
   }).asUInt
   val vlmaxTable = VecInit((0 until numPhyPregs).zip(vlmaxTableUpdate).map{ case (idx, update) =>
-    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wb0Mask(idx) || wb1Mask(idx))
+    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || intVlWb(idx) || vfVlWb(idx))
   }).asUInt
 
 
   zeroTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(wb0Mask(idx)) {
+    when(intVlWb(idx)) {
       // int schd vl write back, check whether the vl is zero
       update := !io_vl_Wb.vlWriteBackInfo.vlFromIntIsZero
-    }.elsewhen(wb1Mask(idx)) {
+    }.elsewhen(vfVlWb(idx)) {
       // vf schd vl write back, check whether the vl is zero
       update := !io_vl_Wb.vlWriteBackInfo.vlFromVfIsZero
     }.elsewhen(allocMask(idx) || ldCancelMask(idx)) {
@@ -231,10 +231,10 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
   }
 
   vlmaxTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(wb1Mask(idx)) {
+    when(intVlWb(idx)) {
       // int schd vl write back, check whether the vl is vlmax
       update := !io_vl_Wb.vlWriteBackInfo.vlFromIntIsVlmax
-    }.elsewhen(wb1Mask(idx)) {
+    }.elsewhen(vfVlWb(idx)) {
       // vf schd vl write back, check whether the vl is vlmax
       update := !io_vl_Wb.vlWriteBackInfo.vlFromVfIsVlmax
     }.elsewhen(allocMask(idx) || ldCancelMask(idx)) {

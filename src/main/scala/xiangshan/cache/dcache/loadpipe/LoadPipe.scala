@@ -429,12 +429,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.data := s2_resp_data
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
-  resp.bits.replay := (resp.bits.miss && (!s2_miss_req_fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
-  resp.bits.replayCarry.valid := (resp.bits.miss && (!s2_miss_req_fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
+  resp.bits.replay := (resp.bits.miss && (s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
+  resp.bits.replayCarry.valid := (resp.bits.miss && (s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
-  resp.bits.tag_error := s2_tag_error // report tag_error in load s2
+  resp.bits.tag_error := false.B
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := s2_miss_req_fire && !io.mq_enq_cancel && !io.wbq_block_miss_req && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
@@ -490,7 +490,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (!s2_miss_req_fire || s2_nack_no_mshr || io.mq_enq_cancel || io.wbq_block_miss_req))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.mq_enq_cancel || io.wbq_block_miss_req))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------

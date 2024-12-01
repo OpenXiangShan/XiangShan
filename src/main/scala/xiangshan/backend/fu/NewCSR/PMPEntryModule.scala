@@ -23,6 +23,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   val ren   = io.in.ren
   val wen   = io.in.wen
   val addr  = io.in.addr
+  val waddr = io.in.waddr
   val wdata = io.in.wdata
 
   val pmpMask  = RegInit(VecInit(Seq.fill(p(PMParameKey).NumPMP)(0.U(PMPAddrBits.W))))
@@ -35,7 +36,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   // write pmpCfg
   val cfgVec = WireInit(VecInit(Seq.fill(8)(0.U.asTypeOf(new PMPCfgBundle))))
   for (i <- 0 until (p(PMParameKey).NumPMP/8+1) by 2) {
-    when (wen && (addr === (0x3A0 + i).U)) {
+    when (wen && (waddr === (0x3A0 + i).U)) {
       for (j <- cfgVec.indices) {
         val cfgOldTmp = pmpEntry(8*i/2+j).cfg
         val cfgNewTmp = Wire(new PMPCfgBundle)
@@ -64,7 +65,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
     pmpAddrW(i) := pmpEntry(i).addr.ADDRESS.asUInt
     pmpAddrR(i) := pmpEntry(i).addr.ADDRESS.asUInt
     // write pmpAddr
-    when (wen && (addr === (0x3B0 + i).U)) {
+    when (wen && (waddr === (0x3B0 + i).U)) {
       if (i != (p(PMParameKey).NumPMP - 1)) {
         val addrNextLocked: Bool = PMPCfgLField.addrLocked(pmpEntry(i).cfg, pmpEntry(i + 1).cfg)
         pmpMask(i) := Mux(!addrNextLocked, pmpEntry(i).matchMask(wdata), pmpEntry(i).mask)
@@ -91,6 +92,7 @@ class PMPEntryHandleIOBundle(implicit p: Parameters) extends PMPBundle {
     val wen   = Bool()
     val ren   = Bool()
     val addr  = UInt(12.W)
+    val waddr = UInt(12.W)
     val wdata = UInt(64.W)
     val pmpCfg  = Vec(NumPMP, new PMPCfgBundle)
     val pmpAddr = Vec(NumPMP, new PMPAddrBundle)

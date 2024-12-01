@@ -1142,8 +1142,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                         })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.dcache.resp.bits.handled
-  val s2_cache_tag_error = GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
-                           io.dcache.resp.bits.tag_error
 
   val s2_troublem        = !s2_exception &&
                            !s2_mmio &&
@@ -1177,7 +1175,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                      !s2_frm_mabuf &&
                      s2_troublem
 
-  val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
+  val s2_data_fwded = s2_dcache_miss && s2_full_fwd
 
   val s2_vp_match_fail = (io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s2_troublem
   val s2_safe_wakeup = !s2_out.rep_info.need_rep && !s2_mmio && !s2_mis_align && !s2_exception // don't need to replay and is not a mmio and misalign
@@ -1620,7 +1618,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec //||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
-  // Now vector instruction don't support mmio. 
+  // Now vector instruction don't support mmio.
     // io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
     //io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
