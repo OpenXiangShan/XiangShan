@@ -69,7 +69,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = LoadPipelineWidth
   ))
   paddrModule.io := DontCare

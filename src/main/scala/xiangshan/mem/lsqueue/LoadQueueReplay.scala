@@ -230,7 +230,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = 0))
   vaddrModule.io := DontCare
   val debug_vaddr = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(VAddrBits.W))))

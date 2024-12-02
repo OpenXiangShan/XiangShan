@@ -75,7 +75,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = StorePipelineWidth
   ))
   paddrModule.io := DontCare
@@ -85,7 +85,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
