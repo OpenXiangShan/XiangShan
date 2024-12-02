@@ -14,7 +14,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   private val trapInfo        = io.in.trapInfo
   private val hasTrap         = trapInfo.valid
   private val trapIsInterrupt = trapInfo.bits.isInterrupt
-  private val intrVec         = trapInfo.bits.intrVec
+  private val isDebugIntr     = trapInfo.bits.isDebugIntr
   private val trapVec         = trapInfo.bits.trapVec
   private val singleStep      = trapInfo.bits.singleStep
   private val trigger         = io.in.trapInfo.bits.trigger
@@ -42,7 +42,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
    */
   // debug_intr
   val hasIntr = hasTrap && trapIsInterrupt
-  val hasDebugIntr = hasIntr && intrVec(CSRConst.IRQ_DEBUG)
+  val hasDebugIntr = hasIntr && isDebugIntr
 
   // debug_exception_ebreak
   val hasExp = hasTrap && !trapIsInterrupt
@@ -144,7 +144,7 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
-      val intrVec = UInt(64.W)
+      val isDebugIntr = Bool()
       val isInterrupt = Bool()
       val singleStep = Bool()
       val trigger = TriggerAction()
