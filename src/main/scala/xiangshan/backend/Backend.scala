@@ -219,6 +219,18 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       memScheduler.io.toSchedulers.wakeupVec
     ).map(x => (x.bits.exuIdx, x)).toMap
 
+  private val iqWakeUpMappedBundleDelayed: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] = (
+    intScheduler.io.toSchedulers.wakeupVec ++
+      fpScheduler.io.toSchedulers.wakeupVec ++
+      vfScheduler.io.toSchedulers.wakeupVec ++
+      memScheduler.io.toSchedulers.wakeupVec
+    ).map{ case x =>
+    val delayed = Wire(chiselTypeOf(x))
+    // TODO: add clock gate use Wen, remove issuequeue wakeupToIQ logic Wen = Wen && valid
+    delayed := RegNext(x)
+    (x.bits.exuIdx, delayed)
+  }.toMap
+
   println(s"[Backend] iq wake up keys: ${iqWakeUpMappedBundle.keys}")
 
   wbFuBusyTable.io.in.intSchdBusyTable := intScheduler.io.wbFuBusyTable
@@ -300,6 +312,41 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
+  val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
+  intWriteBackDelayed.zip(wbDataPath.io.toIntPreg).map{ case (sink, source) =>
+    sink := DontCare
+    sink.wen := RegNext(source.wen)
+    sink.intWen := RegNext(source.intWen)
+    sink.addr := RegEnable(source.addr, source.wen)
+  }
+  val fpWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toFpPreg))
+  fpWriteBackDelayed.zip(wbDataPath.io.toFpPreg).map { case (sink, source) =>
+    sink := DontCare
+    sink.wen := RegNext(source.wen)
+    sink.fpWen := RegNext(source.fpWen)
+    sink.addr := RegEnable(source.addr, source.wen)
+  }
+  val vfWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toVfPreg))
+  vfWriteBackDelayed.zip(wbDataPath.io.toVfPreg).map { case (sink, source) =>
+    sink := DontCare
+    sink.wen := RegNext(source.wen)
+    sink.vecWen := RegNext(source.vecWen)
+    sink.addr := RegEnable(source.addr, source.wen)
+  }
+  val v0WriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toV0Preg))
+  v0WriteBackDelayed.zip(wbDataPath.io.toV0Preg).map { case (sink, source) =>
+    sink := DontCare
+    sink.wen := RegNext(source.wen)
+    sink.v0Wen := RegNext(source.v0Wen)
+    sink.addr := RegEnable(source.addr, source.wen)
+  }
+  val vlWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toVlPreg))
+  vlWriteBackDelayed.zip(wbDataPath.io.toVlPreg).map { case (sink, source) =>
+    sink := DontCare
+    sink.wen := RegNext(source.wen)
+    sink.vlWen := RegNext(source.vlWen)
+    sink.addr := RegEnable(source.addr, source.wen)
+  }
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
@@ -308,8 +355,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
   intScheduler.io.v0WriteBack := 0.U.asTypeOf(intScheduler.io.v0WriteBack)
   intScheduler.io.vlWriteBack := 0.U.asTypeOf(intScheduler.io.vlWriteBack)
+  intScheduler.io.intWriteBackDelayed := intWriteBackDelayed
+  intScheduler.io.fpWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.fpWriteBackDelayed)
+  intScheduler.io.vfWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vfWriteBackDelayed)
+  intScheduler.io.v0WriteBackDelayed := 0.U.asTypeOf(intScheduler.io.v0WriteBackDelayed)
+  intScheduler.io.vlWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vlWriteBackDelayed)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
+  intScheduler.io.fromSchedulers.wakeupVecDelayed.foreach { wakeup => wakeup := iqWakeUpMappedBundleDelayed(wakeup.bits.exuIdx) }
   intScheduler.io.fromDataPath.og0Cancel := og0Cancel
   intScheduler.io.fromDataPath.og1Cancel := og1Cancel
   intScheduler.io.ldCancel := io.mem.ldCancel
@@ -327,8 +380,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpScheduler.io.vfWriteBack := 0.U.asTypeOf(fpScheduler.io.vfWriteBack)
   fpScheduler.io.v0WriteBack := 0.U.asTypeOf(fpScheduler.io.v0WriteBack)
   fpScheduler.io.vlWriteBack := 0.U.asTypeOf(fpScheduler.io.vlWriteBack)
+  fpScheduler.io.intWriteBackDelayed := 0.U.asTypeOf(intWriteBackDelayed)
+  fpScheduler.io.fpWriteBackDelayed := fpWriteBackDelayed
+  fpScheduler.io.vfWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vfWriteBackDelayed)
+  fpScheduler.io.v0WriteBackDelayed := 0.U.asTypeOf(intScheduler.io.v0WriteBackDelayed)
+  fpScheduler.io.vlWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vlWriteBackDelayed)
   fpScheduler.io.fromDataPath.resp := dataPath.io.toFpIQ
   fpScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
+  fpScheduler.io.fromSchedulers.wakeupVecDelayed.foreach { wakeup => wakeup := iqWakeUpMappedBundleDelayed(wakeup.bits.exuIdx) }
   fpScheduler.io.fromDataPath.og0Cancel := og0Cancel
   fpScheduler.io.fromDataPath.og1Cancel := og1Cancel
   fpScheduler.io.ldCancel := io.mem.ldCancel
@@ -345,6 +404,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   memScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
   memScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
+  memScheduler.io.intWriteBackDelayed := intWriteBackDelayed
+  memScheduler.io.fpWriteBackDelayed := fpWriteBackDelayed
+  memScheduler.io.vfWriteBackDelayed := vfWriteBackDelayed
+  memScheduler.io.v0WriteBackDelayed := v0WriteBackDelayed
+  memScheduler.io.vlWriteBackDelayed := vlWriteBackDelayed
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
   memScheduler.io.fromMem.get.wakeup := io.mem.wakeup
@@ -366,6 +430,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.fromMem.get.vstuFeedback := io.mem.vstuIqFeedback
   memScheduler.io.fromMem.get.vlduFeedback := io.mem.vlduIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
+  memScheduler.io.fromSchedulers.wakeupVecDelayed.foreach { wakeup => wakeup := iqWakeUpMappedBundleDelayed(wakeup.bits.exuIdx) }
   memScheduler.io.fromDataPath.og0Cancel := og0Cancel
   memScheduler.io.fromDataPath.og1Cancel := og1Cancel
   memScheduler.io.ldCancel := io.mem.ldCancel
@@ -384,8 +449,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   vfScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
   vfScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
+  vfScheduler.io.intWriteBackDelayed := 0.U.asTypeOf(intWriteBackDelayed)
+  vfScheduler.io.fpWriteBackDelayed := 0.U.asTypeOf(fpWriteBackDelayed)
+  vfScheduler.io.vfWriteBackDelayed := vfWriteBackDelayed
+  vfScheduler.io.v0WriteBackDelayed := v0WriteBackDelayed
+  vfScheduler.io.vlWriteBackDelayed := vlWriteBackDelayed
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
+  vfScheduler.io.fromSchedulers.wakeupVecDelayed.foreach { wakeup => wakeup := iqWakeUpMappedBundleDelayed(wakeup.bits.exuIdx) }
   vfScheduler.io.fromDataPath.og0Cancel := og0Cancel
   vfScheduler.io.fromDataPath.og1Cancel := og1Cancel
   vfScheduler.io.ldCancel := io.mem.ldCancel
