@@ -233,6 +233,7 @@ class ExeUnitImp(
 
       sink.bits.data.src.zip(source.bits.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
       sink.bits.data.pc          .foreach(x => x := source.bits.pc.get)
+      sink.bits.data.nextPcOffset.foreach(x => x := source.bits.nextPcOffset.get)
       sink.bits.data.imm         := source.bits.imm
       sink.bits.ctrl.fuOpType    := source.bits.fuOpType
       sink.bits.ctrl.robIdx      := source.bits.robIdx

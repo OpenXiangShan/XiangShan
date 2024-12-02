@@ -16,13 +16,14 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   // associated with AddrData's position of JmpCfg.srcData
   private val src = io.in.bits.data.src(0)
   private val pc = SignExt(io.in.bits.data.pc.get, cfg.destDataBits)
-  private val immMin = io.in.bits.data.imm
+  private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
   private val isRVC = io.in.bits.ctrl.preDecode.get.isRVC
 
   jumpDataModule.io.src := src
   jumpDataModule.io.pc := pc
-  jumpDataModule.io.immMin := immMin
+  jumpDataModule.io.imm := imm
+  jumpDataModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
 

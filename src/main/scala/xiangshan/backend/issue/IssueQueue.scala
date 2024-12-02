@@ -788,6 +788,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
     deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
+    deq.bits.common.nextPcOffset.foreach(_ := 0.U)
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
 
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
