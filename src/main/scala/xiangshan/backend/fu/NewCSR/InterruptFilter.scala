@@ -363,84 +363,106 @@ class InterruptFilter extends Module {
     ((Candidate123HighCandidate45 && iprioCandidate <= 255.U) || (Candidate123LowCandidate45 && Candidate4) || (Candidate123LowCandidate45 && Candidate5 && hvictl.IPRIOM.asBool)) -> iprioCandidate(7, 0),
   ))
 
-  val mIRVec = Mux(
+  val mIRVecTmp = Mux(
     privState.isModeM && mstatusMIE || privState < PrivState.ModeM,
     io.out.mtopi.IID.asUInt,
     0.U
   )
 
-  val hsIRVec = Mux(
+  val hsIRVecTmp = Mux(
     privState.isModeHS && sstatusSIE || privState < PrivState.ModeHS,
     io.out.stopi.IID.asUInt,
     0.U
   )
 
-  val vsIRVec = Mux(
+  val vsIRVecTmp = Mux(
     privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS,
     io.out.vstopi.IID.asUInt,
     0.U
   )
 
-  val mIRNotZero  = mIRVec.orR
-  val hsIRNotZero = hsIRVec.orR
-  val vsIRNotZero = vsIRVec.orR
+  val mIRNotZero  = mIRVecTmp.orR
+  val hsIRNotZero = hsIRVecTmp.orR
+  val vsIRNotZero = vsIRVecTmp.orR
 
-  val mIRVecOH  = Mux(mIRNotZero,  UIntToOH(mIRVec,  64), 0.U)
-  val hsIRVecOH = Mux(hsIRNotZero, UIntToOH(hsIRVec, 64), 0.U)
-  val vsIRVecOH = Mux(vsIRNotZero, UIntToOH(vsIRVec, 64), 0.U)
+  val irToHS = !mIRNotZero && hsIRNotZero
+  val irToVS = !mIRNotZero && !hsIRNotZero && vsIRNotZero
 
-  val vsMapHostIRVec = Cat((0 until vsIRVecOH.getWidth).map { num =>
+  val mIRVec  = Mux(mIRNotZero, mIRVecTmp, 0.U)
+  val hsIRVec = Mux(irToHS, hsIRVecTmp, 0.U)
+  val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecTmp, 64), 0.U)
+
+  val vsMapHostIRVecTmp = Cat((0 until vsIRVec.getWidth).map { num =>
     // 2,6,10
     if (InterruptNO.getVS.contains(num)) {
       // 1,5,9
       val sNum = num - 1
-      vsIRVecOH(sNum)
+      vsIRVec(sNum)
     }
     // 1,5,9
-    else if(InterruptNO.getHS.contains(num)) {
+    else if (InterruptNO.getHS.contains(num)) {
       0.U(1.W)
     }
     else {
-      vsIRVecOH(num)
+      vsIRVec(num)
     }
   }.reverse)
 
+  val vsMapHostIRVec = OHToUInt(vsMapHostIRVecTmp)
+
   dontTouch(vsMapHostIRVec)
+
+  val nmiVecTmp = Wire(Vec(64, Bool()))
+  nmiVecTmp.zipWithIndex.foreach { case (irq, i) =>
+    if (NonMaskableIRNO.interruptDefaultPrio.contains(i)) {
+      val higherIRSeq = NonMaskableIRNO.getIRQHigherThan(i)
+      irq := (
+        higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !io.in.nmiVec(num))).andR ||
+          higherIRSeq.isEmpty.B
+        ) && io.in.nmiVec(i)
+      dontTouch(irq)
+    } else
+      irq := false.B
+  }
+  val nmiVec = OHToUInt(nmiVecTmp)
 
   // support debug interrupt
   // support smrnmi when NMIE is 0, all interrupt disable
   val disableDebugIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
-  val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
-  val debugInterupt = ((io.in.debugIntr && !disableDebugIntr)  << CSRConst.IRQ_DEBUG).asUInt
+  val enableDebugIntr = io.in.debugIntr && !disableDebugIntr
 
-  val normalIntrVec = Mux(mIRNotZero, mIRVecOH,
-                        Mux(hsIRNotZero, hsIRVecOH,
-                          Mux(vsIRNotZero, vsMapHostIRVec, 0.U)))
-  val intrVec = VecInit(Mux(io.in.nmi, io.in.nmiVec, normalIntrVec).asBools.map(IR => IR && !disableAllIntr)).asUInt | debugInterupt
+  val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
+
+  val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec
+  val intrVec = Mux(disableAllIntr, 0.U, Mux(io.in.nmi, nmiVec, normalIntrVec))
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
   val SelectCandidate5 = Candidate123LowCandidate45 && Candidate5
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
-  val intrVecReg = RegInit(0.U(64.W))
+  val intrVecReg = RegInit(0.U(8.W))
+  val debugIntrReg = RegInit(false.B)
   val nmiReg = RegInit(false.B)
   val viIsHvictlInjectReg = RegInit(false.B)
   val irToHSReg = RegInit(false.B)
   val irToVSReg = RegInit(false.B)
   intrVecReg := intrVec
+  debugIntrReg := enableDebugIntr
   nmiReg := io.in.nmi
   viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
-  irToHSReg := !mIRNotZero && hsIRNotZero
-  irToVSReg := !mIRNotZero && !hsIRNotZero && vsIRNotZero
+  irToHSReg := irToHS
+  irToVSReg := irToVS
   val delayedIntrVec = DelayN(intrVecReg, 5)
+  val delayedDebugIntr = DelayN(debugIntrReg, 5)
   val delayedNMI = DelayN(nmiReg, 5)
   val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
   val delayedIRToHS = DelayN(irToHSReg, 5)
   val delayedIRToVS = DelayN(irToVSReg, 5)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR || delayedVIIsHvictlInjectReg
+  io.out.interruptVec.valid := delayedIntrVec.orR || delayedDebugIntr || delayedVIIsHvictlInjectReg
   io.out.interruptVec.bits := delayedIntrVec
+  io.out.debug := delayedDebugIntr
   io.out.nmi := delayedNMI
   io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
   io.out.irToHS := delayedIRToHS & !delayedNMI
@@ -489,8 +511,9 @@ class InterruptFilterIO extends Bundle {
   })
 
   val out = Output(new Bundle {
+    val debug = Bool()
     val nmi = Bool()
-    val interruptVec = ValidIO(UInt(64.W))
+    val interruptVec = ValidIO(UInt(8.W))
     val mtopi  = new TopIBundle
     val stopi  = new TopIBundle
     val vstopi = new TopIBundle

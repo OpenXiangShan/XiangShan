@@ -382,10 +382,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.dcsr      := dcsr.regOut
 
   when(intrMod.io.out.nmi && intrMod.io.out.interruptVec.valid) {
-    nmip.NMI_31 := nmip.NMI_31 & !intrMod.io.out.interruptVec.bits(NonMaskableIRNO.NMI_31).asBool
-    nmip.NMI_43 := nmip.NMI_43 & !intrMod.io.out.interruptVec.bits(NonMaskableIRNO.NMI_43).asBool
+    nmip.NMI_31 := nmip.NMI_31 & !UIntToOH(intrMod.io.out.interruptVec.bits, 64)(NonMaskableIRNO.NMI_31)
+    nmip.NMI_43 := nmip.NMI_43 & !UIntToOH(intrMod.io.out.interruptVec.bits, 64)(NonMaskableIRNO.NMI_43)
   }
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
+  val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
   val nmi = RegEnable(intrMod.io.out.nmi, false.B, intrMod.io.out.interruptVec.valid)
   val virtualInterruptIsHvictlInject = RegEnable(intrMod.io.out.virtualInterruptIsHvictlInject, false.B, intrMod.io.out.interruptVec.valid)
   val irToHS = RegEnable(intrMod.io.out.irToHS, false.B, intrMod.io.out.interruptVec.valid)
@@ -1073,7 +1074,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugMod = Module(new Debug)
   debugMod.io.in.trapInfo.valid            := hasTrap
   debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
-  debugMod.io.in.trapInfo.bits.intrVec     := intrVec
+  debugMod.io.in.trapInfo.bits.isDebugIntr := debug
   debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
   debugMod.io.in.trapInfo.bits.trigger     := trigger
   debugMod.io.in.trapInfo.bits.singleStep  := singleStep
