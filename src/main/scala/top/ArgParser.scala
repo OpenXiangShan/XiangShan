@@ -146,6 +146,9 @@ object ArgParser {
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
+        case "--verbose" :: tail =>
+          System.setProperty("LOG_LEVEL", "all")
+          nextOption(config, tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
