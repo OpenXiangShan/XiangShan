@@ -3,6 +3,7 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import com.typesafe.scalalogging.LazyLogging
 import difftest.{DiffArchFpRegState, DiffArchIntRegState, DiffArchVecRegState, DifftestModule}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
@@ -21,18 +22,18 @@ import xiangshan.backend.regcache._
 import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.mem.{LqPtr, SqPtr}
 
-class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
+class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule with LazyLogging {
   override def shouldBeInlined: Boolean = false
 
   private implicit val dpParams: BackendParams = params
   lazy val module = new DataPathImp(this)
 
-  println(s"[DataPath] Preg Params: ")
-  println(s"[DataPath]   Int R(${params.getRfReadSize(IntData())}), W(${params.getRfWriteSize(IntData())}) ")
-  println(s"[DataPath]   Fp R(${params.getRfReadSize(FpData())}), W(${params.getRfWriteSize(FpData())}) ")
-  println(s"[DataPath]   Vf R(${params.getRfReadSize(VecData())}), W(${params.getRfWriteSize(VecData())}) ")
-  println(s"[DataPath]   V0 R(${params.getRfReadSize(V0Data())}), W(${params.getRfWriteSize(V0Data())}) ")
-  println(s"[DataPath]   Vl R(${params.getRfReadSize(VlData())}), W(${params.getRfWriteSize(VlData())}) ")
+  logger.debug(s"[DataPath] Preg Params: ")
+  logger.debug(s"[DataPath]   Int R(${params.getRfReadSize(IntData())}), W(${params.getRfWriteSize(IntData())}) ")
+  logger.debug(s"[DataPath]   Fp R(${params.getRfReadSize(FpData())}), W(${params.getRfWriteSize(FpData())}) ")
+  logger.debug(s"[DataPath]   Vf R(${params.getRfReadSize(VecData())}), W(${params.getRfWriteSize(VecData())}) ")
+  logger.debug(s"[DataPath]   V0 R(${params.getRfReadSize(V0Data())}), W(${params.getRfWriteSize(V0Data())}) ")
+  logger.debug(s"[DataPath]   Vl R(${params.getRfReadSize(VlData())}), W(${params.getRfWriteSize(VlData())}) ")
 }
 
 class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
@@ -46,8 +47,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val (fromVfIQ,  toVfIQ,  toVfExu ) = (io.fromVfIQ,  io.toVfIQ,  io.toVecExu)
   private val (fromVecExcp, toVecExcp)       = (io.fromVecExcpMod, io.toVecExcpMod)
 
-  println(s"[DataPath] IntIQ(${fromIntIQ.size}), FpIQ(${fromFpIQ.size}), VecIQ(${fromVfIQ.size}), MemIQ(${fromMemIQ.size})")
-  println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), FpExu(${fromFpIQ.map(_.size).sum}), VecExu(${fromVfIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
+  logger.debug(s"[DataPath] IntIQ(${fromIntIQ.size}), FpIQ(${fromFpIQ.size}), VecIQ(${fromVfIQ.size}), MemIQ(${fromMemIQ.size})")
+  logger.debug(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), FpExu(${fromFpIQ.map(_.size).sum}), VecExu(${fromVfIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
 
   // just refences for convience
   private val fromIQ: Seq[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = (fromIntIQ ++ fromFpIQ ++ fromVfIQ ++ fromMemIQ).toSeq
@@ -442,7 +443,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     addr := io.diffVlRat.get
   }
 
-  println(s"[DataPath] " +
+  logger.trace(s"[DataPath] " +
     s"has intDiffRead: ${intDiffRead.nonEmpty}, " +
     s"has fpDiffRead: ${fpDiffRead.nonEmpty}, " +
     s"has vecDiffRead: ${vfDiffRead.nonEmpty}, " +
@@ -466,7 +467,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
                                 fromMemIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
   private val regCacheReadData = regCache.io.readPorts.map(_.data)
 
-  println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
+  logger.debug(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
   require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
 
   regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) => 
@@ -485,8 +486,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       s1_data := rdata
     }
 
-  println(s"[DataPath] s1_RCReadData.int.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.int.size: ${params.getIntExuRCReadSize}")
-  println(s"[DataPath] s1_RCReadData.mem.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.mem.size: ${params.getMemExuRCReadSize}")
+  logger.debug(s"[DataPath] s1_RCReadData.int.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.int.size: ${params.getIntExuRCReadSize}")
+  logger.debug(s"[DataPath] s1_RCReadData.mem.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.mem.size: ${params.getMemExuRCReadSize}")
 
   io.toWakeupQueueRCIdx := regCache.io.toWakeupQueueRCIdx
   io.toBypassNetworkRCData := s1_RCReadData
@@ -520,7 +521,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val rfrPortConfigs = schdParams.map(_.issueBlockParams).flatten.map(_.exuBlockParams.map(_.rfrPortConfigs))
 
-  println(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
+  logger.trace(s"[DataPath] s1_intPregRData.flatten.flatten.size: ${s1_intPregRData.flatten.flatten.size}, intRfRdata.size: ${intRfRdata.size}")
   s1_intPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_intPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
@@ -530,7 +531,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  println(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
+  logger.trace(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
   s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
@@ -540,7 +541,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
+  logger.trace(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
   s1_vfPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
@@ -550,7 +551,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  println(s"[DataPath] s1_v0PregRData.flatten.flatten.size: ${s1_v0PregRData.flatten.flatten.size}, v0RfRdata.size: ${v0RfRdata.size}")
+  logger.trace(s"[DataPath] s1_v0PregRData.flatten.flatten.size: ${s1_v0PregRData.flatten.flatten.size}, v0RfRdata.size: ${v0RfRdata.size}")
   s1_v0PregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_v0PregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
@@ -560,7 +561,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  println(s"[DataPath] s1_vlPregRData.flatten.flatten.size: ${s1_vlPregRData.flatten.flatten.size}, vlRfRdata.size: ${vlRfRdata.size}")
+  logger.trace(s"[DataPath] s1_vlPregRData.flatten.flatten.size: ${s1_vlPregRData.flatten.flatten.size}, vlRfRdata.size: ${vlRfRdata.size}")
   s1_vlPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_vlPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>

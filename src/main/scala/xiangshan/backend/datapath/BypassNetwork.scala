@@ -78,7 +78,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
   private val immInfo = io.fromDataPath.immInfo
 
-  println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
+  logger.debug(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
 
   // (exuIdx, srcIdx, bypassExuIdx)
   private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
@@ -92,7 +92,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         }
         m := vecMask
       }
-      println(s"[BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
+      logger.trace(s"[BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
       VecInit(x.bits.l1ExuOH.getOrElse(
         // TODO: remove tmp max 1 for fake HYU1
         VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(ExuVec.width.W).asBools)))
@@ -115,7 +115,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val vfExuNum  = params.vfSchdParams.get.numExu
   private val memExuNum = params.memSchdParams.get.numExu
 
-  println(s"[BypassNetwork] allExuNum: ${toExus.size} intExuNum: ${intExuNum} fpExuNum: ${fpExuNum} vfExuNum: ${vfExuNum} memExuNum: ${memExuNum}")
+  logger.trace(s"[BypassNetwork] allExuNum: ${toExus.size} intExuNum: ${intExuNum} fpExuNum: ${fpExuNum} vfExuNum: ${vfExuNum} memExuNum: ${memExuNum}")
 
   private val fromDPsHasBypass2Source = fromDPs.filter(x => x.bits.params.isIQWakeUpSource && x.bits.params.writeVfRf && (x.bits.params.isVfExeUnit || x.bits.params.hasLoadExu)).map(_.bits.params.exuIdx)
   private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && (x.bits.params.isVfExeUnit || x.bits.params.isMemExeUnit)).map(_.bits.params.exuIdx)
@@ -135,9 +135,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     fromDPsHasBypass2Source.map(x => RegEnable(bypassDataVec(x), bypass2DateEn(x).asBool))
   )
 
-  println(s"[BypassNetwork] HasBypass2SourceExuNum: ${fromDPsHasBypass2Source.size} HasBypass2SinkExuNum: ${fromDPsHasBypass2Sink.size} bypass2DataVecSize: ${bypass2DataVec.length}")
-  println(s"[BypassNetwork] HasBypass2SourceExu: ${fromDPsHasBypass2Source}")
-  println(s"[BypassNetwork] HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
+  logger.trace(s"[BypassNetwork] HasBypass2SourceExuNum: ${fromDPsHasBypass2Source.size} HasBypass2SinkExuNum: ${fromDPsHasBypass2Sink.size} bypass2DataVecSize: ${bypass2DataVec.length}")
+  logger.trace(s"[BypassNetwork] HasBypass2SourceExu: ${fromDPsHasBypass2Source}")
+  logger.trace(s"[BypassNetwork] HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
 
   toExus.zip(fromDPs).foreach { case (sink, source) =>
     sink <> source
@@ -165,7 +165,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readRegCache = if (exuParm.needReadRegCache) exuInput.bits.dataSources(srcIdx).readRegCache else false.B
       val readImm = if (exuParm.immType.nonEmpty || exuParm.hasLoadExu) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
-      println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
+      logger.trace(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
       val readBypass2 = if (bypass2ExuIdx >= 0) dataSource.readBypass2 else false.B
       src := Mux1H(
         Seq(
@@ -200,7 +200,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     fromExus.zip(bypassDataVec).filter(_._1.bits.params.needWriteRegCache).map(_._2)
   )
 
-  println(s"[BypassNetwork] WriteRegCacheExuNum: ${forwardIntWenVec.size}")
+  logger.debug(s"[BypassNetwork] WriteRegCacheExuNum: ${forwardIntWenVec.size}")
 
   io.toDataPath.zipWithIndex.foreach{ case (x, i) => 
     x.wen := bypassIntWenVec(i)

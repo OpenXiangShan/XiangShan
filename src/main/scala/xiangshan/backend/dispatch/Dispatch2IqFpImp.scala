@@ -32,11 +32,11 @@ class Dispatch2IqFpImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters
   }
   val fuConfigOnlyOneIQ = fuConfigMapIQ.filter(x => x._2.count(_ == true) == 1).map(_._1)
   val fuConfigMultiIQ = fuConfigMapIQ.filter(x => x._2.count(_ == true) > 1).map(_._1)
-  println(s"[Dispatch2IqFpImp] IQFuConfigs: ${IQFuConfigs.map(_.map(_.name))}")
-  println(s"[Dispatch2IqFpImp] allFuConfigs: ${allFuConfigs.map(_.name)}")
-  println(s"[Dispatch2IqFpImp] fuConfigMapIQ: ${fuConfigMapIQ.map(x => (x._1.name, x._2))}")
-  println(s"[Dispatch2IqFpImp] fuConfigOnlyOneIQ: ${fuConfigOnlyOneIQ.map(_.name)}")
-  println(s"[Dispatch2IqFpImp] fuConfigMultiIQ: ${fuConfigMultiIQ.map(_.name)}")
+  logger.debug(s"[Dispatch2IqFpImp] IQFuConfigs: ${IQFuConfigs.map(_.map(_.name))}")
+  logger.debug(s"[Dispatch2IqFpImp] allFuConfigs: ${allFuConfigs.map(_.name)}")
+  logger.debug(s"[Dispatch2IqFpImp] fuConfigMapIQ: ${fuConfigMapIQ.map(x => (x._1.name, x._2))}")
+  logger.debug(s"[Dispatch2IqFpImp] fuConfigOnlyOneIQ: ${fuConfigOnlyOneIQ.map(_.name)}")
+  logger.debug(s"[Dispatch2IqFpImp] fuConfigMultiIQ: ${fuConfigMultiIQ.map(_.name)}")
   val uopsInFuType = VecInit(uopsIn.map(x => Mux(x.valid, x.bits.fuType, 0.U.asTypeOf(x.bits.fuType))))
   val inFuTypeIsMultiIQ = VecInit(uopsInFuType.map{ case x =>
     VecInit(fuConfigMultiIQ.map{ case y => x(y.fuType.id)})

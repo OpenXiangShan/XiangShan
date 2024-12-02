@@ -138,7 +138,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   }
   val wbReplaceVld = fromExuPre
   val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
-  println("vldIdx: " + vldIdx)
+  logger.trace("vldIdx: " + vldIdx)
   vldIdx.zip(vldMgu).foreach{ case (id, wb) =>
     wbReplaceVld.update(id, wb.io.writebackAfterMerge)
   }
@@ -216,7 +216,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
         intArbiterInput.bits := RegEnable(exuOut.bits, exuOut.valid)
       }
 
-      println(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
+      logger.debug(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
 
       // only EXUs with uncertain latency need result of arbiter
       // the result data can be maintained until getting success in arbiter
@@ -254,31 +254,31 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   v0ArbiterInputsWireN.foreach(_.ready := false.B)
   vlArbiterInputsWireN.foreach(_.ready := false.B)
 
-  println(s"[WbDataPath] write int preg: " +
+  logger.debug(s"[WbDataPath] write int preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"MemExu(${io.fromMemExu.flatten.count(_.bits.params.writeIntRf)})"
   )
-  println(s"[WbDataPath] write fp preg: " +
+  logger.debug(s"[WbDataPath] write fp preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeFpRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeFpRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeFpRf)}) " +
     s"MemExu(${io.fromMemExu.flatten.count(_.bits.params.writeFpRf)})"
   )
-  println(s"[WbDataPath] write vf preg: " +
+  logger.debug(s"[WbDataPath] write vf preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeVfRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeVfRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeVfRf)}) " +
     s"MemExu(${io.fromMemExu.flatten.count(_.bits.params.writeVfRf)})"
   )
-  println(s"[WbDataPath] write v0 preg: " +
+  logger.debug(s"[WbDataPath] write v0 preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeV0Rf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeV0Rf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeV0Rf)}) " +
     s"MemExu(${io.fromMemExu.flatten.count(_.bits.params.writeV0Rf)})"
   )
-  println(s"[WbDataPath] write vl preg: " +
+ logger.debug(s"[WbDataPath] write vl preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeVlRf)}) " +
     s"FpExu(${io.fromFpExu.flatten.count(_.bits.params.writeVlRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeVlRf)}) " +
@@ -291,11 +291,11 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   private val vfWbArbiter = Module(new RealWBCollideChecker(params.getVfWbArbiterParams))
   private val v0WbArbiter = Module(new RealWBCollideChecker(params.getV0WbArbiterParams))
   private val vlWbArbiter = Module(new RealWBCollideChecker(params.getVlWbArbiterParams))
-  println(s"[WbDataPath] int preg write back port num: ${intWbArbiter.io.out.size}, active port: ${intWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  println(s"[WbDataPath] fp preg write back port num: ${fpWbArbiter.io.out.size}, active port: ${fpWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  println(s"[WbDataPath] vf preg write back port num: ${vfWbArbiter.io.out.size}, active port: ${vfWbArbiter.io.inGroup.keys.toSeq.sorted}")
-  println(s"[WbDataPath] v0 preg write back port num: ${v0WbArbiter.io.out.size}, active port: ${v0WbArbiter.io.inGroup.keys.toSeq.sorted}")
-  println(s"[WbDataPath] vl preg write back port num: ${vlWbArbiter.io.out.size}, active port: ${vlWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"[WbDataPath] int preg write back port num: ${intWbArbiter.io.out.size}, active port: ${intWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"[WbDataPath] fp preg write back port num: ${fpWbArbiter.io.out.size}, active port: ${fpWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"[WbDataPath] vf preg write back port num: ${vfWbArbiter.io.out.size}, active port: ${vfWbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"[WbDataPath] v0 preg write back port num: ${v0WbArbiter.io.out.size}, active port: ${v0WbArbiter.io.inGroup.keys.toSeq.sorted}")
+  logger.debug(s"[WbDataPath] vl preg write back port num: ${vlWbArbiter.io.out.size}, active port: ${vlWbArbiter.io.inGroup.keys.toSeq.sorted}")
 
   // module assign
   intWbArbiter.io.flush <> io.flush
