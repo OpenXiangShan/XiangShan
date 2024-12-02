@@ -2,24 +2,28 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.util.log2Up
 import utility.SignExt
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
-import xiangshan.{RedirectLevel, XSModule}
+import xiangshan.{RedirectLevel, SelImm, XSModule}
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val pc = Input(UInt(VAddrBits.W))
     val taken = Input(Bool())
     val isRVC = Input(Bool())
-    val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
+    val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(XLEN.W))
+    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 1).W))
   })
   val pcExtend = SignExt(io.pc, VAddrBits + 1)
+  val immMinWidth = FuConfig.BrhCfg.immType.map(x => SelImm.getImmUnion(x).len).max
+  print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
-  pcExtend + SignExt(ImmUnion.B.toImm32(io.offset), VAddrBits + 1),
-  pcExtend + Mux(io.isRVC, 2.U, 4.U)
+  pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),
+  pcExtend + (io.nextPcOffset << instOffsetBits).asUInt
   ), XLEN)
 }
 
@@ -32,9 +36,10 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.pred_taken := io.in.bits.ctrl.predictInfo.get.taken
 
   addModule.io.pc := io.in.bits.data.pc.get // pc
-  addModule.io.offset := io.in.bits.data.imm // imm
+  addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
   addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
+  addModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
 
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready

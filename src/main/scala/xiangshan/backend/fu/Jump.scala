@@ -35,23 +35,20 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Input(UInt(XLEN.W))
     val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
-    val immMin = Input(UInt(ImmUnion.maxLen.W))
+    val imm = Input(UInt(33.W)) // imm-U need 32 bits, highest bit is sign bit
+    val nextPcOffset = Input(UInt((log2Up(PredictWidth) + 1).W))
     val func = Input(FuOpType())
     val isRVC = Input(Bool())
     val result, target = Output(UInt(XLEN.W))
     val isAuipc = Output(Bool())
   })
-  val (src1, pc, immMin, func, isRVC) = (io.src, io.pc, io.immMin, io.func, io.isRVC)
+  val (src1, pc, imm, func, isRVC) = (io.src, io.pc, io.imm, io.func, io.isRVC)
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
   val isAuipc = JumpOpType.jumpOpisAuipc(func)
-  val offset = SignExt(ParallelMux(Seq(
-    isJalr -> ImmUnion.I.toImm32(immMin),
-    isAuipc -> ImmUnion.U.toImm32(immMin),
-    !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
-  )), XLEN)
+  val offset = SignExt(imm, XLEN)
 
-  val snpc = pc + Mux(isRVC, 2.U, 4.U)
+  val snpc = pc + (io.nextPcOffset << instOffsetBits).asUInt
   val target = Mux(JumpOpType.jumpOpisJalr(func), src1, pc) + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   // RISC-V spec for JALR:

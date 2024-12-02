@@ -789,7 +789,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.v0Wen          := source.bits.v0Wen.getOrElse(false.B)
     sink.bits.uop.vlWen          := source.bits.vlWen.getOrElse(false.B)
     sink.bits.uop.flushPipe      := source.bits.flushPipe.getOrElse(false.B)
-    sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U)
+    sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U) + (source.bits.ftqOffset.getOrElse(0.U) << instOffsetBits)
     sink.bits.uop.loadWaitBit    := Mux(enableMdp, source.bits.loadWaitBit.getOrElse(false.B), false.B)
     sink.bits.uop.waitForRobIdx  := Mux(enableMdp, source.bits.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr)), 0.U.asTypeOf(new RobPtr))
     sink.bits.uop.storeSetHit    := Mux(enableMdp, source.bits.storeSetHit.getOrElse(false.B), false.B)

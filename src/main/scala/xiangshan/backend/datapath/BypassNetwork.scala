@@ -4,13 +4,14 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
-import xiangshan.{XSBundle, XSModule}
+import xiangshan.{JumpOpType, SelImm, XSBundle, XSModule}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, ExuVec, ImmInfo}
 import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.regcache._
+import xiangshan.backend.fu.FuType
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   // params
@@ -168,6 +169,20 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )
       )
+    }
+    if (exuInput.bits.params.hasBrhFu) {
+      val immWidth = exuInput.bits.params.immType.map(x => SelImm.getImmUnion(x).len).max
+      val nextPcOffset = exuInput.bits.ftqOffset.get +& Mux(exuInput.bits.preDecode.get.isRVC, 1.U, 2.U)
+      val imm = ImmExtractor(
+        immInfo(exuIdx).imm,
+        immInfo(exuIdx).immType,
+        exuInput.bits.params.destDataBitsMax,
+        exuInput.bits.params.immType.map(_.litValue)
+      )
+      val isJALR = FuType.isJump(exuInput.bits.fuType) && JumpOpType.jumpOpisJalr(exuInput.bits.fuOpType)
+      val immBJU = imm + Mux(isJALR, 0.U, (exuInput.bits.ftqOffset.getOrElse(0.U) << instOffsetBits).asUInt)
+      exuInput.bits.imm := immBJU
+      exuInput.bits.nextPcOffset.get := nextPcOffset
     }
   }
 

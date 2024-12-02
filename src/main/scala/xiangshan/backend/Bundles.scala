@@ -596,7 +596,8 @@ object Bundles {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
-    val imm           = UInt(32.W)
+    val imm           = UInt(64.W)
+    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((log2Up(PredictWidth) + 1).W))
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
@@ -666,6 +667,7 @@ object Bundles {
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)
       this.preDecode     .foreach(_ := source.common.preDecode.get)
+      this.nextPcOffset  .foreach(_ := source.common.nextPcOffset.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
