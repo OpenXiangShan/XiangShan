@@ -80,7 +80,6 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val ren = Bool()
   val op = UInt(2.W)
   val addr = UInt(12.W)
-  val waddrReg = UInt(12.W)
   val src = UInt(64.W)
   val wdata = UInt(64.W)
   val mnret = Input(Bool())
@@ -233,12 +232,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   /* Alias of input signals */
   val wen   = io.in.bits.wen && valid
   val addr  = io.in.bits.addr
+  val wdata = io.in.bits.wdata
 
   val ren   = io.in.bits.ren && valid
   val raddr = io.in.bits.addr
-
-  val waddrReg = io.in.bits.waddrReg
-  val wdataReg = io.in.bits.wdata
 
   val hasTrap = io.fromRob.trap.valid
   val trapVec = io.fromRob.trap.bits.trapVec
@@ -296,7 +293,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalDret  = permitMod.io.out.hasLegalDret
 
   private val wenLegalReg = GatedValidRegNext(wenLegal)
-  private val isModeVSReg = GatedValidRegNext(isModeVS)
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
@@ -419,21 +415,20 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmpEntryMod.io.in.ren   := ren
   pmpEntryMod.io.in.wen   := wenLegalReg
   pmpEntryMod.io.in.addr  := addr
-  pmpEntryMod.io.in.waddr := waddrReg
-  pmpEntryMod.io.in.wdata := wdataReg
+  pmpEntryMod.io.in.wdata := wdata
 
   // Todo: all wen and wdata of CSRModule assigned in this for loop
   for ((id, (wBundle, _)) <- csrRwMap) {
     if (vsMapS.contains(id)) {
       // VS access CSR by S: privState.isModeVS && addrMappedToVS === sMapVS(id).U
-      wBundle.wen := wenLegalReg && ((isModeVSReg && waddrReg === vsMapS(id).U) || (!isModeVSReg && waddrReg === id.U))
-      wBundle.wdata := wdataReg
+      wBundle.wen := wenLegalReg && ((isModeVS && addr === vsMapS(id).U) || (!isModeVS && addr === id.U))
+      wBundle.wdata := wdata
     } else if (sMapVS.contains(id)) {
-      wBundle.wen := wenLegalReg && !isModeVSReg && waddrReg === id.U
-      wBundle.wdata := wdataReg
+      wBundle.wen := wenLegalReg && !isModeVS && addr === id.U
+      wBundle.wdata := wdata
     } else {
-      wBundle.wen := wenLegalReg && waddrReg === id.U
-      wBundle.wdata := wdataReg
+      wBundle.wen := wenLegalReg && addr === id.U
+      wBundle.wdata := wdata
     }
   }
 
@@ -494,23 +489,23 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   miregiprios.foreach { mod =>
     mod.w.wen := mireg.w.wen && (miselect.regOut.ALL.asUInt === mod.addr.U)
-    mod.w.wdata := wdataReg
+    mod.w.wdata := wdata
   }
 
   siregiprios.foreach { mod =>
     mod.w.wen := sireg.w.wen && (siselect.regOut.ALL.asUInt === mod.addr.U)
-    mod.w.wdata := wdataReg
+    mod.w.wdata := wdata
   }
 
   mhartid.hartid := this.io.fromTop.hartId
 
   cfgs.zipWithIndex.foreach { case (mod, i) =>
-    mod.w.wen := wenLegalReg && (waddrReg === (0x3A0 + i / 8 * 2).U)
+    mod.w.wen := wenLegalReg && (addr === (0x3A0 + i / 8 * 2).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpCfgWData(8*((i%8)+1)-1,8*(i%8))
   }
 
   pmpaddr.zipWithIndex.foreach{ case(mod, i) =>
-    mod.w.wen := wenLegalReg && (waddrReg === (0x3B0 + i).U)
+    mod.w.wen := wenLegalReg && (addr === (0x3B0 + i).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpAddrWData(i)
   }
 
@@ -859,7 +854,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   // flush
-  val resetSatp = Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === waddrReg)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
+  val resetSatp = Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
 
   val floatStatusOnOff = mstatus.w.wen && (
     mstatus.w.wdataFields.FS === ContextStatus.Off && mstatus.regOut.FS =/= ContextStatus.Off ||
@@ -1078,7 +1073,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata2Selected            := tdata2.rdata
   debugMod.io.in.tdata1Update              := tdata1Update
   debugMod.io.in.tdata2Update              := tdata2Update
-  debugMod.io.in.tdata1Wdata               := wdataReg
+  debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
@@ -1103,9 +1098,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
   tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
     mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
-    mod1.w.wdata  := wdataReg
+    mod1.w.wdata  := wdata
     mod2.w.wen    := tdata2Update && (tselect.rdata === idx.U)
-    mod2.w.wdata  := wdataReg
+    mod2.w.wdata  := wdata
   }}
 
   triggerFrontendChange := debugMod.io.out.triggerFrontendChange
