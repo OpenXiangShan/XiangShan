@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import coupledL2.{PrefetchRecv, CMOReq, CMOResp}
+import coupledL2.{PrefetchRecv}
 import device.MsiInfoBundle
 import utils._
 import utility._
@@ -248,8 +248,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
-  val cmo_sender  = if (HasCMO) Some(BundleBridgeSource(() => DecoupledIO(new CMOReq))) else None
-  val cmo_reciver = if (HasCMO) Some(BundleBridgeSink(Some(() => DecoupledIO(new CMOResp)))) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -1099,20 +1097,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
 
-  // lsq to l2 CMO
-  outer.cmo_sender match {
-    case Some(x) =>
-      x.out.head._1 <> lsq.io.cmoOpReq
-    case None =>
-      lsq.io.cmoOpReq.ready  := false.B
-  }
-  outer.cmo_reciver match {
-    case Some(x) =>
-      x.in.head._1  <> lsq.io.cmoOpResp
-    case None =>
-      lsq.io.cmoOpResp.valid := false.B
-      lsq.io.cmoOpResp.bits  := 0.U.asTypeOf(new CMOResp)
-  }
+  lsq.io.cmoOpReq <> dcache.io.cmoOpReq
+  lsq.io.cmoOpResp <> dcache.io.cmoOpResp
 
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt

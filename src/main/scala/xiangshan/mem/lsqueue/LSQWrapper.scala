@@ -25,11 +25,11 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
+import xiangshan.cache.{CMOReq, CMOResp}
 import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
-import coupledL2.{CMOReq, CMOResp}
 import xiangshan.backend.fu.FuType
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
