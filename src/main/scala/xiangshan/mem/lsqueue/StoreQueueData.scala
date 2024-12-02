@@ -144,6 +144,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //     data(RegNext(io.data.waddr(i))).data := RegNext(io.data.wdata(i))
   //   }
   // })
+  val dataWriteClock = ClockGate(false.B, io.data.wen.reduce(_ | _) || RegNext(io.data.wen.reduce(_ | _)), clock)
+  withClock(dataWriteClock) {
   (0 until numWrite).map(i => {
      val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
     for(bank <- 0 until StoreQueueNWriteBanks) {
@@ -166,13 +168,15 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
       s1_wdata.suggestName("data_s1_wdata_" + i +"_bank_" + bank)
       s1_waddr.suggestName("data_s1_waddr_" + i +"_bank_" + bank)
     })
-  })
+  })}
 
   // (0 until numWrite).map(i => {
   //   when(RegNext(io.mask.wen(i))){
   //     data(RegNext(io.mask.waddr(i))).valid := RegNext(io.mask.wdata(i))
   //   }
   // })
+  val maskWriteClock = ClockGate(false.B, io.mask.wen.reduce(_ | _) || RegNext(io.mask.wen.reduce(_ | _)), clock)
+   withClock(maskWriteClock) {
   (0 until numWrite).map(i => {
     val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
     for(bank <- 0 until StoreQueueNWriteBanks) {
@@ -198,8 +202,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
       s1_wdata.suggestName("mask_s1_wdata_" + i +"_bank_" + bank)
       s1_waddr.suggestName("mask_s1_waddr_" + i +"_bank_" + bank)
     })
-  })
-
+  })}
   // destorequeue read data
   (0 until numRead).map(i => {
       io.rdata(i) := data(GatedRegNext(io.raddr(i)))
