@@ -160,7 +160,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
 
-  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !flush_mmu
+  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !flush_mmu
+  // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
+
   refill_to_mem := DontCare
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
@@ -439,12 +441,27 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
     val ptw_getGpa = req_need_gpa && hitVec(idx)
     val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(idx).vaddr)
-    io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back || (!need_gpa_vpn_hit && req_out_v(idx) && need_gpa && !resp_gpa_refill && ptw_getGpa)) // TODO: remove the regnext, timing
-    io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back || (!need_gpa_vpn_hit && req_out_v(idx) && need_gpa && !resp_gpa_refill && ptw_getGpa))
+
+    io.ptw.req(idx).valid := false.B;
+    io.tlbreplay(idx) := false.B;
+
+    when (req_out_v(idx) && missVec(idx)) {
+      // NOTE: for an miss tlb request: either send a ptw request, or ask for a replay
+      when (ptw_just_back || ptw_already_back) {
+        io.tlbreplay(idx) := true.B;
+      } .elsewhen (need_gpa && !need_gpa_vpn_hit && !resp_gpa_refill) {
+        // not send any unrelated ptw request when l1tlb is in need_gpa state
+        io.tlbreplay(idx) := true.B;
+      } .otherwise {
+        io.ptw.req(idx).valid := true.B;
+      }
+    }
+
     when (io.requestor(idx).req_kill && GatedValidRegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B
     }
+
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.getGpa := ptw_getGpa
