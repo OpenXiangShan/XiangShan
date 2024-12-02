@@ -143,7 +143,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val data_readline = DecoupledIO(new L1BankedDataReadLineReq)
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Input(Bool())
-    val readline_pseudo_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
     val data_write_ready_dup = Vec(nDupDataWriteReady, Input(Bool()))
@@ -320,11 +319,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val tag_resp = Wire(Vec(nWays, UInt(tagBits.W)))
   meta_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegEnable(meta_resp, s1_valid))
-  tag_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.tag_resp.map(r => r(tagBits - 1, 0))), RegEnable(tag_resp, s1_valid))
-
-  // real ecc enc tag
-  val enc_tag_resp = Wire(io.tag_resp.cloneType)
-  enc_tag_resp := Mux(GatedValidRegNext(s0_fire), io.tag_resp, RegEnable(enc_tag_resp, s1_valid))
 
   // pseudo ecc enc tag
   val pseudo_tag_toggle_mask = Mux(
@@ -332,27 +326,27 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
                                   io.pseudo_error.bits(0).mask(tagBits - 1, 0),
                                   0.U(tagBits.W)
                               )
-  val pseudo_enc_tag_resp = Wire(io.tag_resp.cloneType)
+  val encTag_resp = Wire(io.tag_resp.cloneType)
   if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
-    pseudo_enc_tag_resp.zip(enc_tag_resp).map {
+    encTag_resp.zip(io.tag_resp).map {
       case (pseudo_enc, real_enc) =>
         val ecc = real_enc(encTagBits - 1, tagBits)
         pseudo_enc := Cat(ecc, real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask)
     }
   } else {
-    pseudo_enc_tag_resp := DontCare
+    encTag_resp := io.tag_resp
   }
+  tag_resp := VecInit(encTag_resp.map(encTag => encTag(tagBits - 1, 0)))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_errors = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid() && dcacheParameters.tagCode.decode(enc_tag_resp(w)).error).asUInt
-  val s1_pseudo_tag_errors = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid() && dcacheParameters.tagCode.decode(pseudo_enc_tag_resp(w)).error).asUInt
+  val s1_tag_errors = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid() && dcacheParameters.tagCode.decode(encTag_resp(w)).error).asUInt
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_match = ParallelORR(s1_tag_match_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
-  val s1_encTag = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => enc_tag_resp(w)))
+  val s1_encTag = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => encTag_resp(w)))
   val s1_flag_error = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
   val s1_extra_meta = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
 
@@ -397,7 +391,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
-  val s2_pseudo_tag_errors = RegEnable(s1_pseudo_tag_errors, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
@@ -431,9 +424,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
-  val s2_pseudo_tag_error = WireInit(false.B)
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
-  val s2_error = s2_flag_error || s2_tag_error || s2_pseudo_tag_error || s2_l2_error // data_error not included
+  val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
 
@@ -493,10 +485,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR && s2_need_tag
   }
-  if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
-    s2_pseudo_tag_error := s2_pseudo_tag_errors.orR && s2_need_tag
-  }
-  io.pseudo_error.ready := s2_fire_to_s3 && (s2_tag_error || s2_pseudo_tag_error || s2_hit && s2_may_report_data_error)
+  io.pseudo_error.ready := s2_fire_to_s3 && (s2_tag_error || s2_hit && s2_may_report_data_error)
 
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
@@ -525,16 +514,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.readline_error_delayed && RegNext(s2_may_report_data_error),
     RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
   )
-  val s3_pseudo_data_error = WireInit(false.B)
-  if (cacheCtrlParamsOpt.nonEmpty && EnableDataEcc) {
-    s3_pseudo_data_error := Mux(GatedValidRegNextN(s1_fire, 2),
-      io.readline_pseudo_error_delayed && RegNext(s2_may_report_data_error),
-      RegNext(s3_pseudo_data_error)
-    )
-  }
   // error signal for amo inst
   // s3_error = s3_flag_error || s3_tag_error || s3_l2_error || s3_data_error
-  val s3_error = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error || s3_pseudo_data_error
+  val s3_error = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error
   val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
 
@@ -1687,10 +1669,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.error.valid := s3_error && GatedValidRegNext(s2_fire)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
-  io.error.bits.report_to_beu := (RegEnable(s2_tag_error || s2_pseudo_tag_error, s2_fire) || s3_data_error || s3_pseudo_data_error) && RegNext(s2_fire)
+  io.error.bits.report_to_beu := (RegEnable(s2_tag_error, s2_fire) || s3_data_error) && RegNext(s2_fire)
   io.error.bits.paddr := RegEnable(s2_req.addr, s2_fire)
-  io.error.bits.source.tag := RegEnable(s2_tag_error || s2_pseudo_tag_error, s2_fire)
-  io.error.bits.source.data := s3_data_error || s3_pseudo_data_error
+  io.error.bits.source.tag := RegEnable(s2_tag_error, s2_fire)
+  io.error.bits.source.data := s3_data_error
   io.error.bits.source.l2 := RegEnable(s2_flag_error || s2_l2_error, s2_fire)
   io.error.bits.opType.store := RegEnable(s2_req.isStore && !s2_req.probe, s2_fire)
   io.error.bits.opType.probe := RegEnable(s2_req.probe, s2_fire)
