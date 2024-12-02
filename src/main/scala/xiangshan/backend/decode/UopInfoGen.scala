@@ -159,7 +159,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     // lmul < 1, foldTime = vlmul - foldFastVlmul
     // lmul >= 1, foldTime = 0.U - foldFastVlmul
     val foldTime = Mux(vlmul(2), vlmul, 0.U) - foldLastVlmul
-    addTime + foldTime
+    Mux((addTime + foldTime).orR, addTime + foldTime, 1.U)
   }
   val numOfUopVFREDOSUM = {
     val uvlMax = MuxLookup(vsew, 1.U)(Seq(
@@ -169,7 +169,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     ))
     val vlMax = Wire(UInt(7.W))
     vlMax := Mux(vlmul(2), uvlMax >> (-vlmul)(1,0), uvlMax << vlmul(1,0)).asUInt
-    vlMax
+    Mux(vlMax.orR, vlMax, 1.U)
   }
   /*
    * when 1 <= lmul <= 4, numOfUopWV = 2 * lmul, otherwise numOfUopWV = 1
