@@ -359,16 +359,14 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst{
   val order = RegEnable(io.req.bits.order, io.req.fire)
   val hitVec = RegEnable(VecInit(hitVecT), io.req.fire)
   val CacheData = RegEnable(ParallelPriorityMux(hitVecT zip bitmapcache.map(_.data)), io.req.fire)
-  val cfs = Reg(Vec(tlbcontiguous, Bool()))
+  val cfs = Wire(Vec(tlbcontiguous, Bool()))
 
   val start = (index(5, 3) << 3.U)
   val end = start + 7.U
   val mask = (1.U << 8) - 1.U
   val cfsdata = (CacheData >> start) & mask
-  when(io.req.fire) {
-    for (i <- 0 until tlbcontiguous) {
-      cfs(i) := cfsdata(i)
-    }
+  for (i <- 0 until tlbcontiguous) {
+    cfs(i) := cfsdata(i)
   }
   val hit = ParallelOR(hitVec)
 
