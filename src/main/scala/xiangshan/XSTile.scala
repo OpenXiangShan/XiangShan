@@ -24,7 +24,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import device.MsiInfoBundle
+import device._
 import system.HasSoCParameter
 import top.{BusPerfMonitor, ArgParser, Generator}
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
@@ -142,12 +142,25 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
 
-    l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
-    l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
+    l2top.module.io.beu_errors(0).valid := core.module.io.beu_errors.icache.ecc_error.valid
+    l2top.module.io.beu_errors(0).bits := 0.U.asTypeOf(new TLBusErrorBundle)
+    l2top.module.io.beu_errors(0).bits.correctable := false.B
+    l2top.module.io.beu_errors(0).bits.deferred := false.B
+    l2top.module.io.beu_errors(0).bits.addrType := 4.U // specific physical address
+    l2top.module.io.beu_errors(0).bits.addrInfo := core.module.io.beu_errors.icache.ecc_error.bits
+
+    l2top.module.io.beu_errors(1).valid := core.module.io.beu_errors.dcache.ecc_error.valid
+    l2top.module.io.beu_errors(1).bits := 0.U.asTypeOf(new TLBusErrorBundle)
+    l2top.module.io.beu_errors(1).bits.correctable := false.B
+    l2top.module.io.beu_errors(1).bits.deferred := false.B
+    l2top.module.io.beu_errors(1).bits.addrType := 4.U // specific physical address
+    l2top.module.io.beu_errors(1).bits.addrInfo := core.module.io.beu_errors.dcache.ecc_error.bits
+    l2top.module.io.beu_errors(2) <> 0.U.asTypeOf(ValidIO(new TLBusErrorBundle))
+
     if (enableL2) {
       // TODO: add ECC interface of L2
 
-      l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      l2top.module.io.beu_errors(3) <> 0.U.asTypeOf(l2top.module.io.beu_errors(3))
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
@@ -162,7 +175,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
 
-      l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      l2top.module.io.beu_errors(3) <> 0.U.asTypeOf(l2top.module.io.beu_errors(3))
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid

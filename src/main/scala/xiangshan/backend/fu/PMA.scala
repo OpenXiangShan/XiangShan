@@ -165,6 +165,8 @@ trait PMAMethod extends PMAConst {
     addPMA(0x38022000L, a = 1, w = true, r = true)
     addPMA(0x38021000L, a = 1, x = true, w = true, r = true)
     addPMA(0x38020000L, a = 1, w = true, r = true)
+    addPMA(0x38010800L, a = 1, w = true, r = true)
+    addPMA(0x38010000L, a = 1, w = true, r = true)
     addPMA(0x30050000L, a = 1, w = true, r = true) // FIXME: GPU space is cacheable?
     addPMA(0x30010000L, a = 1, w = true, r = true)
     addPMA(0x20000000L, a = 1, x = true, w = true, r = true)

@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, EnableCHI}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO, CHIIssue}
+import device._
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -74,10 +75,24 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableCHI && enableL2) None else Some(TLIdentityNode())
-  val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(),
-    BusErrorUnitParams(soc.BEURange.base, soc.BEURange.mask.toInt + 1)
-  ))
+  val beu = LazyModule(new TLErrorRecordRegisterInterface(
+        params = TLErrorRecordRegisterInterfaceParams(
+          bankList = Seq(
+            TLErrorRecordBankParams( // icache
+              numRecords  = 1,
+              address     = AddressSet(0x38010000, 0x3ff)
+            ),
+            TLErrorRecordBankParams( // dcache
+              numRecords  = 2,
+              address     = AddressSet(0x38010400, 0x3ff),
+            ),
+            TLErrorRecordBankParams( // l2 cache
+              numRecords  = 1,
+              address     = AddressSet(0x38010800, 0x3ff)
+            )
+          )
+        )
+      ))
 
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
@@ -132,7 +147,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     case None =>
       memory_port.get := l1_xbar
   }
-  
+
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
