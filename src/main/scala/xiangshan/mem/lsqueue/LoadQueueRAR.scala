@@ -61,9 +61,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  PAddr       : physical address.
   //  Released    : DCache released.
   //
+  def clkGateEntrySize = 40
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
-  val paddrModule = Module(new LqPAddrModule(
+  val paddrModule = Module(new LqPAddrSplitModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRARSize,
     numRead = LoadPipelineWidth,
@@ -89,6 +90,20 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   freeList.io := DontCare
 
+  val low_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
+  val high_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
+  for(i <- 0 until LoadPipelineWidth) {
+    low_en(i) := (paddrModule.io.wen(i) && (paddrModule.io.waddr(i) < clkGateEntrySize.U)) || RegNext(paddrModule.io.wen(i) && (paddrModule.io.waddr(i) < clkGateEntrySize.U))
+    high_en(i) := (paddrModule.io.wen(i) && (paddrModule.io.waddr(i) >= clkGateEntrySize.U)) || RegNext(paddrModule.io.wen(i) && (paddrModule.io.waddr(i) >= clkGateEntrySize.U))
+  }
+  val low_valid = (0 until clkGateEntrySize).map(i => allocated(i))
+  val high_valid = (clkGateEntrySize until LoadQueueRARSize).map(i => allocated(i))
+  val rarPAModule_low_en = low_en.reduce(_ | _).asBool || ((io.query.map(_.req.valid).reduce(_ | _) || io.release.valid) && low_valid.reduce(_ | _))
+  val rarPAModule_high_en = high_en.reduce(_ | _).asBool || ((io.query.map(_.req.valid).reduce(_ | _) || io.release.valid) && high_valid.reduce(_ | _))
+  val clk_low = ClockGate(false.B, rarPAModule_low_en.asBool, clock)
+  val clk_high = ClockGate(false.B, rarPAModule_high_en.asBool, clock)
+  paddrModule.io.clockGate_low := clk_low
+  paddrModule.io.clockGate_high := clk_high
   // Real-allocation: load_s2
   // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
   // load enqueue can catch release.

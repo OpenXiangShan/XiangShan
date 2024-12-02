@@ -209,6 +209,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
   })
+  def clkGateEntrySize = 32  //value from QueuePerf
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
   //  LoadQueueReplay field:
@@ -224,7 +225,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
   val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
-  val vaddrModule = Module(new LqVAddrModule(
+  val vaddrModule = Module(new LqVAddrSplitModule(
     gen = UInt(VAddrBits.W),
     numEntries = LoadQueueReplaySize,
     numRead = LoadPipelineWidth,
@@ -520,6 +521,19 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     vaddrModule.io.raddr(i) := s1_oldestSel(i).bits
   }
 
+  val en = vaddrModule.io.wen.reduce(_ | _) || RegNext(vaddrModule.io.wen.reduce(_ | _)) || vaddrModule.io.ren.reduce(_ | _)
+  val low_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
+  val high_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
+  for(i <- 0 until LoadPipelineWidth) {
+    low_en(i) := (vaddrModule.io.wen(i) && (vaddrModule.io.waddr(i) < clkGateEntrySize.U)) || RegNext(vaddrModule.io.wen(i) && (vaddrModule.io.waddr(i) < clkGateEntrySize.U)) || (vaddrModule.io.ren(i) && (vaddrModule.io.raddr(i) < clkGateEntrySize.U))
+    high_en(i) := (vaddrModule.io.wen(i) && (vaddrModule.io.waddr(i) >= clkGateEntrySize.U)) || RegNext(vaddrModule.io.wen(i) && (vaddrModule.io.waddr(i) >= clkGateEntrySize.U)) || (vaddrModule.io.ren(i) && (vaddrModule.io.raddr(i) >= clkGateEntrySize.U))
+  }
+  val clk_low_en = low_en.reduce(_ | _)
+  val clk_high_en = high_en.reduce(_ | _)
+  val clk_low = ClockGate(false.B, clk_low_en.asBool, clock)
+  val clk_high = ClockGate(false.B, clk_high_en.asBool, clock)
+  vaddrModule.io.clockGate_low := clk_low
+  vaddrModule.io.clockGate_high := clk_high
   for (i <- 0 until LoadPipelineWidth) {
     val s1_replayIdx = s1_oldestSel(i).bits
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
