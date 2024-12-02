@@ -57,6 +57,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle)
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+  val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
+  val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
   val vlFromVfIsZero = Input(Bool())
@@ -277,6 +279,16 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       w := w_src
     }
   }
+  val wakeupFromIQDelayed = Wire(chiselTypeOf(io.wakeupFromIQDelayed))
+  wakeupFromIQDelayed.zip(io.wakeupFromIQDelayed).foreach { case (w, w_src) =>
+    if (!params.inVfSchd && params.readVfRf && params.hasWakeupFromVf && w_src.bits.params.isVfExeUnit) {
+      val noCancel = !LoadShouldCancel(Some(w_src.bits.loadDependency), io.ldCancel)
+      w := RegNext(Mux(noCancel, w_src, 0.U.asTypeOf(w)))
+      w.bits.loadDependency.zip(w_src.bits.loadDependency).foreach { case (ld, ld_src) => ld := RegNext(Mux(noCancel, ld_src << 1, 0.U.asTypeOf(ld))) }
+    } else {
+      w := w_src
+    }
+  }
 
   /**
     * Connection of [[entries]]
@@ -362,6 +374,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     entriesIO.wakeUpFromWB                                      := io.wakeupFromWB
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
+    entriesIO.wakeUpFromWBDelayed                               := io.wakeupFromWBDelayed
+    entriesIO.wakeUpFromIQDelayed                               := wakeupFromIQDelayed
     entriesIO.vlFromIntIsZero                                   := io.vlFromIntIsZero
     entriesIO.vlFromIntIsVlmax                                  := io.vlFromIntIsVlmax
     entriesIO.vlFromVfIsZero                                    := io.vlFromVfIsZero
