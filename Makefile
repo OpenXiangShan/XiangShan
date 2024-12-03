@@ -112,6 +112,12 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+# verbose compile-time logging
+ifeq ($(VERBOSE),1)
+RELEASE_ARGS += --verbose
+DEBUG_ARGS   += --verbose
+endif
+
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
