@@ -74,6 +74,10 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: generate chirrtl only
+        run: |
+          make sim-verilog CHISEL_TARGET=chirrtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

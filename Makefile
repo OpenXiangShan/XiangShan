@@ -37,6 +37,7 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
+CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
@@ -56,7 +57,7 @@ endif
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
-MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
+MFC_ARGS = --dump-fir --target $(CHISEL_TARGET) --split-verilog \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
@@ -151,6 +152,7 @@ $(TOP_V): $(SCALA_FILE)
 	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
+ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -159,6 +161,7 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
+endif
 
 verilog: $(TOP_V)
 
@@ -169,6 +172,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
+ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -188,6 +192,7 @@ else
 endif
 endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
+endif
 
 sim-verilog: $(SIM_TOP_V)
 
