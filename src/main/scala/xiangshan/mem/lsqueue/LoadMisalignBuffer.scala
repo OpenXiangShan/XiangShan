@@ -550,6 +550,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
+  io.writeBack.bits.uop.rfWen := !globalException && !globalMMIO && req.uop.rfWen
   io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.flushPipe := false.B
   io.writeBack.bits.uop.replayInst := false.B
