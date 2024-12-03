@@ -50,21 +50,36 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   })
 
   private val PartialPAddrStride: Int = 6
-  private val PartialPAddrWidth: Int = 16
-
+  private val PartialPAddrBits: Int = 16
+  private val PartialPAddrLowBits: Int = log2Up(DCacheWordBytes * DCacheBanks) - 1
+  private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
+  private def boundary(x: Int, h: Int) = if (x < h) Some(x) else None
+  private def lowMapping = (0 until PartialPAddrLowBits).map(i => Seq(
+      boundary(PartialPAddrStride + i  , PartialPAddrBits),
+      boundary(PartialPAddrBits - i - 1, PartialPAddrBits)
+    )
+  )
+  private def highMapping = (0 until PartialPAddrHighBits).map(i => Seq(
+      boundary(i + PartialPAddrStride     , PAddrBits),
+      boundary(i + PartialPAddrStride + 11, PAddrBits),
+      boundary(i + PartialPAddrStride + 22, PAddrBits),
+      boundary(i + PartialPAddrStride + 33, PAddrBits)
+    )
+  )
   private def genPartialPAddr(paddr: UInt) = {
-   val ppaddr = Wire(Vec(PartialPAddrWidth, Bool()))
-
-   for (i <- 0 until PartialPAddrWidth) {
-    if (i < DCacheWordOffset) {
-      ppaddr(i) := paddr(i + PartialPAddrStride) ^ paddr(PartialPAddrWidth - i)
-    } else {
-      ppaddr(i) := paddr(i + PartialPAddrStride) ^
-                   paddr(i + PartialPAddrStride + 11) ^
-                   paddr(i + PartialPAddrStride + 22)
+    val ppaddr_low = Wire(Vec(PartialPAddrLowBits, Bool()))
+    ppaddr_low.zip(lowMapping).foreach {
+      case (bit, mapping) =>
+        println(mapping.filter(_.isDefined))
+        bit := mapping.filter(_.isDefined).map(x => paddr(x.get)).reduce(_^_)
     }
-   }
-   ppaddr.asUInt
+
+    val ppaddr_high = Wire(Vec(PartialPAddrHighBits, Bool()))
+    ppaddr_high.zip(highMapping).foreach {
+      case (bit, mapping) =>
+        bit := mapping.filter(_.isDefined).map(x => paddr(x.get)).reduce(_^_)
+    }
+    Cat(ppaddr_high.asUInt, ppaddr_low.asUInt)
   }
 
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
@@ -82,7 +97,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
-    gen = UInt(PartialPAddrWidth.W),
+    gen = UInt(PartialPAddrBits.W),
     numEntries = LoadQueueRARSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
