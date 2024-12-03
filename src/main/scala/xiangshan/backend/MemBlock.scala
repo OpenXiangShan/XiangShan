@@ -1924,7 +1924,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("MemBlock perfEvents Set", name, inc, i)
+      logger.trace("MemBlock perfEvents Set", name, inc, i)
     }
   }
 
