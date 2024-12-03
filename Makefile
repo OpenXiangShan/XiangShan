@@ -53,6 +53,13 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+# JVM memory configurations
+JVM_XMX ?= 40G
+JVM_XSS ?= 256m
+
+# mill arguments for build.sc
+MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
+
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
@@ -148,7 +155,7 @@ test-jar:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
@@ -166,7 +173,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP)    \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
