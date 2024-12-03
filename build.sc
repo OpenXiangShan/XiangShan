@@ -255,7 +255,12 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   def macrosModule = macros
 
-  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
+  // properties may be changed by user. Use `Task.Input` here.
+  def forkArgsTask = Task.Input {
+    Seq(s"-Xmx${sys.props.getOrElse("jvm-xmx", "40G")}", s"-Xss${sys.props.getOrElse("jvm-xss", "256m")}")
+  }
+
+  override def forkArgs = forkArgsTask()
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
@@ -326,7 +331,7 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
   }
 
   object test extends SbtTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
+    override def forkArgs = forkArgsTask()
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions("chiseltest")
