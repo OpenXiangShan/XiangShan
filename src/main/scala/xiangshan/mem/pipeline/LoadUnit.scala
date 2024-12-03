@@ -1729,6 +1729,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                           (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
   io.ldout.bits.isFromLoadUnit := true.B
+  // TODO vector?
+  io.ldout.bits.uop.rfWen := !io.ldCancel.ld2Cancel && s3_ld_wb_meta.uop.rfWen
   io.ldout.bits.uop.fuType := Mux(
                                   s3_valid && s3_isvec,
                                   FuType.vldu.U,
