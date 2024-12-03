@@ -49,6 +49,24 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val lqFull = Output(Bool())
   })
 
+  private val PartialPAddrStride: Int = 6
+  private val PartialPAddrWidth: Int = 16
+
+  private def genPartialPAddr(paddr: UInt) = {
+   val ppaddr = Wire(Vec(PartialPAddrWidth, Bool()))
+
+   for (i <- 0 until PartialPAddrWidth) {
+    if (i < DCacheWordOffset) {
+      ppaddr(i) := paddr(i + PartialPAddrStride) ^ paddr(PartialPAddrWidth - i)
+    } else {
+      ppaddr(i) := paddr(i + PartialPAddrStride) ^
+                   paddr(i + PartialPAddrStride + 11) ^
+                   paddr(i + PartialPAddrStride + 22)
+    }
+   }
+   ppaddr.asUInt
+  }
+
   println("LoadQueueRAR: size: " + LoadQueueRARSize)
   //  LoadQueueRAR field
   //  +-------+-------+-------+----------+
@@ -64,7 +82,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
-    gen = UInt(PAddrBits.W),
+    gen = UInt(PartialPAddrWidth.W),
     numEntries = LoadQueueRARSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
@@ -74,7 +92,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -138,8 +155,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.bits.paddr
-      bypassPAddr(w) := enq.bits.paddr
+      paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
@@ -202,7 +218,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
     ldLdViolation(w) := false.B
-    paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
+    paddrModule.io.releaseViolationMdata(w) := genPartialPAddr(query.req.bits.paddr)
 
     query.resp.valid := RegNext(query.req.valid)
     // Generate real violation mask
@@ -226,16 +242,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // update release flag in 1 cycle
   val releaseVioMask = Reg(Vec(LoadQueueRARSize, Bool()))
   when (release1Cycle.valid) {
-    paddrModule.io.releaseMdata.takeRight(1)(0) := release1Cycle.bits.paddr
+    paddrModule.io.releaseMdata.takeRight(1)(0) := genPartialPAddr(release1Cycle.bits.paddr)
   }
 
-  val lastAllocIndexOH = lastAllocIndex.map(UIntToOH(_))
-  val lastReleasePAddrMatch = VecInit((0 until LoadPipelineWidth).map(i => {
-    (bypassPAddr(i)(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
-  }))
   (0 until LoadQueueRARSize).map(i => {
-    val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => lastCanAccept(j) && lastAllocIndexOH(j)(i) && lastReleasePAddrMatch(j))).asUInt.orR
-    when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i) || bypassMatch) && allocated(i) && release1Cycle.valid)) {
+    when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i)) && allocated(i) && release1Cycle.valid)) {
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches.
       released(i) := true.B
