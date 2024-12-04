@@ -30,6 +30,7 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
 import device.DebugModule
 import utility.{IntBuffer, RegNextN}
+import freechips.rocketchip.tilelink.TLWidthWidget
 
 class StandAloneDebugModule (
   useTL: Boolean = false,
@@ -47,8 +48,7 @@ class StandAloneDebugModule (
 
   val debugModule = LazyModule(new DebugModule(hartNum)(p))
   debugModule.debug.node := xbar
-  debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach(masternode := _.node)
-
+  debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach(masternode := TLWidthWidget(1) := _.node)
   // interrupts
   val debugModuleIntNode = IntSinkNode(IntSinkPortSimple(hartNum, 1))
   debugModuleIntNode :*= IntBuffer() :*= debugModule.debug.dmOuter.dmOuter.intnode
