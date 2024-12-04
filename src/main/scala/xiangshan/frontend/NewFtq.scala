@@ -303,10 +303,10 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     "If PredictWidth does not satisfy the power of 2," +
       "pftAddr := getLower(io.start_addr) and carry := true.B  not working!!"
   )
-  
-  init_entry.isJalr  := new_jmp_is_jalr
-  init_entry.isCall  := new_jmp_is_call
-  init_entry.isRet   := new_jmp_is_ret
+
+  init_entry.isJalr := new_jmp_is_jalr
+  init_entry.isCall := new_jmp_is_call
+  init_entry.isRet  := new_jmp_is_ret
   // that means fall thru points to the middle of an inst
   init_entry.last_may_be_rvi_call := pd.jmpOffset === (PredictWidth - 1).U && !pd.rvcMask(pd.jmpOffset)
 
