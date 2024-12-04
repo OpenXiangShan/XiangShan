@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2024 Institute of Information Engineering, Chinese Academy of Sciences
 * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *

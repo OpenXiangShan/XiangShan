@@ -43,7 +43,7 @@ case object SoCParamsKey extends Field[SoCParameters]
 case class SoCParameters
 (
   EnableILA: Boolean = false,
-  PAddrBits: Int = 50,  //48
+  PAddrBits: Int = 48,
   PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
   CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
