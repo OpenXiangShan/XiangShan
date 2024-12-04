@@ -96,6 +96,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
+    val pendingIntr = Input(Bool())
   }
 
   val isStoreException = Input(Bool())
@@ -142,6 +143,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(XLEN.W))
     val isForVSnonLeafPTE = Output(Bool())
+    val update = Output(Vec(LoadPipelineWidth, Bool()))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
     val lqCanAccept = Output(Bool())
@@ -1081,6 +1083,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+  loadMisalignBuffer.io.rob.pendingIntr         := io.ooo_to_mem.lsqio.pendingIntr
 
   lsq.io.flushFrmMaBuf                          := loadMisalignBuffer.io.flushLdExpBuff
 
@@ -1094,6 +1097,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
   storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
   storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
+  storeMisalignBuffer.io.rob.pendingIntr        := io.ooo_to_mem.lsqio.pendingIntr
 
   lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
 
@@ -1272,6 +1276,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
+  io.mem_to_ooo.lsqio.update     := lsq.io.rob.update
   io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
@@ -1283,6 +1288,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+  lsq.io.rob.pendingIntr         := io.ooo_to_mem.lsqio.pendingIntr
 
   //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq

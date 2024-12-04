@@ -94,10 +94,12 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     * (5) ROB commits the instruction: same as normal instructions
     */
 
+  io.rob.update := DontCare
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
   val pendingld = GatedValidRegNext(io.rob.pendingUncacheld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
+  val pendingIntr = GatedRegNext(io.rob.pendingIntr)
 
   switch (uncacheState) {
     is (s_idle) {
@@ -172,6 +174,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.ldout.valid              := (uncacheState === s_wait)
   io.ldout.bits               := DontCare
   io.ldout.bits.uop           := selUop
+  io.ldout.bits.uop.flushPipe := pendingIntr
   io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
   io.ldout.bits.uop.exceptionVec(loadAccessFault) := nderr
   io.ldout.bits.data          := rdataPartialLoad
@@ -373,7 +376,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule
   io.ld_raw_data(UncacheWBPort)      := RegEnable(ld_raw_data, ldout.fire)
 
   for (i <- 0 until LoadPipelineWidth) {
-    io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
+    io.rob.update(i) := RegNext(s1_valid(i))
+    io.rob.mmio(i) := RegEnable(s1_req(i).mmio, s1_valid(i))
     io.rob.uop(i) := RegEnable(s1_req(i).uop, s1_valid(i))
   }
 
