@@ -68,12 +68,6 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     dontTouch(output1H)
   }
   val outputWidth1H = output1H
-  val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
-  val outIsInt = !outCtrl.fuOpType(6)
-  
-  // May be useful in the future.
-  // val outIsMvInst = outCtrl.fuOpType === FuOpType.FMVXF
-  val outIsMvInst = false.B
 
   val outEew = RegEnable(RegEnable(Mux1H(output1H, Seq(0,1,2,3).map(i => i.U)), fire), fireReg)
   private val needNoMask = outVecCtrl.fpu.isFpToVecInst
@@ -136,7 +130,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val fflagsAll = Wire(Vec(8, UInt(5.W)))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
   val fflags = fflagsEnCycle2.zip(fflagsAll).map{case(en, fflag) => Mux(en, fflag, 0.U(5.W))}.reduce(_ | _)
-  io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fflags)
+  io.out.bits.res.fflags.get := fflags
 
 
   /**
@@ -167,15 +161,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   mgu.io.in.isIndexedVls := false.B
 
-  // for scalar f2i cvt inst
-  val isFp2VecForInt = outVecCtrl.fpu.isFpToVecInst && outIs32bits && outIsInt
-  // for f2i mv inst
-  val result = Mux(outIsMvInst, RegNext(RegNext(vs2.tail(64))), mgu.io.out.vd)
-
-  io.out.bits.res.data := Mux(isFp2VecForInt,
-    Fill(32, result(31)) ## result(31, 0),
-    result
-  )
+  io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }
 
