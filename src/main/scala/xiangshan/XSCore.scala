@@ -148,6 +148,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
   backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
   backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
+  backend.io.mem.robLsqIO.update := memBlock.io.mem_to_ooo.lsqio.update
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
@@ -215,6 +216,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.lsqio.commit           := backend.io.mem.robLsqIO.commit
   memBlock.io.ooo_to_mem.lsqio.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
   memBlock.io.ooo_to_mem.lsqio.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext
+  memBlock.io.ooo_to_mem.lsqio.pendingIntr      := backend.io.mem.robLsqIO.pendingIntr
   memBlock.io.ooo_to_mem.isStoreException       := backend.io.mem.isStoreException
   memBlock.io.ooo_to_mem.isVlsException         := backend.io.mem.isVlsException
 

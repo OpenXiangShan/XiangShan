@@ -130,6 +130,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val flushLdExpBuff  = Output(Bool())
   })
 
+  io.rob.update := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
   io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
 
@@ -569,7 +570,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
 
-  val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val flush = req_valid && req.uop.robIdx.needFlush(io.redirect) || io.rob.pendingIntr
 
   when (flush && (bufferState =/= s_idle)) {
     bufferState := s_idle

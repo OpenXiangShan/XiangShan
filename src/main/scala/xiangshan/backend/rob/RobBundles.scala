@@ -239,7 +239,9 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val commit = Output(Bool())
   val pendingPtr = Output(new RobPtr)
   val pendingPtrNext = Output(new RobPtr)
+  val pendingIntr = Output(Bool())
 
+  val update = Input(Vec(LoadPipelineWidth, Bool()))
   val mmio = Input(Vec(LoadPipelineWidth, Bool()))
   // Todo: what's this?
   val uop = Input(Vec(LoadPipelineWidth, new DynInst))

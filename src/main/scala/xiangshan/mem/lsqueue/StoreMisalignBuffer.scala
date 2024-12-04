@@ -102,6 +102,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val sqControl       = new StoreMaBufToSqControlIO
   })
 
+  io.rob.update := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
   io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
 
@@ -584,7 +585,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.sqControl.control.removeSq := req_valid && (bufferState === s_wait) && !(globalMMIO || globalException) && (io.rob.scommit =/= 0.U)
 
-  val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
+  val flush = req_valid && req.uop.robIdx.needFlush(io.redirect) || io.rob.pendingIntr
 
   when (flush && (bufferState =/= s_idle)) {
     bufferState := s_idle

@@ -306,6 +306,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.maControl.storeInfo.completeSbTrans := doMisalignSt && dataBuffer.io.enq(0).fire
 
   // store can be committed by ROB
+  io.rob.update := DontCare
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
 
@@ -789,6 +790,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val uncacheUop = Reg(new DynInst)
   val uncacheVAddr = Reg(UInt(VAddrBits.W))
   val cboFlushedSb = RegInit(false.B)
+  val pendingIntr = RegNext(io.rob.pendingIntr)
   val cmoOpCode = uncacheUop.fuOpType(1, 0)
   switch(uncacheState) {
     is(s_idle) {
@@ -894,7 +896,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.uop := uncacheUop
   io.mmioStout.bits.uop.exceptionVec := ExceptionNO.selectByFu(uncacheUop.exceptionVec, StaCfg)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.flushPipe := deqCanDoCbo // flush Pipeline to keep order in CMO
+  io.mmioStout.bits.uop.flushPipe := deqCanDoCbo || pendingIntr // flush Pipeline to keep order in CMO
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.isFromLoadUnit := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B

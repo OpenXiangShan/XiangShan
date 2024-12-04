@@ -539,8 +539,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
 
   for (i <- 0 until LoadPipelineWidth) {
-    when(RegNext(io.lsq.mmio(i))) {
-      robEntries(RegEnable(io.lsq.uop(i).robIdx, io.lsq.mmio(i)).value).mmio := true.B
+    when(RegNext(io.lsq.update(i))) {
+      when(RegEnable(io.lsq.mmio(i), io.lsq.update(i))) {
+        robEntries(RegEnable(io.lsq.uop(i).robIdx, io.lsq.update(i)).value).mmio := true.B
+      }.otherwise {
+        robEntries(RegEnable(io.lsq.uop(i).robIdx, io.lsq.update(i)).value).interrupt_safe := true.B
+      }
     }
   }
 
@@ -808,6 +812,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
+  io.lsq.pendingIntr := RegNext(intrEnable)
 
   /**
    * state changes
