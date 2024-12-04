@@ -90,6 +90,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     }
   }
 
+  val maxSplitNum = 2
 
   /**
   ********************************************************************************************************
@@ -236,13 +237,30 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   * s_finish:
   * s_fof_fix_vl: Writeback the uop of the fof instruction to modify vl.
   * */
-  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_send_data :: s_wait_to_sbuffer :: s_finish :: s_fof_fix_vl :: Nil = Enum(13)
+  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_misalign_merge_data :: s_latch_and_merge_data :: s_send_data :: s_wait_to_sbuffer :: s_finish :: s_fof_fix_vl :: Nil = Enum(14)
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
   val isEnqfof          = io.in.bits.uop.fuOpType === VlduType.vleff && io.in.valid
   val isEnqFixVlUop     = isEnqfof && io.in.bits.uop.vpu.lastUop
 
+  // handle misalign sign
+  val curPtr             = RegInit(false.B)
+  val canHandleMisalign  = WireInit(false.B)
+  val isMisalignReg      = RegInit(false.B)
+  val isMisalignWire     = WireInit(false.B)
+  val notCross16ByteReg  = RegInit(false.B)
+  val notCross16ByteWire = WireInit(false.B)
+  val combinedData       = RegInit(0.U(XLEN.W))
+
+  val lowPagePaddr       = RegInit(0.U(PAddrBits.W))
+  val lowPageGPaddr      = RegInit(0.U(GPAddrBits.W))
+
+  val highPagePaddr      = RegInit(0.U(PAddrBits.W))
+  val highPageGPaddr     = RegInit(0.U(GPAddrBits.W))
+
+  val isFirstSplit       = !curPtr
+  val isSecondSplit      = curPtr
   /**
    * state update
    */
@@ -270,10 +288,16 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
                       s_wait_tlb_resp)
 
   }.elsewhen(state === s_pm){
-    /* if is vStore, send data to sbuffer, so don't need query dcache */
-    stateNext := Mux(exception_pa || exception_va || exception_gpa,
-                     s_finish,
-                     Mux(isVSegLoad, s_cache_req, s_send_data))
+    when(exception_pa || exception_va || exception_gpa) {
+      stateNext := s_finish
+    } .otherwise {
+      when(canHandleMisalign && isMisalignWire && !notCross16ByteWire || (isMisalignReg && !notCross16ByteReg && isFirstSplit && isVSegStore)) {
+        stateNext := s_tlb_req
+      } .otherwise {
+        /* if is vStore, send data to sbuffer, so don't need query dcache */
+        stateNext := Mux(isVSegLoad, s_cache_req, s_send_data)
+      }
+    }
 
   }.elsewhen(state === s_cache_req){
     stateNext := Mux(io.rdcache.req.fire, s_cache_resp, s_cache_req)
@@ -283,12 +307,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-        stateNext := Mux(isVSegLoad, s_latch_and_merge_data, s_send_data)
+
+        stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
     }
-    /* if segment is inactive, don't need to wait access all of the field */
+  }.elsewhen(state === s_misalign_merge_data) {
+    stateNext := Mux(!curPtr, s_tlb_req, s_latch_and_merge_data)
   }.elsewhen(state === s_latch_and_merge_data) {
     when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
       ((segmentIdx === maxSegIdx) && !segmentActive)) {
@@ -299,7 +325,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     }
     /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
-    when(!sbufferOut.fire && segmentActive) {
+    when(!sbufferOut.fire && segmentActive || (isMisalignReg && !notCross16ByteReg && isFirstSplit)) {
       stateNext := s_send_data
     }.elsewhen(segmentIdx === maxSegIdx && (fieldIdx === maxNfields && sbufferOut.fire || !segmentActive && io.sbuffer.valid && !io.sbuffer.ready)) {
       stateNext := s_wait_to_sbuffer
@@ -362,6 +388,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVSegLoad(io.in.bits.uop.fuType)
     instMicroOp.isVSegLoad            := FuType.isVSegLoad(io.in.bits.uop.fuType)
     instMicroOp.isVSegStore           := FuType.isVSegStore(io.in.bits.uop.fuType)
+    isMisalignReg                     := false.B
+    notCross16ByteReg                 := false.B
   }
   // latch data
   when(io.in.fire && !isEnqFixVlUop){
@@ -389,8 +417,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
                                             segmentOffset)
   val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
 
+  val misalignLowVaddr                = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W))
+  val misalignHighVaddr               = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W)) + 8.U
+  val notCross16ByteVaddr             = Cat(latchVaddr(latchVaddr.getWidth - 1, 4), 0.U(4.W))
+//  val misalignVaddr                   = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr))
+  val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)
+  val tlbReqVaddr                     = Mux(isMisalignReg, misalignVaddr, vaddr)
   //latch vaddr
-  when(state === s_tlb_req){
+  when(state === s_tlb_req && !isMisalignReg){
     latchVaddr := vaddr(VAddrBits - 1, 0)
   }
   /**
@@ -402,8 +436,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.resp.ready                  := true.B
   io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
   io.dtlb.req.bits.cmd                := Mux(isVSegLoad, TlbCmd.read, TlbCmd.write)
-  io.dtlb.req.bits.vaddr              := vaddr(VAddrBits - 1, 0)
-  io.dtlb.req.bits.fullva             := vaddr
+  io.dtlb.req.bits.vaddr              := tlbReqVaddr(VAddrBits - 1, 0)
+  io.dtlb.req.bits.fullva             := tlbReqVaddr
   io.dtlb.req.bits.checkfullva        := true.B
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
   io.dtlb.req.bits.memidx.is_ld       := isVSegLoad
@@ -422,7 +456,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   segmentTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   segmentTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   segmentTrigger.io.memType                             := isVSegLoad
-  segmentTrigger.io.fromLoadStore.vaddr                 := latchVaddr
+  segmentTrigger.io.fromLoadStore.vaddr                 := Mux(isMisalignReg, misalignVaddr, latchVaddr)
   segmentTrigger.io.fromLoadStore.isVectorUnitStride    := false.B
   segmentTrigger.io.fromLoadStore.mask                  := 0.U
 
@@ -442,6 +476,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
         instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
         instMicroOp.exceptionIsForVSnonLeafPTE  := io.dtlb.resp.bits.isForVSnonLeafPTE
+        lowPagePaddr  := Mux(isMisalignReg && !notCross16ByteReg && !curPtr, io.dtlb.resp.bits.paddr(0), lowPagePaddr)
+        lowPageGPaddr := Mux(isMisalignReg && !notCross16ByteReg && !curPtr, io.dtlb.resp.bits.gpaddr(0), lowPageGPaddr)
+
+        highPagePaddr  := Mux(isMisalignReg && !notCross16ByteReg && curPtr, io.dtlb.resp.bits.paddr(0), highPagePaddr)
+        highPageGPaddr := Mux(isMisalignReg && !notCross16ByteReg && curPtr, io.dtlb.resp.bits.gpaddr(0), highPageGPaddr)
       }
   }
   // pmp
@@ -449,18 +488,29 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val exceptionWithPf = exceptionVec(storePageFault) || exceptionVec(loadPageFault) || exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
   val pmp = (io.pmpResp.asUInt & Fill(io.pmpResp.asUInt.getWidth, !exceptionWithPf)).asTypeOf(new PMPRespBundle())
   when(state === s_pm) {
+    val highAddress = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
+      "b00".U -> 0.U,
+      "b01".U -> 1.U,
+      "b10".U -> 3.U,
+      "b11".U -> 7.U
+    )) + tlbReqVaddr(4, 0)
+
     val addr_aligned = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
       "b00".U   -> true.B,                   //b
-      "b01".U   -> (vaddr(0)    === 0.U), //h
-      "b10".U   -> (vaddr(1, 0) === 0.U), //w
-      "b11".U   -> (vaddr(2, 0) === 0.U)  //d
+      "b01".U   -> (tlbReqVaddr(0)    === 0.U), //h
+      "b10".U   -> (tlbReqVaddr(1, 0) === 0.U), //w
+      "b11".U   -> (tlbReqVaddr(2, 0) === 0.U)  //d
     ))
-    val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := missAligned && isVSegLoad  && canTriggerException
-    exceptionVec(storeAddrMisaligned) := missAligned && isVSegStore && canTriggerException
+
+    notCross16ByteWire   := highAddress(4) === tlbReqVaddr(4)
+    isMisalignWire       := !addr_aligned
+    canHandleMisalign := !pmp.mmio && !triggerBreakpoint && !triggerDebugMode
+    exceptionVec(loadAddrMisaligned)  := isMisalignWire && isVSegLoad  && canTriggerException && !canHandleMisalign
+    exceptionVec(storeAddrMisaligned) := isMisalignWire && isVSegStore && canTriggerException && !canHandleMisalign
+
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
-                     triggerBreakpoint || triggerDebugMode || missAligned
+                     triggerBreakpoint || triggerDebugMode || (isMisalignWire && !canHandleMisalign)
     exception_gpa := exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
     exception_pa  := pmp.st || pmp.ld || pmp.mmio
 
@@ -490,12 +540,42 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     when(exceptionVec(breakPoint) || triggerDebugMode) {
       instMicroOp.uop.trigger := triggerAction
     }
+
+    when(isMisalignWire && canHandleMisalign && !(exception_va || exception_gpa || exception_pa)) {
+      notCross16ByteReg := notCross16ByteWire
+      isMisalignReg       := true.B
+      curPtr              := false.B
+    }
   }
 
   /**
    * flush sbuffer IO Assign
    */
   io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req)
+
+  /**
+  * update curPtr
+  * */
+  when(state === s_finish || state === s_latch_and_merge_data || state === s_send_data && stateNext =/= s_send_data) {
+    isMisalignReg     := false.B
+    notCross16ByteReg := false.B
+    curPtr := false.B
+  } .otherwise {
+    when(isVSegLoad) {
+      when(isMisalignReg && !notCross16ByteReg && state === s_misalign_merge_data) {
+        curPtr := true.B
+      }
+    } .otherwise {
+      when(isMisalignReg && !notCross16ByteReg && state === s_pm) {
+        curPtr := !curPtr
+      } .elsewhen(isMisalignReg && !notCross16ByteReg && state === s_pm && stateNext === s_send_data) {
+        curPtr := false.B
+      } .elsewhen(isMisalignReg && !notCross16ByteReg && state === s_send_data && stateNext === s_send_data && sbufferOut.fire) {
+        curPtr := !curPtr
+      }
+    }
+  }
+
 
 
   /**
@@ -519,7 +599,46 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     "b1110".U -> io.rdcache.resp.bits.data_delayed(127, 112),
     "b1111".U -> io.rdcache.resp.bits.data_delayed(127, 120)
   ))
-  val pickData  = rdataVecHelper(alignedType(1,0), cacheData)
+
+  val misalignLowData  = LookupTree(latchVaddr(3,0), List(
+    "b1001".U -> io.rdcache.resp.bits.data_delayed(127,  72),
+    "b1010".U -> io.rdcache.resp.bits.data_delayed(127,  80),
+    "b1011".U -> io.rdcache.resp.bits.data_delayed(127,  88),
+    "b1100".U -> io.rdcache.resp.bits.data_delayed(127,  96),
+    "b1101".U -> io.rdcache.resp.bits.data_delayed(127, 104),
+    "b1110".U -> io.rdcache.resp.bits.data_delayed(127, 112),
+    "b1111".U -> io.rdcache.resp.bits.data_delayed(127, 120)
+  ))
+  val misalignHighData = LookupTree(latchVaddr(3,0), List(
+    "b1001".U -> io.rdcache.resp.bits.data_delayed(63,    8),
+    "b1010".U -> io.rdcache.resp.bits.data_delayed(63,   16),
+    "b1011".U -> io.rdcache.resp.bits.data_delayed(63,   24),
+    "b1100".U -> io.rdcache.resp.bits.data_delayed(63,   32),
+    "b1101".U -> io.rdcache.resp.bits.data_delayed(63,   40),
+    "b1110".U -> io.rdcache.resp.bits.data_delayed(63,   48),
+    "b1111".U -> io.rdcache.resp.bits.data_delayed(63,   56)
+  ))
+
+  val misalignCombinedData = LookupTree(latchVaddr(3,0), List(
+    "b1001".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(55,    0))(63, 0),
+    "b1010".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(47,    0))(63, 0),
+    "b1011".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(39,    0))(63, 0),
+    "b1100".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(31,    0))(63, 0),
+    "b1101".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(23,    0))(63, 0),
+    "b1110".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(15,    0))(63, 0),
+    "b1111".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(7,     0))(63, 0)
+  ))
+  when(state === s_misalign_merge_data && segmentActive){
+    when(!curPtr) {
+      combinedData := misalignLowData
+    } .otherwise {
+      combinedData := misalignCombinedData
+    }
+  }
+
+  val shiftData    = (io.rdcache.resp.bits.data_delayed >> (latchVaddr(3, 0) << 3)).asUInt(63, 0)
+  val mergemisalignData = Mux(notCross16ByteReg, shiftData, combinedData)
+  val pickData  = rdataVecHelper(alignedType(1,0), Mux(isMisalignReg, mergemisalignData, cacheData))
   val mergedData = mergeDataWithElemIdx(
     oldData = data(splitPtr.value),
     newData = Seq(pickData),
@@ -530,6 +649,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(state === s_latch_and_merge_data && segmentActive){
     data(splitPtr.value) := mergedData
   }
+
+
   /**
    * split data for store
    * */
@@ -540,21 +661,23 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   )
   val flowData  = genVWdata(splitData, alignedType) // TODO: connect vstd, pass vector data
   val wmask     = genVWmask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
-
+  val bmask     = genBasemask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
+  val dcacheReqVaddr = Mux(isMisalignReg, misalignVaddr, latchVaddr)
+  val dcacheReqPaddr = Mux(isMisalignReg, Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, PageOffsetWidth), misalignVaddr(PageOffsetWidth - 1, 0)), instMicroOp.paddr)
   /**
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
   io.rdcache.req.valid              := state === s_cache_req && isVSegLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
-  io.rdcache.req.bits.vaddr         := latchVaddr
+  io.rdcache.req.bits.vaddr         := dcacheReqVaddr
   io.rdcache.req.bits.mask          := mask
   io.rdcache.req.bits.data          := flowData
   io.rdcache.pf_source              := LOAD_SOURCE.U
   io.rdcache.req.bits.id            := DontCare
   io.rdcache.resp.ready             := true.B
-  io.rdcache.s1_paddr_dup_lsu       := instMicroOp.paddr
-  io.rdcache.s1_paddr_dup_dcache    := instMicroOp.paddr
+  io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
+  io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
   io.rdcache.s1_kill                := false.B
   io.rdcache.s1_kill_data_read      := false.B
   io.rdcache.s2_kill                := false.B
@@ -568,21 +691,56 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     io.rdcache.s2_pc                := instMicroOp.uop.pc
   }
   io.rdcache.replacementUpdated     := false.B
-  io.rdcache.is128Req               := false.B
+  io.rdcache.is128Req               := notCross16ByteReg
 
 
   /**
    * write data to sbuffer
    * */
+  val sbufferAddrLow4bit = latchVaddr(3, 0)
+
+  val notCross16BytePaddr          = Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, 4), 0.U(4.W))
+  val notCross16ByteData           = flowData << (sbufferAddrLow4bit << 3)
+
+  val Cross16ByteMask = Wire(UInt(32.W))
+  val Cross16ByteData = Wire(UInt(256.W))
+  Cross16ByteMask := bmask << sbufferAddrLow4bit
+  Cross16ByteData := flowData << (sbufferAddrLow4bit << 3)
+
+  val vaddrLow  = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W))
+  val vaddrHigh = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W)) + 8.U
+
+
+  val paddrLow  = Cat(lowPagePaddr(lowPagePaddr.getWidth - 1, 3), 0.U(3.W))
+  val paddrHigh = Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, 3), 0.U(3.W))
+
+  val maskLow   = Cross16ByteMask(15, 0)
+  val maskHigh  = Cross16ByteMask(31, 16)
+
+  val dataLow   = Cross16ByteData(127, 0)
+  val dataHigh  = Cross16ByteData(255, 128)
+
+  val sbuffermisalignMask          = Mux(notCross16ByteReg, wmask, Mux(isFirstSplit, maskLow, maskHigh))
+  val sbuffermisalignData          = Mux(notCross16ByteReg, notCross16ByteData, Mux(isFirstSplit, dataLow, dataHigh))
+  val sbuffermisalignPaddr         = Mux(notCross16ByteReg, notCross16BytePaddr, Mux(isFirstSplit, paddrLow, paddrHigh))
+  val sbuffermisalignVaddr         = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, vaddrLow, vaddrHigh))
+
+  val sbufferMask                  = Mux(isMisalignReg, sbuffermisalignMask, wmask)
+  val sbufferData                  = Mux(isMisalignReg, sbuffermisalignData, flowData)
+  val sbufferVaddr                 = Mux(isMisalignReg, sbuffermisalignVaddr, latchVaddr)
+  val sbufferPaddr                 = Mux(isMisalignReg, sbuffermisalignPaddr, instMicroOp.paddr)
+
+  dontTouch(wmask)
+  dontTouch(Cross16ByteMask)
   sbufferOut.bits                  := DontCare
   sbufferOut.valid                 := state === s_send_data && segmentActive
   sbufferOut.bits.vecValid         := state === s_send_data && segmentActive
-  sbufferOut.bits.mask             := wmask
-  sbufferOut.bits.data             := flowData
-  sbufferOut.bits.vaddr            := latchVaddr
+  sbufferOut.bits.mask             := sbufferMask
+  sbufferOut.bits.data             := sbufferData
+  sbufferOut.bits.vaddr            := sbufferVaddr
   sbufferOut.bits.cmd              := MemoryOpConstants.M_XWR
   sbufferOut.bits.id               := DontCare
-  sbufferOut.bits.addr             := instMicroOp.paddr
+  sbufferOut.bits.addr             := sbufferPaddr
 
   NewPipelineConnect(
     sbufferOut, io.sbuffer, io.sbuffer.fire,
@@ -599,7 +757,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   private val fieldActiveWirteFinish = sbufferOut.fire && segmentActive // writedata finish and is a active segment
   XSError(sbufferOut.fire && !segmentActive, "Attempt write inactive segment to sbuffer, something wrong!\n")
 
-  private val segmentInactiveFinish = ((state === s_latch_and_merge_data) || (state === s_send_data)) && !segmentActive
+  private val segmentInactiveFinish = ((state === s_latch_and_merge_data) || (state === s_send_data && stateNext =/= s_send_data)) && !segmentActive
 
   val splitPtrOffset = Mux(
     isIndexed(instType),
@@ -623,7 +781,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
   // update splitPtr
-  when(state === s_latch_and_merge_data || (state === s_send_data && (fieldActiveWirteFinish || !segmentActive))){
+  when(state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && (fieldActiveWirteFinish || !segmentActive))){
     splitPtr := splitPtrNext
   }.elsewhen(io.in.fire && !instMicroOpValid){
     splitPtr := deqPtr // initial splitPtr
@@ -637,7 +795,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(io.in.fire && !instMicroOpValid){ // init
     fieldIdx := 0.U
   }.elsewhen(state === s_latch_and_merge_data && segmentActive ||
-            (state === s_send_data && fieldActiveWirteFinish)){ // only if segment is active
+            (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)){ // only if segment is active
 
     /* next segment, only if segment complete */
     fieldIdx := Mux(fieldIdx === maxNfields, 0.U, fieldIdx + 1.U)
@@ -647,7 +805,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   //update segmentIdx
   when(io.in.fire && !instMicroOpValid){
     segmentIdx := 0.U
-  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish)) &&
+  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)) &&
              segmentIdx =/= maxSegIdx){ // next segment, only if segment is active
 
     segmentIdx := segmentIdx + 1.U
@@ -657,7 +815,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   //update segmentOffset
   /* when segment is active or segment is inactive, increase segmentOffset */
-  when((fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish))) ||
+  when((fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish))) ||
        segmentInactiveFinish){
 
     segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew(1, 0), stride(stridePtr.value))

@@ -190,7 +190,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
-    val flushFrmMaBuf = Input(Bool())
+    val loadMisalignFull = Input(Bool())
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -276,7 +276,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // mmio non-data error exception
   exceptionBuffer.io.req.last := uncacheBuffer.io.exception
   exceptionBuffer.io.req.last.bits.vaNeedExt := true.B
-  exceptionBuffer.io.flushFrmMaBuf := io.flushFrmMaBuf
+  loadQueueReplay.io.loadMisalignFull := io.loadMisalignFull
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
@@ -321,6 +321,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+
   // TODO: implement it!
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
