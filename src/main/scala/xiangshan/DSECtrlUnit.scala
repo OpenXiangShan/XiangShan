@@ -8,7 +8,9 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortParameters, 
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, RegWriteFn}
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
+import system.HasSoCParameter
 import xiangshan.backend.regfile.Regfile
+import huancun.{HCCacheParamsKey, HuanCun}
 
 import javax.swing.SwingWorker
 
@@ -29,7 +31,8 @@ class DSECtrlUnit(params: DSEParams)(implicit p: Parameters) extends LazyModule 
   lazy val module = new DSECtrlUnitImp(this)
 }
 
-class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter {
+class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper)
+  with HasXSParameter with HasSoCParameter {
 
   val io = IO(new Bundle{
     val clk = Input(Clock())
@@ -84,6 +87,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val lsDqSize1 = RegInit(dpParams.LsDqSize.U(64.W))
     val lsDqSize = Wire(UInt(64.W))
 
+    val l2cache_sets0 = RegInit(p(HCCacheParamsKey).sets.U(64.W))
+    val l2cache_sets1 = RegInit(p(HCCacheParamsKey).sets.U(64.W))
+    val l2cache_sets = Wire(UInt(64.W))
+
+    val l3cache_sets0 = RegInit(soc.L3CacheParamsOpt.get.sets.U(64.W))
+    val l3cache_sets1 = RegInit(soc.L3CacheParamsOpt.get.sets.U(64.W))
+    val l3cache_sets = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -110,7 +121,11 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x160 -> Seq(RegField(64, fpDqSize0)),
       0x168 -> Seq(RegField(64, fpDqSize1)),
       0x170 -> Seq(RegField(64, lsDqSize0)),
-      0x178 -> Seq(RegField(64, lsDqSize1))
+      0x178 -> Seq(RegField(64, lsDqSize1)),
+      0x180 -> Seq(RegField(64, l2cache_sets0)),
+      0x188 -> Seq(RegField(64, l2cache_sets1)),
+      0x190 -> Seq(RegField(64, l3cache_sets0)),
+      0x198 -> Seq(RegField(64, l3cache_sets1)),
     )
 
     // Mux logic
@@ -122,6 +137,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     intDqSize := Mux(ctrlSel.orR, intDqSize1, intDqSize0)
     fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
     lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
+    l2cache_sets := Mux(ctrlSel.orR, l2cache_sets1, l2cache_sets0)
+    l3cache_sets := Mux(ctrlSel.orR, l3cache_sets1, l3cache_sets0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -132,6 +149,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(intDqSize, "DSE_INTDQSIZE")
     ExcitingUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
     ExcitingUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
+    ExcitingUtils.addSource(l2cache_sets, "DSE_L2CACHESETS")
+    ExcitingUtils.addSource(l3cache_sets, "DSE_L3CACHESETS")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -145,6 +164,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(intDqSize <= dpParams.IntDqSize.U, "DSE parameter must not exceed IntDqSize")
     assert(fpDqSize <= dpParams.FpDqSize.U, "DSE parameter must not exceed FpDqSize")
     assert(lsDqSize <= dpParams.LsDqSize.U, "DSE parameter must not exceed LsDqSize")
+    assert(l2cache_sets <= p(HCCacheParamsKey).sets.U, "DSE parameter must not exceed L2CacheSize")
+    assert(l3cache_sets <= soc.L3CacheParamsOpt.get.sets.U, "DSE parameter must not exceed L3CacheSize")
 
 
     // core reset generation

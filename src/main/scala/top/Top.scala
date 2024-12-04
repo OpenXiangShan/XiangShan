@@ -95,6 +95,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.plic.intnode := IntBuffer() := int
   }))
 
+
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
   } else {
@@ -204,6 +205,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       for(node <- core_rst_nodes){
         node.out.head._1 := false.B.asAsyncReset()
       }
+    }
+
+    // DSE parameters
+    val l3cache_sets = WireInit(soc.L3CacheParamsOpt.get.sets.U)
+    ExcitingUtils.addSink(l3cache_sets, "DSE_L3CACHESETS")
+    if(!l3cacheOpt.isEmpty) {
+      l3cacheOpt.get.module.io.psetBits := l3cache_sets
     }
 
 

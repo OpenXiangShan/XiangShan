@@ -84,7 +84,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       case HCCacheParamsKey => l2param
     })))
   )
-
   // public ports
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
@@ -162,9 +161,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     // reset vector
     core.module.io.reset_vector := io.reset_vector
 
+    // DSE parameter
+    val l2cache_sets = WireInit(0.U(log2Up(p(HCCacheParamsKey).sets)))
+    ExcitingUtils.addSink(l2cache_sets, "DSE_L2CACHESETS")
+
 //    core.module.io.robSize := io.robSize
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+      l2cache.get.module.io.psetBits := l2cache_sets
     }
     else {
       core.module.io.perfEvents <> DontCare
