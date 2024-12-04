@@ -70,6 +70,7 @@ class FunctionUnitIO(val len: Int)(implicit p: Parameters) extends XSBundle {
 abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new FunctionUnitIO(len))
+  
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)

@@ -52,6 +52,7 @@ object Bundles {
     val ftqPtr           = new FtqPtr
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
+    val seqNum           = UInt(64.W)
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
@@ -66,6 +67,7 @@ object Bundles {
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
       this.isLastInFtqEntry := source.isLastInFtqEntry
+      this.seqNum           := source.seqNum
     }
   }
 
@@ -118,6 +120,7 @@ object Bundles {
     val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val seqNum          = UInt(64.W)
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -226,6 +229,7 @@ object Bundles {
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
     val debugInfo       = new PerfDebugInfo
+    val seqNum          = UInt(64.W)
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
     // Load wait is needed
@@ -639,6 +643,7 @@ object Bundles {
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
+    val seqNum = UInt(64.W)
 
     def exuIdx = this.params.exuIdx
 
@@ -737,6 +742,7 @@ object Bundles {
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val seqNum = UInt(64.W)
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
@@ -757,6 +763,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val seqNum = UInt(64.W)
 
     this.wakeupSource = s"WB(${params.toString})"
 
@@ -778,6 +785,7 @@ object Bundles {
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
       this.debugInfo := source.debugInfo
+      this.seqNum := source.seqNum
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortWithConfig = {

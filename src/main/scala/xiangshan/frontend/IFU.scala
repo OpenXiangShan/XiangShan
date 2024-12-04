@@ -937,6 +937,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid.asUInt
   }
 
+  io.toIbuffer.bits.seqNum.zipWithIndex.foreach { case (a, i) =>
+    val pc = f3_pc(i)
+    val code = io.toIbuffer.bits.instrs(i)
+    val en = io.toIbuffer.bits.enqEnable(i)
+    a := PerfCCT.createInstMetaAtFetch(pc, code, en, clock, reset)
+  }
+
   /** to backend */
   // f3_gpaddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := f3_toIbuffer_valid && Mux(
