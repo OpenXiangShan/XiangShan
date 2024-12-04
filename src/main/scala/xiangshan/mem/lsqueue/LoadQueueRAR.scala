@@ -51,7 +51,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   private val PartialPAddrStride: Int = 6
   private val PartialPAddrBits: Int = 16
-  private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2
+  private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2 // avoid overlap
   private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
   private def boundary(x: Int, h: Int) = if (x < h) Some(x) else None
   private def lowMapping = (0 until PartialPAddrLowBits).map(i => Seq(
@@ -70,7 +70,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val ppaddr_low = Wire(Vec(PartialPAddrLowBits, Bool()))
     ppaddr_low.zip(lowMapping).foreach {
       case (bit, mapping) =>
-        println(mapping.filter(_.isDefined))
         bit := mapping.filter(_.isDefined).map(x => paddr(x.get)).reduce(_^_)
     }
 
