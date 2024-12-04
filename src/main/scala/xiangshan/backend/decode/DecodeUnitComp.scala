@@ -31,7 +31,7 @@ import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
+import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul, Vl}
 import yunsuan.VpermType
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
@@ -160,6 +160,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   val isVstore = FuType.isVStore(latchedInst.fuType)
 
+  // exception generator
+  val vecException = Module(new VecExceptionGen)
+  vecException.io.inst := latchedInst.instr
+  vecException.io.decodedInst := latchedInst
+  vecException.io.vtype := latchedInst.vpu.vtype
+  vecException.io.vstart := latchedInst.vpu.vstart
+  val illegalInst = vecException.io.illegalInst
+
   numOfUop := latchedUopInfo.numOfUop
   numOfWB := latchedUopInfo.numOfWB
 
@@ -183,6 +191,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     dst := latchedInst
     dst.numUops := latchedUopInfo.numOfUop
     dst.numWB := latchedUopInfo.numOfWB
+    dst.exceptionVec(ExceptionNO.EX_II) := latchedInst.exceptionVec(ExceptionNO.EX_II) || illegalInst
     dst.firstUop := false.B
     dst.lastUop := false.B
     dst.vlsInstr := false.B
