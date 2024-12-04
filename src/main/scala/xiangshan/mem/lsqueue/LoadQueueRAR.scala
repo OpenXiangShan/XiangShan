@@ -51,7 +51,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   private val PartialPAddrStride: Int = 6
   private val PartialPAddrBits: Int = 16
-  private val PartialPAddrLowBits: Int = log2Up(DCacheWordBytes * DCacheBanks) - 1
+  private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2
   private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
   private def boundary(x: Int, h: Int) = if (x < h) Some(x) else None
   private def lowMapping = (0 until PartialPAddrLowBits).map(i => Seq(
