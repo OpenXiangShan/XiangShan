@@ -26,7 +26,7 @@ import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
 import system.SoCParamsKey
 
@@ -98,6 +98,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
+  XSLog.collect(timer, logEnable, clean, dump)
   dontTouch(timer)
   dontTouch(logEnable)
   dontTouch(clean)
@@ -121,6 +122,8 @@ object SimTop extends App {
     firtoolOpts
   )
 
+  // Logs: write prints to verilog file
+  XSLog.emitVerilog()
   // tools: write cpp files
   ChiselDB.addToFileRegisters
   Constantin.addToFileRegisters
