@@ -39,8 +39,8 @@ val defaultScalaVersion = "2.13.15"
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
 def defaultVersions = Map(
-  "chisel"        -> ivy"org.chipsalliance::chisel:6.6.0",
-  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.6.0",
+  "chisel"        -> ivy"org.chipsalliance::chisel:7.1.0+0-68fc902c+20241203-2357-SNAPSHOT",
+  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:7.1.0+0-68fc902c+20241203-2357-SNAPSHOT",
   "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
 )
 
