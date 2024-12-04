@@ -299,6 +299,7 @@ class WithNKBL2
         dataECC = Some("secded"),
         enableTagECC = true,
         enableDataECC = true,
+        dataCheck = Some("oddparity"),
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
