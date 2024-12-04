@@ -603,7 +603,22 @@ class CtrlBlockImp(
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
 
   dispatch.io.redirect := s1_s3_redirect
-  dispatch.io.enqRob <> rob.io.enq
+  val enqRob = Wire(chiselTypeOf(rob.io.enq))
+  enqRob.canAccept := rob.io.enq.canAccept
+  enqRob.canAcceptForDispatch := rob.io.enq.canAcceptForDispatch
+  enqRob.isEmpty := rob.io.enq.isEmpty
+  enqRob.resp := rob.io.enq.resp
+  enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
+  enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
+    sink.valid := RegNext(source.valid && !rob.io.redirect.valid)
+    sink.bits := RegEnable(source.bits, source.valid)
+  }
+  dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
+  dispatch.io.enqRob.canAcceptForDispatch := enqRob.canAcceptForDispatch
+  dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
+  dispatch.io.enqRob.resp := enqRob.resp
+  rob.io.enq.needAlloc := enqRob.needAlloc
+  rob.io.enq.req := enqRob.req
   dispatch.io.robHead := rob.io.debugRobHead
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.lqCanAccept := io.lqCanAccept
