@@ -159,6 +159,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
   val allowEnqueue = RegInit(true.B)
+  val allowEnqueueForDispatch = RegInit(true.B)
   val vecExcpInfo = RegInit(ValidIO(new VecExcpInfo).Lit(
     _.valid -> false.B,
   ))
@@ -175,6 +176,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walkPtr = walkPtrVec(0)
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
+  io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
@@ -896,7 +898,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
-  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - CommitWidth).U
+  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
+  allowEnqueueForDispatch := numValidEntries + dispatchNum <= (RobSize - 2 * RenameWidth).U
 
   val redirectWalkDistance = distanceBetween(io.redirect.bits.robIdx, deqPtrVec_next(0))
   when(io.redirect.valid) {
