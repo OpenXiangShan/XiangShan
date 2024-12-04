@@ -366,12 +366,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
   when (state === s_cache_resp_latch) {
     success := dcache_resp_id
-    val rdataSel = LookupTree(paddr(3, 0), List(
-      "b0000".U -> dcache_resp_data,
-      "b0100".U -> (dcache_resp_data >> 32),
-      "b1000".U -> (dcache_resp_data >> (32*2)),
-      "b1100".U -> (dcache_resp_data >> (32*3))
-    ))
+    val rdataSel = Mux(
+      paddr(2, 0) === 0.U,
+      dcache_resp_data,
+      dcache_resp_data >> 32
+    )
+    assert(paddr(2, 0) === "b000".U || paddr(2, 0) === "b100".U)
 
     resp_data_wire := Mux(
       isSc,
