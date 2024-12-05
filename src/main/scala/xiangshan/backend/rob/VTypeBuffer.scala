@@ -43,6 +43,7 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
   val snpt = Input(new SnapshotPort)
 
   val canEnq = Output(Bool())
+  val canEnqForDispatch = Output(Bool())
 
   val toDecode = Output(new Bundle {
     val isResumeVType = Bool()
@@ -263,6 +264,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     numValidEntries + enqCount <= (size - RenameWidth).U,
     true.B
   )
+  val allowEnqueueForDispatch = GatedValidRegNext(
+    numValidEntries + enqCount <= (size - 2*RenameWidth).U,
+    true.B
+  )
 
   private val decodeResumeVType = RegInit(0.U.asTypeOf(new ValidIO(VType())))
   private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
@@ -292,6 +297,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }
 
   io.canEnq := allowEnqueue && state === s_idle
+  io.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
   io.status.walkEnd := walkEndNext
   // update vtype in decode when VTypeBuffer resumes from walk state
   // note that VTypeBuffer can still send resuming request in the first cycle of s_idle
