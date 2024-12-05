@@ -725,7 +725,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqFlushBlockCounter = Reg(UInt(3.W))
   val deqFlushBlock = deqFlushBlockCounter(0)
   val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
-  val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
+  // TODO *** WARNING ***
+  // Blocking commit. Don't change this before we fully understand the logic.
+  val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr) || RegNext(RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr))
   val criticalErrorState = io.csr.criticalErrorState
   when(deqNeedFlush && deqHitRedirectReg){
     deqFlushBlockCounter := "b111".U
