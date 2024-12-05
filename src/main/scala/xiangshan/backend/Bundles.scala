@@ -673,6 +673,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
+      this.seqNum        := source.common.seqNum    
       this.l1ExuOH       .foreach(_ := source.common.l1ExuOH.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
@@ -697,6 +698,7 @@ object Bundles {
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+
     }
   }
 
