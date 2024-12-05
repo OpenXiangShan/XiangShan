@@ -135,6 +135,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
+  io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
+    PerfCCT.updateInstPos(wb.bits.seqNum, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+  }
+
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
   val bankAddrWidth = log2Up(CommitWidth)
