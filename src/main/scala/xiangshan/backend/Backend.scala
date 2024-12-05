@@ -256,6 +256,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.frontend <> io.frontend
   ctrlBlock.io.fromCSR.toDecode := intExuBlock.io.csrToDecode.get
   ctrlBlock.io.fromCSR.traceCSR := intExuBlock.io.csrio.get.traceCSR
+  ctrlBlock.io.fromCSR.instrAddrTransType := RegNext(intExuBlock.io.csrio.get.instrAddrTransType)
   ctrlBlock.io.fromWB.wbData <> wbDataPath.io.toCtrlBlock.writeback
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation

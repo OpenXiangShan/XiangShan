@@ -196,6 +196,10 @@ class CtrlBlockImp(
     out.bits := x.bits.redirect.get.bits
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
+    // for fix timing, next cycle assgin
+    out.bits.cfiUpdate.backendIAF := false.B
+    out.bits.cfiUpdate.backendIPF := false.B
+    out.bits.cfiUpdate.backendIGPF := false.B
     out
   }).toSeq
   private val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
@@ -299,6 +303,7 @@ class CtrlBlockImp(
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
+  redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
   redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
   redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
@@ -763,6 +768,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val fromCSR = new Bundle{
     val toDecode = Input(new CSRToDecode)
     val traceCSR = Input(new TraceCSR)
+    val instrAddrTransType = Input(new AddrTransType)
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
