@@ -49,6 +49,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val snpt = Input(new SnapshotPort)
 
     val canEnq = Output(Bool())
+    val canEnqForDispatch = Output(Bool())
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
@@ -260,8 +261,10 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val allowEnqueue = GatedValidRegNext(numValidEntries + enqCount <= (size - RenameWidth).U, true.B)
+  val allowEnqueueForDispatch = GatedValidRegNext(numValidEntries + enqCount <= (size - 2*RenameWidth).U, true.B)
 
   io.canEnq := allowEnqueue && state === s_idle
+  io.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
   io.enqPtrVec := enqPtrVec
 
   io.status.walkEnd := walkEndNext
