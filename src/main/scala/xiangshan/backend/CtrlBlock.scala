@@ -437,6 +437,12 @@ class CtrlBlockImp(
     rename.io.in(i).bits := decodePipeRename(i).bits
   }
 
+  for (i <- 1 until RenameWidth) {
+    when(fusionDecoder.io.clear(i)) {
+      rename.io.in(i - 1).bits.seqNum := decodePipeRename(i).bits.seqNum
+    }
+  }
+
   for (i <- 0 until RenameWidth - 1) {
     fusionDecoder.io.dec(i) := decodePipeRename(i).bits
     rename.io.fusionInfo(i) := fusionDecoder.io.info(i)
