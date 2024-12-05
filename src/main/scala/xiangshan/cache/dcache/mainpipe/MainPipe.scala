@@ -471,8 +471,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
   val s2_data_quad_word = VecInit((0 until DCacheBanks).map(i => {
-    if (i == (DCacheBanks - 1)) s2_data(i)
-    else Cat(s2_data(i + 1), s2_data(i))
+    if (i == (DCacheBanks - 1)) s2_store_data_merged(i)
+    else Cat(s2_store_data_merged(i + 1), s2_store_data_merged(i))
   }))(s2_req.word_idx)
 
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
