@@ -361,6 +361,9 @@ class XiangShan(object):
         workloads = [
             "riscv-hyp-tests/rvh_test.bin",
             "xvisor_wboxtest/checkpoint.gz",
+            "pointer-masking-test/M_HS_test/rvh_test.bin",
+            "pointer-masking-test/U_test/hint_UMode_hupmm2/rvh_test.bin",
+            "pointer-masking-test/U_test/vu_senvcfgpmm2/rvh_test.bin"
         ]
         rvh_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return rvh_tests

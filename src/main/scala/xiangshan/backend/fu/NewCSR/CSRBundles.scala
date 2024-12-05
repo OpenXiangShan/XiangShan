@@ -48,7 +48,7 @@ object CSRBundles {
     val PBMTE =      RO(    62)           .withReset(0.U) // Svpbmt Enable
     val ADUE  =      RO(    61)           .withReset(0.U) // Svadu extension Enable
     val DTE   =      RO(    59)           .withReset(0.U) // Ssdbltrp extension Enable
-    val PMM   =      RO(33, 32)           .withReset(0.U) // Smnpm extension
+    val PMM   =  EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable) // Smnpm extension
     val CBZE  =      RW(     7)           .withReset(1.U) // Zicboz extension
     val CBCFE =      RW(     6)           .withReset(1.U) // Zicbom extension
     val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval) // Zicbom extension

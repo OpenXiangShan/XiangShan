@@ -211,6 +211,13 @@ class NewCSR(implicit val p: Parameters) extends Module
       val dvirt = Bool()
       val mPBMTE = Bool()
       val hPBMTE = Bool()
+      val pmm = new Bundle {
+        val mseccfg = UInt(2.W)
+        val menvcfg = UInt(2.W)
+        val henvcfg = UInt(2.W)
+        val hstatus = UInt(2.W)
+        val senvcfg = UInt(2.W)
+      }
     })
 
     val toDecode = new CSRToDecode
@@ -1288,6 +1295,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
   io.tlb.mPBMTE := RegNext(menvcfg.regOut.PBMTE.asBool)
   io.tlb.hPBMTE := RegNext(henvcfg.regOut.PBMTE.asBool)
+  io.tlb.pmm.mseccfg := RegNext(mseccfg.regOut.PMM.asUInt)
+  io.tlb.pmm.menvcfg := RegNext(menvcfg.regOut.PMM.asUInt)
+  io.tlb.pmm.henvcfg := RegNext(henvcfg.regOut.PMM.asUInt)
+  io.tlb.pmm.hstatus := RegNext(hstatus.regOut.HUPMM.asUInt)
+  io.tlb.pmm.senvcfg := RegNext(senvcfg.regOut.PMM.asUInt)
 
   io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU

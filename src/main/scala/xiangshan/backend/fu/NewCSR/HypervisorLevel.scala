@@ -207,6 +207,7 @@ class HstatusBundle extends CSRBundle {
   val VTW   = RW(21).withReset(0.U)
   val VTSR  = RW(22).withReset(0.U)
   val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64)
+  val HUPMM = EnvPMM(49, 48, wNoEffect).withReset(EnvPMM.Disable) // Ssnpm extension
 
 }
 

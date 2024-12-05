@@ -440,6 +440,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
+        instMicroOp.exceptionVaddr    := io.dtlb.resp.bits.fullva
         instMicroOp.exceptionGpaddr   := io.dtlb.resp.bits.gpaddr(0)
         instMicroOp.exceptionIsForVSnonLeafPTE  := io.dtlb.resp.bits.isForVSnonLeafPTE
       }
@@ -479,7 +480,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
     when(exception_va || exception_gpa || exception_pa) {
       when(canTriggerException) {
-        instMicroOp.exceptionVaddr  := vaddr
         instMicroOp.exceptionVstart := segmentIdx // for exception
       }.otherwise {
         instMicroOp.exceptionVl.valid := true.B

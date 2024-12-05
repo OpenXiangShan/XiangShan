@@ -288,6 +288,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
+    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable)  // Smmpm extension
     val MLPE  = RO(10) // Landing pand, Zicfilp extension
     val SSEED = RO( 9) // Zkr extension
     val USEED = RO( 8) // Zkr extension
