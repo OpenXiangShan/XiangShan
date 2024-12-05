@@ -165,8 +165,16 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
-    io.traceCoreInterface.toEncoder := core_with_l2.module.io.traceCoreInterface.toEncoder
-    core_with_l2.module.io.traceCoreInterface.fromEncoder := io.traceCoreInterface.fromEncoder
+    // trace Interface
+    val traceInterface = core_with_l2.module.io.traceCoreInterface
+    traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
+    io.traceCoreInterface.toEncoder.priv := traceInterface.toEncoder.priv
+    io.traceCoreInterface.toEncoder.cause := traceInterface.toEncoder.trap.cause
+    io.traceCoreInterface.toEncoder.tval := traceInterface.toEncoder.trap.tval
+    io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
+    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+    io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
+    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
     EnableClintAsyncBridge match {
       case Some(param) =>
