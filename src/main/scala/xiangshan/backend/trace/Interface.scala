@@ -41,14 +41,18 @@ class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSPa
     val enable = Bool()
     val stall  = Bool()
   })
-  val toEncoder   = Output(new Bundle {
-    val cause     = UInt(CauseWidth.W)
-    val tval      = UInt(TvalWidth.W)
-    val priv      = UInt(PrivWidth.W)
-    val iaddr     = UInt((TraceGroupNum * IaddrWidth).W)
-    val itype     = UInt((TraceGroupNum * ItypeWidth).W)
-    val iretire   = UInt((TraceGroupNum * IretireWidthCompressed).W)
-    val ilastsize = UInt((TraceGroupNum * IlastsizeWidth).W)
+  val toEncoder = Output(new Bundle {
+    val priv   = Priv()
+    val trap   = new Bundle{
+      val cause = UInt(CauseWidth.W)
+      val tval  = UInt(TvalWidth.W)
+    }
+    val groups = Vec(TraceGroupNum, ValidIO(new Bundle{
+      val iaddr     = UInt(IaddrWidth.W)
+      val itype     = UInt(ItypeWidth.W)
+      val iretire   = UInt(IretireWidthCompressed.W)
+      val ilastsize = UInt(IlastsizeWidth.W)
+    }))
   })
 }
 

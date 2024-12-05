@@ -46,7 +46,7 @@ import xiangshan.backend.datapath.NewPipelineConnect
 import system.SoCParamsKey
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.ExceptionNO._
-import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -1888,7 +1888,32 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.reset_backend := DontCare
   }
   io.resetInFrontendBypass.toL2Top := io.resetInFrontendBypass.fromFrontend
-  io.traceCoreInterfaceBypass.toL2Top <> io.traceCoreInterfaceBypass.fromBackend
+  // trace interface
+  val traceToL2Top = io.traceCoreInterfaceBypass.toL2Top
+  val traceFromBackend = io.traceCoreInterfaceBypass.fromBackend
+  traceFromBackend.fromEncoder := RegNext(traceToL2Top.fromEncoder)
+  traceToL2Top.toEncoder.trap  := RegEnable(
+    traceFromBackend.toEncoder.trap,
+    traceFromBackend.toEncoder.groups(0).valid && Itype.isTrap(traceFromBackend.toEncoder.groups(0).bits.itype)
+  )
+  traceToL2Top.toEncoder.priv  := RegEnable(
+    traceFromBackend.toEncoder.priv,
+    traceFromBackend.toEncoder.groups(0).valid
+  )
+  (0 until TraceGroupNum).foreach{ i =>
+    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid)
+    traceToL2Top.toEncoder.groups(i).bits.iretire := RegNext(traceFromBackend.toEncoder.groups(i).bits.iretire)
+    traceToL2Top.toEncoder.groups(i).bits.itype := RegNext(traceFromBackend.toEncoder.groups(i).bits.itype)
+    traceToL2Top.toEncoder.groups(i).bits.ilastsize := RegEnable(
+      traceFromBackend.toEncoder.groups(i).bits.ilastsize,
+      traceFromBackend.toEncoder.groups(i).valid
+    )
+    traceToL2Top.toEncoder.groups(i).bits.iaddr := RegEnable(
+      traceFromBackend.toEncoder.groups(i).bits.iaddr,
+      traceFromBackend.toEncoder.groups(i).valid
+    )
+  }
+
 
   io.mem_to_ooo.storeDebugInfo := DontCare
   // store event difftest information

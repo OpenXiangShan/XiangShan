@@ -262,14 +262,16 @@ class CtrlBlockImp(
     io.fromCSR.traceCSR.lastPriv,
     io.fromCSR.traceCSR.currentPriv
   )
-  io.traceCoreInterface.toEncoder.cause     := io.fromCSR.traceCSR.cause.asUInt
-  io.traceCoreInterface.toEncoder.tval      := io.fromCSR.traceCSR.tval.asUInt
-  io.traceCoreInterface.toEncoder.priv      := tracePriv
-  io.traceCoreInterface.toEncoder.iaddr     := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.iaddr.get)).asUInt
-  io.traceCoreInterface.toEncoder.itype     := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.itype)).asUInt
-  io.traceCoreInterface.toEncoder.iretire   := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.iretire)).asUInt
-  io.traceCoreInterface.toEncoder.ilastsize := VecInit(trace.io.out.toEncoder.blocks.map(_.bits.tracePipe.ilastsize)).asUInt
-
+  io.traceCoreInterface.toEncoder.trap.cause := io.fromCSR.traceCSR.cause.asUInt
+  io.traceCoreInterface.toEncoder.trap.tval  := io.fromCSR.traceCSR.tval.asUInt
+  io.traceCoreInterface.toEncoder.priv       := tracePriv
+  (0 until TraceGroupNum).foreach(i => {
+    io.traceCoreInterface.toEncoder.groups(i).valid := trace.io.out.toEncoder.blocks(i).valid
+    io.traceCoreInterface.toEncoder.groups(i).bits.iaddr := trace.io.out.toEncoder.blocks(i).bits.iaddr.getOrElse(0.U)
+    io.traceCoreInterface.toEncoder.groups(i).bits.itype := trace.io.out.toEncoder.blocks(i).bits.tracePipe.itype
+    io.traceCoreInterface.toEncoder.groups(i).bits.iretire := trace.io.out.toEncoder.blocks(i).bits.tracePipe.iretire
+    io.traceCoreInterface.toEncoder.groups(i).bits.ilastsize := trace.io.out.toEncoder.blocks(i).bits.tracePipe.ilastsize
+  })
   /**
    * trace end
    */
