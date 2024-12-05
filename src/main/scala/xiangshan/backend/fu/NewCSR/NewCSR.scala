@@ -1224,7 +1224,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.instrAddrTransType.sv48x4 := privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Sv48x4
   assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
-  private val csrAccess = wenLegal || ren
+  private val csrAccess = wenLegalReg || RegNext(ren)
 
   private val imsicAddrValid =
     csrAccess &&  addr === CSRs.mireg.U &&  miselect.inIMSICRange ||
