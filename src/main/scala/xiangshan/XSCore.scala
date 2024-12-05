@@ -242,7 +242,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
-  io.traceCoreInterface <> backend.io.traceCoreInterface
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare

@@ -311,8 +311,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
       io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
-      io.traceCoreInterface(i).toEncoder := core.module.io.traceCoreInterface.toEncoder
-      core.module.io.traceCoreInterface.fromEncoder := io.traceCoreInterface(i).fromEncoder
+      // trace Interface
+      val traceInterface = core.module.io.traceCoreInterface
+      traceInterface.fromEncoder := io.traceCoreInterface(i).fromEncoder
+      io.traceCoreInterface(i).toEncoder.priv := traceInterface.toEncoder.priv
+      io.traceCoreInterface(i).toEncoder.cause := traceInterface.toEncoder.trap.cause
+      io.traceCoreInterface(i).toEncoder.tval := traceInterface.toEncoder.trap.tval
+      io.traceCoreInterface(i).toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
+      io.traceCoreInterface(i).toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+      io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
+      io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 

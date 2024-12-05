@@ -33,7 +33,7 @@ import top.BusPerfMonitor
 import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -189,7 +189,32 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
-    io.traceCoreInterface.toTile <> io.traceCoreInterface.fromCore
+    // trace interface
+    val traceToTile = io.traceCoreInterface.toTile
+    val traceFromCore = io.traceCoreInterface.fromCore
+    traceFromCore.fromEncoder := RegNext(traceToTile.fromEncoder)
+    traceToTile.toEncoder.trap := RegEnable(
+      traceFromCore.toEncoder.trap,
+      traceFromCore.toEncoder.groups(0).valid && Itype.isTrap(traceFromCore.toEncoder.groups(0).bits.itype)
+    )
+    traceToTile.toEncoder.priv := RegEnable(
+      traceFromCore.toEncoder.priv,
+      traceFromCore.toEncoder.groups(0).valid
+    )
+    (0 until TraceGroupNum).foreach{ i =>
+      traceToTile.toEncoder.groups(i).valid := RegNext(traceFromCore.toEncoder.groups(i).valid)
+      traceToTile.toEncoder.groups(i).bits.iretire := RegNext(traceFromCore.toEncoder.groups(i).bits.iretire)
+      traceToTile.toEncoder.groups(i).bits.itype := RegNext(traceFromCore.toEncoder.groups(i).bits.itype)
+      traceToTile.toEncoder.groups(i).bits.ilastsize := RegEnable(
+        traceFromCore.toEncoder.groups(i).bits.ilastsize,
+        traceFromCore.toEncoder.groups(i).valid
+      )
+      traceToTile.toEncoder.groups(i).bits.iaddr := RegEnable(
+        traceFromCore.toEncoder.groups(i).bits.iaddr,
+        traceFromCore.toEncoder.groups(i).valid
+      )
+    }
+
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
     dontTouch(io.cpu_critical_error)
