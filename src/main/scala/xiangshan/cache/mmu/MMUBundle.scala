@@ -99,7 +99,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.gpf
     this.af := item.gaf
-    this.v := DontCare
+    this.v := 0.U
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
