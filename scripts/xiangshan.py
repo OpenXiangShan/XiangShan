@@ -351,7 +351,8 @@ class XiangShan(object):
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
-            "cache-management/softprefetchtest-riscv64-xs.bin"
+            "cache-management/softprefetchtest-riscv64-xs.bin",
+            "smstateen/rvh_test.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
