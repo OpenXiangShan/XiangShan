@@ -689,7 +689,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val resetVstart = dirty_vs && !io.vstartIsZero
 
-  vecExcpInfo.valid := exceptionHappen && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
+  vecExcpInfo.valid := exceptionHappen && !intrEnable && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
   when (exceptionHappen) {
     vecExcpInfo.bits.nf := exceptionDataRead.bits.nf
     vecExcpInfo.bits.vsew := exceptionDataRead.bits.vsew
