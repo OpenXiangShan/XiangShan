@@ -594,6 +594,7 @@ package object xiangshan {
     // since atomics use a different fu type
     // so we can safely reuse other load/store's encodings
     // bit encoding: | optype(4bit) | size (2bit) |
+    def AMOFuOpWidth = 6
     def lr_w      = "b000010".U
     def sc_w      = "b000110".U
     def amoswap_w = "b001010".U
@@ -605,6 +606,7 @@ package object xiangshan {
     def amomax_w  = "b100010".U
     def amominu_w = "b100110".U
     def amomaxu_w = "b101010".U
+    def amocas_w  = "b101110".U
 
     def lr_d      = "b000011".U
     def sc_d      = "b000111".U
@@ -617,17 +619,25 @@ package object xiangshan {
     def amomax_d  = "b100011".U
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
+    def amocas_d  = "b101111".U
+
+    def amocas_q  = "b101100".U
 
     def size(op: UInt) = op(1,0)
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
-    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
+    def isAllUS   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isUStride (fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
+    def isWhole   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided (fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed (fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
+    def isLr      (fuOpType: UInt): Bool = fuOpType === lr_w || fuOpType === lr_d
+    def isSc      (fuOpType: UInt): Bool = fuOpType === sc_w || fuOpType === sc_d
+    def isAMOCASQ (fuOpType: UInt): Bool = fuOpType === amocas_q
+    def isAMOCASWD(fuOpType: UInt): Bool = fuOpType === amocas_w || fuOpType === amocas_d
+    def isAMOCAS  (fuOpType: UInt): Bool = fuOpType(5, 2) === "b1011".U
   }
 
   object BKUOpType {
@@ -792,12 +802,18 @@ package object xiangshan {
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def VEC_MVNR         = "b000100".U // vmvnr
+    
+    def AMO_CAS_W        = "b110101".U // amocas_w
+    def AMO_CAS_D        = "b110110".U // amocas_d
+    def AMO_CAS_Q        = "b110111".U // amocas_q
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")
 
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
+
+    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
   }
 
   object ExceptionNO {
