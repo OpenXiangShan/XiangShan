@@ -19,6 +19,8 @@ package xiangshan
 import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
 import chisel3.util.{Valid, ValidIO, log2Up}
+import chisel3.layer.{Layer, LayerConfig, block}
+import chisel3.layers.Verification
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
@@ -115,6 +117,20 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
+
+    block(Verification) {
+        val rst_a = RegNext(io.hartIsInReset)
+        val hartID = WireInit(io.hartId)
+        dontTouch(rst_a)
+        dontTouch(hartID)
+        block(Verification.Cover) {
+          cover(hartID === 3.U)
+        }
+        val rst2 = WireInit(io.hartIsInReset)
+        when(rst2) {
+          assume(io.reset_vector =/= 2.U)
+        }
+    }
 
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
