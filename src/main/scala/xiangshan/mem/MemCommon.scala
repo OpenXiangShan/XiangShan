@@ -54,6 +54,28 @@ object genVWmask {
   }
 }
 
+object genBasemask {
+  /**
+   *
+   * @param addr
+   * @param sizeEncode
+   * @return Return 16-byte aligned mask.
+   *
+   *         Example:
+   *         Address: 0x80000003 Encoding size: ‘b11
+   *         Return: 0xff
+   */
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
+    LookupTree(sizeEncode, List(
+      "b00".U -> 0x1.U,
+      "b01".U -> 0x3.U,
+      "b10".U -> 0xf.U,
+      "b11".U -> 0xff.U
+    ))
+  }
+}
+
+
 object genWdata {
   def apply(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -171,6 +193,13 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
   // hardware prefetch and fast replay no need to query tlb
   val tlbNoQuery = Bool()
+
+  // misalign
+  val isMisalign          = Bool()
+  val isFinalSplit        = Bool()
+  val misalignWith16Byte  = Bool()
+  val misalignNeedWakeUp  = Bool()
+  val updateAddrValid     = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -412,26 +441,27 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
 class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
   // from storeMisalignBuffer to storeQueue, control it's sbuffer write
-  val control = Output(new XSBundle {
-    // control sq to write-into sb
-    val writeSb = Bool()
-    val wdata = UInt(VLEN.W)
-    val wmask = UInt((VLEN / 8).W)
+  val toStoreQueue = Output(new XSBundle {
+    // This entry is a cross page
+    val crossPageWithHit = Bool()
+    val crossPageCanDeq  = Bool()
+    // High page Paddr
     val paddr = UInt(PAddrBits.W)
-    val vaddr = UInt(VAddrBits.W)
-    val last  = Bool()
-    val hasException = Bool()
-    // remove this entry in sq
-    val removeSq = Bool()
+
+    val withSameUop = Bool()
   })
   // from storeQueue to storeMisalignBuffer, provide detail info of this store
-  val storeInfo = Input(new XSBundle {
-    val data = UInt(VLEN.W)
-    // is the data of the unaligned store ready at sq?
-    val dataReady = Bool()
-    // complete a data transfer from sq to sb
-    val completeSbTrans = Bool()
+  val toStoreMisalignBuffer = Input(new XSBundle {
+    val sqPtr = new SqPtr
+    val doDeq = Bool()
+
+    val uop = new DynInst()
   })
+}
+
+class StoreMaBufToVecStoreMergeBufferIO(implicit p: Parameters)  extends VLSUBundle{
+  val mbIndex = Output(UInt(vsmBindexBits.W))
+  val flush   = Output(Bool())
 }
 
 // Store byte valid mask write bundle

@@ -30,8 +30,9 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuConfig.StaCfg
+import xiangshan.backend.fu.FuType.isVStore
 
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -63,35 +64,45 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SD -> 0xff.U
   ))
 
-  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T], index: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
     assert(valid.length == bits.length)
     if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
+      (valid, bits, index)
     } else if (valid.length == 2) {
       val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+      val resIndex = Seq.fill(2)(Wire(chiselTypeOf(index(0))))
       for (i <- res.indices) {
         res(i).valid := valid(i)
         res(i).bits := bits(i)
+        resIndex(i) := index(i)
       }
       val oldest = Mux(valid(0) && valid(1),
         Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
           (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
+
+      val oldestIndex = Mux(valid(0) && valid(1),
+        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
+          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), resIndex(1), resIndex(0)),
+        Mux(valid(0) && !valid(1), resIndex(0), resIndex(1)))
+      (Seq(oldest.valid), Seq(oldest.bits), Seq(oldestIndex))
     } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), index.take(index.length / 2))
+      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), index.takeRight(index.length - (index.length / 2)))
+      selectOldest(left._1 ++ right._1, left._2 ++ right._2, left._3 ++ right._3)
     }
   }
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(Valid(new LsPipelineBundle)))
+    val req             = Vec(enqPortNum, Flipped(Decoupled(new LsPipelineBundle)))
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
     val writeBack       = Decoupled(new MemExuOutput)
+    val vecWriteBack    = Vec(VecStorePipelineWidth, Decoupled(new VecPipelineFeedbackIO(isVStore = true)))
+    val storeOutValid    = Input(Bool())
+    val storeVecOutValid = Input(Bool())
     val overwriteExpBuf = Output(new XSBundle {
       val valid = Bool()
       val vaddr = UInt(XLEN.W)
@@ -100,66 +111,86 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       val isForVSnonLeafPTE = Bool()
     })
     val sqControl       = new StoreMaBufToSqControlIO
+
+    val toVecStoreMergeBuffer = Vec(VecStorePipelineWidth, new StoreMaBufToVecStoreMergeBufferIO)
+    val full = Bool()
   })
 
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
   io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
 
+  class StoreMisalignBufferEntry(implicit p: Parameters) extends LsPipelineBundle {
+    val portIndex = UInt(log2Up(enqPortNum).W)
+  }
   val req_valid = RegInit(false.B)
-  val req = Reg(new LsPipelineBundle)
+  val req = Reg(new StoreMisalignBufferEntry)
+
+  val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
+  val cross4KBPageBoundary = Wire(Bool())
+  val needFlushPipe = RegInit(false.B)
 
   // enqueue
   // s1:
   val s1_req = VecInit(io.req.map(_.bits))
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
-  // s2: delay 1 cycle
-  val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until enqPortNum).map(i =>
-    RegNext(s1_valid(i)) &&
-    !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
-    !s2_req(i).uop.robIdx.needFlush(io.redirect)
-  )
-  val s2_miss_aligned = s2_req.map(x =>
-    x.uop.exceptionVec(storeAddrMisaligned) && !x.uop.exceptionVec(breakPoint) && !TriggerAction.isDmode(x.uop.trigger)
-  )
+  val s1_index = (0 until io.req.length).map(_.asUInt)
+  val reqSel = selectOldest(s1_valid, s1_req, s1_index)
 
-  val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
-  for (w <- 0 until enqPortNum) {
-    s2_enqueue(w) := s2_valid(w) && s2_miss_aligned(w)
+  val reqSelValid = reqSel._1(0)
+  val reqSelBits  = reqSel._2(0)
+  val reqSelPort  = reqSel._3(0)
+
+  val reqRedirect = reqSelBits.uop.robIdx.needFlush(io.redirect)
+
+  val canEnq = !req_valid && !reqRedirect && reqSelValid
+  when(canEnq) {
+    connectSamePort(req, reqSelBits)
+    req.portIndex := reqSelPort
+    req_valid := true.B
+  }
+  val cross4KBPageEnq = WireInit(false.B)
+  when (cross4KBPageBoundary && !reqRedirect) {
+    when(reqSelValid && (isAfter(req.uop.robIdx, reqSelBits.uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSelBits.uop.robIdx) && req.uop.uopIdx > reqSelBits.uop.uopIdx))) {
+      connectSamePort(req, reqSelBits)
+      req.portIndex := reqSelPort
+      cross4KBPageEnq := true.B
+      needFlushPipe   := true.B
+    } .otherwise {
+      req := req
+      cross4KBPageEnq := false.B
+    }
   }
 
-  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
-    req_valid := s2_enqueue.asUInt.orR
-  } .elsewhen (s2_enqueue.asUInt.orR) {
-    req_valid := req_valid || true.B
+  val reqSelCanEnq = UIntToOH(reqSelPort)
+
+  io.req.zipWithIndex.map{
+    case (reqPort, index) => reqPort.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
   }
 
-  val reqSel = selectOldest(s2_enqueue, s2_req)
 
-  when (req_valid) {
-    req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
-      reqSel._2(0),
-      req)
-  } .elsewhen (s2_enqueue.asUInt.orR) {
-    req := reqSel._2(0)
+  io.toVecStoreMergeBuffer.zipWithIndex.map{
+    case (toStMB, index) => {
+      toStMB.flush   := req_valid && cross4KBPageBoundary && cross4KBPageEnq && UIntToOH(req.portIndex)(index)
+      toStMB.mbIndex := req.mbIndex
+    }
   }
-
-  val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
+  io.full := req_valid
 
   // buffer control:
   //  - split miss-aligned store into aligned stores
   //  - send split store to sta and get result from sta
   //  - control sq write to sb
   //  - control sq write this store back
-  val s_idle :: s_split :: s_req :: s_resp :: s_cal :: s_sq_req :: s_wb :: s_wait :: Nil = Enum(8)
-  val bufferState = RegInit(s_idle)
+  // s_block When cross page, the high page address needs to be provided to sbuffer, so the
+  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: s_wait :: Nil = Enum(7)
+  val bufferState    = RegInit(s_idle)
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new SqWriteBundle))))
-  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
-  val unSentStores  = RegInit(0.U(maxSplitNum.W))
-  val unWriteStores = RegInit(0.U(maxSplitNum.W))
+  val isCrossPage    = RegInit(false.B)
+  val exceptionVec   = RegInit(0.U.asTypeOf(ExceptionVec()))
+  val unSentStores   = RegInit(0.U(maxSplitNum.W))
+  val unWriteStores  = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
 
   // if there is exception or mmio in split store
@@ -169,11 +200,26 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.need_rep
   val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.need_rep
 
+  io.sqControl.toStoreQueue.crossPageWithHit := io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx && isCrossPage
+  io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block
+  io.sqControl.toStoreQueue.paddr := Cat(splitStoreResp(1).paddr(splitStoreResp(1).paddr.getWidth - 1, 3), 0.U(3.W))
+
+  io.sqControl.toStoreQueue.withSameUop := io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx && io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx && req.isvec && robMatch && isCrossPage
+
   switch(bufferState) {
     is (s_idle) {
-      when (robMatch) {
-        bufferState := s_split
+      when(cross4KBPageBoundary) {
+        when(robMatch) {
+          bufferState := s_split
+          isCrossPage := true.B
+        }
+      } .otherwise {
+        when (req_valid) {
+          bufferState := s_split
+          isCrossPage := false.B
+        }
       }
+
     }
 
     is (s_split) {
@@ -195,36 +241,60 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           bufferState := s_wb
           globalException := hasException
           globalMMIO := isMMIO
-        } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & ~clearOh).orR) {
+        } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & (~clearOh).asUInt).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
           // got result, goto calculate data and control sq
-          bufferState := s_cal
-        }
-      }
-    }
-
-    is (s_cal) {
-      when (io.sqControl.storeInfo.dataReady) {
-        bufferState := s_sq_req
-        curPtr := 0.U
-      }
-    }
-
-    is (s_sq_req) {
-      when (io.sqControl.storeInfo.completeSbTrans) {
-        when (!((unWriteStores & ~UIntToOH(curPtr)).orR)) {
           bufferState := s_wb
         }
       }
     }
 
     is (s_wb) {
-      when (io.writeBack.fire) {
-        bufferState := s_wait
+      when (req.isvec) {
+        when (io.vecWriteBack.map(x => x.fire).reduce( _ || _)) {
+          bufferState := s_idle
+          req_valid := false.B
+          curPtr := 0.U
+          unSentStores := 0.U
+          unWriteStores := 0.U
+          globalException := false.B
+          globalMMIO := false.B
+          isCrossPage := false.B
+          needFlushPipe := false.B
+        }
+      }
+      when (io.writeBack.fire && (!isCrossPage || globalMMIO || globalException)) {
+        bufferState := s_idle
+        req_valid := false.B
+        curPtr := 0.U
+        unSentStores := 0.U
+        unWriteStores := 0.U
+        globalException := false.B
+        globalMMIO := false.B
+        isCrossPage := false.B
+        needFlushPipe := false.B
+      } .elsewhen(io.writeBack.fire && isCrossPage) {
+        bufferState := s_block
+      } .otherwise {
+        bufferState := s_wb
       }
     }
+
+    is (s_block) {
+      when (io.sqControl.toStoreMisalignBuffer.doDeq) {
+        bufferState := s_idle
+        req_valid := false.B
+        curPtr := 0.U
+        unSentStores := 0.U
+        unWriteStores := 0.U
+        globalException := false.B
+        globalMMIO := false.B
+        isCrossPage := false.B
+      }
+    }
+
 
     is (s_wait) {
       when (io.rob.scommit =/= 0.U || req.uop.robIdx.needFlush(io.redirect)) {
@@ -237,17 +307,28 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         globalException := false.B
         globalMMIO := false.B
       }
+      assert(false.B, s"The State of the storeMisalignBuffer should not reach wait.")
     }
   }
 
-  val highAddress = LookupTree(req.uop.fuOpType(1, 0), List(
+  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+
+  val highAddress = LookupTree(alignedType, List(
     SB -> 0.U,
     SH -> 1.U,
     SW -> 3.U,
     SD -> 7.U
   )) + req.vaddr(4, 0)
+
+  val highPageAddress = LookupTree(alignedType, List(
+    SB -> 0.U,
+    SH -> 1.U,
+    SW -> 3.U,
+    SD -> 7.U
+  )) + req.vaddr(12, 0)
   // to see if (vaddr + opSize - 1) and vaddr are in the same 16 bytes region
   val cross16BytesBoundary = req_valid && (highAddress(4) =/= req.vaddr(4))
+  cross4KBPageBoundary := req_valid && (highPageAddress(12) =/= req.vaddr(12))
   val aligned16BytesAddr   = (req.vaddr >> 4) << 4// req.vaddr & ~("b1111".U)
   val aligned16BytesSel    = req.vaddr(3, 0)
 
@@ -263,17 +344,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   when (bufferState === s_split) {
     when (!cross16BytesBoundary) {
-      // change this unaligned store into a 128 bits store
-      unWriteStores := 1.U
-      unSentStores := 1.U
-      curPtr := 0.U
-      new128Store.vaddr := aligned16BytesAddr
-      // new128Store.mask  := (getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel).asUInt
-      new128Store.mask  := 0xffff.U
-      new128Store.uop   := req.uop
-      new128Store.uop.exceptionVec(storeAddrMisaligned) := false.B
-      new128Store.is128bit := true.B
-      splitStoreReqs(0) := new128Store
+      assert(false.B, s"There should be no non-aligned access that does not cross 16Byte boundaries.")
     } .otherwise {
       // split this unaligned store into `maxSplitNum` aligned stores
       unWriteStores := Fill(maxSplitNum, 1.U(1.W))
@@ -284,7 +355,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       highAddrStore.uop := req.uop
       highAddrStore.uop.exceptionVec(storeAddrMisaligned) := false.B
 
-      switch (req.uop.fuOpType(1, 0)) {
+      switch (alignedType(1, 0)) {
         is (SB) {
           assert(false.B, "lb should not trigger miss align")
         }
@@ -445,10 +516,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitStoreReq.valid := req_valid && (bufferState === s_req)
   io.splitStoreReq.bits  := splitStoreReqs(curPtr)
+  io.splitStoreReq.bits.is128bit  := req.isvec
   // Restore the information of H extension store
   // bit encoding: | hsv 1 | store 00 | size(2bit) |
   val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
-  io.splitStoreReq.bits.uop.fuOpType := Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0))
+  io.splitStoreReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0)))
+  io.splitStoreReq.bits.alignedType  := Mux(req.isvec, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  io.splitStoreReq.bits.isFinalSplit := curPtr(0)
 
   when (io.splitStoreResp.valid) {
     val resp = io.splitStoreResp.bits
@@ -464,7 +538,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       unSentStores := 0.U
       StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
     } .elsewhen (!io.splitStoreResp.bits.need_rep) {
-      unSentStores := unSentStores & ~UIntToOH(curPtr)
+      unSentStores := unSentStores & (~UIntToOH(curPtr)).asUInt
       curPtr := curPtr + 1.U
       exceptionVec := 0.U.asTypeOf(ExceptionVec())
     }
@@ -475,7 +549,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val wmask = UInt((VLEN / 8).W)
   }))))
 
-  val unalignedStoreData = io.sqControl.storeInfo.data
   val wmaskLow  = Wire(Vec(VLEN / 8, Bool()))
   val wmaskHigh = Wire(Vec(VLEN / 8, Bool()))
   (0 until (VLEN / 8)).map {
@@ -493,89 +566,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  when (bufferState === s_cal) {
-    when (!cross16BytesBoundary) {
-      splitStoreData(0).wdata := LookupTree(aligned16BytesSel, List(
-        "b0000".U ->     unalignedStoreData,
-        "b0001".U -> Cat(unalignedStoreData, 0.U(( 1 * 8).W)),
-        "b0010".U -> Cat(unalignedStoreData, 0.U(( 2 * 8).W)),
-        "b0011".U -> Cat(unalignedStoreData, 0.U(( 3 * 8).W)),
-        "b0100".U -> Cat(unalignedStoreData, 0.U(( 4 * 8).W)),
-        "b0101".U -> Cat(unalignedStoreData, 0.U(( 5 * 8).W)),
-        "b0110".U -> Cat(unalignedStoreData, 0.U(( 6 * 8).W)),
-        "b0111".U -> Cat(unalignedStoreData, 0.U(( 7 * 8).W)),
-        "b1000".U -> Cat(unalignedStoreData, 0.U(( 8 * 8).W)),
-        "b1001".U -> Cat(unalignedStoreData, 0.U(( 9 * 8).W)),
-        "b1010".U -> Cat(unalignedStoreData, 0.U((10 * 8).W)),
-        "b1011".U -> Cat(unalignedStoreData, 0.U((11 * 8).W)),
-        "b1100".U -> Cat(unalignedStoreData, 0.U((12 * 8).W)),
-        "b1101".U -> Cat(unalignedStoreData, 0.U((13 * 8).W)),
-        "b1110".U -> Cat(unalignedStoreData, 0.U((14 * 8).W)),
-        "b1111".U -> Cat(unalignedStoreData, 0.U((15 * 8).W))
-      ))(VLEN - 1, 0)
-      splitStoreData(0).wmask := getMask(req.uop.fuOpType(1, 0)) << aligned16BytesSel
-    } .otherwise {
-      // low 16bytes part
-      val catData = LookupTree(lowResultWidth, List(
-        BYTE0 -> unalignedStoreData,
-        BYTE1 -> Cat(unalignedStoreData, 0.U((8 * 15).W)),
-        BYTE2 -> Cat(unalignedStoreData, 0.U((8 * 14).W)),
-        BYTE3 -> Cat(unalignedStoreData, 0.U((8 * 13).W)),
-        BYTE4 -> Cat(unalignedStoreData, 0.U((8 * 12).W)),
-        BYTE5 -> Cat(unalignedStoreData, 0.U((8 * 11).W)),
-        BYTE6 -> Cat(unalignedStoreData, 0.U((8 * 10).W)),
-        BYTE7 -> Cat(unalignedStoreData, 0.U((8 *  9).W))
-      ))
-      splitStoreData(0).wdata := catData(VLEN - 1, 0)
-      splitStoreData(0).wmask := VecInit(wmaskLow.reverse).asUInt
-      // high 16bytes part
-      val shiftData = LookupTree(lowResultWidth, List(
-        BYTE0 -> unalignedStoreData(VLEN - 1,    0),
-        BYTE1 -> unalignedStoreData(VLEN - 1,    8),
-        BYTE2 -> unalignedStoreData(VLEN - 1,   16),
-        BYTE3 -> unalignedStoreData(VLEN - 1,   24),
-        BYTE4 -> unalignedStoreData(VLEN - 1,   32),
-        BYTE5 -> unalignedStoreData(VLEN - 1,   40),
-        BYTE6 -> unalignedStoreData(VLEN - 1,   48),
-        BYTE7 -> unalignedStoreData(VLEN - 1,   56)
-      ))
-      splitStoreData(1).wdata := LookupTree(highResultWidth, List(
-        BYTE0 -> ZeroExt(shiftData, VLEN),
-        BYTE1 -> ZeroExt(shiftData(7,    0), VLEN),
-        BYTE2 -> ZeroExt(shiftData(15,   0), VLEN),
-        BYTE3 -> ZeroExt(shiftData(23,   0), VLEN),
-        BYTE4 -> ZeroExt(shiftData(31,   0), VLEN),
-        BYTE5 -> ZeroExt(shiftData(39,   0), VLEN),
-        BYTE6 -> ZeroExt(shiftData(47,   0), VLEN),
-        BYTE7 -> ZeroExt(shiftData(55,   0), VLEN)
-      ))
-      splitStoreData(1).wmask := wmaskHigh.asUInt
-    }
-  }
-
-  io.sqControl.control.hasException := req_valid && globalException
-
-  io.sqControl.control.writeSb := bufferState === s_sq_req
-  io.sqControl.control.wdata   := splitStoreData(curPtr).wdata
-  io.sqControl.control.wmask   := splitStoreData(curPtr).wmask
-  // the paddr and vaddr is not corresponding to the exact addr of
-  io.sqControl.control.paddr   := splitStoreResp(curPtr).paddr
-  io.sqControl.control.vaddr   := splitStoreResp(curPtr).vaddr
-  io.sqControl.control.last    := !((unWriteStores & ~UIntToOH(curPtr)).orR)
-
-  when (bufferState === s_sq_req) {
-    when (io.sqControl.storeInfo.completeSbTrans) {
-      unWriteStores := unWriteStores & ~UIntToOH(curPtr)
-      curPtr := curPtr + 1.U
-    }
-  }
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && io.sqControl.storeInfo.dataReady
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isvec
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
-  io.writeBack.bits.uop.flushPipe := Mux(globalMMIO || globalException, false.B, true.B)
+  io.writeBack.bits.uop.flushPipe := needFlushPipe
   io.writeBack.bits.uop.replayInst := false.B
-  io.writeBack.bits.data := unalignedStoreData
+  io.writeBack.bits.data := DontCare
   io.writeBack.bits.isFromLoadUnit := DontCare
   io.writeBack.bits.debug.isMMIO := globalMMIO
   // FIXME lyq: temporarily set to false
@@ -584,18 +581,45 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
 
-  io.sqControl.control.removeSq := req_valid && (bufferState === s_wait) && !(globalMMIO || globalException) && (io.rob.scommit =/= 0.U)
+  io.vecWriteBack.zipWithIndex.map{
+    case (wb, index) => {
+      wb.valid := req_valid && (bufferState === s_wb) && req.isvec && !io.storeVecOutValid && UIntToOH(req.portIndex)(index)
+
+      wb.bits.mBIndex           := req.mbIndex
+      wb.bits.hit               := true.B
+      wb.bits.isvec             := true.B
+      wb.bits.sourceType        := RSFeedbackType.tlbMiss
+      wb.bits.flushState        := DontCare
+      wb.bits.trigger           := TriggerAction.None
+      wb.bits.mmio              := globalMMIO
+      wb.bits.exceptionVec      := ExceptionNO.selectByFu(exceptionVec, VstuCfg)
+      wb.bits.usSecondInv       := req.usSecondInv
+      wb.bits.vecFeedback       := true.B
+      wb.bits.elemIdx           := req.elemIdx
+      wb.bits.alignedType       := req.alignedType
+      wb.bits.mask              := req.mask
+      wb.bits.vaddr             := req.vaddr
+      wb.bits.vaNeedExt         := req.vaNeedExt
+      wb.bits.gpaddr            := req.gpaddr
+      wb.bits.isForVSnonLeafPTE := req.isForVSnonLeafPTE
+      wb.bits.vstart            := req.uop.vpu.vstart
+      wb.bits.vecTriggerMask    := 0.U
+      wb.bits.nc                := false.B
+    }
+  }
 
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
-  when (flush && (bufferState =/= s_idle)) {
+  when (flush) {
     bufferState := s_idle
-    req_valid := false.B
+    req_valid := Mux(cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect, req_valid, false.B)
     curPtr := 0.U
     unSentStores := 0.U
     unWriteStores := 0.U
     globalException := false.B
     globalMMIO := false.B
+    isCrossPage := false.B
+    needFlushPipe := false.B
   }
 
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
@@ -607,7 +631,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val overwriteGpaddr = RegEnable(splitStoreResp(curPtr).gpaddr, shouldOverwrite)
   val overwriteIsForVSnonLeafPTE = RegEnable(splitStoreResp(curPtr).isForVSnonLeafPTE, shouldOverwrite)
 
-  io.overwriteExpBuf.valid := overwriteExpBuf
+  //TODO In theory, there is no need to overwrite, but for now, the signal is retained in the code in this way.
+  // and the signal will be removed after sufficient verification.
+  io.overwriteExpBuf.valid := false.B
   io.overwriteExpBuf.vaddr := overwriteVaddr
   io.overwriteExpBuf.isHyper := overwriteIsHyper
   io.overwriteExpBuf.gpaddr := overwriteGpaddr

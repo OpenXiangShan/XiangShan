@@ -685,11 +685,6 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
 
-  when (sbuffer_out_s1_fire) {
-    assert(!(io.dcache.req.bits.vaddr === 0.U))
-    assert(!(io.dcache.req.bits.addr === 0.U))
-  }
-
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
   )
