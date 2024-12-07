@@ -308,12 +308,10 @@ class CtrlBlockImp(
     io.frontend.toFtq.redirect.bits.cfiUpdate.backendIGPF := RegEnable(s5_trapTargetIGPF, s5_flushFromRobValidAhead)
   }
 
-  for (i <- 0 until DecodeWidth) {
-    gpaMem.io.fromIFU := io.frontend.fromIfu
-    gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
-    gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
-    gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
-  }
+  gpaMem.io.fromIFU := io.frontend.fromIfu
+  gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
+  gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
+  gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
 
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
@@ -338,7 +336,6 @@ class CtrlBlockImp(
     dontTouch(decodeFromFrontendNotAccept)
     dontTouch(decodeFromFrontendAcceptNum)
   }
-  val a = decodeBufNotAccept.drop(2)
   for (i <- 0 until DecodeWidth) {
     // decodeBufValid update
     when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
@@ -462,11 +459,11 @@ class CtrlBlockImp(
 
   // memory dependency predict
   // when decode, send fold pc to mdp
-  private val mdpFlodPcVecVld = Wire(Vec(DecodeWidth, Bool()))
-  private val mdpFlodPcVec = Wire(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
+  private val mdpFoldPcVecVld = Wire(Vec(DecodeWidth, Bool()))
+  private val mdpFoldPcVec = Wire(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
   for (i <- 0 until DecodeWidth) {
-    mdpFlodPcVecVld(i) := decode.io.out(i).fire || GatedValidRegNext(decode.io.out(i).fire)
-    mdpFlodPcVec(i) := Mux(
+    mdpFoldPcVecVld(i) := decode.io.out(i).fire || GatedValidRegNext(decode.io.out(i).fire)
+    mdpFoldPcVec(i) := Mux(
       decode.io.out(i).fire,
       decode.io.in(i).bits.foldpc,
       rename.io.in(i).bits.foldpc
@@ -478,8 +475,8 @@ class CtrlBlockImp(
   memCtrl.io.csrCtrl := io.csrCtrl                          // RegNext in memCtrl
   memCtrl.io.stIn := io.fromMem.stIn                        // RegNext in memCtrl
   memCtrl.io.memPredUpdate := redirectGen.io.memPredUpdate  // RegNext in memCtrl
-  memCtrl.io.mdpFoldPcVecVld := mdpFlodPcVecVld
-  memCtrl.io.mdpFlodPcVec := mdpFlodPcVec
+  memCtrl.io.mdpFoldPcVecVld := mdpFoldPcVecVld
+  memCtrl.io.mdpFoldPcVec := mdpFoldPcVec
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rat.io.redirect := s1_s3_redirect.valid
