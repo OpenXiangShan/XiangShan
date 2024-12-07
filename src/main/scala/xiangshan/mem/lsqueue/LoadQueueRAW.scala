@@ -54,6 +54,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val lqFull           = Output(Bool())
   })
 
+  private def PartialPAddrWidth: Int = 24
+  private def genPartialPAddr(paddr: UInt) = {
+    paddr(DCacheVWordOffset + PartialPAddrWidth - 1, DCacheVWordOffset)
+  }
+
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
   //  LoadQueueRAW field
   //  +-------+--------+-------+-------+-----------+
@@ -70,7 +75,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
-    gen = UInt(PAddrBits.W),
+    gen = UInt(PartialPAddrWidth.W),
     numEntries = LoadQueueRAWSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
@@ -147,7 +152,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.bits.paddr
+      paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
 
       //  Write mask
       maskModule.io.wen(w) := true.B
@@ -289,7 +294,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val storeIn = io.storeIn
 
   def detectRollback(i: Int) = {
-    paddrModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.paddr, storeIn(i).valid)
+    paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
     maskModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.mask, storeIn(i).valid)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt

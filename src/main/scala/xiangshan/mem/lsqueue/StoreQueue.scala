@@ -586,11 +586,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       )
     }
     // sq data write s1
+    val lastStWbIndex = RegEnable(stWbIndex, io.storeDataIn(i).fire)
     when (
-      RegNext(io.storeDataIn(i).fire) && allocated(RegEnable(stWbIndex, io.storeDataIn(i).fire))
+      RegNext(io.storeDataIn(i).fire) && allocated(lastStWbIndex)
       // && !RegNext(io.storeDataIn(i).bits.uop).robIdx.needFlush(io.brqRedirect)
     ) {
-      datavalid(RegEnable(stWbIndex, io.storeDataIn(i).fire)) := true.B
+      datavalid(lastStWbIndex) := true.B
     }
   }
 

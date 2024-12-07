@@ -135,7 +135,7 @@ class LqPAddrModule[T <: UInt](
   // 128-bits aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheVWordOffset) === data(j)(PAddrBits-1, DCacheVWordOffset)
+      io.violationMmask(i)(j) := io.violationMdata(i) === data(j)
     }
   }
 
@@ -143,7 +143,7 @@ class LqPAddrModule[T <: UInt](
   // cacheline aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.releaseViolationMmask(i)(j) := io.releaseViolationMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
+      io.releaseViolationMmask(i)(j) := io.releaseViolationMdata(i) === data(j)
     }
   }
 
@@ -151,7 +151,7 @@ class LqPAddrModule[T <: UInt](
   // cacheline aligned
   for (i <- 0 until numCamPort) {
     for (j <- 0 until numEntries) {
-      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheLineOffset) === data(j)(PAddrBits-1, DCacheLineOffset)
+      io.releaseMmask(i)(j) := io.releaseMdata(i) === data(j)
     }
   }
 }
