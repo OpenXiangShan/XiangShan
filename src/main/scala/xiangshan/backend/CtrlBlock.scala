@@ -37,6 +37,7 @@ import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.trace._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -72,7 +73,8 @@ class CtrlBlockImp(
     "robFlush"  -> 1,
     "load"      -> params.LduCnt,
     "hybrid"    -> params.HyuCnt,
-    "store"     -> (if(EnableStorePrefetchSMS) params.StaCnt else 0)
+    "store"     -> (if(EnableStorePrefetchSMS) params.StaCnt else 0),
+    "trace"     -> TraceGroupNum
   ))
 
   private val numPcMemReadForExu = params.numPcReadPort
@@ -238,6 +240,42 @@ class CtrlBlockImp(
   } else {
     io.memStPcRead.foreach(_.data := 0.U)
   }
+
+  /**
+   * trace begin
+   */
+  val trace = Module(new Trace)
+  trace.io.in.fromEncoder.stall  := io.traceCoreInterface.fromEncoder.stall
+  trace.io.in.fromEncoder.enable := io.traceCoreInterface.fromEncoder.enable
+  trace.io.in.fromRob            := rob.io.trace.traceCommitInfo
+  rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
+  
+  for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
+    val traceValid = trace.toPcMem.blocks(i).valid
+    pcMem.io.ren.get(pcMemIdx) := traceValid
+    pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
+    trace.io.in.fromPcMem(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(trace.toPcMem.blocks(i).bits.ftqOffset.get, traceValid))
+  }
+
+  // Trap/Xret only occor in block(0).
+  val tracePriv = Mux(Itype.isTrapOrXret(trace.toEncoder.blocks(0).bits.tracePipe.itype),
+    io.fromCSR.traceCSR.lastPriv,
+    io.fromCSR.traceCSR.currentPriv
+  )
+  io.traceCoreInterface.toEncoder.trap.cause := io.fromCSR.traceCSR.cause.asUInt
+  io.traceCoreInterface.toEncoder.trap.tval  := io.fromCSR.traceCSR.tval.asUInt
+  io.traceCoreInterface.toEncoder.priv       := tracePriv
+  (0 until TraceGroupNum).foreach(i => {
+    io.traceCoreInterface.toEncoder.groups(i).valid := trace.io.out.toEncoder.blocks(i).valid
+    io.traceCoreInterface.toEncoder.groups(i).bits.iaddr := trace.io.out.toEncoder.blocks(i).bits.iaddr.getOrElse(0.U)
+    io.traceCoreInterface.toEncoder.groups(i).bits.itype := trace.io.out.toEncoder.blocks(i).bits.tracePipe.itype
+    io.traceCoreInterface.toEncoder.groups(i).bits.iretire := trace.io.out.toEncoder.blocks(i).bits.tracePipe.iretire
+    io.traceCoreInterface.toEncoder.groups(i).bits.ilastsize := trace.io.out.toEncoder.blocks(i).bits.tracePipe.ilastsize
+  })
+  /**
+   * trace end
+   */
+
 
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
@@ -686,6 +724,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val frontend = Flipped(new FrontendToCtrlIO())
   val fromCSR = new Bundle{
     val toDecode = Input(new CSRToDecode)
+    val traceCSR = Input(new TraceCSR)
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
@@ -753,6 +792,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val excpInfo = ValidIO(new VecExcpInfo)
     val ratOldPest = new RatToVecExcpMod
   })
+
+  val traceCoreInterface = new TraceCoreInterface
 
   val perfInfo = Output(new Bundle{
     val ctrlInfo = new Bundle {

@@ -46,6 +46,7 @@ import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.backend.trace._
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
