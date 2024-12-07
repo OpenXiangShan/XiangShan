@@ -307,9 +307,16 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
   init_entry.carry   := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos - instOffsetBits), true.B)
-  init_entry.isJalr  := new_jmp_is_jalr
-  init_entry.isCall  := new_jmp_is_call
-  init_entry.isRet   := new_jmp_is_ret
+
+  require(
+    isPow2(PredictWidth),
+    "If PredictWidth does not satisfy the power of 2," +
+      "pftAddr := getLower(io.start_addr) and carry := true.B  not working!!"
+  )
+
+  init_entry.isJalr := new_jmp_is_jalr
+  init_entry.isCall := new_jmp_is_call
+  init_entry.isRet  := new_jmp_is_ret
   // that means fall thru points to the middle of an inst
   init_entry.last_may_be_rvi_call := pd.jmpOffset === (PredictWidth - 1).U && !pd.rvcMask(pd.jmpOffset)
 
