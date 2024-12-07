@@ -245,8 +245,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     when (io.ldin(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
       val need_rep = io.ldin(i).bits.rep_info.need_rep
+      val need_valid = io.ldin(i).bits.updateAddrValid
 
-      when (!need_rep) {
+      when (!need_rep && need_valid) {
       // update control flag
         addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss || io.ldin(i).bits.isSWPrefetch
         datavalid(loadWbIndex) :=
