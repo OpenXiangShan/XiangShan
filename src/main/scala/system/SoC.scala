@@ -414,7 +414,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   } else {
     debugModule.debug.node := peripheralXbar.get
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-      l3_xbar.get := TLBuffer() := sb2tl.node
+      l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
   }
 
