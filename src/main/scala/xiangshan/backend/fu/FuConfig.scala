@@ -191,6 +191,8 @@ case class FuConfig (
 
   def isSta: Boolean = name.contains("sta")
 
+  def isStd: Boolean = name.contains("std")
+
   def ckAlwaysEn: Boolean = isCsr || isFence
 
   /**

@@ -51,7 +51,7 @@ class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
 
   val toAdd = IO(Output(new MulToAddIO(FPU.ftypes)))
 
-  val robIdx = robIdxVec(0)
+  val robIdx = io.in.bits.ctrl.robIdx
   val fpCtrl = DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire)
   val typeTagIn = fpCtrl.typeTagIn
 
@@ -100,14 +100,14 @@ class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
   toAdd.rm := S2Reg(S1Reg(rm))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
   toAdd.fpCtrl := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
-  toAdd.robIdx := robIdxVec(latency)
+  toAdd.robIdx := io.in.bits.ctrlPipe.get(latency).robIdx
   toAdd.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
   toAdd.fpWen := S2Reg(S1Reg(io.in.bits.ctrl.fpWen.get))
   io.out.bits.res.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   })
   io.out.bits.res.fflags.get := Mux1H(outSel, s3.map(_.io.fflags))
-  io.out.bits.ctrl.robIdx := robIdxVec(latency)
+  io.out.bits.ctrl.robIdx := io.in.bits.ctrlPipe.get(latency).robIdx
   io.out.bits.ctrl.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
   io.out.bits.ctrl.fpu.get := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
 }
@@ -163,7 +163,7 @@ class FADD_pipe(cfg: FuConfig, val addLat: Int = 2)(implicit p: Parameters) exte
     case (mod, t) => FPU.box(mod.io.result, t)
   })
   io.out.bits.res.fflags.get := Mux1H(outSel, s2.map(_.io.fflags))
-  io.out.bits.ctrl.robIdx := robIdxVec(latency)
+  io.out.bits.ctrl.robIdx := io.in.bits.ctrlPipe.get(latency).robIdx
   io.out.bits.ctrl.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
   io.out.bits.ctrl.fpu.get := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
 }
