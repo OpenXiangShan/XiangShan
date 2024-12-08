@@ -70,7 +70,10 @@ class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 }
 
 class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
+  val needCtrlPipe = cfg.latency.latencyVal.nonEmpty && (!cfg.isStd)
   val ctrl = new FuncUnitCtrlInput(cfg)
+  val ctrlPipe = OptionWrapper(needCtrlPipe, Vec(cfg.latency.latencyVal.get + 1, new FuncUnitCtrlInput(cfg)))
+  val validPipe = OptionWrapper(needCtrlPipe, Vec(cfg.latency.latencyVal.get + 1, Bool()))
   val data = new FuncUnitDataInput(cfg)
   val perfDebugInfo = new PerfDebugInfo()
 }
@@ -176,13 +179,11 @@ trait HasPipelineReg { this: FuncUnit =>
       rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1).asTypeOf(Bool())
     }
     for (i <- 1 to latency) {
-      when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)) {
-        validVec(i) := validVec(i - 1)
+      validVec(i) := validVec(i - 1)
+      when(rdyVec(i - 1) && validVec(i - 1)) {
         ctrlVec(i) := ctrlVec(i - 1)
         dataVec(i) := dataVec(i - 1)
         perfVec(i) := perfVec(i - 1)
-      }.elsewhen(flushVec(i) || rdyVec(i)) {
-        validVec(i) := false.B
       }
     }
 
@@ -190,58 +191,57 @@ trait HasPipelineReg { this: FuncUnit =>
       case(( ctrl,data), perf) => {
         val out = Wire(new FuncUnitInput(cfg))
         out.ctrl := ctrl
+        out.ctrlPipe.foreach(_ := 0.U.asTypeOf(out.ctrlPipe.get))
+        out.validPipe.foreach(_ := 0.U.asTypeOf(out.validPipe.get))
         out.data := data
         out.perfDebugInfo := perf
         out
       }
     },validVec, rdyVec)
   }
-  val (pipeReg : Seq[FuncUnitInput],validVec ,rdyVec ) = pipelineReg(io.in.bits, io.in.valid,io.out.ready,preLat, io.flush)
-  val ctrlVec = pipeReg.map(_.ctrl)
+  val (pipeReg : Seq[FuncUnitInput], validVecThisFu ,rdyVec ) = pipelineReg(io.in.bits, io.in.valid,io.out.ready,preLat, io.flush)
+  val validVec = io.in.bits.validPipe.get.zip(validVecThisFu).map(x => x._1 && x._2)
+  val ctrlVec = io.in.bits.ctrlPipe.get
   val dataVec = pipeReg.map(_.data)
   val perfVec = pipeReg.map(_.perfDebugInfo)
-  val robIdxVec = ctrlVec.map(_.robIdx)
-  val pipeflushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
 
 
   val fixtiminginit = Wire(new FuncUnitInput(cfg))
   fixtiminginit.ctrl := ctrlVec.last
+  fixtiminginit.ctrlPipe.foreach(_ := 0.U.asTypeOf(fixtiminginit.ctrlPipe.get))
+  fixtiminginit.validPipe.foreach(_ := 0.U.asTypeOf(fixtiminginit.validPipe.get))
   fixtiminginit.data := dataVec.last
   fixtiminginit.perfDebugInfo := perfVec.last
 
   // fixtiming pipelinereg
   val (fixpipeReg : Seq[FuncUnitInput], fixValidVec, fixRdyVec) = pipelineReg(fixtiminginit, validVec.last,rdyVec.head ,latdiff, io.flush)
-  val fixCtrlVec = fixpipeReg.map(_.ctrl)
   val fixDataVec = fixpipeReg.map(_.data)
   val fixPerfVec = fixpipeReg.map(_.perfDebugInfo)
-  val fixrobIdxVec = ctrlVec.map(_.robIdx)
-  val fixflushVec = fixValidVec.zip(fixrobIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
-  val flushVec = pipeflushVec ++ fixflushVec
   val pcVec = fixDataVec.map(_.pc)
 
   io.in.ready := fixRdyVec.head
   io.out.valid := fixValidVec.last
 
-  io.out.bits.ctrl.robIdx := fixCtrlVec.last.robIdx
-  io.out.bits.ctrl.pdest := fixCtrlVec.last.pdest
-  io.out.bits.ctrl.rfWen.foreach(_ := fixCtrlVec.last.rfWen.get)
-  io.out.bits.ctrl.fpWen.foreach(_ := fixCtrlVec.last.fpWen.get)
-  io.out.bits.ctrl.vecWen.foreach(_ := fixCtrlVec.last.vecWen.get)
-  io.out.bits.ctrl.v0Wen.foreach(_ := fixCtrlVec.last.v0Wen.get)
-  io.out.bits.ctrl.vlWen.foreach(_ := fixCtrlVec.last.vlWen.get)
-  io.out.bits.ctrl.fpu.foreach(_ := fixCtrlVec.last.fpu.get)
-  io.out.bits.ctrl.vpu.foreach(_ := fixCtrlVec.last.vpu.get)
+  io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
+  io.out.bits.ctrl.pdest := ctrlVec.last.pdest
+  io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
+  io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
+  io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
+  io.out.bits.ctrl.v0Wen.foreach(_ := ctrlVec.last.v0Wen.get)
+  io.out.bits.ctrl.vlWen.foreach(_ := ctrlVec.last.vlWen.get)
+  io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
+  io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
   io.out.bits.perfDebugInfo := fixPerfVec.last
 
   // vstart illegal
   if (cfg.exceptionOut.nonEmpty) {
-    val outVstart = fixCtrlVec.last.vpu.get.vstart
+    val outVstart = ctrlVec.last.vpu.get.vstart
     val vstartIllegal = outVstart =/= 0.U
     io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
     io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
   }
 
-  def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
+  def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)
 
   def PipelineReg[TT <: Data](i: Int)(next: TT) = {
     val lat = preLat min i
