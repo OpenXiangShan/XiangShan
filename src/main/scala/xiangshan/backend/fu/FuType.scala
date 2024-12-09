@@ -134,6 +134,7 @@ object FuType extends OHEnumeration {
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
   val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val blockBackCompress = Seq(brh, jmp, stu)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
@@ -210,6 +211,8 @@ object FuType extends OHEnumeration {
   def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
 
   def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
+
+  def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
 
   object FuTypeOrR {
     def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
