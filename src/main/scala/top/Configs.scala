@@ -401,6 +401,7 @@ class WithFuzzer extends Config((site, here, up) => {
 
 class CVMCompile extends Config((site, here, up) => {
   case SoCParamsKey => up(SoCParamsKey).copy(
+    KeyIDBits = Some(5),
     HasMEMencryption = Some(true),
     HasDelayNoencryption = Some(false)
   )
@@ -411,6 +412,7 @@ class CVMCompile extends Config((site, here, up) => {
 
 class CVMTestCompile extends Config((site, here, up) => {
   case SoCParamsKey => up(SoCParamsKey).copy(
+    KeyIDBits = Some(5),
     HasMEMencryption = Some(true),
     HasDelayNoencryption = Some(true)
   )

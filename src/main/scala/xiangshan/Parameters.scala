@@ -586,7 +586,7 @@ trait HasXSParameter {
   def PmemRanges = p(SoCParamsKey).PmemRanges
   def PmemLowBounds = PmemRanges.unzip._1
   def PmemHighBounds = PmemRanges.unzip._2
-  def KeyIDBits = p(SoCParamsKey).KeyIDBits
+  def KeyIDBits = p(SoCParamsKey).KeyIDBits.getOrElse(0)
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
 

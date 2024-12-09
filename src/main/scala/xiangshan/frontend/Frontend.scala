@@ -135,10 +135,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   pmp_req_vec.last <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
-    if(HasCVMExtension){
+    if (HasCVMExtension) {
       pmp_check(i).apply(tlbCsr.mcvm.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
-    }else{
-      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i)) 
+    } else {
+      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
     }
   }
   (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
