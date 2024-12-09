@@ -257,7 +257,7 @@ class CtrlBlockImp(
     trace.io.in.fromPcMem(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(trace.toPcMem.blocks(i).bits.ftqOffset.get, traceValid))
   }
 
-  // Trap/Xret only occor in block(0).
+  // Trap/Xret only occur in block(0).
   val tracePriv = Mux(Itype.isTrapOrXret(trace.toEncoder.blocks(0).bits.tracePipe.itype),
     io.fromCSR.traceCSR.lastPriv,
     io.fromCSR.traceCSR.currentPriv
