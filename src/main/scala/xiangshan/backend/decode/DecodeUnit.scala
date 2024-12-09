@@ -1019,43 +1019,36 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
-  val fpToVecDecoder = Module(new FPToVecDecoder())
-  fpToVecDecoder.io.instr := inst.asUInt
-  val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
-  when(isFpToVecInst){
-    decodedInst.vpu := fpToVecDecoder.io.vpuCtrl
-  }.otherwise{
-    decodedInst.vpu.vill := io.enq.vtype.illegal
-    decodedInst.vpu.vma := io.enq.vtype.vma
-    decodedInst.vpu.vta := io.enq.vtype.vta
-    decodedInst.vpu.vsew := io.enq.vtype.vsew
-    decodedInst.vpu.vlmul := io.enq.vtype.vlmul
-    decodedInst.vpu.vm := inst.VM
-    decodedInst.vpu.nf := inst.NF
-    decodedInst.vpu.veew := inst.WIDTH
-    decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isVload = FuType.isVLoad(decodedInst.fuType)
-    val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
-    val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
-    val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
-    val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
-    val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
-    val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
-    val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
-    val vstartIsNotZero = io.enq.vstart =/= 0.U
-    decodedInst.vpu.isNarrow := isNarrow
-    decodedInst.vpu.isDstMask := isDstMask
-    decodedInst.vpu.isOpMask := isOpMask
-    decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
-    decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
-    decodedInst.vpu.vstart := io.enq.vstart
-    decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
-  }
+  decodedInst.vpu.vill := io.enq.vtype.illegal
+  decodedInst.vpu.vma := io.enq.vtype.vma
+  decodedInst.vpu.vta := io.enq.vtype.vta
+  decodedInst.vpu.vsew := io.enq.vtype.vsew
+  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.vm := inst.VM
+  decodedInst.vpu.nf := inst.NF
+  decodedInst.vpu.veew := inst.WIDTH
+  decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isVload = FuType.isVLoad(decodedInst.fuType)
+  val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
+  val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
+  val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
+  val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
+  val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
+  val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
+  val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
+  val vstartIsNotZero = io.enq.vstart =/= 0.U
+  decodedInst.vpu.isNarrow := isNarrow
+  decodedInst.vpu.isDstMask := isDstMask
+  decodedInst.vpu.isOpMask := isOpMask
+  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
+  decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
+  decodedInst.vpu.vstart := io.enq.vstart
+  decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
   decodedInst.vpu.specVill := io.enq.vtype.illegal
   decodedInst.vpu.specVma := io.enq.vtype.vma
   decodedInst.vpu.specVta := io.enq.vtype.vta
@@ -1064,8 +1057,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.vlsInstr := isVls
 
-  decodedInst.srcType(3) := Mux(inst.VM === 0.U && !isFpToVecInst, SrcType.vp, SrcType.DC) // mask src
-  decodedInst.srcType(4) := Mux(!isFpToVecInst, SrcType.vp, SrcType.DC) // vconfig
+  decodedInst.srcType(3) := Mux(inst.VM === 0.U, SrcType.vp, SrcType.DC) // mask src
+  decodedInst.srcType(4) := SrcType.vp // vconfig
 
   val uopInfoGen = Module(new UopInfoGen)
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
