@@ -824,6 +824,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.connectStaticInst(io.enq.ctrlFlow)
 
+  decodedInst.lastInFtqEntry := ctrl_flow.isLastInFtqEntry
   decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B

@@ -75,6 +75,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val needFlush = Bool()
+    val crossFtq = Bool() // 59 bit
     // status end
 
     // debug_begin
@@ -110,6 +111,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val fpWen = Bool()
     val rfWen = Bool()
     val needFlush = Bool()
+    val crossFtq = Bool()
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
     // debug_begin
@@ -137,6 +139,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.dirtyVs := robEnq.dirtyVs
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
+    robEntry.crossFtq := robEnq.crossFtq
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.debug_pc.foreach(_ := robEnq.pc)
@@ -168,6 +171,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
+    robCommitEntry.crossFtq := robEntry.crossFtq
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
