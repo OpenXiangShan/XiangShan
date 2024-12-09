@@ -267,8 +267,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Update the ftqOffset to correctly notify the frontend which instructions have been committed.
   // Instructions in multiple Ftq entries compressed to one RobEntry do not occur.
   for (i <- 0 until CommitWidth) {
-    val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt).asUInt) + rawInfo(i).ftqOffset
-    commitInfo(i).ftqOffset := Mux(CommitType.isFused(rawInfo(i).commitType), rawInfo(i).ftqOffset, lastOffset)
+    commitInfo(i).ftqOffset := 0.U
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
   }
 
   // data for debug
@@ -986,10 +986,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
+  private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
-    req => FuType.isStore(req.bits.fuType)
-  })
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
   for (i <- 0 until RobSize) {
@@ -1230,7 +1228,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
-  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit) +& fuseCommitCnt
+  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit)
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
   when(isCommitReg){
@@ -1530,9 +1528,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.wpdest := commitInfo.debug_pdest.get
       difftest.wdest := Mux(isVLoad, instr.VD, commitInfo.debug_ldest.get)
       difftest.otherwpdest := debug_VecOtherPdest(ptr)
-      difftest.nFused := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+      difftest.nFused := commitInfo.instrSize - 1.U
       when(difftest.valid) {
-        assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
+        assert(commitInfo.instrSize >= 1.U)
       }
       if (env.EnableDifftest) {
         val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)

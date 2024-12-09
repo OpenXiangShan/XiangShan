@@ -120,6 +120,7 @@ object Bundles {
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
     val needFrm         = new NeedFrmBundle
+    val lastInFtqEntry  = Bool()
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
     val debug_seqNum    = InstSeqNum()
@@ -188,6 +189,8 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val ftqLastOffset   = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
+    val stdwriteNeed    = Bool()
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
@@ -203,6 +206,8 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
+    val crossFtqCommit  = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
+    val crossFtq        = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     val selImm          = SelImm()
     val imm             = UInt(32.W)
     val fpu             = new FPUCtrlSignals
