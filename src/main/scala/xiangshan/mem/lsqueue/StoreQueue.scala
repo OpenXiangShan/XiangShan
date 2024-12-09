@@ -800,13 +800,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cboFlushedSb = RegInit(false.B)
   val cmoOpCode = uncacheUop.fuOpType(1, 0)
   val mmioDoReq = io.uncache.req.fire && !io.uncache.req.bits.nc
-  val cboMmioPAddr = RegEnable(paddrModule.io.rdata(0), mmioState === s_idle)
+  val cboMmioPAddr = Reg(UInt(PAddrBits.W))
   switch(mmioState) {
     is(s_idle) {
       when(RegNext(io.rob.pendingst && uop(deqPtr).robIdx === io.rob.pendingPtr && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr))) {
         mmioState := s_req
         uncacheUop := uop(deqPtr)
         cboFlushedSb := false.B
+        cboMmioPAddr := paddrModule.io.rdata(0)
       }
     }
     is(s_req) {
