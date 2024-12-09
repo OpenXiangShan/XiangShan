@@ -117,6 +117,7 @@ object Bundles {
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
     val needFrm         = new NeedFrmBundle
+    val lastInFtqEntry  = Bool()
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
@@ -195,6 +196,7 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
+    val crossFtq        = Bool()
     val selImm          = SelImm()
     val imm             = UInt(32.W)
     val fpu             = new FPUCtrlSignals
