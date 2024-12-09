@@ -181,6 +181,7 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val ftqLastOffset   = UInt(log2Up(PredictWidth).W)
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
@@ -196,6 +197,7 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
+    val crossFtqCommit  = Bool()
     val crossFtq        = Bool()
     val selImm          = SelImm()
     val imm             = UInt(32.W)
