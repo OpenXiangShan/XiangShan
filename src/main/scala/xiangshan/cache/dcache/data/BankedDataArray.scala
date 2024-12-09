@@ -266,6 +266,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val cacheOp = Flipped(new L1CacheInnerOpIO)
     val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
     val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
+    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
@@ -470,6 +471,22 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val read_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays,new L1BankedDataReadResult()))))
   val read_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays,new L1BankedDataReadResult()))))
   val read_error_delayed_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
+  dontTouch(read_result)
+  dontTouch(read_error_delayed_result)
+
+  val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
+    case bank =>
+      Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
+  }
+  val readline_hit = io.readline.fire &&
+                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
+  val readbank_hit = io.read.zip(bank_addrs.zip(io.is128Req)).zipWithIndex.map {
+                          case ((read, (bank_addr, is128Req)), i) =>
+                            val error_bank0 = io.pseudo_error.bits(bank_addr(0))
+                            val error_bank1 = io.pseudo_error.bits(bank_addr(1))
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) && !io.bank_conflict_slow(i)
+                      }.reduce(_|_)
+  io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
 
   for (div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
@@ -509,7 +526,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         data_bank.io.r.addr := sram_set_addr
 
         read_result(div_index)(bank_index)(way_index).ecc := getECCFromEncWord(data_bank.io.r.data)
-        read_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data)
+        read_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data) ^ pseudo_data_toggle_mask(bank_index)
 
         if (EnableDataEcc) {
           val ecc_data = read_result(div_index)(bank_index)(way_index).asECCData()
@@ -790,7 +807,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       data_bank.io.r.addr := bank_set_addr
       for (way_index <- 0 until DCacheWays) {
         bank_result(div_index)(bank_index)(way_index).ecc := getECCFromEncWord(data_bank.io.r.data(way_index))
-        bank_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data(way_index))
+        bank_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data(way_index)) ^ pseudo_data_toggle_mask(bank_index)
 
         if (EnableDataEcc) {
           val ecc_data = bank_result(div_index)(bank_index)(way_index).asECCData()

@@ -29,6 +29,7 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val param  = UInt(cWidth.W)
   val voluntary = Bool()
   val hasData = Bool()
+  val corrupt = Bool()
   val dirty = Bool()
 
   val delay_release = Bool()
@@ -62,6 +63,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.param := param
     out.voluntary := voluntary
     out.hasData := hasData
+    out.corrupt := corrupt
     out.dirty := dirty
     out.delay_release := delay_release
     out.miss_id := miss_id
@@ -73,6 +75,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.param := param
     out.voluntary := voluntary
     out.hasData := hasData
+    out.corrupt := corrupt
     out.dirty := dirty
     out.delay_release := delay_release
     out.miss_id := miss_id
@@ -205,7 +208,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     paddr_dup_0 := io.req.bits.addr
     paddr_dup_1 := io.req.bits.addr
     paddr_dup_2 := io.req.bits.addr
-  
+
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     state      := s_release_req
     state_dup_0 := s_release_req
@@ -229,13 +232,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param
   )
+  probeResponse.corrupt := req.corrupt
 
   val probeResponseData = edge.ProbeAck(
     fromSource = io.id,
     toAddress = paddr_dup_1,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param,
-    data = beat_data(beat)
+    data = beat_data(beat),
+    corrupt = req.corrupt
   )
 
   val voluntaryRelease = edge.Release(
@@ -244,13 +249,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     lgSize = log2Ceil(cfg.blockBytes).U,
     shrinkPermissions = req.param
   )._2
+  voluntaryRelease.corrupt := req.corrupt
 
   val voluntaryReleaseData = edge.Release(
     fromSource = io.id,
     toAddress = paddr_dup_2,
     lgSize = log2Ceil(cfg.blockBytes).U,
     shrinkPermissions = req.param,
-    data = beat_data(beat)
+    data = beat_data(beat),
+    corrupt = req.corrupt
   )._2
 
   // voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
@@ -413,6 +420,6 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     ("dcache_wbq_3_4_valid", (perfValidCount > (cfg.nReleaseEntries.U/2.U)) & (perfValidCount <= (cfg.nReleaseEntries.U*3.U/4.U))),
     ("dcache_wbq_4_4_valid", (perfValidCount > (cfg.nReleaseEntries.U*3.U/4.U))),
   )
-  generatePerfEvent()  
+  generatePerfEvent()
 
 }
