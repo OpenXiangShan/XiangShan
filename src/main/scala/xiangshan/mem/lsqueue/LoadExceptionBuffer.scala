@@ -81,7 +81,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
       }
       val oldest = Mux(valid(0) && valid(1),
         Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
+          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
@@ -95,7 +95,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
 
   when (req_valid) {
     req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
+      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (req.uop.robIdx === reqSel._2(0).uop.robIdx && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
       reqSel._2(0),
       req)
   } .elsewhen (s2_enqueue.asUInt.orR) {
