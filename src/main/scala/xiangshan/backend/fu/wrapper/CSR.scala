@@ -228,13 +228,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
-  // ctrl block will use theses later for flush // Todo: optimize isXRetFlag's DelayN
-  val isXRetFlag = RegInit(false.B)
-  isXRetFlag := Mux1H(Seq(
-    DelayN(flush, 5) -> false.B,
-    isXRet -> true.B,
-  ))
-
   flushPipe := csrMod.io.out.bits.flushPipe
 
   // tlb
@@ -306,7 +299,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt
 
-  csrOut.isXRet := RegEnable(isXRetFlag, false.B, io.in.fire)
+  csrOut.isXRet := isXRet
 
   csrOut.trapTarget := csrMod.io.out.bits.targetPc
   csrOut.interrupt := csrMod.io.status.interrupt
