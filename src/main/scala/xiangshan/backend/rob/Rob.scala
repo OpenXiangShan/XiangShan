@@ -251,7 +251,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Instructions in multiple Ftq entries compressed to one RobEntry do not occur.
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
-    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + rawInfo(i).crossFtq
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx + rawInfo(i).crossFtqCommit
   }
 
   // data for debug

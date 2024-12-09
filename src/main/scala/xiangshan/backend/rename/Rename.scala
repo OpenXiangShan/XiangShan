@@ -322,6 +322,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).replayInst := false.B // set by IQ or MemQ
     uops(i).crossFtq := false.B
+    uops(i).crossFtqCommit := false.B
+    uops(i).ftqLastOffset := uops(i).ftqOffset
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -371,10 +373,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
       uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
       if (i < RenameWidth - 1) {
+        uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
+        uops(i).ftqLastOffset := uops(i + 1).ftqLastOffset
       }
     }.elsewhen(needRobFlags(i)) {
-      uops(i).crossFtq := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))(1)
+      uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))(1)
+      uops(i).crossFtq := uops(i).crossFtqCommit || ((compressMasksVec(i) & Cat(isLastFtqVec.reverse)).orR && !isLastFtqVec(i))
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
@@ -488,23 +493,17 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   for (i <- 0 until RenameWidth) {
     // iretire
-    uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
-      halfWordNumMatrix(i).reduce(_ +& _),
-      (if(i < RenameWidth -1) Mux(isFusionVec(i), halfWordNumVec(i+1), 0.U) else 0.U) +& halfWordNumVec(i)
-    )
+    uops(i).traceBlockInPipe.iretire := halfWordNumVec(i).reduce(_ +& _)
 
     // ilastsize
-    val tmp = i
-    val lastIsRVC = WireInit(false.B)
-    (tmp until RenameWidth).map { j =>
-      when(compressMasksVec(i)(j)) {
-        lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
+    val lastIsRVC = isRVCVec(i) && needRobFlags(i)
+    when (!needRobFlags(i)) {
+      if (i + 1 < RenameWidth) {
+        uops(i).traceBlockInPipe.ilastsize := uops(i + 1).traceBlockInPipe.ilastsize
       }
+    }.elsewhen(needRobFlags(i)) {
+      uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
     }
-    uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
-      Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
-      (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
-    )
 
     // itype
     uops(i).traceBlockInPipe.itype := Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
