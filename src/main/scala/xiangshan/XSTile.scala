@@ -90,7 +90,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // mmio
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.frontendBridge.instr_uncache_node
-  l2top.inner.d_mmio_port := memBlock.uncache.clientNode
+  l2top.inner.d_mmio_port := memBlock.uncache_port
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {

@@ -849,7 +849,7 @@ class Sbuffer(implicit p: Parameters)
       stateVec(i).w_timeout
     )
   }
-  
+
   /*
   *
   **********************************************************

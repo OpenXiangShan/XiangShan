@@ -132,12 +132,20 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     case None =>
       memory_port.get := l1_xbar
   }
-  
+
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  mmio_port := TLBuffer() := mmio_xbar
-
+  if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+    mmio_port :=
+      TLFilter(TLFilter.mSubtract(dcacheParameters.cacheCtrlAddressOpt.get)) :=
+      TLBuffer() :=
+      mmio_xbar
+  } else {
+    mmio_port :=
+      TLBuffer() :=
+      mmio_xbar
+  }
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val beu_errors = Input(chiselTypeOf(beu.module.io.errors))

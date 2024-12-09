@@ -32,6 +32,7 @@ import utility._
 import utils._
 import huancun._
 import openLLC.{OpenLLCParam}
+import freechips.rocketchip.diplomacy._
 import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
@@ -130,6 +131,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMaxPrefetchEntry = 2,
           enableTagEcc = true,
           enableDataEcc = true,
+          cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
         )),
         // ============ BPU ===============
         EnableLoop = false,
@@ -267,7 +269,8 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         nReleaseEntries = 18,
         nMaxPrefetchEntry = 6,
         enableTagEcc = true,
-        enableDataEcc = true
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
       ))
     ))
 })
