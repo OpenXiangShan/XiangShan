@@ -524,7 +524,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   // PMP: mainPipe & prefetchPipe need PortNumber each
   val pmp: Vec[ICachePMPBundle] = Vec(2 * PortNumber, new ICachePMPBundle)
   // iTLB
-  val itlb: Vec[TlbRequestIO] = Vec(PortNumber, new TlbRequestIO)
+  val itlb:          Vec[TlbRequestIO] = Vec(PortNumber, new TlbRequestIO)
+  val itlbFlushPipe: Bool              = Bool()
   // backend/BEU
   val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
   // backend/CSR
@@ -655,6 +656,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.itlb(0) <> prefetcher.io.itlb(0)
   io.itlb(1) <> prefetcher.io.itlb(1)
+  io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // notify IFU that Icache pipeline is available
   io.toIFU    := mainPipe.io.fetch.req.ready
