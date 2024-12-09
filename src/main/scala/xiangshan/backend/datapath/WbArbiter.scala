@@ -154,10 +154,6 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     source.ready := sink.ready
   }
 
-  fromExu.zipWithIndex.foreach { case (e, i) =>
-    PerfCCT.updateInstPos(e.bits.seqNum, PerfCCT.InstPos.AtWriteVal.id.U, e.valid, clock, reset)
-  }
-
   // fromExu -> ArbiterInput
   val intArbiterInputsWire = Wire(chiselTypeOf(fromExu))
   val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
