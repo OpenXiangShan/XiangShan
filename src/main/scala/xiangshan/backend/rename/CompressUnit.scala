@@ -38,6 +38,7 @@ import xiangshan._
 class CompressUnit(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val in = Vec(RenameWidth, Flipped(Valid(new DecodedInst)))
+    val oddFtqVec = Vec(RenameWidth, Input(Bool()))
     val out = new Bundle {
       val needRobFlags = Vec(RenameWidth, Output(Bool()))
       val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
@@ -48,8 +49,8 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
 
   val noExc = io.in.map(in => !in.bits.exceptionVec.asUInt.orR && !TriggerAction.isDmode(in.bits.trigger))
   val uopCanCompress = io.in.map(_.bits.canRobCompress)
-  val canCompress = io.in.zip(noExc).zip(uopCanCompress).map { case ((in, noExc), canComp) =>
-    in.valid && !CommitType.isFused(in.bits.commitType) && in.bits.lastUop && noExc && canComp
+  val canCompress = io.in.zip(noExc).zip(uopCanCompress).zip(io.oddFtqVec)map { case (((in, noExc), canComp), oddFtq) =>
+    in.valid && !CommitType.isFused(in.bits.commitType) && in.bits.lastUop && noExc && canComp && oddFtq
   }
 
   val compressTable = (0 until 1 << RenameWidth).map { case keyCandidate =>

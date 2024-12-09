@@ -161,10 +161,28 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
+  val isLastFtqVec = io.in.map(_.bits.lastInFtqEntry)
+  val canRobCompressVec = io.in.map(_.bits.canRobCompress)
+  // count crossftq num in may same robentry
+  val crossFtqNumVec = Wire(Vec(RenameWidth, Bool()))
+  // identify cross odd ftqentry
+  val oddFtqVec = Wire(Vec(RenameWidth, Bool()))
+  for (i <- 0 until RenameWidth) {
+    if (i == 0) {
+      crossFtqNumVec(i) := canRobCompressVec(i) && isLastFtqVec(i)
+      oddFtqVec(i) := false.B
+    } else {
+      crossFtqNumVec(i) := (crossFtqNumVec(i - 1) ^ isLastFtqVec(i)) && canRobCompressVec(i)
+      oddFtqVec(i) := crossFtqNumVec(i - 1) && isLastFtqVec(i)
+    }
+  }
+  dontTouch(crossFtqNumVec)
+  dontTouch(oddFtqVec)
   compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
     sink.valid := source.valid && !io.singleStep
     sink.bits := source.bits
   }
+  compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
   val compressMasksVec = compressUnit.io.out.masks
@@ -303,6 +321,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitBit := io.waittable(i)
 
     uops(i).replayInst := false.B // set by IQ or MemQ
+    uops(i).crossFtq := false.B
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -351,6 +370,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).lastUop := false.B
       uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
       uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
+      if (i < RenameWidth - 1) {
+        uops(i).crossFtq := uops(i + 1).crossFtq
+      }
+    }.elsewhen(needRobFlags(i)) {
+      uops(i).crossFtq := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))(1)
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
