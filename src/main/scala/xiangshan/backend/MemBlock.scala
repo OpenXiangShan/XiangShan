@@ -363,9 +363,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
-  // val vlWrapper = Module(new VectorLoadWrapper)
-  // val vsUopQueue = Module(new VsUopQueue)
-  // val vsFlowQueue = Module(new VsFlowQueue)
 
   // The number of vector load/store units is decoupled with the number of load/store units
   val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
@@ -454,6 +451,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ldaExeWbReqs(AtomicWBPort).bits  := atomicWritebackOverride
   atomicsUnit.io.out.ready := ldaExeWbReqs(AtomicWBPort).ready
   loadUnits(AtomicWBPort).io.ldout.ready := ldaExeWbReqs(AtomicWBPort).ready
+
+  val st_data_atomics = Seq.tabulate(StdCnt)(i =>
+    stData(i).valid && FuType.storeIsAMO(stData(i).bits.uop.fuType)
+  )
 
   // misalignBuffer will overwrite the source from ldu if it is about to writeback
   val misalignWritebackOverride = Mux(
@@ -1048,6 +1049,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // Lsq to std unit's rs
     lsq.io.std.storeDataIn(StaCnt + i) := stData(StaCnt + i)
+    lsq.io.std.storeDataIn(StaCnt + i).valid := stData(StaCnt + i).valid && !st_data_atomics(StaCnt + i)
     // prefetch
     hybridUnits(i).io.stu_io.prefetch_req <> sbuffer.io.store_prefetch(StaCnt + i)
 
@@ -1186,7 +1188,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
         stData(i).ready := false.B
       }.otherwise {
-        lsq.io.std.storeDataIn(i).valid := stData(i).valid
+        lsq.io.std.storeDataIn(i).valid := stData(i).valid && !st_data_atomics(i)
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
         lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
@@ -1195,7 +1197,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         stData(i).ready := true.B
       }
     } else {
-        lsq.io.std.storeDataIn(i).valid := stData(i).valid
+        lsq.io.std.storeDataIn(i).valid := stData(i).valid && !st_data_atomics(i)
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
         lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
@@ -1589,10 +1591,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.ooo_to_mem.issueSta(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueSta(i).bits.uop.fuType))
   ) ++ Seq.tabulate(HyuCnt)(i =>
     io.ooo_to_mem.issueHya(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueHya(i).bits.uop.fuType))
-  )
-
-  val st_data_atomics = Seq.tabulate(StdCnt)(i =>
-    stData(i).valid && FuType.storeIsAMO(stData(i).bits.uop.fuType)
   )
 
   for (i <- 0 until StaCnt) when(st_atomics(i)) {
