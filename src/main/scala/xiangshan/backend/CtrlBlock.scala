@@ -145,7 +145,7 @@ class CtrlBlockImp(
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
-  val intCanCompress = intScheWbData.filter(_.bits.params.CanCompress)
+  val staScheWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreAddrFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
@@ -154,23 +154,26 @@ class CtrlBlockImp(
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
-    val isIntSche = intCanCompress.contains(x)
+    val isIntSche = intScheWbData.contains(x)
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
     val isi2v = i2vWbData.contains(x)
     val isf2v = f2vWbData.contains(x)
+    val isStaSche = staScheWbData.contains(x)
     val canSameRobidxWbData = if(isVfSche) {
       i2vWbData ++ f2vWbData ++ vfScheWbData
     } else if(isi2v) {
-      intCanCompress ++ fpScheWbData ++ vfScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
     } else if (isf2v) {
-      intCanCompress ++ fpScheWbData ++ vfScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
     } else if (isIntSche) {
-      intCanCompress ++ fpScheWbData
+      intScheWbData ++ fpScheWbData
     } else if (isFpSche) {
-      intCanCompress ++ fpScheWbData
-    }  else if (isMemVload) {
+      intScheWbData ++ fpScheWbData
+//    } else if (isStaSche) {
+//      intScheWbData ++ fpScheWbData ++ staScheWbData
+    } else if (isMemVload) {
       memVloadWbData
     } else {
       Seq(x)
@@ -579,6 +582,9 @@ class CtrlBlockImp(
     rename.io.in(i).bits := decodePipeRename(i).bits
     dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
+    rename.io.validVec(i) := decodePipeRename(i).valid
+    rename.io.isFusionVec(i) := false.B
+    rename.io.fusionCross2FtqVec(i) := false.B
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -599,7 +605,16 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      rename.io.in(i).bits.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
+      val cross2Ftq = decodePipeRename(i).bits.lastInFtqEntry && decodePipeRename(i + 1).bits.lastInFtqEntry
+      val cross1Ftq = decodePipeRename(i).bits.lastInFtqEntry || decodePipeRename(i + 1).bits.lastInFtqEntry
+      rename.io.in(i + 1).bits.lastInFtqEntry := cross1Ftq
+      rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
+      // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
+      rename.io.in(i + 1).bits.isMove := false.B
+      rename.io.in(i).bits.lastInFtqEntry := false.B
+      rename.io.in(i).bits.canRobCompress := !cross2Ftq
+      rename.io.isFusionVec(i) := true.B
+      rename.io.fusionCross2FtqVec(i) := cross2Ftq
     }
     XSError(fusionDecoder.io.out(i).valid && !cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
   }
