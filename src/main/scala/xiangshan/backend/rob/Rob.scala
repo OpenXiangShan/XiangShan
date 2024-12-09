@@ -1038,11 +1038,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
-    val xret = csrWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && io.csr.isXRet).reduce(_ || _)
-
-    when(robEntries(i).valid && xret){
-      robEntries(i).traceBlockInPipe.itype := Itype.ExpIntReturn
-    }.elsewhen(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
+    when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
       robEntries(i).traceBlockInPipe.itype := Itype.Taken
     }
@@ -1106,10 +1102,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
-    val xret = csrWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && io.csr.isXRet).reduce(_ || _)
-    when(robBanksRdata(i).valid && xret){
-      needUpdate(i).traceBlockInPipe.itype := Itype.ExpIntReturn
-    }.elsewhen(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype) && taken){
+    when(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype) && taken){
       // BranchType code(notaken itype = 4) must be correctly replaced!
       needUpdate(i).traceBlockInPipe.itype := Itype.Taken
     }
@@ -1239,6 +1232,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val traceBlocks = io.trace.traceCommitInfo.blocks
   val traceBlockInPipe = io.trace.traceCommitInfo.blocks.map(_.bits.tracePipe)
 
+  // The reg 'isTraceXret' only for trace xret instructions. xret only occur in block(0).
+  val isTraceXret = RegInit(false.B)
+  when(io.csr.isXRet){
+    isTraceXret := true.B
+  }.elsewhen(isTraceXret && io.commits.isCommit && io.commits.commitValid(0)){
+    isTraceXret := false.B
+  }
+
   for (i <- 0 until CommitWidth) {
     traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
     traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
@@ -1246,9 +1247,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     traceBlockInPipe(i).iretire := rawInfo(i).traceBlockInPipe.iretire
     traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
     traceValids(i) := io.commits.isCommit && io.commits.commitValid(i)
-    // exception only occor block(0).
+    // exception/xret only occur in block(0).
     if(i == 0) {
-      when(io.exception.valid){
+      when(isTraceXret && io.commits.isCommit && io.commits.commitValid(0)){ // trace xret
+        traceBlocks(i).bits.tracePipe.itype := Itype.ExpIntReturn
+      }.elsewhen(io.exception.valid){ // trace exception
         traceBlocks(i).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
           Itype.Interrupt,
           Itype.Exception
