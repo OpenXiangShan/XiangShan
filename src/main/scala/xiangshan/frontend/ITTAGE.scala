@@ -505,7 +505,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   update := RegEnable(io.update.bits, io.update.valid)
 
   // meta is splited by composer
-  val updateMeta = WireInit(update.meta.asTypeOf(new ITTageMeta))
+  val updateMeta = Wire(new ITTageMeta)
+  update.meta := updateMeta.asUInt
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
@@ -513,6 +514,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // To improve Clock Gating Efficiency
   val u_meta = io.update.bits.meta.asTypeOf(new ITTageMeta)
+  updateMeta := RegEnable(u_meta, io.update.valid)
   updateMeta.provider.bits := RegEnable(
     u_meta.provider.bits,
     io.update.valid && u_meta.provider.valid

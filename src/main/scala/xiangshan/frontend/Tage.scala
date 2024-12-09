@@ -707,7 +707,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
       io.update.bits.ftb_entry.brValids(w) && io.update.valid
     )) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
   val u_meta     = io.update.bits.meta.asTypeOf(new TageMeta)
-  val updateMeta = WireInit(update.meta.asTypeOf(new TageMeta))
+  val updateMeta = Wire(new TageMeta)
+  update.meta := updateMeta.asUInt
+  updateMeta  := RegEnable(u_meta, io.update.valid)
   for (i <- 0 until numBr) {
     updateMeta.providers(i).bits := RegEnable(
       u_meta.providers(i).bits,
