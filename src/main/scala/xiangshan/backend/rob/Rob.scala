@@ -765,7 +765,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     io.commits.info(i) := commitInfo(i)
     io.commits.robIdx(i) := deqPtrVec(i)
     val deqDebugInst = debug_microOp(deqPtrVec(i).value)
-    PerfCCT.CommitInstMeta(deqDebugInst.seqNum, io.commits.commitValid(i), clock, reset)
+    PerfCCT.CommitInstMeta(deqDebugInst.seqNum, io.commits.isCommit && io.commits.commitValid(i), clock, reset)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
     when(state === s_walk) {
