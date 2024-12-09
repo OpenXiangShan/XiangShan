@@ -16,20 +16,20 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.frontend.FtqPtr
 
 class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val enqPortNum = LoadPipelineWidth + VecLoadPipelineWidth + 1 // 1 for mmio bus non-data error
@@ -41,20 +41,19 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   })
 
   val req_valid = RegInit(false.B)
-  val req = Reg(new LqWriteBundle)
+  val req       = Reg(new LqWriteBundle)
 
   // enqueue
   // s1:
-  val s1_req = VecInit(io.req.map(_.bits))
+  val s1_req   = VecInit(io.req.map(_.bits))
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
   // s2: delay 1 cycle
-  val s2_req = (0 until enqPortNum).map(i => {
-    RegEnable(s1_req(i), s1_valid(i))})
+  val s2_req = (0 until enqPortNum).map(i => RegEnable(s1_req(i), s1_valid(i)))
   val s2_valid = (0 until enqPortNum).map(i =>
     RegNext(s1_valid(i)) &&
-    !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
-    !s2_req(i).uop.robIdx.needFlush(io.redirect)
+      !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
+      !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
 
@@ -63,9 +62,9 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
     s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 
-  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
+  when(req_valid && req.uop.robIdx.needFlush(io.redirect)) {
     req_valid := s2_enqueue.asUInt.orR
-  } .elsewhen (s2_enqueue.asUInt.orR) {
+  }.elsewhen(s2_enqueue.asUInt.orR) {
     req_valid := true.B
   }
 
@@ -77,37 +76,49 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
       val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
       for (i <- res.indices) {
         res(i).valid := valid(i)
-        res(i).bits := bits(i)
+        res(i).bits  := bits(i)
       }
-      val oldest = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
-        Mux(valid(0) && !valid(1), res(0), res(1)))
+      val oldest = Mux(
+        valid(0) && valid(1),
+        Mux(
+          isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
+            (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx),
+          res(1),
+          res(0)
+        ),
+        Mux(valid(0) && !valid(1), res(0), res(1))
+      )
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+      val right = selectOldest(
+        valid.takeRight(valid.length - (valid.length / 2)),
+        bits.takeRight(bits.length - (bits.length / 2))
+      )
       selectOldest(left._1 ++ right._1, left._2 ++ right._2)
     }
   }
 
   val reqSel = selectOldest(s2_enqueue, s2_req)
 
-  when (req_valid) {
+  when(req_valid) {
     req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (req.uop.robIdx === reqSel._2(0).uop.robIdx && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
+      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (req.uop.robIdx === reqSel._2(
+        0
+      ).uop.robIdx && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
       reqSel._2(0),
-      req)
-  } .elsewhen (s2_enqueue.asUInt.orR) {
+      req
+    )
+  }.elsewhen(s2_enqueue.asUInt.orR) {
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr  := req.fullva
-  io.exceptionAddr.vaNeedExt := req.vaNeedExt
-  io.exceptionAddr.isHyper := req.isHyper
-  io.exceptionAddr.vstart := req.uop.vpu.vstart
-  io.exceptionAddr.vl     := req.uop.vpu.vl
-  io.exceptionAddr.gpaddr := req.gpaddr
+  io.exceptionAddr.vaddr             := req.fullva
+  io.exceptionAddr.vaNeedExt         := req.vaNeedExt
+  io.exceptionAddr.isHyper           := req.isHyper
+  io.exceptionAddr.vstart            := req.uop.vpu.vstart
+  io.exceptionAddr.vl                := req.uop.vpu.vl
+  io.exceptionAddr.gpaddr            := req.gpaddr
   io.exceptionAddr.isForVSnonLeafPTE := req.isForVSnonLeafPTE
 
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)

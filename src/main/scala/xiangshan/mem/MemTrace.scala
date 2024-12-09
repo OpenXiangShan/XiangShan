@@ -16,13 +16,13 @@
 
 package xiangshan.mem.trace
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 
 class L1MissTrace extends Bundle {
-  val vaddr = UInt(39.W)
-  val paddr = UInt(36.W)
+  val vaddr  = UInt(39.W)
+  val paddr  = UInt(36.W)
   val source = UInt(4.W)
-  val pc = UInt(39.W)
+  val pc     = UInt(39.W)
 }

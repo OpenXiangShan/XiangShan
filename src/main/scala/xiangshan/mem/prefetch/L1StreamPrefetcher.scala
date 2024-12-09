@@ -1,23 +1,24 @@
 package xiangshan.mem.prefetch
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
+import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
+import xiangshan._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
-import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
-import xiangshan.mem.trace._
+import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.L1PrefetchSource
+import xiangshan.mem.LdPrefetchTrainBundle
+import xiangshan.mem.trace._
 
 trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   // capacity related
   val STREAM_FILTER_SIZE = 4
   val BIT_VEC_ARRAY_SIZE = 16
-  val ACTIVE_THRESHOLD = BIT_VEC_WITDH - 4
-  val INIT_DEC_MODE = false
+  val ACTIVE_THRESHOLD   = BIT_VEC_WITDH - 4
+  val INIT_DEC_MODE      = false
 
   // bit_vector [StreamBitVectorBundle]:
   // `X`: valid; `.`: invalid; `H`: hit
@@ -25,23 +26,23 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   //                    hit in 12th slot & active           --------------------->             prefetch bit_vector [StreamPrefetchReqBundle]
   //                        |  <---------------------------- depth ---------------------------->
   //                                                                                           | <-- width -- >
-  val DEPTH_BYTES = 1024
+  val DEPTH_BYTES        = 1024
   val DEPTH_CACHE_BLOCKS = DEPTH_BYTES / dcacheParameters.blockBytes
-  val WIDTH_BYTES = 128
+  val WIDTH_BYTES        = 128
   val WIDTH_CACHE_BLOCKS = WIDTH_BYTES / dcacheParameters.blockBytes
 
-  val L2_DEPTH_RATIO = 2
-  val L2_WIDTH_BYTES = WIDTH_BYTES * 2
+  val L2_DEPTH_RATIO        = 2
+  val L2_WIDTH_BYTES        = WIDTH_BYTES * 2
   val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
 
-  val L3_DEPTH_RATIO = 3
-  val L3_WIDTH_BYTES = WIDTH_BYTES * 2 * 2
+  val L3_DEPTH_RATIO        = 3
+  val L3_WIDTH_BYTES        = WIDTH_BYTES * 2 * 2
   val L3_WIDTH_CACHE_BLOCKS = L3_WIDTH_BYTES / dcacheParameters.blockBytes
 
   val DEPTH_LOOKAHEAD = 6
-  val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
+  val DEPTH_BITS      = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
-  val ENABLE_DECR_MODE = false
+  val ENABLE_DECR_MODE               = false
   val ENABLE_STRICT_ACTIVE_DETECTION = true
 
   // constraints
@@ -51,52 +52,50 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
 }
 
 class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
-  val tag = UInt(REGION_TAG_BITS.W)
+  val tag     = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
-  val active = Bool()
+  val active  = Bool()
   // cnt can be optimized
-  val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
+  val cnt       = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
 
   // debug usage
   val trigger_full_va = UInt(VAddrBits.W)
 
   def reset(index: Int) = {
-    tag := index.U
-    bit_vec := 0.U
-    active := false.B
-    cnt := 0.U
-    decr_mode := INIT_DEC_MODE.B
+    tag             := index.U
+    bit_vec         := 0.U
+    active          := false.B
+    cnt             := 0.U
+    decr_mode       := INIT_DEC_MODE.B
     trigger_full_va := 0xdeadbeefL.U
   }
 
-  def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
+  def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool =
     valid1 && valid2 && region_hash_tag(tag) === region_hash_tag(new_tag)
-  }
 
   def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool, alloc_full_vaddr: UInt) = {
-    tag := alloc_tag
-    bit_vec := alloc_bit_vec
-    active := alloc_active
-    cnt := 1.U
+    tag             := alloc_tag
+    bit_vec         := alloc_bit_vec
+    active          := alloc_active
+    cnt             := 1.U
     trigger_full_va := alloc_full_vaddr
-    if(ENABLE_DECR_MODE) {
+    if (ENABLE_DECR_MODE) {
       decr_mode := alloc_decr_mode
-    }else {
+    } else {
       decr_mode := INIT_DEC_MODE.B
     }
-    
 
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
   def update(update_bit_vec: UInt, update_active: Bool) = {
     // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
+    val cnt_en   = !(bit_vec & update_bit_vec).orR
     val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
 
     bit_vec := bit_vec | update_bit_vec
-    cnt := cnt_next
+    cnt     := cnt_next
     when(cnt_next >= ACTIVE_THRESHOLD.U) {
       active := true.B
     }
@@ -110,45 +109,63 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
 }
 
 class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
-  val region = UInt(REGION_TAG_BITS.W)
+  val region  = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
-  val sink = UInt(SINK_BITS.W)
-  val source = new L1PrefetchSource()
+  val sink    = UInt(SINK_BITS.W)
+  val source  = new L1PrefetchSource()
   // debug usage
   val trigger_pc = UInt(VAddrBits.W)
   val trigger_va = UInt(VAddrBits.W)
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(
+      valid:     Bool,
+      vaddr:     UInt,
+      width:     Int,
+      decr_mode: Bool,
+      sink:      UInt,
+      source:    UInt,
+      t_pc:      UInt,
+      t_va:      UInt
+  ): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
-    res.region := get_region_tag(vaddr)
-    res.sink := sink
+    res.region       := get_region_tag(vaddr)
+    res.sink         := sink
     res.source.value := source
 
     res.trigger_pc := t_pc
-    res.trigger_va := t_va 
+    res.trigger_va := t_va
 
-    val region_bits = get_region_bits(vaddr)
+    val region_bits    = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
     res.bit_vec := Mux(
       decr_mode,
-      (0 until width).map{ case i => region_bit_vec >> i}.reduce(_ | _),
-      (0 until width).map{ case i => region_bit_vec << i}.reduce(_ | _)
+      (0 until width).map { case i => region_bit_vec >> i }.reduce(_ | _),
+      (0 until width).map { case i => region_bit_vec << i }.reduce(_ | _)
     )
 
-    assert(!valid || PopCount(res.bit_vec) <= width.U, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
+    assert(
+      !valid || PopCount(res.bit_vec) <= width.U,
+      "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS"
+    )
     assert(!valid || PopCount(res.bit_vec) >= 1.U, "at least one block should be included")
     assert(sink <= SINK_L3, "invalid sink")
-    for(i <- 0 until BIT_VEC_WITDH) {
+    for (i <- 0 until BIT_VEC_WITDH) {
       when(decr_mode) {
         when(i.U > region_bits) {
-          assert(!valid || res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in decr_mode, prefetch vector is wrong!")
+          assert(
+            !valid || res.bit_vec(i) === 0.U,
+            s"res.bit_vec(${i}) is not zero in decr_mode, prefetch vector is wrong!"
+          )
         }.elsewhen(i.U === region_bits) {
           assert(!valid || res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
         }
       }.otherwise {
         when(i.U < region_bits) {
-          assert(!valid || res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in incr_mode, prefetch vector is wrong!")
+          assert(
+            !valid || res.bit_vec(i) === 0.U,
+            s"res.bit_vec(${i}) is not zero in incr_mode, prefetch vector is wrong!"
+          )
         }.elsewhen(i.U === region_bits) {
           assert(!valid || res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
         }
@@ -163,10 +180,10 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
-    val flush = Input(Bool())
-    val dynamic_depth = Input(UInt(DEPTH_BITS.W))
-    val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
-    val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val flush              = Input(Bool())
+    val dynamic_depth      = Input(UInt(DEPTH_BITS.W))
+    val train_req          = Flipped(DecoupledIO(new PrefetchReqBundle))
+    val l1_prefetch_req    = ValidIO(new StreamPrefetchReqBundle)
     val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
 
     // Stride send lookup req here
@@ -174,37 +191,40 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val stream_lookup_resp = Output(Bool())
   })
 
-  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
+  val array  = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
   val valids = RegInit(VecInit(Seq.fill(BIT_VEC_ARRAY_SIZE)(false.B)))
 
-  def reset_array(i: Int): Unit = {
+  def reset_array(i: Int): Unit =
     valids(i) := false.B
-    //only need to rest control signals for firendly area
+    // only need to rest control signals for firendly area
     // array(i).reset(i)
-  }
 
   val replacement = ReplacementPolicy.fromString("plru", BIT_VEC_ARRAY_SIZE)
 
   // s0: generate region tag, parallel match
-  val s0_can_accept = Wire(Bool())
-  val s0_valid = io.train_req.fire
-  val s0_pc    = io.train_req.bits.pc
-  val s0_vaddr = io.train_req.bits.vaddr
-  val s0_miss  = io.train_req.bits.miss
-  val s0_pfHit = io.train_req.bits.pfHitStream
-  val s0_region_bits = get_region_bits(s0_vaddr)
-  val s0_region_tag = get_region_tag(s0_vaddr)
-  val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
+  val s0_can_accept           = Wire(Bool())
+  val s0_valid                = io.train_req.fire
+  val s0_pc                   = io.train_req.bits.pc
+  val s0_vaddr                = io.train_req.bits.vaddr
+  val s0_miss                 = io.train_req.bits.miss
+  val s0_pfHit                = io.train_req.bits.pfHitStream
+  val s0_region_bits          = get_region_bits(s0_vaddr)
+  val s0_region_tag           = get_region_tag(s0_vaddr)
+  val s0_region_tag_plus_one  = get_region_tag(s0_vaddr) + 1.U
   val s0_region_tag_minus_one = get_region_tag(s0_vaddr) - 1.U
   val s0_region_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag) }
-  val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_plus_one) }
-  val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_minus_one) }
-  val s0_hit = Cat(s0_region_tag_match_vec).orR
-  val s0_plus_one_hit = Cat(s0_region_tag_plus_one_match_vec).orR
-  val s0_minus_one_hit = Cat(s0_region_tag_minus_one_match_vec).orR
-  val s0_hit_vec = VecInit(s0_region_tag_match_vec).asUInt
-  val s0_index = Mux(s0_hit, OHToUInt(s0_hit_vec), replacement.way)
-  val s0_plus_one_index = OHToUInt(VecInit(s0_region_tag_plus_one_match_vec).asUInt)
+  val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) =>
+    e.tag_match(v, s0_valid, s0_region_tag_plus_one)
+  }
+  val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) =>
+    e.tag_match(v, s0_valid, s0_region_tag_minus_one)
+  }
+  val s0_hit             = Cat(s0_region_tag_match_vec).orR
+  val s0_plus_one_hit    = Cat(s0_region_tag_plus_one_match_vec).orR
+  val s0_minus_one_hit   = Cat(s0_region_tag_minus_one_match_vec).orR
+  val s0_hit_vec         = VecInit(s0_region_tag_match_vec).asUInt
+  val s0_index           = Mux(s0_hit, OHToUInt(s0_hit_vec), replacement.way)
+  val s0_plus_one_index  = OHToUInt(VecInit(s0_region_tag_plus_one_match_vec).asUInt)
   val s0_minus_one_index = OHToUInt(VecInit(s0_region_tag_minus_one_match_vec).asUInt)
   io.train_req.ready := s0_can_accept
 
@@ -212,10 +232,14 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     replacement.access(s0_index)
   }
 
-  val stream_pf_train_debug_table = ChiselDB.createTable("StreamTrainTraceTable" + p(XSCoreParamsKey).HartId.toString, new StreamTrainTraceEntry, basicDB = false)
+  val stream_pf_train_debug_table = ChiselDB.createTable(
+    "StreamTrainTraceTable" + p(XSCoreParamsKey).HartId.toString,
+    new StreamTrainTraceEntry,
+    basicDB = false
+  )
 
   val spf_log_enable = s0_valid
-  val spf_log_data = Wire(new StreamTrainTraceEntry)
+  val spf_log_data   = Wire(new StreamTrainTraceEntry)
 
   // WARNING: the type here only indicates trigger by stream, not saying it's sink
   spf_log_data.Type := MemReqSource.Prefetch2L2Stream.id.U
@@ -225,9 +249,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     array(s0_index).trigger_full_va
   )
   spf_log_data.CurAddr := s0_vaddr
-  spf_log_data.Offset := DontCare
-  spf_log_data.Score := DontCare
-  spf_log_data.Miss := io.train_req.bits.miss
+  spf_log_data.Offset  := DontCare
+  spf_log_data.Score   := DontCare
+  spf_log_data.Miss    := io.train_req.bits.miss
 
   stream_pf_train_debug_table.log(
     data = spf_log_data,
@@ -238,62 +262,97 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   )
 
   assert(!s0_valid || PopCount(VecInit(s0_region_tag_match_vec)) <= 1.U, "req region should match no more than 1 entry")
-  assert(!s0_valid || PopCount(VecInit(s0_region_tag_plus_one_match_vec)) <= 1.U, "req region plus 1 should match no more than 1 entry")
-  assert(!s0_valid || PopCount(VecInit(s0_region_tag_minus_one_match_vec)) <= 1.U, "req region minus 1 should match no more than 1 entry")
-  assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
-  assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
-  assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
+  assert(
+    !s0_valid || PopCount(VecInit(s0_region_tag_plus_one_match_vec)) <= 1.U,
+    "req region plus 1 should match no more than 1 entry"
+  )
+  assert(
+    !s0_valid || PopCount(VecInit(s0_region_tag_minus_one_match_vec)) <= 1.U,
+    "req region minus 1 should match no more than 1 entry"
+  )
+  assert(
+    !s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)),
+    "region and region plus 1 index match failed"
+  )
+  assert(
+    !s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)),
+    "region and region minus 1 index match failed"
+  )
+  assert(
+    !s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)),
+    "region plus 1 and region minus 1 index match failed"
+  )
+  assert(
+    !(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(
+      replacement.way,
+      s0_valid
+    )),
+    "replacement error"
+  )
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
-  for(i <- 0 until (1 << s0_hit_pattern_vec.size)) {
+  for (i <- 0 until (1 << s0_hit_pattern_vec.size)) {
     XSPerfAccumulate(s"s0_hit_pattern_${toBinary(i)}", (VecInit(s0_hit_pattern_vec).asUInt === i.U) && s0_valid)
   }
-  XSPerfAccumulate("s0_replace_the_neighbor", s0_valid && !s0_hit && ((s0_plus_one_hit && (s0_index === s0_plus_one_index)) || (s0_minus_one_hit && (s0_index === s0_minus_one_index))))
+  XSPerfAccumulate(
+    "s0_replace_the_neighbor",
+    s0_valid && !s0_hit && ((s0_plus_one_hit && (s0_index === s0_plus_one_index)) || (s0_minus_one_hit && (s0_index === s0_minus_one_index)))
+  )
   XSPerfAccumulate("s0_req_valid", io.train_req.valid)
   XSPerfAccumulate("s0_req_cannot_accept", io.train_req.valid && !io.train_req.ready)
 
   val ratio_const = Constantin.createRecord(s"l2DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L2_DEPTH_RATIO)
-  val ratio = ratio_const(3, 0)
+  val ratio       = ratio_const(3, 0)
 
   val l3_ratio_const = Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
-  val l3_ratio = l3_ratio_const(3, 0)
+  val l3_ratio       = l3_ratio_const(3, 0)
 
   // s1: alloc or update
-  val s1_valid = GatedValidRegNext(s0_valid)
-  val s1_index = RegEnable(s0_index, s0_valid)
-  val s1_pc    = RegEnable(s0_pc, s0_valid)
-  val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
-  val s1_miss  = RegEnable(s0_miss, s0_valid)
-  val s1_pfHit = RegEnable(s0_pfHit, s0_valid)
-  val s1_plus_one_index = RegEnable(s0_plus_one_index, s0_valid)
+  val s1_valid           = GatedValidRegNext(s0_valid)
+  val s1_index           = RegEnable(s0_index, s0_valid)
+  val s1_pc              = RegEnable(s0_pc, s0_valid)
+  val s1_vaddr           = RegEnable(s0_vaddr, s0_valid)
+  val s1_miss            = RegEnable(s0_miss, s0_valid)
+  val s1_pfHit           = RegEnable(s0_pfHit, s0_valid)
+  val s1_plus_one_index  = RegEnable(s0_plus_one_index, s0_valid)
   val s1_minus_one_index = RegEnable(s0_minus_one_index, s0_valid)
-  val s1_hit = RegEnable(s0_hit, s0_valid)
-  val s1_plus_one_hit = if(ENABLE_STRICT_ACTIVE_DETECTION)
-                            RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active && (array(s1_plus_one_index).cnt >= ACTIVE_THRESHOLD.U)
-                        else
-                            RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active
-  val s1_minus_one_hit = if(ENABLE_STRICT_ACTIVE_DETECTION)
-                            RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active && (array(s1_minus_one_index).cnt >= ACTIVE_THRESHOLD.U)
-                        else
-                            RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
-  val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
+  val s1_hit             = RegEnable(s0_hit, s0_valid)
+  val s1_plus_one_hit = if (ENABLE_STRICT_ACTIVE_DETECTION)
+    RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active && (array(
+      s1_plus_one_index
+    ).cnt >= ACTIVE_THRESHOLD.U)
+  else
+    RegEnable(s0_plus_one_hit, s0_valid) && array(s1_plus_one_index).active
+  val s1_minus_one_hit = if (ENABLE_STRICT_ACTIVE_DETECTION)
+    RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active && (array(
+      s1_minus_one_index
+    ).cnt >= ACTIVE_THRESHOLD.U)
+  else
+    RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
+  val s1_region_tag  = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
-  val s1_alloc = s1_valid && !s1_hit
-  val s1_update = s1_valid && s1_hit
-  val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
-  val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_alloc       = s1_valid && !s1_hit
+  val s1_update      = s1_valid && s1_hit
+  val s1_pf_l1_incr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l1_decr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_incr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l2_decr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_incr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_decr_vaddr =
+    Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
   val strict_trigger_const = Constantin.createRecord(s"StreamStrictTrigger_${p(XSCoreParamsKey).HartId}", initValue = 1)
   // If use strict triggering mode, the stream prefetcher will only trigger prefetching
   // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
   val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
+  val s1_can_send_pf =
+    Mux(s1_update, !(array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR, true.B) && s1_can_trigger
   s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
 
   when(s1_alloc) {
@@ -305,14 +364,15 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
       alloc_active = s1_plus_one_hit || s1_minus_one_hit,
       alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid),
       alloc_full_vaddr = RegEnable(s0_vaddr, s0_valid)
-      )
+    )
 
   }.elsewhen(s1_update) {
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
     array(s1_index).update(
       update_bit_vec = UIntToOH(s1_region_bits),
-      update_active = s1_plus_one_hit || s1_minus_one_hit)
+      update_active = s1_plus_one_hit || s1_minus_one_hit
+    )
   }
 
   XSPerfAccumulate("s1_alloc", s1_alloc)
@@ -321,26 +381,26 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s1_active_minus_one_hit", s1_valid && s1_minus_one_hit)
 
   // s2: trigger prefetch if hit active bit vector, compute meta of prefetch req
-  val s2_valid = GatedValidRegNext(s1_valid)
-  val s2_index = RegEnable(s1_index, s1_valid)
-  val s2_pc    = RegEnable(s1_pc, s1_valid)
-  val s2_vaddr = RegEnable(s1_vaddr, s1_valid)
-  val s2_region_bits = RegEnable(s1_region_bits, s1_valid)
-  val s2_region_tag = RegEnable(s1_region_tag, s1_valid)
+  val s2_valid            = GatedValidRegNext(s1_valid)
+  val s2_index            = RegEnable(s1_index, s1_valid)
+  val s2_pc               = RegEnable(s1_pc, s1_valid)
+  val s2_vaddr            = RegEnable(s1_vaddr, s1_valid)
+  val s2_region_bits      = RegEnable(s1_region_bits, s1_valid)
+  val s2_region_tag       = RegEnable(s1_region_tag, s1_valid)
   val s2_pf_l1_incr_vaddr = RegEnable(s1_pf_l1_incr_vaddr, s1_valid)
   val s2_pf_l1_decr_vaddr = RegEnable(s1_pf_l1_decr_vaddr, s1_valid)
   val s2_pf_l2_incr_vaddr = RegEnable(s1_pf_l2_incr_vaddr, s1_valid)
   val s2_pf_l2_decr_vaddr = RegEnable(s1_pf_l2_decr_vaddr, s1_valid)
   val s2_pf_l3_incr_vaddr = RegEnable(s1_pf_l3_incr_vaddr, s1_valid)
   val s2_pf_l3_decr_vaddr = RegEnable(s1_pf_l3_decr_vaddr, s1_valid)
-  val s2_can_send_pf = RegEnable(s1_can_send_pf, s1_valid)
-  val s2_active = array(s2_index).active
-  val s2_decr_mode = array(s2_index).decr_mode
-  val s2_l1_vaddr = Mux(s2_decr_mode, s2_pf_l1_decr_vaddr, s2_pf_l1_incr_vaddr)
-  val s2_l2_vaddr = Mux(s2_decr_mode, s2_pf_l2_decr_vaddr, s2_pf_l2_incr_vaddr)
-  val s2_l3_vaddr = Mux(s2_decr_mode, s2_pf_l3_decr_vaddr, s2_pf_l3_incr_vaddr)
-  val s2_will_send_pf = s2_valid && s2_active && s2_can_send_pf
-  val s2_pf_req_valid = s2_will_send_pf && io.enable
+  val s2_can_send_pf      = RegEnable(s1_can_send_pf, s1_valid)
+  val s2_active           = array(s2_index).active
+  val s2_decr_mode        = array(s2_index).decr_mode
+  val s2_l1_vaddr         = Mux(s2_decr_mode, s2_pf_l1_decr_vaddr, s2_pf_l1_incr_vaddr)
+  val s2_l2_vaddr         = Mux(s2_decr_mode, s2_pf_l2_decr_vaddr, s2_pf_l2_incr_vaddr)
+  val s2_l3_vaddr         = Mux(s2_decr_mode, s2_pf_l3_decr_vaddr, s2_pf_l3_incr_vaddr)
+  val s2_will_send_pf     = s2_valid && s2_active && s2_can_send_pf
+  val s2_pf_req_valid     = s2_will_send_pf && io.enable
   val s2_pf_l1_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l1_vaddr,
@@ -350,7 +410,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     source = L1_HW_PREFETCH_STREAM,
     t_pc = s2_pc,
     t_va = s2_vaddr
-    )
+  )
   val s2_pf_l2_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l2_vaddr,
@@ -360,7 +420,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     source = L1_HW_PREFETCH_STREAM,
     t_pc = s2_pc,
     t_va = s2_vaddr
-    )
+  )
   val s2_pf_l3_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l3_vaddr,
@@ -370,7 +430,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     source = L1_HW_PREFETCH_STREAM,
     t_pc = s2_pc,
     t_va = s2_vaddr
-    )
+  )
 
   XSPerfAccumulate("s2_valid", s2_valid)
   XSPerfAccumulate("s2_will_not_send_pf", s2_valid && !s2_will_send_pf)
@@ -379,27 +439,27 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   // s3: send the l1 prefetch req out
   val s3_pf_l1_valid = GatedValidRegNext(s2_pf_req_valid)
-  val s3_pf_l1_bits = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
+  val s3_pf_l1_bits  = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
   val s3_pf_l2_valid = GatedValidRegNext(s2_pf_req_valid)
-  val s3_pf_l2_bits = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
-  val s3_pf_l3_bits = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
+  val s3_pf_l2_bits  = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
+  val s3_pf_l3_bits  = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
 
   XSPerfAccumulate("s3_pf_sent", s3_pf_l1_valid)
 
   // s4: send the l2 prefetch req out
   val s4_pf_l2_valid = GatedValidRegNext(s3_pf_l2_valid)
-  val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
-  val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
+  val s4_pf_l2_bits  = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
+  val s4_pf_l3_bits  = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
   val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = false)
   // s5: send the l3 prefetch req out
   val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
-  val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
+  val s5_pf_l3_bits  = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
 
-  io.l1_prefetch_req.valid := s3_pf_l1_valid
-  io.l1_prefetch_req.bits := s3_pf_l1_bits
+  io.l1_prefetch_req.valid    := s3_pf_l1_valid
+  io.l1_prefetch_req.bits     := s3_pf_l1_bits
   io.l2_l3_prefetch_req.valid := s4_pf_l2_valid || s5_pf_l3_valid
-  io.l2_l3_prefetch_req.bits := Mux(s4_pf_l2_valid, s4_pf_l2_bits, s5_pf_l3_bits)
+  io.l2_l3_prefetch_req.bits  := Mux(s4_pf_l2_valid, s4_pf_l2_bits, s5_pf_l3_bits)
 
   XSPerfAccumulate("s4_pf_sent", s4_pf_l2_valid)
   XSPerfAccumulate("s5_pf_sent", !s4_pf_l2_valid && s5_pf_l3_valid)
@@ -409,32 +469,44 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // S0: Stride send req
   val s0_lookup_valid = io.stream_lookup_req.valid
   val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
-  val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
+  val s0_lookup_tag   = get_region_tag(s0_lookup_vaddr)
   // S1: match
-  val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
-  val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
+  val s1_lookup_valid         = GatedValidRegNext(s0_lookup_valid)
+  val s1_lookup_tag           = RegEnable(s0_lookup_tag, s0_lookup_valid)
   val s1_lookup_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s1_lookup_valid, s1_lookup_tag) }
-  val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
-  val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
+  val s1_lookup_hit           = VecInit(s1_lookup_tag_match_vec).asUInt.orR
+  val s1_lookup_index         = OHToUInt(VecInit(s1_lookup_tag_match_vec))
   // S2: read active out
-  val s2_lookup_valid = GatedValidRegNext(s1_lookup_valid)
-  val s2_lookup_hit = RegEnable(s1_lookup_hit, s1_lookup_valid)
-  val s2_lookup_index = RegEnable(s1_lookup_index, s1_lookup_valid)
+  val s2_lookup_valid  = GatedValidRegNext(s1_lookup_valid)
+  val s2_lookup_hit    = RegEnable(s1_lookup_hit, s1_lookup_valid)
+  val s2_lookup_index  = RegEnable(s1_lookup_index, s1_lookup_valid)
   val s2_lookup_active = array(s2_lookup_index).active
   // S3: send back to Stride
-  val s3_lookup_valid = GatedValidRegNext(s2_lookup_valid)
-  val s3_lookup_hit = RegEnable(s2_lookup_hit, s2_lookup_valid)
+  val s3_lookup_valid  = GatedValidRegNext(s2_lookup_valid)
+  val s3_lookup_hit    = RegEnable(s2_lookup_hit, s2_lookup_valid)
   val s3_lookup_active = RegEnable(s2_lookup_active, s2_lookup_valid)
   io.stream_lookup_resp := s3_lookup_valid && s3_lookup_hit && s3_lookup_active
 
   // reset meta to avoid muti-hit problem
-  for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
+  for (i <- 0 until BIT_VEC_ARRAY_SIZE) {
     when(GatedValidRegNext(io.flush)) {
       reset_array(i)
     }
   }
 
   XSPerfHistogram("bit_vector_active", PopCount(VecInit(array.map(_.active)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
-  XSPerfHistogram("bit_vector_decr_mode", PopCount(VecInit(array.map(_.decr_mode)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
-  XSPerfAccumulate("hash_conflict", s0_valid && s2_valid && (s0_region_tag =/= s2_region_tag) && (region_hash_tag(s0_region_tag) === region_hash_tag(s2_region_tag)))
+  XSPerfHistogram(
+    "bit_vector_decr_mode",
+    PopCount(VecInit(array.map(_.decr_mode)).asUInt),
+    true.B,
+    0,
+    BIT_VEC_ARRAY_SIZE,
+    1
+  )
+  XSPerfAccumulate(
+    "hash_conflict",
+    s0_valid && s2_valid && (s0_region_tag =/= s2_region_tag) && (region_hash_tag(s0_region_tag) === region_hash_tag(
+      s2_region_tag
+    ))
+  )
 }

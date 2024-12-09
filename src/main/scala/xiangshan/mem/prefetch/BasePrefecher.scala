@@ -21,23 +21,25 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.backend._
+import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.LdPrefetchTrainBundle
+import xiangshan.mem.StPrefetchTrainBundle
 
 class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
-  val addr = UInt(PAddrBits.W)
+  val addr   = UInt(PAddrBits.W)
   val source = UInt(MemReqSource.reqSourceBits.W)
 }
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
-  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
-  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
+  val ld_in   = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
+  val st_in   = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
-  val l1_req = DecoupledIO(new L1PrefetchReq())
-  val l2_req = ValidIO(new L2PrefetchReq())
-  val l3_req = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
-  val enable = Input(Bool())
+  val l1_req  = DecoupledIO(new L1PrefetchReq())
+  val l2_req  = ValidIO(new L2PrefetchReq())
+  val l3_req  = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
+  val enable  = Input(Bool())
 }
 
 class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {

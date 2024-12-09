@@ -18,18 +18,18 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
 import utility._
+import utils._
+import xiangshan._
 import xiangshan.cache._
 
 class MaskedSyncDataModuleTemplate[T <: Data](
-  gen: T,
-  numEntries: Int,
-  numRead: Int,
-  numWrite: Int,
-  numMRead: Int = 0,
-  numMWrite: Int = 0
+    gen:        T,
+    numEntries: Int,
+    numRead:    Int,
+    numWrite:   Int,
+    numMRead:   Int = 0,
+    numMWrite:  Int = 0
 ) extends Module {
   val io = IO(new Bundle {
     // address indexed sync read
@@ -61,7 +61,7 @@ class MaskedSyncDataModuleTemplate[T <: Data](
 
   // write ports (with priorities)
   for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
+    when(io.wen(i)) {
       data(io.waddr(i)) := io.wdata(i)
     }
   }
@@ -69,29 +69,27 @@ class MaskedSyncDataModuleTemplate[T <: Data](
   // masked write
   for (j <- 0 until numEntries) {
     val wen = VecInit((0 until numMWrite).map(i => io.mwmask(i)(j))).asUInt.orR
-    when (wen) {
-      data(j) := VecInit((0 until numMWrite).map(i => {
-        Mux(io.mwmask(i)(j), io.mwdata(i), 0.U).asUInt
-      })).reduce(_ | _)
+    when(wen) {
+      data(j) := VecInit((0 until numMWrite).map(i => Mux(io.mwmask(i)(j), io.mwdata(i), 0.U).asUInt)).reduce(_ | _)
     }
   }
 
   // DataModuleTemplate should not be used when there're any write conflicts
   for (i <- 0 until numWrite) {
-    for (j <- i+1 until numWrite) {
+    for (j <- i + 1 until numWrite) {
       assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
     }
   }
 }
 
 class MaskedBankedSyncDataModuleTemplate[T <: Data](
-  gen: T,
-  numEntries: Int,
-  numRead: Int,
-  numWrite: Int,
-  numMRead: Int = 0,
-  numMWrite: Int = 0,
-  numWBanks: Int = 2
+    gen:        T,
+    numEntries: Int,
+    numRead:    Int,
+    numWrite:   Int,
+    numMRead:   Int = 0,
+    numMWrite:  Int = 0,
+    numWBanks:  Int = 2
 ) extends Module {
   val io = IO(new Bundle {
     // address indexed sync read
@@ -129,15 +127,14 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
 
   val waddr_dec = io.waddr.map(a => UIntToOH(a))
 
-  def selectBankMask(in: UInt, bank: Int): UInt = {
+  def selectBankMask(in: UInt, bank: Int): UInt =
     in((bank + 1) * numEntryPerBank - 1, bank * numEntryPerBank)
-  }
 
   for (bank <- 0 until numWBanks) {
     // write ports
     // s0: write to bank level buffer
     val s0_bank_waddr_dec = waddr_dec.map(a => selectBankMask(a, bank))
-    val s0_bank_write_en = io.wen.zip(s0_bank_waddr_dec).map(w => w._1 && w._2.orR)
+    val s0_bank_write_en  = io.wen.zip(s0_bank_waddr_dec).map(w => w._1 && w._2.orR)
     s0_bank_waddr_dec.zipWithIndex.map(a =>
       a._1.suggestName("s0_bank_waddr_dec" + bank + "_" + a._2)
     )
@@ -146,8 +143,8 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     )
     // s1: write data to entries
     val s1_bank_waddr_dec = s0_bank_waddr_dec.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
-    val s1_bank_wen = RegNext(VecInit(s0_bank_write_en))
-    val s1_wdata = io.wdata.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
+    val s1_bank_wen       = RegNext(VecInit(s0_bank_write_en))
+    val s1_wdata          = io.wdata.zip(s0_bank_write_en).map(w => RegEnable(w._1, w._2))
     s1_bank_waddr_dec.zipWithIndex.map(a =>
       a._1.suggestName("s1_bank_waddr_dec" + bank + "_" + a._2)
     )
@@ -159,7 +156,7 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     )
     // masked write ports
     // s0: write to bank level buffer
-    val s0_bank_mwmask = io.mwmask.map(a => selectBankMask(a.asUInt, bank))
+    val s0_bank_mwmask    = io.mwmask.map(a => selectBankMask(a.asUInt, bank))
     val s0_bank_mwrite_en = s0_bank_mwmask.map(w => w.orR)
     s0_bank_mwmask.zipWithIndex.map(a =>
       a._1.suggestName("s0_bank_mwmask" + bank + "_" + a._2)
@@ -169,7 +166,7 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     )
     // s1: write data to entries
     val s1_bank_mwmask = s0_bank_mwmask.map(a => RegNext(a))
-    val s1_mwdata = io.mwdata.zip(s0_bank_mwrite_en).map(w => RegEnable(w._1, w._2))
+    val s1_mwdata      = io.mwdata.zip(s0_bank_mwrite_en).map(w => RegEnable(w._1, w._2))
     s1_bank_mwmask.zipWithIndex.map(a =>
       a._1.suggestName("s1_bank_mwmask" + bank + "_" + a._2)
     )
@@ -181,15 +178,15 @@ class MaskedBankedSyncDataModuleTemplate[T <: Data](
     for (entry <- 0 until numEntryPerBank) {
       // write ports
       val s1_entry_write_en_vec = s1_bank_wen.zip(s1_bank_waddr_dec).map(w => w._1 && w._2(entry))
-      val s1_entry_write_en = VecInit(s1_entry_write_en_vec).asUInt.orR
-      val s1_entry_write_data = Mux1H(s1_entry_write_en_vec, s1_wdata)
+      val s1_entry_write_en     = VecInit(s1_entry_write_en_vec).asUInt.orR
+      val s1_entry_write_data   = Mux1H(s1_entry_write_en_vec, s1_wdata)
       // masked write ports
       val s1_bank_mwrite_en_vec = s1_bank_mwmask.map(_(entry))
-      val s1_bank_mwrite_en = VecInit(s1_bank_mwrite_en_vec).asUInt.orR
-      val s1_bank_mwrite_data = Mux1H(s1_bank_mwrite_en_vec, s1_mwdata)
-      when (s1_entry_write_en || s1_bank_mwrite_en) {
+      val s1_bank_mwrite_en     = VecInit(s1_bank_mwrite_en_vec).asUInt.orR
+      val s1_bank_mwrite_data   = Mux1H(s1_bank_mwrite_en_vec, s1_mwdata)
+      when(s1_entry_write_en || s1_bank_mwrite_en) {
         data(bank * numEntryPerBank + entry) := Mux1H(
-          Seq(s1_entry_write_en, s1_bank_mwrite_en), 
+          Seq(s1_entry_write_en, s1_bank_mwrite_en),
           Seq(s1_entry_write_data, s1_bank_mwrite_data)
         )
       }
