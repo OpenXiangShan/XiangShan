@@ -148,7 +148,7 @@ class CtrlBlockImp(
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
-  val intCanCompress = intScheWbData.filter(_.bits.params.CanCompress)
+  val staScheWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreAddrFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
@@ -157,22 +157,23 @@ class CtrlBlockImp(
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
-    val isIntSche = intCanCompress.contains(x)
+    val isIntSche = intScheWbData.contains(x)
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
     val isi2v = i2vWbData.contains(x)
     val isf2v = f2vWbData.contains(x)
+    val isStaSche = staScheWbData.contains(x)
     val canSameRobidxWbData = if(isVfSche) {
       i2vWbData ++ f2vWbData ++ vfScheWbData
     } else if(isi2v) {
-      intCanCompress ++ fpScheWbData ++ vfScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData ++ staScheWbData
     } else if (isf2v) {
-      intCanCompress ++ fpScheWbData ++ vfScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData ++ staScheWbData
     } else if (isIntSche) {
-      intCanCompress ++ fpScheWbData
+      intScheWbData ++ fpScheWbData ++ staScheWbData
     } else if (isFpSche) {
-      intCanCompress ++ fpScheWbData
+      intScheWbData ++ fpScheWbData ++ staScheWbData
     }  else if (isMemVload) {
       memVloadWbData
     } else {
