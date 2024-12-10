@@ -77,7 +77,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = StorePipelineWidth
+    numCamPort = StorePipelineWidth,
+    clkGateEntrySize = clkGateEntrySize
   ))
   paddrModule.io := DontCare
   val maskModule = Module(new LqMaskSplitModule(
@@ -87,7 +88,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = StorePipelineWidth
+    numCamPort = StorePipelineWidth,
+    clkGateEntrySize = clkGateEntrySize
   ))
   maskModule.io := DontCare
   val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))

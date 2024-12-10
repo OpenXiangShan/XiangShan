@@ -299,8 +299,8 @@ class LqPAddrSplitModule[T <: UInt](
   numWrite: Int,
   numWBank: Int,
   numWDelay: Int = 1,
-  numCamPort: Int = 1
-  )(implicit p: Parameters) extends XSModule
+  numCamPort: Int = 1,
+  clkGateEntrySize: Int)(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
 {
   val io = IO(new Bundle() {
@@ -320,7 +320,7 @@ class LqPAddrSplitModule[T <: UInt](
     val releaseViolationMmask = Output(Vec(numCamPort, Vec(numEntries, Bool()))) // cam result mask result
   })
   
-  def clkGateEntrySize = 40
+  // def clkGateEntrySize = 40
   val paddrModule_low = Module(new LqPAddrModule(
     gen = gen,
     numEntries = clkGateEntrySize,
@@ -401,7 +401,8 @@ class LqMaskSplitModule[T <: UInt](
   numWrite: Int,
   numWBank: Int,
   numWDelay: Int = 1,
-  numCamPort: Int = 1
+  numCamPort: Int = 1,
+  clkGateEntrySize: Int
   )(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
 {

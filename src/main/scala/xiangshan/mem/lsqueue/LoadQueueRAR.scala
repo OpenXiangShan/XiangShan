@@ -61,7 +61,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  PAddr       : physical address.
   //  Released    : DCache released.
   //
-  def clkGateEntrySize = 40
+  def clkGateEntrySize = 56
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrSplitModule(
@@ -71,7 +71,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = LoadPipelineWidth
+    numCamPort = LoadPipelineWidth,
+    clkGateEntrySize = clkGateEntrySize
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
