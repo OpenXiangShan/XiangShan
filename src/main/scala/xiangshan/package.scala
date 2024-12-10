@@ -834,6 +834,7 @@ package object xiangshan {
     // def singleStep          = 14
     def storePageFault      = 15
     def doubleTrap          = 16
+    def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
     def virtualInstr        = 22

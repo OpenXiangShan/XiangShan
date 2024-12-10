@@ -79,6 +79,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // ecc error
     val error = Output(ValidIO(new L1CacheErrorInfo))
+    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
+    val pseudo_tag_error_inj_done = Output(Bool())
+    val pseudo_data_error_inj_done = Output(Bool())
 
     val prefetch_info = new Bundle {
       val naive = new Bundle {
@@ -191,13 +194,31 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
   // tag check
-  val meta_resp = io.meta_resp
-  val tag_resp = io.tag_resp.map(r => r(tagBits - 1, 0))
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
+  val meta_resp = io.meta_resp
+  // pseudo enc ecc tag
+  val pseudo_tag_toggle_mask = Mux(
+                                io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
+                                io.pseudo_error.bits(0).mask(tagBits - 1, 0),
+                                0.U(tagBits.W)
+                            )
+  val s1_enctag_resp = Wire(io.tag_resp.cloneType)
+  s1_enctag_resp.zip(io.tag_resp).map {
+    case (pseudo_enc, real_enc) =>
+    if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
+      val ecc = real_enc(encTagBits - 1, tagBits)
+      val toggleTag = real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask
+      pseudo_enc := Cat(ecc, toggleTag)
+    }  else {
+      pseudo_enc := real_enc
+    }
+  }
 
   // resp in s1
-  val s1_tag_match_way_dup_dc = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
-  val s1_tag_match_way_dup_lsu = wayMap((w: Int) => tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
+  val s1_tag_resp = s1_enctag_resp.map(encTag => encTag(tagBits - 1, 0))
+  val s1_tag_errors = wayMap((w: Int) => meta_resp(w).coh.isValid() && dcacheParameters.tagCode.decode(s1_enctag_resp(w)).error).asUInt
+  val s1_tag_match_way_dup_dc = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
+  val s1_tag_match_way_dup_lsu = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
   val s1_wpu_pred_valid = RegEnable(io.dwpu.resp(0).valid, s0_fire)
   val s1_wpu_pred_way_en = RegEnable(io.dwpu.resp(0).bits.s0_pred_way_en, s0_fire)
 
@@ -224,7 +245,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     io.dwpu.cfpred(0).s0_vaddr := s0_vaddr
     io.dwpu.cfpred(0).s1_vaddr := s1_vaddr
     // whether direct_map_way miss with valid tag value
-    io.dwpu.cfpred(0).s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way_num && tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
+    io.dwpu.cfpred(0).s1_dm_hit := wayMap((w: Int) => w.U === s1_direct_map_way_num && s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt.orR
   }else{
     io.dwpu.cfpred(0) := DontCare
   }
@@ -249,6 +270,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_match_dup_dc = ParallelORR(s1_tag_match_way_dup_dc)
   val s1_tag_match_dup_lsu = ParallelORR(s1_tag_match_way_dup_lsu)
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
+  io.pseudo_tag_error_inj_done := s1_fire && wayMap((w: Int) => meta_resp(w).coh.isValid()).asUInt.orR
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
@@ -289,7 +311,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.is128Req := s1_load128Req
 
   // check ecc error
-  val s1_encTag = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.tag_resp(w)))
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
 
   // --------------------------------------------------------------------------------
@@ -330,6 +351,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // hit, miss, nack, permission checking
   // dcache side tag match
+  val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
 
@@ -349,8 +371,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
-
-  val s2_encTag = RegEnable(s1_encTag, s1_fire)
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -388,10 +408,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   if(EnableTagEcc) {
-    s2_tag_error := dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
-  }else {
-    s2_tag_error := false.B
+    s2_tag_error := s2_tag_errors.orR // error reported by tag ecc check
   }
+  io.pseudo_data_error_inj_done := s2_fire && s2_hit && !io.bank_conflict_slow
+  io.pseudo_error.ready := false.B
 
   // send load miss to miss queue
   io.miss_req.valid := s2_miss_req_valid
