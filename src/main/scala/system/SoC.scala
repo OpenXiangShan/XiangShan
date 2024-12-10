@@ -75,8 +75,11 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  WFIClockGate: Boolean = false,
+  EnablePMU: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -97,7 +100,7 @@ trait HasSoCParameter {
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
-
+  val WFIClockGate = soc.WFIClockGate
   // L3 configurations
   val L3InnerBusWidth = soc.L3InnerBusWidth
   val L3BlockSize = soc.L3BlockSize
@@ -115,6 +118,7 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
+  val EnablePMU = soc.EnablePMU
 }
 
 trait HasPeripheralRanges {

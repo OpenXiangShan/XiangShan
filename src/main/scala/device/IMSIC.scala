@@ -152,3 +152,120 @@ class MsiInfoBundle(
 
   val info = UInt(MSI_INFO_WIDTH.W)
 }
+
+class PMU extends Module {
+  val io = IO(new Bundle {
+    // Inputs
+    val coreActive = Input(Bool())  // Core active signal
+    val coreWakeReq = Input(Bool()) // Core wake request signal
+
+    // Outputs
+    val coreReset = Output(Bool())  // Core reset output (active low)
+    val coreIsolate = Output(Bool()) // Core isolation output (active low)
+    val coreClken = Output(Bool())  // Core clock enable output (active low)
+    val coreHWstat = Output(UInt(8.W)) // Core hardware status output (POFF, PON, etc.)
+  })
+
+  // FSM states
+  val POFF     = "b00000001".U(8.W)  
+  val POFF_CLK = "b00000010".U(8.W)  
+  val POFF_ISO = "b00000100".U(8.W)  
+  val POFF_RST = "b00001000".U(8.W)  
+  val PON_ISO  = "b00100000".U(8.W)  
+  val PON_RST  = "b01000000".U(8.W)  
+  val PON      = "b10000000".U(8.W)  
+
+  // Define the FSM
+  val sPOFF :: sPOFF_CLK :: sPOFF_ISO :: sPOFF_RST :: sPON_ISO :: sPON_RST :: sPON :: Nil = Enum(7) 
+  val state = RegInit(sPON)
+
+  // Configurable delays in clock cycles (use appropriate values for custom design)
+  val PON_DLY_CLKEN_ISO = 5.U(8.W) // PowerOn Delay for clockEn -> Isolate
+  val PON_DLY_ISO_RST = 5.U(8.W) // PowerOn Delay for Isolate -> Reset 
+  val PON_DLY_ISO_CLKEN = 5.U(8.W) // PowerOff delay for Isolate -> clockEn
+  val PON_DLY_CLKEN_RST = 5.U(8.W) // PowerOff delay for clockEn -> Reset
+
+  // Delay counters (in clock cycles)
+  val delayCounter = RegInit(0.U(8.W)) 
+  val delayMax = 10.U 
+
+  // Control signals (active low)
+  val coreResetReg = RegInit(true.B) 
+  val coreIsolateReg = RegInit(true.B)
+  val coreClkenReg = RegInit(true.B)
+
+  // Output control signals
+  io.coreReset := coreResetReg
+  io.coreIsolate := coreIsolateReg
+  io.coreClken := coreClkenReg
+  io.coreHWstat := state
+
+  // FSM logic for power on/off sequence
+  switch(state) {
+    //Power Off Sequence
+    is(sPON) {
+      when(io.coreActive === false.B) {
+        state := sPOFF_CLK
+      }
+    }
+    is(sPOFF_CLK) {
+      // Step 1: Set coreClken = 0
+      coreClkenReg := false.B
+      delayCounter := PON_DLY_CLKEN_ISO
+      state := sPOFF_ISO
+    }
+    is(sPOFF_ISO) {
+      when(delayCounter === 0.U) {
+        // Step 2: Set coreIsolate =0 after PDN_DLY_CLKEN_ISO
+        delayCounter := PON_DLY_ISO_RST
+        coreIsolateReg := false.B
+        state := sPOFF_RST
+      }
+    }
+    is(sPOFF_RST) {
+      when(delayCounter === 0.U) {
+        // Step 3: Set coreReset =0 after PDN_DLY_ISO_RST
+        delayCounter := 0.U
+        coreResetReg := false.B
+        state := sPOFF
+      }
+    }
+
+    //Power On Sequence
+    is(sPOFF) {
+      // Power on sequence (coreWakeReq = 1)
+      when(io.coreWakeReq === true.B) {
+        // Step 1: Set coreIsolate = 1
+        coreIsolateReg := true.B
+        delayCounter := PON_DLY_ISO_CLKEN
+        state := sPON_ISO 
+      }
+    }
+    is(sPON_ISO) {
+      when(delayCounter === 0.U) {
+        // Step 2: Set coreClken =1 after PON_DLY_CLKEN_ISO
+        delayCounter := PON_DLY_CLKEN_RST
+        coreClkenReg := true.B
+        state := sPON_RST
+      }
+    }
+    is(sPON_RST) {
+      when(delayCounter === 0.U) {
+        // Step 3: Set coreReset =1 after PON_DLY_CLKEN_RST
+        delayCounter := 0.U
+        coreResetReg := true.B
+        state := sPON
+      }
+    }
+  }
+
+  // Delay counter management
+  when(delayCounter > 0.U) {
+    delayCounter := delayCounter - 1.U
+  }
+
+  //Physical control signals
+  val power_off = (state === sPOFF)
+  val nPOWRUP = power_off
+  val nISOLATE = ~power_off
+}

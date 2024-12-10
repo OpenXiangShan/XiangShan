@@ -139,9 +139,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     // input
     dontTouch(io)
-
-    core_with_l2.module.clock := clock
-    core_with_l2.module.reset := reset
+    val pmuReset = Wire(Bool())
+    val wfiClockEn = WireDefault(true.B)
+    val pmuClockEn = WireDefault(true.B)
+    val resetTile = reset.asBool || pmuReset
+    core_with_l2.module.clock := ClockGate(false.B, (wfiClockEn | pmuClockEn), clock)
+    core_with_l2.module.reset := resetTile.asAsyncReset
     core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
     core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
@@ -150,6 +153,81 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
+
+    /* Low power logic include:
+   * 1. Interrupt source parse
+   * 2. PPU-Core low power state transfer
+   * 3. WFI clock gating and wakeup
+   */
+
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sPOFFREQ :: Nil = Enum(4)
+//    val state = RegInit(sIDLE)
+//    val powerOff = Bool()
+
+    //Interrupt sources
+    val msip  = clint.head(0)
+    val mtip  = clint.head(1)
+    val meip  = plic.head(0)
+    val seip  = plic.last(0)
+    val nmi_31 = nmi.head(0)
+    val nmi_43 = nmi.head(1)
+    val msi_info_vld = wrapper.u_imsic_bus_top.module.o_msi_info_vld
+    val intAll = msip || mtip || meip || seip || nmi_31 || nmi_43 || msi_info_vld
+
+/*    // FSM stransfer
+    switch(state) {
+      is(sIDLE) {
+        when(core_with_l2.module.io.corePWRDNEn) {
+        state := sL2FLUSH  
+        }
+      }
+      is(sL2FLUSH) {
+        when(io.core_with_l2.module.io.l2FlushDone) {
+          when(core_with_l2.module.io.corePWRDNEn) {
+            state := sWAITWFI
+          }.otherwise {
+            state := sIDLE
+          }
+        }
+      }
+      is(sWAITWFI) {
+        when(core_with_l2.module.io.corePWRDNEn === false.B) {
+          state := sIDLE
+        }
+        when(core_with_l2.module.io.corePWRDNEn && core_with_l2.module.io.isWFI) {
+          state := sPOFFREQ
+        }
+      }
+      is(sPOFFREQ) {
+        powerOff := true.B
+      }
+    }
+ */
+    //PMU-module
+    if (EnablePMU) {
+      val pmu = withClockAndReset(soc_clock, soc_reset_sync)(Module(new PMU))
+//      pmu.io.coreActive := ~powerOff
+      pmu.io.coreActive := true.B
+      pmu.io.coreWakeReq := intAll //TODO constraint to external interrupt only
+      pmuClockEn := pmu.io.coreClken
+      pmuReset := pmu.io.coreReset
+    } else {
+      pmuClockEn := true.B
+      pmuReset := false.B
+    }
+  //Core in WFI -> gate clock -> interrupt/snoop -> recover clock
+    if (WFIClockGate) {
+      when(core_with_l2.module.io.cpu_halt || io.chi.rx.snp.flitpend){ //ToDo
+        wfiClockEn := false.B
+      }.elsewhen(intAll) {
+        wfiClockEn := true.B
+      }
+    }
+    else {
+      wfiClockEn := true.B
+    }
+
+    
 
     EnableClintAsyncBridge match {
       case Some(param) =>
@@ -184,3 +262,5 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
   lazy val module = new XSNoCTopImp(this)
 }
+
+
