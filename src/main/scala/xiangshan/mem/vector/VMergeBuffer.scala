@@ -19,6 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import utils._
 import utility._
 import xiangshan._
@@ -193,35 +194,6 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     dontTouch(mergedByPrevPortVec)
   }
 
-  // for exception, select exception, when multi port writeback exception, we need select oldest one
-  def selectOldest[T <: VecPipelineFeedbackIO](valid: Seq[Bool], bits: Seq[T], sel: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
-    assert(valid.length == bits.length)
-    assert(valid.length == sel.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits, sel)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1),
-        Mux(sel(0) < sel(1),
-            res(0), res(1)),
-        Mux(valid(0) && !valid(1), res(0), res(1)))
-
-      val oldidx = Mux(valid(0) && valid(1),
-        Mux(sel(0) < sel(1),
-          sel(0), sel(1)),
-        Mux(valid(0) && !valid(1), sel(0), sel(1)))
-      (Seq(oldest.valid), Seq(oldest.bits), Seq(oldidx))
-    } else {
-      val left  = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), sel.take(sel.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), sel.takeRight(sel.length - (sel.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2, left._3 ++ right._3)
-    }
-  }
-
   val pipeValid        = io.fromPipeline.map(_.valid)
   val pipeBits         = io.fromPipeline.map(_.bits)
   val wbElemIdx        = pipeBits.map(_.elemIdx)
@@ -245,7 +217,19 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entryVstart         = entry.vstart
     val entryElemIdx        = entry.elemIdx
 
-    val sel                    = selectOldest(mergePortMatrix(i), pipeBits, wbElemIdxInField)
+    // for exception, select exception, when multi port writeback exception, we need select oldest one
+    val bits = pipeBits.zip(wbElemIdxInField).map { case x =>
+      val out = Wire(new VecPipelineFeedbackIOWithElemIdx(isVStore))
+      out.viewAsSupertype(new VecPipelineFeedbackIO(isVStore)) := x._1
+      out.wbElemIdxInField := x._2
+      out
+    }
+    val sel = SelectOldest(mergePortMatrix(i), bits,
+      (a: VecPipelineFeedbackIOWithElemIdx,
+       b: VecPipelineFeedbackIOWithElemIdx) => {
+        Mux(a.wbElemIdxInField < b.wbElemIdxInField, a, b)
+      }
+    )
     val selPort                = sel._2
     val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec

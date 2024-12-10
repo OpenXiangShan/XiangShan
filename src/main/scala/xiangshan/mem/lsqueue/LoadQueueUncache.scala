@@ -528,15 +528,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *                     rollback req
    * 
    ******************************************************************/
-  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
-    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
-      (if (j < i) !xs(j).valid || compareVec(i)(j)
-      else if (j == i) xs(i).valid
-      else !xs(j).valid || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
   val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
     s2_enqueue(w) && !s2_enqValidVec(w)
   ))
@@ -554,7 +545,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
-  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = Wire(Valid(new Redirect))
   lastCycleRedirect.valid := RegNext(io.redirect.valid)

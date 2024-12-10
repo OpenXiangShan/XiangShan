@@ -299,9 +299,11 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
 }
 
-class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
+trait HasMicroOp { this: XSBundle =>
   val uop = new DynInst
 }
+
+class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle with HasMicroOp
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
   val flag = UInt(1.W)

@@ -136,6 +136,13 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
 }
 
+trait HasElemIdxInField { this: VLSUBundle =>
+  val wbElemIdxInField = UInt()
+}
+
+class VecPipelineFeedbackIOWithElemIdx(isVStore: Boolean = false)(implicit p: Parameters) extends
+  VecPipelineFeedbackIO(isVStore) with HasElemIdxInField
+
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
   val vaddr               = UInt(XLEN.W)
   val basevaddr           = UInt(VAddrBits.W)

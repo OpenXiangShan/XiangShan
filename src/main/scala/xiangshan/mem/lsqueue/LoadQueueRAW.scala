@@ -248,49 +248,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val lgSelectGroupSize = log2Ceil(SelectGroupSize)
   val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
 
-  def selectPartialOldest[T <: XSBundleWithMicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectPartialOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectPartialOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectPartialOldest(left._1 ++ right._1, left._2 ++ right._2)
-    }
-  }
-
-  def selectOldest[T <: XSBundleWithMicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
-
-    // group info
-    val selectValidGroups = valid.grouped(SelectGroupSize).toList
-    val selectBitsGroups = bits.grouped(SelectGroupSize).toList
-    // select logic
-    if (valid.length <= SelectGroupSize) {
-      val (selValid, selBits) = selectPartialOldest(valid, bits)
-      val selValidNext = GatedValidRegNext(selValid(0))
-      val selBitsNext = RegEnable(selBits(0), selValid(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
-    } else {
-      val select = (0 until numSelectGroups).map(g => {
-        val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
-        val selValidNext = RegNext(selValid(0))
-        val selBitsNext = RegEnable(selBits(0), selValid(0))
-        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
-      })
-      selectOldest(select.map(_._1), select.map(_._2))
-    }
-  }
-
   val storeIn = io.storeIn
 
   def detectRollback(i: Int) = {
@@ -312,7 +269,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     })
 
     // select logic
-    val lqSelect: (Seq[Bool], Seq[XSBundleWithMicroOp]) = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
+    val lqSelect: (Seq[Bool], Seq[XSBundleWithMicroOp]) = SelectOldestRobIdx(
+      valids = lqViolationSelVec,
+      bits = lqViolationSelUopExts,
+      groupSizeOpt = Some(SelectGroupSize),
+      flushOpt = Some(io.redirect)
+    )
 
     // select one inst
     val lqViolation = lqSelect._1(0)

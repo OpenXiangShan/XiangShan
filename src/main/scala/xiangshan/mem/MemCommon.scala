@@ -96,10 +96,107 @@ object shiftMaskToHigh {
   }
 }
 
+object SelectOldest {
+  def apply[T <: Bundle](
+    valids: Seq[Bool],
+    bits: Seq[T],
+    f: (T, T) => T,
+    groupSizeOpt: Option[Int] = None,
+    flushOpt: Option[Valid[Redirect]] = None
+  ): (Seq[Bool], Seq[T]) = {
+
+    val len = valids.length
+    /**
+      * When `groupSizeOpt` is defined, select oldest entry within the group size in a cycle and iterate the selection
+      * in the next cycle.
+      * When `flushOpt` is defined, the selected result needs to be flushed in each cycle.
+      * Therefore `flushOpt` can be defined only if `groupSizeOpt` is defined.
+      */
+    val needGroup = groupSizeOpt.isDefined
+    val needFlush = flushOpt.isDefined
+    require(valids.length == bits.length)
+    require(!needFlush || needGroup)
+    require(!needFlush || bits.head.isInstanceOf[HasMicroOp])
+
+    if (needGroup) {
+      val groupSize = groupSizeOpt.get
+      require(groupSize > 0)
+      val groups = scala.math.ceil(len.toFloat / groupSize).toInt
+
+      val validGroups = valids.grouped(groupSize).toList
+      val bitsGroups = bits.grouped(groupSize).toList
+      val selects = (0 until groups).map { case g =>
+        val (selValid, selBits) = apply(validGroups(g), bitsGroups(g), f)
+        val selValidNext = RegNext(selValid.head)
+        val selBitsNext = RegEnable(selBits.head, selValid.head)
+        val doFlush = flushOpt match {
+          case Some(r) => selBitsNext.asInstanceOf[HasMicroOp].uop.robIdx.needFlush(RegNext(r))
+          case None => false.B
+        }
+        (selValidNext && !doFlush, selBitsNext)
+      }
+      if (groups <= 1) (selects.map(_._1), selects.map(_._2))
+      else apply(selects.map(_._1), selects.map(_._2), f, groupSizeOpt, flushOpt)
+
+    } else {
+      if (len == 0 || len == 1) {
+        (valids, bits)
+      } else if (len == 2) {
+        val oldest = Mux(
+          valids(0) && valids(1),
+          f(bits(0), bits(1)),
+          Mux(valids(0) && !valids(1), bits(0), bits(1))
+        )
+        (Seq(valids(0) || valids(1)), Seq(oldest))
+      } else {
+        val left = apply(valids.take(len / 2), bits.take(len / 2), f)
+        val right = apply(valids.takeRight(len - (len / 2)), bits.takeRight(len - (len / 2)), f)
+        apply(left._1 ++ right._1, left._2 ++ right._2, f)
+      }
+    }
+  }
+}
+
+object SelectOldestRobIdx {
+  def apply[T <: Bundle](
+    valids: Seq[Bool],
+    bits: Seq[T],
+    groupSizeOpt: Option[Int] = None,
+    flushOpt: Option[Valid[Redirect]] = None
+  ): (Seq[Bool], Seq[T]) = {
+    require(bits.head.isInstanceOf[HasMicroOp])
+    SelectOldest(valids, bits,
+      (a: T, b: T) => {
+        val aRobIdx = a.asInstanceOf[HasMicroOp].uop.robIdx
+        val bRobIdx = b.asInstanceOf[HasMicroOp].uop.robIdx
+        Mux(aRobIdx > bRobIdx, b, a)
+      }, groupSizeOpt, flushOpt
+    )
+  }
+}
+
+object SelectOldestUopIdx {
+  def apply[T <: Bundle](
+    valids: Seq[Bool],
+    bits: Seq[T],
+    groupSizeOpt: Option[Int] = None,
+    flushOpt: Option[Valid[Redirect]] = None
+  ): (Seq[Bool], Seq[T]) = {
+    require(bits.head.isInstanceOf[HasMicroOp])
+    SelectOldest(valids, bits,
+      (a: T, b: T) => {
+        val au = a.asInstanceOf[HasMicroOp].uop
+        val bu = b.asInstanceOf[HasMicroOp].uop
+        Mux(au.robIdx > bu.robIdx || au.robIdx === bu.robIdx && au.uopIdx > bu.uopIdx, b, a)
+      }, groupSizeOpt, flushOpt
+    )
+  }
+}
+
 class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters
-  with HasVLSUParameters {
-  val uop = new DynInst
+  with HasVLSUParameters
+  with HasMicroOp {
   val vaddr = UInt(VAddrBits.W)
   // For exception vaddr generate
   val fullva = UInt(XLEN.W)

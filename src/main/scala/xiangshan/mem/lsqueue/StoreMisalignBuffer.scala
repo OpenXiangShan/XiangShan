@@ -64,35 +64,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SD -> 0xff.U
   ))
 
-  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T], index: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits, index)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      val resIndex = Seq.fill(2)(Wire(chiselTypeOf(index(0))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-        resIndex(i) := index(i)
-      }
-      val oldest = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
-        Mux(valid(0) && !valid(1), res(0), res(1)))
-
-      val oldestIndex = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), resIndex(1), resIndex(0)),
-        Mux(valid(0) && !valid(1), resIndex(0), resIndex(1)))
-      (Seq(oldest.valid), Seq(oldest.bits), Seq(oldestIndex))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), index.take(index.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), index.takeRight(index.length - (index.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2, left._3 ++ right._3)
-    }
-  }
-
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
     val req             = Vec(enqPortNum, Flipped(Decoupled(new LsPipelineBundle)))
@@ -135,11 +106,30 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val s1_valid = VecInit(io.req.map(x => x.valid))
 
   val s1_index = (0 until io.req.length).map(_.asUInt)
-  val reqSel = selectOldest(s1_valid, s1_req, s1_index)
+  val reqSel = ParallelOperation(s1_valid zip s1_req zip s1_index,
+    (a: ((Bool, LsPipelineBundle), UInt), b: ((Bool, LsPipelineBundle), UInt)) => {
+      val au = a._1._2.uop
+      val bu = b._1._2.uop
+      val aValid = a._1._1
+      val bValid = b._1._1
+      val bSel = au.robIdx > bu.robIdx || au.robIdx === bu.robIdx && au.uopIdx > bu.uopIdx
+      val bits = Mux(
+        aValid && bValid,
+        Mux(bSel, b._1._2, a._1._2),
+        Mux(aValid && !bValid, a._1._2, b._1._2)
+      )
+      val idx = Mux(
+        aValid && bValid,
+        Mux(bSel, b._2, a._2),
+        Mux(aValid && !bValid, a._2, b._2)
+      )
+      ((aValid || bValid, bits), idx)
+    }
+  )
 
-  val reqSelValid = reqSel._1(0)
-  val reqSelBits  = reqSel._2(0)
-  val reqSelPort  = reqSel._3(0)
+  val reqSelValid = reqSel._1._1
+  val reqSelBits  = reqSel._1._2
+  val reqSelPort  = reqSel._2
 
   val reqRedirect = reqSelBits.uop.robIdx.needFlush(io.redirect)
 
@@ -167,7 +157,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.req.zipWithIndex.map{
     case (reqPort, index) => reqPort.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
   }
-
 
   io.toVecStoreMergeBuffer.zipWithIndex.map{
     case (toStMB, index) => {
