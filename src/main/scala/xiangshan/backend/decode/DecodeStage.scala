@@ -229,7 +229,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   debug_globalCounter := debug_globalCounter + PopCount(io.out.map(_.fire))
 
   io.stallReason.in.backReason := io.stallReason.out.backReason
-  io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
+  io.stallReason.out.reason.zip(io.stallReason.in.reason).foreach { case (out, in) =>
     out := Mux(io.stallReason.out.backReason.valid,
                io.stallReason.out.backReason.bits,
                in)
