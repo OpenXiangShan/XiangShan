@@ -12,6 +12,7 @@ import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.{Redirect, XSBundle, XSModule}
 import xiangshan.SrcType.v0
 import xiangshan.backend.fu.vector.Bundles.Vstart
+import utility.PerfCCT
 
 class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
   val in = Flipped(DecoupledIO(gen))

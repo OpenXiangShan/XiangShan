@@ -95,6 +95,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   })
 
+  io.in.zipWithIndex.map { case (o, i) =>
+    PerfCCT.updateInstPos(o.bits.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
+  }
+
   // io alias
   private val dispatchCanAcc = io.out.head.ready
 
@@ -272,6 +276,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkIntSpecWen = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
+
+  io.out.zipWithIndex.foreach{ case (o, i) =>
+    o.bits.debug_seqNum := io.in(i).bits.debug_seqNum
+  }
 
   // uop calculation
   for (i <- 0 until RenameWidth) {

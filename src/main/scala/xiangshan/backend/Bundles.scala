@@ -52,6 +52,7 @@ object Bundles {
     val ftqPtr           = new FtqPtr
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
+    val debug_seqNum     = UInt(64.W)
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
@@ -66,6 +67,7 @@ object Bundles {
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
       this.isLastInFtqEntry := source.isLastInFtqEntry
+      this.debug_seqNum     := source.debug_seqNum
     }
   }
 
@@ -118,6 +120,7 @@ object Bundles {
     val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_seqNum    = UInt(64.W)
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -226,6 +229,7 @@ object Bundles {
     // Take snapshot at this CFI inst
     val snapshot        = Bool()
     val debugInfo       = new PerfDebugInfo
+    val debug_seqNum    = UInt(64.W)
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
     // Load wait is needed
@@ -641,6 +645,7 @@ object Bundles {
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
+    val debug_seqNum = UInt(64.W)
 
     def exuIdx = this.params.exuIdx
 
@@ -670,6 +675,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
+      this.debug_seqNum  := source.common.debug_seqNum    
       this.l1ExuOH       .foreach(_ := source.common.l1ExuOH.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
@@ -694,6 +700,7 @@ object Bundles {
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+
     }
   }
 
@@ -739,6 +746,7 @@ object Bundles {
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val debug_seqNum = UInt(64.W)
   }
 
   // ExuOutput + DynInst --> WriteBackBundle
@@ -759,6 +767,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
+    val debug_seqNum = UInt(64.W)
 
     this.wakeupSource = s"WB(${params.toString})"
 
@@ -780,6 +789,7 @@ object Bundles {
       this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
       this.debug := source.debug
       this.debugInfo := source.debugInfo
+      this.debug_seqNum := source.debug_seqNum
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
