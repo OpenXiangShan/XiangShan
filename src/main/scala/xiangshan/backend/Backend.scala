@@ -570,6 +570,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
     sink.bits.debug := source.bits.debug
     sink.bits.debugInfo := source.bits.uop.debugInfo
+    sink.bits.debug_seqNum := source.bits.uop.debug_seqNum
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
     sink.bits.predecodeInfo.foreach(_ := source.bits.uop.preDecodeInfo)
@@ -701,6 +702,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.ftqPtr         := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
     sink.bits.uop.ftqOffset      := source.bits.ftqOffset.getOrElse(0.U)
     sink.bits.uop.debugInfo      := source.bits.perfDebugInfo
+    sink.bits.uop.debug_seqNum   := source.bits.debug_seqNum
     sink.bits.uop.vpu            := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
     sink.bits.uop.preDecodeInfo  := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
     sink.bits.uop.numLsElem      := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
