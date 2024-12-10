@@ -103,6 +103,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val chi_llcBridge_opt = Option.when(enableCHI)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
+        outstandingDepth    = 64,
         axiMasterOrder      = EnumAXIMasterOrder.WriteAddress,
         readCompDMT         = false,
         writeCancelable     = false,
@@ -115,6 +116,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
+        outstandingDepth            = 32,
         axiMasterOrder              = EnumAXIMasterOrder.None,
         readCompDMT                 = false,
         writeCancelable             = false,
