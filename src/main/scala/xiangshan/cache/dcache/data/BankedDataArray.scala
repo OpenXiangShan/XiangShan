@@ -513,13 +513,13 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // readline port
   val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
+  val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.valid))
+  val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
+  val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))
   (0 until DCacheBanks).map(i => {
-    val r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
-    val rr_way_addr = RegEnable(r_way_addr, RegNext(io.readline.valid))
-    val r_div_addr = RegEnable(line_div_addr, io.readline.valid)
-    val rr_div_addr = RegEnable(r_div_addr, RegNext(io.readline.valid))
-    io.readline_resp(i) := read_result(r_div_addr)(i)(r_way_addr)
-    readline_error_delayed(i) := read_result(rr_div_addr)(i)(rr_way_addr).error_delayed
+    io.readline_resp(i) := read_result(readline_r_div_addr)(i)(readline_r_way_addr)
+    readline_error_delayed(i) := read_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
   })
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) && readline_error_delayed.asUInt.orR
 
@@ -769,13 +769,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read result: expose banked read result
   val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
+  val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.valid))
+  val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
+  val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))
   (0 until DCacheBanks).map(i => {
-    val r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
-    val rr_way_addr = RegEnable(r_way_addr, RegNext(io.readline.valid))
-    val r_div_addr = RegEnable(line_div_addr, io.readline.valid)
-    val rr_div_addr = RegEnable(r_div_addr, RegNext(io.readline.valid))
-    io.readline_resp(i) := bank_result(r_div_addr)(i)(r_way_addr)
-    readline_error_delayed(i) := bank_result(rr_div_addr)(i)(rr_way_addr).error_delayed
+    io.readline_resp(i) := bank_result(readline_r_div_addr)(i)(readline_r_way_addr)
+    readline_error_delayed(i) := bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
   })
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) && readline_error_delayed.asUInt.orR
 
