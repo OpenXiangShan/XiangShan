@@ -37,7 +37,6 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))
     val req           = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
-    val flushFrmMaBuf = Input(Bool())
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -67,7 +66,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
     req_valid := s2_enqueue.asUInt.orR
   } .elsewhen (s2_enqueue.asUInt.orR) {
-    req_valid := req_valid || true.B
+    req_valid := true.B
   }
 
   def selectOldest[T <: LqWriteBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
@@ -82,7 +81,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
       }
       val oldest = Mux(valid(0) && valid(1),
         Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
+          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
         Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
@@ -96,7 +95,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
 
   when (req_valid) {
     req := Mux(
-      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
+      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (req.uop.robIdx === reqSel._2(0).uop.robIdx && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
       reqSel._2(0),
       req)
   } .elsewhen (s2_enqueue.asUInt.orR) {
@@ -110,10 +109,6 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   io.exceptionAddr.vl     := req.uop.vpu.vl
   io.exceptionAddr.gpaddr := req.gpaddr
   io.exceptionAddr.isForVSnonLeafPTE := req.isForVSnonLeafPTE
-
-  when(req_valid && io.flushFrmMaBuf) {
-    req_valid := false.B
-  }
 
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
 
