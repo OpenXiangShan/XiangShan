@@ -73,12 +73,14 @@ class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlInput(cfg)
   val data = new FuncUnitDataInput(cfg)
   val perfDebugInfo = new PerfDebugInfo()
+  val debug_seqNum = UInt(64.W)
 }
 
 class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlOutput(cfg)
   val res = new FuncUnitDataOutput(cfg)
   val perfDebugInfo = new PerfDebugInfo()
+  val debug_seqNum = UInt(64.W)
 }
 
 class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -99,6 +101,8 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
   val io = IO(new FuncUnitIO(cfg))
+  PerfCCT.updateInstPos(io.in.bits.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.in.valid, clock, reset)
+  PerfCCT.updateInstPos(io.out.bits.debug_seqNum, PerfCCT.InstPos.AtBypassVal.id.U, io.out.valid, clock, reset)
   val criticalErrors = Seq(("none", false.B))
 
   // should only be used in non-piped fu
@@ -115,6 +119,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
+    io.out.bits.debug_seqNum := RegEnable(io.in.bits.debug_seqNum, io.in.fire)
   }
 
   def connectNonPipedCtrlSingalForCSR: Unit = {
@@ -130,6 +135,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
+    io.out.bits.debug_seqNum := DataHoldBypass(io.in.bits.debug_seqNum, io.in.fire)
   }
 
   def connect0LatencyCtrlSingal: Unit = {
@@ -145,6 +151,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
     io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
     io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
+    io.out.bits.debug_seqNum := io.in.bits.debug_seqNum
   }
 }
 
@@ -164,8 +171,7 @@ trait HasPipelineReg { this: FuncUnit =>
     val ctrlVec = init.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))
     val dataVec = init.data +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.data)))
     val perfVec = init.perfDebugInfo +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.perfDebugInfo)))
-
-
+    val seqNumVec = init.debug_seqNum +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.debug_seqNum)))
 
     val robIdxVec = ctrlVec.map(_.robIdx)
 
@@ -181,17 +187,19 @@ trait HasPipelineReg { this: FuncUnit =>
         ctrlVec(i) := ctrlVec(i - 1)
         dataVec(i) := dataVec(i - 1)
         perfVec(i) := perfVec(i - 1)
+        seqNumVec(i) := seqNumVec(i-1)
       }.elsewhen(flushVec(i) || rdyVec(i)) {
         validVec(i) := false.B
       }
     }
 
-    (ctrlVec.zip(dataVec).zip(perfVec).map{
-      case(( ctrl,data), perf) => {
+    (ctrlVec.zip(dataVec).zip(perfVec).zip(seqNumVec).map{
+      case(((ctrl,data), perf), debug_seqNum) => {
         val out = Wire(new FuncUnitInput(cfg))
         out.ctrl := ctrl
         out.data := data
         out.perfDebugInfo := perf
+        out.debug_seqNum := debug_seqNum
         out
       }
     },validVec, rdyVec)
@@ -200,6 +208,7 @@ trait HasPipelineReg { this: FuncUnit =>
   val ctrlVec = pipeReg.map(_.ctrl)
   val dataVec = pipeReg.map(_.data)
   val perfVec = pipeReg.map(_.perfDebugInfo)
+  val seqNumVec = pipeReg.map(_.debug_seqNum)
   val robIdxVec = ctrlVec.map(_.robIdx)
   val pipeflushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
 
@@ -208,12 +217,14 @@ trait HasPipelineReg { this: FuncUnit =>
   fixtiminginit.ctrl := ctrlVec.last
   fixtiminginit.data := dataVec.last
   fixtiminginit.perfDebugInfo := perfVec.last
+  fixtiminginit.debug_seqNum := seqNumVec.last
 
   // fixtiming pipelinereg
   val (fixpipeReg : Seq[FuncUnitInput], fixValidVec, fixRdyVec) = pipelineReg(fixtiminginit, validVec.last,rdyVec.head ,latdiff, io.flush)
   val fixCtrlVec = fixpipeReg.map(_.ctrl)
   val fixDataVec = fixpipeReg.map(_.data)
   val fixPerfVec = fixpipeReg.map(_.perfDebugInfo)
+  val fixSeqNumVec = fixpipeReg.map(_.debug_seqNum)
   val fixrobIdxVec = ctrlVec.map(_.robIdx)
   val fixflushVec = fixValidVec.zip(fixrobIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
   val flushVec = pipeflushVec ++ fixflushVec
@@ -233,6 +244,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.fpu.foreach(_ := fixCtrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := fixCtrlVec.last.vpu.get)
   io.out.bits.perfDebugInfo := fixPerfVec.last
+  io.out.bits.debug_seqNum := fixSeqNumVec.last
 
   // vstart illegal
   if (cfg.exceptionOut.nonEmpty) {

@@ -60,6 +60,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val backendException = Bool()
   val triggered        = TriggerAction()
   val isLastInFtqEntry = Bool()
+  val debug_seqNum     = UInt(64.W)
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst       := fetch.instrs(i)
@@ -77,6 +78,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     backendException := fetch.backendException(i)
     triggered        := fetch.triggered(i)
     isLastInFtqEntry := fetch.isLastInFtqEntry(i)
+    debug_seqNum     := fetch.debug_seqNum(i)
     this
   }
 
@@ -103,6 +105,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ftqPtr                            := ftqPtr
     cf.ftqOffset                         := ftqOffset
     cf.isLastInFtqEntry                  := isLastInFtqEntry
+    cf.debug_seqNum                      := debug_seqNum
     cf
   }
 

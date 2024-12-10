@@ -514,6 +514,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       uop(stWbIndex) := io.storeAddrIn(i).bits.uop
       uop(stWbIndex).debugInfo := io.storeAddrIn(i).bits.uop.debugInfo
+      uop(stWbIndex).debug_seqNum := io.storeAddrIn(i).bits.uop.debug_seqNum
 
       vecDataValid(stWbIndex) := io.storeAddrIn(i).bits.isvec
 

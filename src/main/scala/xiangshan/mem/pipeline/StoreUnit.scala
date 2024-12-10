@@ -71,6 +71,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
+  PerfCCT.updateInstPos(io.stin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
+
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
   // Pipeline

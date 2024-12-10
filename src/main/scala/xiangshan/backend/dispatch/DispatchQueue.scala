@@ -50,6 +50,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
   require(backendParams.intSchdParams.get.issueBlockParams.size == 4, "int issueBlockParams must be 4")
   backendParams.intSchdParams.get.issueBlockParams.map(x => require(x.exuBlockParams.size == 2, "int issueBlockParam's must be 2"))
 
+  io.enq.req.zipWithIndex.foreach { case (req, i) =>
+    PerfCCT.updateInstPos(req.bits.debug_seqNum, PerfCCT.InstPos.AtDispQue.id.U, req.valid, clock, reset)
+  }
+
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
