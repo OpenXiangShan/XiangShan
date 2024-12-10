@@ -75,6 +75,7 @@ class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrlPipe = OptionWrapper(needCtrlPipe, Vec(cfg.latency.latencyVal.get + 1, new FuncUnitCtrlInput(cfg)))
   val validPipe = OptionWrapper(needCtrlPipe, Vec(cfg.latency.latencyVal.get + 1, Bool()))
   val data = new FuncUnitDataInput(cfg)
+  val dataPipe = OptionWrapper(needCtrlPipe, Vec(cfg.latency.latencyVal.get + 1, new FuncUnitDataInput(cfg)))
   val perfDebugInfo = new PerfDebugInfo()
 }
 
@@ -193,6 +194,7 @@ trait HasPipelineReg { this: FuncUnit =>
         out.ctrl := ctrl
         out.ctrlPipe.foreach(_ := 0.U.asTypeOf(out.ctrlPipe.get))
         out.validPipe.foreach(_ := 0.U.asTypeOf(out.validPipe.get))
+        out.dataPipe.foreach(_ := 0.U.asTypeOf(out.dataPipe.get))
         out.data := data
         out.perfDebugInfo := perf
         out
@@ -202,7 +204,7 @@ trait HasPipelineReg { this: FuncUnit =>
   val (pipeReg : Seq[FuncUnitInput], validVecThisFu ,rdyVec ) = pipelineReg(io.in.bits, io.in.valid,io.out.ready,preLat, io.flush)
   val validVec = io.in.bits.validPipe.get.zip(validVecThisFu).map(x => x._1 && x._2)
   val ctrlVec = io.in.bits.ctrlPipe.get
-  val dataVec = pipeReg.map(_.data)
+  val dataVec = io.in.bits.dataPipe.get
   val perfVec = pipeReg.map(_.perfDebugInfo)
 
 
@@ -210,6 +212,7 @@ trait HasPipelineReg { this: FuncUnit =>
   fixtiminginit.ctrl := ctrlVec.last
   fixtiminginit.ctrlPipe.foreach(_ := 0.U.asTypeOf(fixtiminginit.ctrlPipe.get))
   fixtiminginit.validPipe.foreach(_ := 0.U.asTypeOf(fixtiminginit.validPipe.get))
+  fixtiminginit.dataPipe.foreach(_ := 0.U.asTypeOf(fixtiminginit.dataPipe.get))
   fixtiminginit.data := dataVec.last
   fixtiminginit.perfDebugInfo := perfVec.last
 
