@@ -293,6 +293,12 @@ class ExeUnitImp(
       sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
+      val sinkData = fu.io.in.bits.dataPipe.get(i)
+      val sourceData = inPipe._1(i)
+      sinkData.src.zip(sourceData.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
+      sinkData.pc.foreach(x => x := sourceData.pc.get)
+      sinkData.nextPcOffset.foreach(x => x := sourceData.nextPcOffset.get)
+      sinkData.imm := sourceData.imm
     }
   }
 
