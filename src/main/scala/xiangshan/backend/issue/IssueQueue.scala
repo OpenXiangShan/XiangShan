@@ -16,6 +16,7 @@ import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Bundles.VSew
+import utility.PerfCCT
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -103,6 +104,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${wakeupFuLatencyMaps}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
+
+  io.enq.zipWithIndex.foreach { case (enq, i) =>
+    PerfCCT.updateInstPos(enq.bits.debug_seqNum, PerfCCT.InstPos.AtIssueQue.id.U, enq.valid, clock, reset)
+  }
 
   // Modules
   val entries = Module(new Entries)
@@ -775,6 +780,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
+    deq.bits.common.debug_seqNum := deqEntryVec(i).bits.payload.debug_seqNum
   }
 
   val deqDelay = Reg(params.genIssueValidBundle)

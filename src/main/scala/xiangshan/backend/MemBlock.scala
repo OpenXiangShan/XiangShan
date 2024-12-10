@@ -329,6 +329,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   })
 
+  io.mem_to_ooo.writeBack.zipWithIndex.foreach{ case (wb, i) =>
+    PerfCCT.updateInstPos(wb.bits.uop.debug_seqNum, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset)
+  }
+
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
   dontTouch(io.outer_reset_vector)
