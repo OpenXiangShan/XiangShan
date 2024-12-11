@@ -1984,11 +1984,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
   val thisAllOut = uopRes <= readyCounter
 
+  val count = RegInit(0.U(log2Up(maxUopSize/RenameWidth + 1).W))
+  val countNext = WireInit(count)
+
   switch(state) {
     is(s_idle) {
       when (inValid) {
         stateNext := s_active
         uopResNext := inUopInfo.numOfUop
+        countNext := 0.U
       }
     }
     is(s_active) {
@@ -2000,15 +2004,18 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           stateNext := s_idle
           uopResNext := 0.U
         }
+        countNext := 0.U
       }.otherwise {
         stateNext := s_active
         uopResNext := uopRes - readyCounter
+        countNext := count + outReadys.head.asUInt
       }
     }
   }
 
   state := Mux(io.redirect, s_idle, stateNext)
   uopRes := Mux(io.redirect, 0.U, uopResNext)
+  count := Mux(io.redirect, 0.U, countNext)
 
   val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
@@ -2017,10 +2024,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // when vstart is not zero, the last uop will modify vstart to zero
   // therefore, blockback and flush pipe
   fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
-
+  val uopsSeq = (0 until RenameWidth).map(i => VecInit(fixedDecodedInst.zipWithIndex.filter(_._2 % RenameWidth == i).map(_._1)))
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
-    outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
+    outDecodedInsts(i) := uopsSeq(i)(count)
   }
 
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
