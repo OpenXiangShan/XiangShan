@@ -177,13 +177,13 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gvpn_gpf = !(hptw_pageFault || hptw_accessFault ) && Mux(s2xlate && io.csr.hgatp.mode === Sv39x4, full_gvpn(ptePPNLen - 1, GPAddrBitsSv39x4 - offLen) =/= 0.U, Mux(s2xlate && io.csr.hgatp.mode === Sv48x4, full_gvpn(ptePPNLen - 1, GPAddrBitsSv48x4 - offLen) =/= 0.U, false.B))
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
-  val fake_h_resp = 0.U.asTypeOf(new HptwResp)
+  val fake_h_resp = WireInit(0.U.asTypeOf(new HptwResp))
   fake_h_resp.entry.tag := get_pn(gpaddr)
   fake_h_resp.entry.vmid.map(_ := io.csr.hgatp.vmid)
   fake_h_resp.gpf := true.B
 
   val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
-  val fake_pte = 0.U.asTypeOf(new PteBundle())
+  val fake_pte = WireInit(0.U.asTypeOf(new PteBundle()))
   fake_pte.perm.v := false.B // tell L1TLB this is fake pte
   fake_pte.ppn := ppn(ppnLen - 1, 0)
   fake_pte.ppn_high := ppn(ptePPNLen - 1, ppnLen)

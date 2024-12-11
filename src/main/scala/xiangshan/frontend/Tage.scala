@@ -682,29 +682,32 @@ class Tage(implicit p: Parameters) extends BaseTage {
     VecInit((0 until TageBanks).map(w =>
       io.update.bits.ftb_entry.brValids(w) && io.update.valid
     )) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
-  val u_meta = io.update.bits.meta.asTypeOf(new TageMeta)
+  val u_meta     = io.update.bits.meta.asTypeOf(new TageMeta)
+  val updateMeta = Wire(new TageMeta)
+  update.meta := updateMeta.asUInt
+  updateMeta  := RegEnable(u_meta, io.update.valid)
   for (i <- 0 until numBr) {
-    update.meta.asTypeOf(new TageMeta).providers(i).bits := RegEnable(
+    updateMeta.providers(i).bits := RegEnable(
       u_meta.providers(i).bits,
       u_meta.providers(i).valid && u_valids_for_cge(i)
     )
-    update.meta.asTypeOf(new TageMeta).providerResps(i) := RegEnable(
+    updateMeta.providerResps(i) := RegEnable(
       u_meta.providerResps(i),
       u_meta.providers(i).valid && u_valids_for_cge(i)
     )
-    update.meta.asTypeOf(new TageMeta).altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
-    update.meta.asTypeOf(new TageMeta).allocates(i) := RegEnable(
+    updateMeta.altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
+    updateMeta.allocates(i) := RegEnable(
       u_meta.allocates(i),
       io.update.valid && io.update.bits.mispred_mask(i)
     )
   }
   if (EnableSC) {
     for (w <- 0 until TageBanks) {
-      update.meta.asTypeOf(new TageMeta).scMeta.get.scPreds(w) := RegEnable(
+      updateMeta.scMeta.get.scPreds(w) := RegEnable(
         u_meta.scMeta.get.scPreds(w),
         u_valids_for_cge(w) && u_meta.providers(w).valid
       )
-      update.meta.asTypeOf(new TageMeta).scMeta.get.ctrs(w) := RegEnable(
+      updateMeta.scMeta.get.ctrs(w) := RegEnable(
         u_meta.scMeta.get.ctrs(w),
         u_valids_for_cge(w) && u_meta.providers(w).valid
       )
@@ -716,8 +719,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.strong_bias(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)
   ))
-
-  val updateMeta = update.meta.asTypeOf(new TageMeta)
 
   val updateMask    = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
   val updateUMask   = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))

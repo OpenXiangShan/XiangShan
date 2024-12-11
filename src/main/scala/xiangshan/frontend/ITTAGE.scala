@@ -504,29 +504,34 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val update = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
 
+  // meta is splited by composer
+  val updateMeta = Wire(new ITTageMeta)
+  update.meta := updateMeta.asUInt
+
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
   val update_pc = io.update.bits.pc
 
   // To improve Clock Gating Efficiency
   val u_meta = io.update.bits.meta.asTypeOf(new ITTageMeta)
-  update.meta.asTypeOf(new ITTageMeta).provider.bits := RegEnable(
+  updateMeta := RegEnable(u_meta, io.update.valid)
+  updateMeta.provider.bits := RegEnable(
     u_meta.provider.bits,
     io.update.valid && u_meta.provider.valid
   )
-  update.meta.asTypeOf(new ITTageMeta).providerTarget := RegEnable(
+  updateMeta.providerTarget := RegEnable(
     u_meta.providerTarget,
     io.update.valid && u_meta.provider.valid
   )
-  update.meta.asTypeOf(new ITTageMeta).allocate.bits := RegEnable(
+  updateMeta.allocate.bits := RegEnable(
     u_meta.allocate.bits,
     io.update.valid && u_meta.allocate.valid
   )
-  update.meta.asTypeOf(new ITTageMeta).altProvider.bits := RegEnable(
+  updateMeta.altProvider.bits := RegEnable(
     u_meta.altProvider.bits,
     io.update.valid && u_meta.altProvider.valid
   )
-  update.meta.asTypeOf(new ITTageMeta).altProviderTarget := RegEnable(
+  updateMeta.altProviderTarget := RegEnable(
     u_meta.altProviderTarget,
     io.update.valid && u_meta.provider.valid && u_meta.altProvider.valid && u_meta.providerCtr === 0.U
   )
@@ -542,9 +547,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       update.jmp_taken && update.cfi_idx.valid && update.cfi_idx.bits === update.ftb_entry.tailSlot.offset && !update.ftb_entry.strong_bias(
         numBr - 1
       )
-
-  // meta is splited by composer
-  val updateMeta = update.meta.asTypeOf(new ITTageMeta)
 
   val updateMask            = WireInit(0.U.asTypeOf(Vec(ITTageNTables, Bool())))
   val updateUMask           = WireInit(0.U.asTypeOf(Vec(ITTageNTables, Bool())))
