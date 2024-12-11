@@ -31,6 +31,7 @@ import utils._
 import utility._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import xiangshan.mem.LqPtr
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 import scala.math.max
@@ -55,6 +56,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
   val addr = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
   val kill = Bool()
+  val lqIdx = new LqPtr
 }
 
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
@@ -328,6 +330,31 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     dumpWrite
     dumpResp
   }
+
+  def selcetOldestPort(valid: Seq[Bool], bits: Seq[LqPtr], index: Seq[UInt]):((Bool, LqPtr), UInt) = {
+    require(valid.length == bits.length &&  bits.length == index.length, s"length must eq, valid:${valid.length}, bits:${bits.length}, index:${index.length}")
+    ParallelOperation(valid zip bits zip index,
+      (a: ((Bool, LqPtr), UInt), b: ((Bool, LqPtr), UInt)) => {
+        val au = a._1._2
+        val bu = b._1._2
+        val aValid = a._1._1
+        val bValid = b._1._1
+        val bSel = au > bu
+        val bits = Mux(
+          aValid && bValid,
+          Mux(bSel, b._1._2, a._1._2),
+          Mux(aValid && !bValid, a._1._2, b._1._2)
+        )
+        val idx = Mux(
+          aValid && bValid,
+          Mux(bSel, b._2, a._2),
+          Mux(aValid && !bValid, a._2, b._2)
+        )
+        ((aValid || bValid, bits), idx)
+      }
+    )
+  }
+
 }
 
 // the smallest access unit is sram
@@ -375,13 +402,30 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   // read conflict
-  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
-    io.read(x).valid && io.read(y).valid &&
-    div_addrs(x) === div_addrs(y) &&
-    (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U &&
-    io.read(x).bits.way_en === io.read(y).bits.way_en &&
-    set_addrs(x) =/= set_addrs(y)
-  ))
+  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => {
+    if (x == y) {
+      false.B
+    } else {
+      io.read(x).valid && io.read(y).valid &&
+        div_addrs(x) === div_addrs(y) &&
+        (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U &&
+        io.read(x).bits.way_en === io.read(y).bits.way_en &&
+        set_addrs(x) =/= set_addrs(y)
+    }
+  }))
+  val load_req_with_bank_conflict = rr_bank_conflict.map(_.reduce(_ || _))
+  val load_req_valid = io.read.map(_.valid)
+  val load_req_lqIdx = io.read.map(_.bits.lqIdx)
+  val load_req_index = (0 until LoadPipelineWidth).map(_.asUInt)
+
+
+  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_valid, load_req_lqIdx, load_req_index)
+  val load_req_bank_select_port  = UIntToOH(load_req_bank_conflict_selcet._2).asBools
+
+  val rr_bank_conflict_oldest = (0 until LoadPipelineWidth).map(i =>
+    !load_req_bank_select_port(i) && load_req_with_bank_conflict(i)
+  )
+
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach { i =>
@@ -405,7 +449,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_conflict_fast = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach(i => {
     bank_conflict_fast(i) := wr_bank_conflict(i) || rrl_bank_conflict(i) ||
-      (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
+    rr_bank_conflict_oldest(i)
     io.bank_conflict_slow(i) := RegNext(bank_conflict_fast(i))
     io.disable_ld_fast_wakeup(i) := wr_bank_conflict(i) || rrl_bank_conflict_intend(i) ||
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
@@ -426,8 +470,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val read_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays,new L1BankedDataReadResult()))))
   val read_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays,new L1BankedDataReadResult()))))
   val read_error_delayed_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
-  dontTouch(read_result)
-  dontTouch(read_error_delayed_result)
+
   for (div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
       for (way_index <- 0 until DCacheWays) {
@@ -445,7 +488,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         //     |    Data Bank    |
         //     +-----------------+
         val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-          io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) && way_en(i)(way_index)
+          io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
+          way_en(i)(way_index) &&
+          !rr_bank_conflict_oldest(i)
         })))
         val readline_en = Wire(Bool())
         if (ReduceReadlineConflict) {
@@ -581,6 +626,11 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x)===set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
+  if (backendParams.debugEn){
+    load_req_with_bank_conflict.map(dontTouch(_))
+    dontTouch(read_result)
+    dontTouch(read_error_delayed_result)
+  }
 }
 
 // the smallest access unit is bank
@@ -631,11 +681,30 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   // read each bank, get bank result
-  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y =>
-    io.read(x).valid && io.read(y).valid &&
-    div_addrs(x) === div_addrs(y) &&
-    (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U
+  val rr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => {
+    if (x == y) {
+      false.B
+    } else {
+      io.read(x).valid && io.read(y).valid &&
+      div_addrs(x) === div_addrs(y) &&
+      (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U &&
+      set_addrs(x) =/= set_addrs(y)
+    }
+  }
   ))
+
+  val load_req_with_bank_conflict = rr_bank_conflict.map(_.reduce(_ || _))
+  val load_req_valid = io.read.map(_.valid)
+  val load_req_lqIdx = io.read.map(_.bits.lqIdx)
+  val load_req_index = (0 until LoadPipelineWidth).map(_.asUInt)
+
+  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_valid, load_req_lqIdx, load_req_index)
+  val load_req_bank_select_port  = UIntToOH(load_req_bank_conflict_selcet._2).asBools
+
+  val rr_bank_conflict_oldest = (0 until LoadPipelineWidth).map(i =>
+    !load_req_bank_select_port(i) && load_req_with_bank_conflict(i)
+  )
+
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach { i =>
@@ -659,9 +728,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   (0 until LoadPipelineWidth).foreach(i => {
     // remove fake rr_bank_conflict situation in s2
     val real_other_bank_conflict_reg = RegNext(wr_bank_conflict(i) || rrl_bank_conflict(i))
-    val real_rr_bank_conflict_reg = (if (i == 0) 0.B else (0 until i).map{ j =>
-      RegNext(rr_bank_conflict(j)(i)) && (set_addrs_reg(j) =/= set_addrs_reg(i))
-    }.reduce(_ || _))
+    val real_rr_bank_conflict_reg = RegNext(rr_bank_conflict_oldest(i))
     io.bank_conflict_slow(i) := real_other_bank_conflict_reg || real_rr_bank_conflict_reg
 
     // get result in s1
@@ -684,8 +751,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val bank_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
-  dontTouch(bank_result)
-  dontTouch(read_bank_error_delayed)
+
   for (div_index <- 0 until DCacheSetDiv) {
     for (bank_index <- 0 until DCacheBanks) {
       //     Set Addr & Read Way Mask
@@ -702,7 +768,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       //     |    Data Bank    |
       //     +-----------------+
       val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-        io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i))
+        io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
+          !rr_bank_conflict_oldest(i)
       })))
       val readline_match = Wire(Bool())
       if (ReduceReadlineConflict) {
@@ -835,4 +902,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x) === set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
+  if (backendParams.debugEn){
+    load_req_with_bank_conflict.map(dontTouch(_))
+    dontTouch(bank_result)
+    dontTouch(read_bank_error_delayed)
+  }
 }
