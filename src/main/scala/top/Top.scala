@@ -23,14 +23,13 @@ import utils._
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils, UIntToOH1}
 import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
@@ -115,11 +114,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   dseCtrl.ctrlnode := misc.peripheralXbar
 
 
-  lazy val module = new LazyRawModuleImp(this) {
-    ElaborationArtefacts.add("dts", dts)
-    ElaborationArtefacts.add("graphml", graphML)
-    ElaborationArtefacts.add("json", json)
-    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+  class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+    FileRegisters.add("dts", dts)
+    FileRegisters.add("graphml", graphML)
+    FileRegisters.add("json", json)
+    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = IO(Flipped(misc.dma.cloneType))
     val peripheral = IO(misc.peripheral.cloneType)
@@ -198,7 +197,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset()
+        node.out.head._1 := false.B.asAsyncReset
       }
     }
 
@@ -232,10 +231,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 //    core_with_l2.head.module.io.robSize := dseCtrl.module.io.robSize
     dseCtrl.module.io.instrCnt := io.instrCnt
 
-
-    ExcitingUtils.addSink(io.instrCnt, "DSE_INSTRCNT")
+    val instrCnt_sink = Wire(UInt(64.W))
+    ExcitingUtils.addSink(instrCnt_sink, "DSE_INSTRCNT")
+    io.instrCnt := instrCnt_sink
 
   }
+
+  lazy val module = new XSTopImp(this)
 }
 
 object TopMain extends App {

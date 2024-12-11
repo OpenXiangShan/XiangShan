@@ -16,7 +16,7 @@
 
 package xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
@@ -88,9 +88,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 0: req from Ftq */
   val p0_valid  =   fromFtq.req.valid
   val p0_vaddr  =   addrAlign(fromFtq.req.bits.target, blockBytes, VAddrBits)
-  p0_fire   :=   p0_valid && p1_ready && toITLB.fire() && !fromITLB.bits.miss && toIMeta.ready && enableBit
+  p0_fire   :=   p0_valid && p1_ready && toITLB.fire && !fromITLB.bits.miss && toIMeta.ready && enableBit
   //discard req when source not ready
-  // p0_discard := p0_valid && ((toITLB.fire() && fromITLB.bits.miss) || !toIMeta.ready || !enableBit)
+  // p0_discard := p0_valid && ((toITLB.fire && fromITLB.bits.miss) || !toIMeta.ready || !enableBit)
 
   toIMeta.valid     := p0_valid
   toIMeta.bits.vSetIdx(0) := get_idx(p0_vaddr)
@@ -115,7 +115,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 1: cache probe filter */
   val p1_valid =  generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p1_vaddr   =  RegEnable(next = p0_vaddr,    enable=p0_fire)
+  val p1_vaddr   =  RegEnable(p0_vaddr,p0_fire)
 
   //tlb resp
   val tlb_resp_valid = RegInit(false.B)
@@ -150,9 +150,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Prefetch Stage 2: filtered req PIQ enqueue */
   val p2_valid =  generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p2_paddr     = RegEnable(next = tlb_resp_paddr,  enable = p1_fire)
-  val p2_except_pf = RegEnable(next =tlb_resp_pf, enable = p1_fire)
-  val p2_except_tlb_af = RegEnable(next = tlb_resp_af, enable = p1_fire)
+  val p2_paddr     = RegEnable(tlb_resp_paddr, p1_fire)
+  val p2_except_pf = RegEnable(tlb_resp_pf, p1_fire)
+  val p2_except_tlb_af = RegEnable(tlb_resp_af, p1_fire)
 
   /*when a prefetch req meet with a miss req in MSHR cancle the prefetch req */
   val p2_check_in_mshr = VecInit(io.fromMSHR.map(mshr => mshr.valid && mshr.bits === addrAlign(p2_paddr, blockBytes, PAddrBits))).reduce(_||_)
@@ -169,7 +169,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val p3_pmp_fire = p3_valid
   val pmpExcpAF = fromPMP.instr
-  val p3_paddr = RegEnable(next = p2_paddr,  enable = p2_fire)
+  val p3_paddr = RegEnable(p2_paddr, p2_fire)
 
   io.pmp.req.valid      := p3_pmp_fire
   io.pmp.req.bits.addr  := p3_paddr
@@ -177,7 +177,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   io.pmp.req.bits.cmd   := TlbCmd.exec
 
   val p3_except_pmp_af = DataHoldBypass(pmpExcpAF, p3_pmp_fire) 
-  val p3_check_in_mshr = RegEnable(next = p2_check_in_mshr,  enable = p2_fire)
+  val p3_check_in_mshr = RegEnable(p2_check_in_mshr, p2_fire)
   val p3_mmio      = DataHoldBypass(io.pmp.resp.mmio && !p3_except_pmp_af, p3_pmp_fire)
 
   val p3_exception  = VecInit(Seq(p3_except_pmp_af, p3_mmio)).reduce(_||_)
@@ -193,7 +193,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     maxPrefetchCoutner := 0.U
 
     prefetch_dir.foreach(_.valid := false.B)
-  }.elsewhen(toMissUnit.enqReq.fire()){
+  }.elsewhen(toMissUnit.enqReq.fire){
     maxPrefetchCoutner := maxPrefetchCoutner + 1.U
 
     prefetch_dir(maxPrefetchCoutner).valid := true.B
@@ -201,7 +201,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   }
 
   p3_ready := toMissUnit.enqReq.ready || !enableBit
-  p3_fire  := toMissUnit.enqReq.fire()
+  p3_fire  := toMissUnit.enqReq.fire
 
 }
 
@@ -238,7 +238,7 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
   //state change
   switch(state) {
     is(s_idle) {
-      when(io.req.fire()) {
+      when(io.req.fire) {
         state := s_send_hint
         req := io.req.bits
       }
@@ -246,7 +246,7 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
 
     // memory request
     is(s_send_hint) {
-      when(io.mem_hint.fire()) {
+      when(io.mem_hint.fire) {
         state := s_idle
       }
     }
@@ -263,6 +263,6 @@ class IPrefetchEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends I
   io.mem_hint.bits.user.lift(PreferCacheKey).foreach(_ := true.B)
 
 
-  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire())
+  XSPerfAccumulate("PrefetchEntryReq" + Integer.toString(id, 10), io.req.fire)
 
 }

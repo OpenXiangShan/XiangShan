@@ -16,7 +16,7 @@
 
 package xiangshan.backend.rob
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
@@ -322,7 +322,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
-  val debug_microOp = DebugMem(RobSize, new MicroOp)
+  val debug_microOp = Reg(Vec(RobSize, new MicroOp))
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W)))//for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle))//for debug
 
@@ -911,7 +911,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map{ case (v, i) => RegNext(v && CommitType.isFused(i.commitType)) })
   val trueCommitCnt = RegNext(commitCnt) +& fuseCommitCnt
   val retireCounter = Mux(RegNext(io.commits.isCommit), trueCommitCnt, 0.U)
-  val instrCnt = instrCntReg + retireCounter
+  val instrCnt = Wire(UInt(64.W))
+  instrCnt := instrCntReg + retireCounter
   ExcitingUtils.addSource(instrCnt, "DSE_INSTRCNT")
   instrCntReg := instrCnt
   io.csr.perfinfo.retiredInstr := retireCounter

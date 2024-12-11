@@ -16,13 +16,11 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.experimental.chiselName
 
 import scala.math.min
 import scala.{Tuple2 => &}
@@ -457,7 +455,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val s3_fauftb_hit_ftb_miss = RegEnable(!s2_ftb_hit_dup(dupForFtb) && s2_uftb_hit_dup(dupForFtb), io.s2_fire(dupForFtb))
   io.out.last_stage_ftb_entry := Mux(s3_fauftb_hit_ftb_miss, io.in.bits.resp_in(0).last_stage_ftb_entry, s3_ftb_entry_dup(dupForFtb))
-  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt(), io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
+  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt, s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt, io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
 
   // always taken logic
   for (i <- 0 until numBr) {

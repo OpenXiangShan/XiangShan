@@ -16,7 +16,7 @@
 
 package xiangshan.mem.mdp
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -415,7 +415,7 @@ class LFST(implicit p: Parameters) extends XSModule {
 
   // recover robIdx after squash
   // behavior model, to be refactored later 
-  when(RegNext(io.redirect.fire())) {
+  when(RegNext(io.redirect.fire)) {
     (0 until LFSTSize).map(i => {
       (0 until LFSTWidth).map(j => {
         val check_position = WireInit(allocPtr(i) + (j+1).U)

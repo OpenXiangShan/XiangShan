@@ -21,7 +21,7 @@ import xiangshan._
 import chisel3.experimental.{ExtModule, IntParam, noPrefix}
 import chisel3.util._
 import chisel3.util.HasExtModuleResource
-import freechips.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.diplomacy._
@@ -48,19 +48,18 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
 //  }
+  class DebugModuleIO extends Bundle {
+    val resetCtrl = new ResetCtrlIO(numCores)(p)
+    val debugIO = new DebugIO()(p)
+    val clock = Input(Bool())
+    val reset = Input(Reset())
+  }
 
-  lazy val module = new LazyRawModuleImp(this) {
-    val io = IO(new Bundle{
-      val resetCtrl = new ResetCtrlIO(numCores)(p)
-      val debugIO = new DebugIO()(p)
-      val clock = Input(Bool())
-      val reset = Input(Reset())
-    })
+  class DebugModuleImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+    val io = IO(new DebugModuleIO)
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
-    withClock(io.clock.asClock) {
-      debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
-    }
+    debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
@@ -93,6 +92,8 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       dtm
     }
   }
+
+  lazy val module = new DebugModuleImp(this)
 }
 
 object XSDebugModuleParams {
@@ -103,8 +104,7 @@ object XSDebugModuleParams {
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
       baseAddress = BigInt(0x38020000),
-      nScratch = 2,
-      crossingHasSafeReset = false
+      nScratch = 2
     )
   }
 }
@@ -122,9 +122,6 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
   val exit = IO(Output(UInt(32.W)))
 
   def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Reset, done: Bool, tbsuccess: Bool) = {
-    if (!dutio.TRSTn.isEmpty) {
-      dutio.TRSTn.get := jtag.TRSTn.getOrElse(false.B) || !tbreset.asBool
-    }
     dutio.TCK := jtag.TCK
     dutio.TMS := jtag.TMS
     dutio.TDI := jtag.TDI
@@ -141,7 +138,7 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
     tbsuccess := exit === 1.U
     when (exit >= 2.U) {
       printf("*** FAILED *** (exit code = %d)\n", exit >> 1.U)
-      stop(1)
+      stop()
     }
   }
 }

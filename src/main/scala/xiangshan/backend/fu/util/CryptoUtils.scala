@@ -19,7 +19,7 @@ package xiangshan.backend.fu.util
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 
 // 32bits shift right
 object SHR32 {

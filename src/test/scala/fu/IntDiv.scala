@@ -19,6 +19,8 @@ package futest
 import chisel3._
 import chiseltest._
 import chiseltest.ChiselScalatestTester
+import chiseltest.VerilatorBackendAnnotation
+import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.test.types._
@@ -29,7 +31,7 @@ import xiangshan.backend.fu._
 import scala.util.Random
 
 
-class SRTDividerWrapper extends Module {
+class SRT4DividerWrapper extends Module {
   val io = IO(new Bundle{
     val dividend = Input(UInt(64.W))
     val divisor = Input(UInt(64.W))

@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.Instance
 import chisel3.util._
@@ -74,7 +74,7 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   // to please redirectGen
   io.extra.exuRedirect.zip(exeUnits.reverse.filter(_.config.hasRedirect).map(_.io.out)).foreach {
     case (x, y) =>
-      x.valid := y.fire() && y.bits.redirectValid
+      x.valid := y.fire && y.bits.redirectValid
       x.bits := y.bits
   }
 
@@ -105,8 +105,8 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   }
 
   for ((iss, i) <- io.issue.zipWithIndex) {
-    XSPerfAccumulate(s"issue_count_$i", iss.fire())
+    XSPerfAccumulate(s"issue_count_$i", iss.fire)
   }
-  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
+  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire)), true.B, 0, numIn, 1)
 
 }

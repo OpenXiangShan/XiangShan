@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -694,7 +694,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   when (load_s2_leftFire) { load_s2_valid_vec := 0x3f.U(6.W)}
   when (load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) { load_s2_valid_vec := 0x0.U(6.W) }
   assert(RegNext(load_s2.io.in.valid === load_s2_valid_vec(0)))
-  io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools()
+  io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools
 
   // s2_dcache_require_replay signal will be RegNexted, then used in s3
   io.lsq.s2_dcache_require_replay := load_s2.io.s2_dcache_require_replay

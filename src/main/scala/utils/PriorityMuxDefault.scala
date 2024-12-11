@@ -54,6 +54,6 @@ object PriorityEncoderWithFlag {
     PriorityMuxWithFlag(in.zipWithIndex.map(x => x._1 -> x._2.U))
   }
   def apply(in: Bits): (UInt, Bool) = {
-    PriorityEncoderWithFlag(in.asBools())
+    PriorityEncoderWithFlag(in.asBools)
   }
 }

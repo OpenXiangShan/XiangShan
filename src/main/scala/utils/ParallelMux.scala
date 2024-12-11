@@ -93,8 +93,21 @@ object ParallelPriorityMux {
   def apply[T <: Data](sel: Seq[Bool], in: Seq[T]): T = apply(sel zip in)
 }
 
+object ParallelPosteriorityMux {
+  def apply[T <: Data](in: Seq[(Bool, T)]): T = {
+    ParallelOperation(in, (a: (Bool, T), b: (Bool, T)) => (a._1 || b._1, Mux(b._1, b._2, a._2)))._2
+  }
+  def apply[T <: Data](sel: Bits, in: Seq[T]): T = apply((0 until in.size).map(sel(_)), in)
+  def apply[T <: Data](sel: Seq[Bool], in: Seq[T]): T = apply(sel zip in)
+}
+
 object ParallelPriorityEncoder {
   def apply(in: Seq[Bool]): UInt = ParallelPriorityMux(in, (0 until in.size).map(_.asUInt))
+  def apply(in: Bits): UInt = apply(in.asBools)
+}
+
+object ParallelPosteriorityEncoder {
+  def apply(in: Seq[Bool]): UInt = ParallelPosteriorityMux(in, (0 until in.size).map(_.asUInt))
   def apply(in: Bits): UInt = apply(in.asBools)
 }
 

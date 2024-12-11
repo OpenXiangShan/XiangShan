@@ -1,7 +1,7 @@
 package utils
 
 import chisel3._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.IntAdapterNode
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg

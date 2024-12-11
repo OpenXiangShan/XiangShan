@@ -16,8 +16,8 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
@@ -34,16 +34,14 @@ import xiangshan.frontend._
 
 import scala.collection.mutable.ListBuffer
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
-  with HasFPUParameters {
-  def io: Record
-}
+  with HasFPUParameters
 
 //remove this trait after impl module logic
 trait NeedImpl {
   this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
+  protected def IO[T <: Data](iodef: T): T = {
     println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.IO(iodef)
     io <> DontCare
@@ -98,7 +96,7 @@ trait HasWritebackSink {
   }
 
   def writebackSinksParams: Seq[WritebackSourceParams] = {
-    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }
+    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }.toSeq
   }
   final def writebackSinksMod(
      thisMod: Option[HasWritebackSource] = None,
@@ -107,7 +105,7 @@ trait HasWritebackSink {
     require(thisMod.isDefined == thisModImp.isDefined)
     writebackSinks.map(_._1.map(source =>
       if (thisMod.isDefined && source == thisMod.get) thisModImp.get else source.writebackSourceImp)
-    )
+    ).toSeq
   }
   final def writebackSinksImp(
     thisMod: Option[HasWritebackSource] = None,
@@ -116,7 +114,7 @@ trait HasWritebackSink {
     val sourceMod = writebackSinksMod(thisMod, thisModImp)
     writebackSinks.zip(sourceMod).map{ case ((s, i), m) =>
       s.zip(i).zip(m).flatMap(x => x._1._1.writebackSource(x._2)(x._1._2))
-    }
+    }.toSeq
   }
   def selWritebackSinks(func: WritebackSourceParams => Int): Int = {
     writebackSinksParams.zipWithIndex.minBy(params => func(params._1))._2
@@ -255,13 +253,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
-  val frontend = outer.frontend.module
-  val ctrlBlock = outer.ctrlBlock.module
-  val wb2Ctrl = outer.wb2Ctrl.module
-  val memBlock = outer.memBlock.module
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
-  val exuBlocks = outer.exuBlocks.map(_.module)
+  private val frontend = outer.frontend.module
+  private val ctrlBlock = outer.ctrlBlock.module
+  private val wb2Ctrl = outer.wb2Ctrl.module
+  private val memBlock = outer.memBlock.module
+  private val ptw = outer.ptw.module
+  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val exuBlocks = outer.exuBlocks.map(_.module)
 
   // reset vector
   frontend.io.reset_vector := io.reset_vector
@@ -289,6 +287,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 <> DontCare
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head

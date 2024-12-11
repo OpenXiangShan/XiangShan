@@ -16,9 +16,8 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
 import xiangshan._
@@ -31,7 +30,7 @@ class RASEntry()(implicit p: Parameters) extends XSBundle {
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
-@chiselName
+
 class RAS(implicit p: Parameters) extends BasePredictor {
   object RASEntry {
     def apply(retAddr: UInt, ctr: UInt): RASEntry = {
@@ -42,7 +41,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
   }
 
-  @chiselName
+  
   class RASStack(val rasSize: Int) extends XSModule {
     val io = IO(new Bundle {
       val push_valid = Input(Bool())
@@ -76,7 +75,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     
     val top_write_en = WireInit(false.B)
     val top_write = Wire(new RASEntry)
-    val top_dup = RegEnable(dup(top_write), init=dup(RASEntry(0x80000000L.U, 0.U)), top_write_en)
+    val top_dup = RegEnable(dup(top_write), dup(RASEntry(0x80000000L.U, 0.U)), top_write_en)
     top_write := top_dup(0)
     top_dup.foreach(dontTouch(_))
     

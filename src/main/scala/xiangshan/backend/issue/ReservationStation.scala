@@ -16,7 +16,7 @@
 
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -134,7 +134,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   val maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
+  class RSWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
     val rs = (0 until numRS).map(i => {
@@ -190,6 +190,8 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     generatePerfEvent()
   }
 
+  lazy val module = new RSWrapperImp(this)
+
   var fastWakeupIdx = 0
   def connectFastWakeup(uop: ValidIO[MicroOp], data: UInt): Unit = {
     module.io.fastUopsIn(fastWakeupIdx) := uop
@@ -226,7 +228,6 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   )) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr)
-    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
   val load = if (params.isLoad) Some(Vec(params.numDeq, new Bundle {

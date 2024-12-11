@@ -21,7 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import system._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
@@ -331,20 +331,20 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
         RenameWidth = 4,
         FetchWidth = 8,
         IssQueSize = 8,
-        NRPhyRegs = 64,
-        LoadQueueSize = 256,
+        NRPhyRegs = 128,
+        LoadQueueSize = 64,
         LoadQueueNWriteBanks = 4,
-        StoreQueueSize = 256,
+        StoreQueueSize = 64,
         StoreQueueNWriteBanks = 4,
-        RobSize = 1024,
-        FtqSize = 128,
-        IBufSize = 256,
+        RobSize = 256,
+        FtqSize = 64,
+        IBufSize = 32,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
         dpParams = DispatchParameters(
-          IntDqSize = 256,
-          FpDqSize = 256,
-          LsDqSize = 256,
+          IntDqSize = 12,
+          FpDqSize = 12,
+          LsDqSize = 12,
           IntDqDeqWidth = 4,
           FpDqDeqWidth = 4,
           LsDqDeqWidth = 4

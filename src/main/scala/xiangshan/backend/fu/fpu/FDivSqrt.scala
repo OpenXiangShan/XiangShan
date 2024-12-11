@@ -16,7 +16,7 @@
 
 package xiangshan.backend.fu.fpu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
@@ -88,7 +88,7 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
 
 class FDivSqrt(implicit p: Parameters) extends FPUSubModule {
 
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire)
   val kill_r = !io.in.ready && uopReg.robIdx.needFlush(io.redirectIn)
 
   override val dataModule = Module(new FDivSqrtDataModule)

@@ -37,14 +37,33 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
+# firtool check and download
+FIRTOOL_VERSION = 1.61.0
+FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
+FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
+CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
 ifeq ($(MFC),1)
-ChiselVersion=chisel
+ifeq ($(FIRTOOL_PATH),)
+ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
+$(info [INFO] Firtool not found in your PATH.)
+$(info [INFO] Downloading from $(FIRTOOL_URL))
+$(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
+endif
+FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
+endif
+endif
+
+# common chisel args
+ifeq ($(MFC),1)
+CHISEL_VERSION = chisel
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-RELEASE_ARGS += --dump-fir --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
-DEBUG_ARGS += --dump-fir --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+MFC_ARGS = --dump-fir $(FIRTOOL_ARGS) \
+           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+RELEASE_ARGS += $(MFC_ARGS)
+DEBUG_ARGS += $(MFC_ARGS)
 else
-ChiselVersion=chisel3
+CHISEL_VERSION = chisel3
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 endif
@@ -74,11 +93,11 @@ SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i xiangshan[$(ChiselVersion)].runMain $(FPGATOP) --help
+	mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan[$(ChiselVersion)].runMain $(FPGATOP)   \
+	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
 		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
@@ -100,7 +119,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan[$(ChiselVersion)].test.runMain $(SIMTOP)    \
+	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)
 ifeq ($(MFC),1)
@@ -129,7 +148,7 @@ clean:
 
 init:
 	git submodule update --init
-	cd rocket-chip && git submodule update --init api-config-chipsalliance hardfloat
+	cd rocket-chip && git submodule update --init cde hardfloat
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"

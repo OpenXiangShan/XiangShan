@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -171,17 +171,17 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   switch(pendingstate){
     is(s_idle){
-      when(io.uncache.req.fire()){
+      when(io.uncache.req.fire){
         pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, s_store)
       }
     }
     is(s_load){
-      when(io.uncache.resp.fire()){
+      when(io.uncache.resp.fire){
         pendingstate := s_idle
       }
     }
     is(s_store){
-      when(io.uncache.resp.fire()){
+      when(io.uncache.resp.fire){
         pendingstate := s_idle
       }
     }

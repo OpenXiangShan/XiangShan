@@ -16,18 +16,17 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
-import utils.GTimer
+import utils.{GTimer, FileRegisters}
 import xiangshan.{DebugOptions, DebugOptionsKey}
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
@@ -97,31 +96,44 @@ class SimTop(implicit p: Parameters) extends Module {
     io.memAXI <> soc.memory
   }
 
-  if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSource(timer, "logTimestamp")
-  }
+  // if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
+  //   val timer = GTimer()
+  //   val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+  //   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+  //   ExcitingUtils.addSource(timer, "logTimestamp")
+  // }
 
-  if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
-    val clean = io.perfInfo.clean
-    val dump = io.perfInfo.dump
-    ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
-    ExcitingUtils.addSource(dump, "XSPERF_DUMP")
-  }
+  // if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
+  //   val clean = io.perfInfo.clean
+  //   val dump = io.perfInfo.dump
+  //   ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
+  //   ExcitingUtils.addSource(dump, "XSPERF_DUMP")
+  // }
 
-  // Check and dispaly all source and sink connections
-  ExcitingUtils.fixConnections()
-  ExcitingUtils.checkAndDisplay()
+  // // Check and dispaly all source and sink connections
+  // ExcitingUtils.fixConnections()
+  // ExcitingUtils.checkAndDisplay()
+
+  val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+  val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+  val hasPerfLog = hasPerf || hasLog
+  val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
+  val logEnable = if (hasPerfLog) WireDefault((timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)) else WireDefault(false.B)
+  val clean = if (hasPerf) WireDefault(io.perfInfo.clean) else WireDefault(false.B)
+  val dump = if (hasPerf) WireDefault(io.perfInfo.dump) else WireDefault(false.B)
+
+  dontTouch(timer)
+  dontTouch(logEnable)
+  dontTouch(clean)
+  dontTouch(dump)
 }
 
 object SimTop extends App {
   // Keep this the same as TopMain except that SimTop is used here instead of XSTop
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
-    // tools: init to close dpi-c when in fpga
-    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  // tools: init to close dpi-c when in fpga
+  val envInFPGA = config(DebugOptionsKey).FPGAPlatform
 
   Generator.execute(
     firrtlOpts,
@@ -130,8 +142,5 @@ object SimTop extends App {
   )
 
   // tools: write cpp files
-  ChiselDB.addToFileRegisters
-  Constantin.addToFileRegisters
   FileRegisters.write(fileDir = "./build")
-  DifftestModule.finish("XiangShan")
 }

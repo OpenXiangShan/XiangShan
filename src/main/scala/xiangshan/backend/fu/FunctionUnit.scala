@@ -16,7 +16,7 @@
 
 package xiangshan.backend.fu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.XSPerfAccumulate
@@ -129,7 +129,7 @@ trait HasPipelineReg {
 
   def PipelineReg[TT <: Data](i: Int)(next: TT) = RegEnable(
     next,
-    enable = regEnable(i)
+    regEnable(i)
   )
 
   def S1Reg[TT <: Data](next: TT): TT = PipelineReg[TT](1)(next)

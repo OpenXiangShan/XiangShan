@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
@@ -113,7 +113,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val redirect = RegNextWithEnable(io.redirect)
 
-  val dcache = outer.dcache.module
+  private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
   val csrCtrl = DelayN(io.csrCtrl, 2)
@@ -456,7 +456,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       stOut(i).bits.uop.cf.trigger.backendCanFire := triggerCanFireVec
     }
     // store data
-//    when(lsq.io.storeDataIn(i).fire()){
+//    when(lsq.io.storeDataIn(i).fire){
 //
 //      val hit = Wire(Vec(3, Bool()))
 //      for (j <- 0 until 3) {

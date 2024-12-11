@@ -14,31 +14,27 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-import os.Path
 import mill._
 import scalalib._
-import publish._
-import coursier.maven.MavenRepository
 import $file.`rocket-chip`.common
-import $file.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
+import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
+import $file.huancun.common
 
 val defaultScalaVersion = "2.13.10"
 
-def defaultVersions(chiselVersion: String) = Map(
-  "chisel" -> (chiselVersion match {
-    case "chisel"  => ivy"org.chipsalliance::chisel:6.0.0-M3"
-    case "chisel3" => ivy"edu.berkeley.cs::chisel3:3.6.0"
-  }),
-  "chisel-plugin" -> (chiselVersion match {
-    case "chisel"  => ivy"org.chipsalliance:::chisel-plugin:6.0.0-M3"
-    case "chisel3" => ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0"
-  }),
-  "chiseltest" -> (chiselVersion match {
-    case "chisel"  => ivy"edu.berkeley.cs::chiseltest:5.0.2"
-    case "chisel3" => ivy"edu.berkeley.cs::chiseltest:0.6.2"
-  })
-)
+def defaultVersions(chiselVersion: String) = chiselVersion match {
+  case "chisel" => Map(
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.0.0-RC1",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.0.0-RC1",
+    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:5.0.2"
+  )
+  case "chisel3" => Map(
+    "chisel"        -> ivy"edu.berkeley.cs::chisel3:3.6.0",
+    "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0",
+    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:0.6.2"
+  )
+}
 
 trait HasChisel extends SbtModule with Cross.Module[String] {
   def chiselModule: Option[ScalaModule] = None
@@ -66,19 +62,19 @@ trait RocketChip
     with HasChisel {
   def scalaVersion: T[String] = T(defaultScalaVersion)
 
-  override def scalaVersion = ivys.sv
+  override def millSourcePath = os.pwd / "rocket-chip"
 
-  override def compileIvyDeps = Agg(ivys.macroParadise)
+  def macrosModule = macros
 
   def hardfloatModule = hardfloat(crossValue)
 
-  override def scalacOptions = Seq("-Xsource:2.11")
+  def cdeModule = cde
 
   def mainargsIvy = ivy"com.lihaoyi::mainargs:0.5.4"
 
   def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.6"
 
-  def publishVersion = "0.0.1"
+  object macros extends Macros
 
   trait Macros
     extends millbuild.`rocket-chip`.common.MacrosModule
@@ -110,62 +106,6 @@ trait RocketChip
   }
 }
 
-object utility extends Cross[Utility]("chisel", "chisel3")
-trait Utility extends HasChisel {
-
-  val rcPath = os.pwd / "rocket-chip"
-
-  override def scalaVersion = ivys.sv
-
-  override def scalacOptions = Seq("-Xsource:2.11")
-
-  override def millSourcePath = rcPath
-
-  object configRocket extends `rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build.config with PublishModule {
-    override def millSourcePath = rcPath / "api-config-chipsalliance" / "design" / "craft"
-
-    override def scalaVersion = T {
-      rocketchip.scalaVersion()
-    }
-
-    override def pomSettings = T {
-      rocketchip.pomSettings()
-    }
-
-    override def publishVersion = T {
-      rocketchip.publishVersion()
-    }
-  }
-
-  object hardfloatRocket extends `rocket-chip`.hardfloat.build.hardfloat {
-    override def millSourcePath = rcPath / "hardfloat"
-
-    override def scalaVersion = T {
-      rocketchip.scalaVersion()
-    }
-
-    def chisel3IvyDeps = if(chisel3Module.isEmpty) Agg(
-      common.getVersion("chisel3")
-    ) else Agg.empty[Dep]
-    
-    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
-  }
-
-  def hardfloatModule = hardfloatRocket
-
-  def configModule = configRocket
-
-}
-
-object huancun extends XSModule with SbtModule {
-
-  override def millSourcePath = os.pwd / "huancun"
-
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip(crossValue)
-  )
-}
-
 object huancun extends Cross[HuanCun]("chisel", "chisel3")
 trait HuanCun extends millbuild.huancun.common.HuanCunModule with HasChisel {
 
@@ -175,18 +115,16 @@ trait HuanCun extends millbuild.huancun.common.HuanCunModule with HasChisel {
 
   def utilityModule: ScalaModule = utility(crossValue)
 
-}
+  object utility extends Cross[Utility]("chisel", "chisel3")
+  trait Utility extends HasChisel {
 
-object coupledL2 extends Cross[CoupledL2]("chisel", "chisel3")
-trait CoupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChisel {
+    override def millSourcePath = os.pwd / "huancun" / "Utility"
 
-  override def millSourcePath = os.pwd / "coupledL2"
+    override def moduleDeps = super.moduleDeps ++ Seq(
+      rocketchip(crossValue)
+    )
 
-  def rocketModule: ScalaModule = rocketchip(crossValue)
-
-  def utilityModule: ScalaModule = utility(crossValue)
-
-  def huancunModule: ScalaModule = huancun(crossValue)
+  }
 
 }
 
@@ -204,28 +142,24 @@ trait FuDian extends HasChisel {
 }
 
 // extends this trait to use XiangShan in other projects
-trait CommonXiangShan extends XSModule with SbtModule { m =>
+trait XiangShanModule extends ScalaModule {
 
-  // module deps
-  def rocketModule: PublishModule
-  def difftestModule: PublishModule
-  def huancunModule: PublishModule
-  def fudianModule: PublishModule
+  def rocketModule: ScalaModule
 
-  override def millSourcePath = os.pwd
+  def difftestModule: ScalaModule
 
-  override def forkArgs = Seq("-Xmx64G", "-Xss256m")
+  def huancunModule: ScalaModule
 
-  override def ivyDeps = super.ivyDeps() ++ Seq(ivys.chiseltest)
+  def fudianModule: ScalaModule
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
     huancunModule,
-    fudianModule
+    fudianModule,
   )
 
-  object test extends Tests with TestModule.ScalaTest {
+}
 
 object xiangshan extends Cross[XiangShan]("chisel", "chisel3")
 trait XiangShan extends XiangShanModule with HasChisel {
@@ -238,11 +172,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def huancunModule = huancun(crossValue)
 
-  def coupledL2Module = coupledL2(crossValue)
-
   def fudianModule = fudian(crossValue)
-
-  def utilityModule = utility(crossValue)
 
   override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
@@ -261,11 +191,4 @@ trait XiangShan extends XiangShanModule with HasChisel {
       defaultVersions(crossValue)("chiseltest")
     )
   }
-}
-
-object XiangShan extends CommonXiangShan {
-  override def rocketModule = rocketchip
-  override def difftestModule = difftest
-  override def huancunModule = huancun
-  override def fudianModule = fudian
 }

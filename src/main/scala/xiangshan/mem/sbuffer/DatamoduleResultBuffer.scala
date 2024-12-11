@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.{DataMirror, requireIsChiselType}
 import chisel3._
 import chisel3.util._
@@ -36,17 +36,11 @@ class DatamoduleResultBufferIO[T <: Data](gen: T) extends Bundle
 class DatamoduleResultBuffer[T <: Data]
 (
   gen: T,
-) extends Module {
+)(implicit p: Parameters) extends XSModule {
 
-  val genType = if (compileOptions.declaredTypeMustBeUnbound) {
+  val genType = {
     requireIsChiselType(gen)
     gen
-  } else {
-    if (DataMirror.internal.isSynthesizable(gen)) {
-      chiselTypeOf(gen)
-    } else {
-      gen
-    }
   }
 
   val io = IO(new DatamoduleResultBufferIO[T](gen))
@@ -80,11 +74,11 @@ class DatamoduleResultBuffer[T <: Data]
   assert(!(io.deq(1).ready && !io.deq(0).ready))
 
   entry_allowin(0) := !valids(0) ||
-    io.deq(0).fire() && !deq_flag ||
-    io.deq(1).fire() && deq_flag
+    io.deq(0).fire && !deq_flag ||
+    io.deq(1).fire && deq_flag
   entry_allowin(1) := !valids(1) ||
-    io.deq(0).fire() && deq_flag ||
-    io.deq(1).fire() && !deq_flag
+    io.deq(0).fire && deq_flag ||
+    io.deq(1).fire && !deq_flag
 
   io.enq(0).ready := Mux(enq_flag,
     entry_allowin(1),
@@ -98,7 +92,7 @@ class DatamoduleResultBuffer[T <: Data]
   assert(!(io.enq(1).ready && !io.enq(0).ready))
   assert(!(io.enq(1).valid && !io.enq(0).valid))
 
-  when(io.deq(0).fire()){
+  when(io.deq(0).fire){
     when(deq_flag){
       valids(1) := false.B
     }.otherwise{
@@ -106,7 +100,7 @@ class DatamoduleResultBuffer[T <: Data]
     }
     deq_flag := ~deq_flag
   }
-  when(io.deq(1).fire()){
+  when(io.deq(1).fire){
     when(deq_flag){
       valids(0) := false.B
     }.otherwise{
@@ -115,7 +109,7 @@ class DatamoduleResultBuffer[T <: Data]
     deq_flag := deq_flag
   }
 
-  when(io.enq(0).fire()){
+  when(io.enq(0).fire){
     when(enq_flag){
       valids(1) := true.B
       data(1) := io.enq(0).bits
@@ -125,7 +119,7 @@ class DatamoduleResultBuffer[T <: Data]
     }
     enq_flag := ~enq_flag
   }
-  when(io.enq(1).fire()){
+  when(io.enq(1).fire){
     when(enq_flag){
       valids(0) := true.B
       data(0) := io.enq(1).bits

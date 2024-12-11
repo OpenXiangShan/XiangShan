@@ -109,11 +109,11 @@
 //    statIdx.U -> statReg,
 //    ctrlIdx.U -> ctrlReg
 //  ))
-//  in.r.bits.data := RegEnable(readReg(in.ar.bits.addr), in.ar.fire())
+//  in.r.bits.data := RegEnable(readReg(in.ar.bits.addr), in.ar.fire)
 //
 //  val wIdx = index(in.aw.bits.addr)
 //  val wdata = genWdata(readReg(in.aw.bits.addr))
-//  when (in.aw.fire()) {
+//  when (in.aw.fire) {
 //    when (wIdx === ctrlIdx.U) { ctrlReg := wdata }
 //  }
 //
@@ -154,9 +154,9 @@
 //    out.metaData.ar.bits.addr := spriteAddr(spriteIdx.value)
 //    out.metaData.ar.bits.len := (SpriteBeats - 1).U  // 2 beats
 //    out.metaData.r.ready := true.B
-//    when (out.metaData.ar.fire()) { metaDataRwait := true.B }
+//    when (out.metaData.ar.fire) { metaDataRwait := true.B }
 //
-//    when (out.metaData.r.fire()) {
+//    when (out.metaData.r.fire) {
 //      spriteBufReg(spriteReadCnt.value) := out.metaData.r.bits.data
 //      when (spriteReadCnt.inc()) {
 //        metaDataRwait := false.B
@@ -175,9 +175,9 @@
 //    out.metaData.ar.bits.addr := textureLineAddr(spriteBuf.texture, textureLineCnt.value)
 //    out.metaData.ar.bits.len := (TextureLineBeats - 1).U  // 8 beats
 //    out.metaData.r.ready := true.B
-//    when (out.metaData.ar.fire()) { metaDataRwait := true.B }
+//    when (out.metaData.ar.fire) { metaDataRwait := true.B }
 //
-//    when (out.metaData.r.fire()) {
+//    when (out.metaData.r.fire) {
 //      textureLineBuf(textureLineReadCnt.value) := out.metaData.r.bits.data
 //      when (textureLineReadCnt.inc()) {
 //        metaDataRwait := false.B
@@ -198,12 +198,12 @@
 //    //val renderLineMask = Cat(textureLineBuf.asTypeOf(new TextureLineBundle).pixels.map(
 //    //  c => Mux(c.a === 0.U, 0.U(4.W), 0xf.U(4.W))))
 //
-//    when (out.fb.w.fire()) { textureLineWriteCnt.inc() }
+//    when (out.fb.w.fire) { textureLineWriteCnt.inc() }
 //    when (wSend) { state := s_render_bwait }
 //  }
 //
 //  when (state === s_render_bwait) {
-//    when (out.fb.b.fire()) {
+//    when (out.fb.b.fire) {
 //      val finishOneTexture = textureLineCnt.inc()
 //      when (finishOneTexture) { spriteIdx.inc() }
 //      state := Mux(finishOneTexture, s_sprite_read, s_texture_read)
@@ -211,18 +211,18 @@
 //  }
 //
 //  out.metaData.ar.valid := BoolStopWatch(
-//    (state === s_sprite_read || state === s_texture_read) && !metaDataRwait, out.metaData.ar.fire())
+//    (state === s_sprite_read || state === s_texture_read) && !metaDataRwait, out.metaData.ar.fire)
 //  out.metaData.aw.valid := false.B
 //  out.metaData.w.valid := false.B
 //  out.metaData.b.ready := true.B
 //
-//  val awAck = BoolStopWatch(out.fb.aw.fire(), wSend)
-//  val wAck = BoolStopWatch(out.fb.w.fire() && out.fb.w.bits.last, wSend)
-//  wSend := (out.fb.aw.fire() && out.fb.w.fire() && out.fb.w.bits.last) || (awAck && wAck)
+//  val awAck = BoolStopWatch(out.fb.aw.fire, wSend)
+//  val wAck = BoolStopWatch(out.fb.w.fire && out.fb.w.bits.last, wSend)
+//  wSend := (out.fb.aw.fire && out.fb.w.fire && out.fb.w.bits.last) || (awAck && wAck)
 //
 //  out.fb.aw.valid := (state === s_render_line) && !awAck
 //  out.fb.w .valid := (state === s_render_line) && !wAck
-//  out.fb.b.ready := BoolStopWatch(wSend, out.fb.b.fire())
+//  out.fb.b.ready := BoolStopWatch(wSend, out.fb.b.fire)
 //  out.fb.ar.valid := false.B
 //  out.fb.r.ready := true.B
 //}
