@@ -1751,7 +1751,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.valid := s3_valid && s3_fast_rep
   io.fast_rep_out.bits := s3_in
   io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
-  io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
+  io.fast_rep_out.bits.delayedLoadError := s3_hw_err
 
   val vecFeedback = s3_valid && s3_fb_no_waiting && s3_lrq_rep_info.need_rep && !io.lsq.ldin.ready && s3_isvec
 
