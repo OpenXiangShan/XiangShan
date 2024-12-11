@@ -67,29 +67,26 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Mask        : data mask
   //  Datavalid   : data valid
   //
-  def clkGateEntrySize = 40
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
-  val paddrModule = Module(new LqPAddrSplitModule(
+  val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRAWSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = StorePipelineWidth,
-    clkGateEntrySize = clkGateEntrySize
+    numCamPort = StorePipelineWidth
   ))
   paddrModule.io := DontCare
-  val maskModule = Module(new LqMaskSplitModule(
+  val maskModule = Module(new LqMaskModule(
     gen = UInt((VLEN/8).W),
     numEntries = LoadQueueRAWSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = StorePipelineWidth,
-    clkGateEntrySize = clkGateEntrySize
+    numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
   val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
@@ -107,22 +104,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   ))
   freeList.io := DontCare
 
-  val low_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
-  val high_en = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(1.W))))
-  for(i <- 0 until LoadPipelineWidth) {
-    low_en(i) := (paddrModule.io.wen(i) && (paddrModule.io.waddr(i) < clkGateEntrySize.U)) || RegNext(paddrModule.io.wen(i) && (paddrModule.io.waddr(i) < clkGateEntrySize.U))
-    high_en(i) := (paddrModule.io.wen(i) && (paddrModule.io.waddr(i) >= clkGateEntrySize.U)) || RegNext(paddrModule.io.wen(i) && (paddrModule.io.waddr(i) >= clkGateEntrySize.U))
-  }
-  val low_valid = (0 until clkGateEntrySize).map(i => allocated(i))
-  val high_valid = (clkGateEntrySize until LoadQueueRAWSize).map(i => allocated(i))
-  val rawPAModule_low_en = low_en.reduce(_ | _).asBool || (RegNext(io.storeIn.map(_.valid).reduce(_ | _)) && low_valid.reduce(_ | _))
-  val rawPAModule_high_en = high_en.reduce(_ | _).asBool || (RegNext(io.storeIn.map(_.valid).reduce(_ | _)) && high_valid.reduce(_ | _))
-  val clk_low = ClockGate(false.B, rawPAModule_low_en.asBool, clock)
-  val clk_high = ClockGate(false.B, rawPAModule_high_en.asBool, clock)
-  paddrModule.io.clockGate_low := clk_low
-  paddrModule.io.clockGate_high := clk_high
-  maskModule.io.clockGate_low := clk_low
-  maskModule.io.clockGate_high := clk_high
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
