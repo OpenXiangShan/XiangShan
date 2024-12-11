@@ -21,28 +21,93 @@ import chisel3._
 import chisel3.util._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
+import difftest.common.{DifftestMemReadIO, DifftestMemWriteIO, HasTopMemoryMasterPort}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer, MaskExpand}
 import xiangshan.DebugOptionsKey
+
+class XiangShan(implicit p: Parameters) extends Module with HasTopMemoryMasterPort {
+  val l_soc = LazyModule(new XSTop())
+  val top = Module(l_soc.module)
+
+  val io = IO(chiselTypeOf(top.io))
+  val dma = IO(chiselTypeOf(top.dma))
+  val peripheral = IO(chiselTypeOf(top.peripheral))
+  val memory = IO(chiselTypeOf(top.memory))
+
+  io <> top.io
+  top.io.clock := clock.asBool
+  top.io.reset := reset.asAsyncReset
+  dma <> top.dma
+  peripheral <> top.peripheral
+  memory <> top.memory
+
+  override def getTopMemoryMasterRead: DifftestMemReadIO = {
+    val mem = chisel3.util.experimental.BoringUtils.tapAndRead(memory.elts.head)
+    val req_valid = RegInit(false.B)
+    val req_bits = Reg(chiselTypeOf(mem.ar.bits))
+    val req_beat_count = Reg(UInt(8.W))
+    assert(!mem.r.fire || (req_valid && mem.r.bits.id === req_bits.id), "data fire but req mismatch")
+    when (mem.ar.fire) {
+      req_valid := true.B
+      req_bits := mem.ar.bits
+      // wrap here for burst
+      val wrap_mask = ~(mem.ar.bits.len << mem.ar.bits.size).asTypeOf(UInt(mem.ar.bits.addr.getWidth.W))
+      req_bits.addr := mem.ar.bits.addr & wrap_mask.asUInt
+      req_beat_count := (mem.ar.bits.addr >> mem.ar.bits.size).asUInt & mem.ar.bits.len
+      assert(!req_valid || mem.r.fire && mem.r.bits.last, "multiple inflight not supported")
+    }.elsewhen(mem.r.fire) {
+      val should_wrap = req_bits.burst === 2.U && req_beat_count === req_bits.len
+      req_beat_count := Mux(should_wrap, 0.U, req_beat_count + 1.U)
+      when (mem.r.bits.last) {
+        req_valid := false.B
+      }
+    }
+    val read = Wire(Output(new DifftestMemReadIO(mem.r.bits.data.getWidth / 64)))
+    read.valid := mem.r.fire
+    read.index := (req_bits.addr >> log2Ceil(mem.r.bits.data.getWidth / 8 - 1)) + req_beat_count
+    read.data := RegEnable(mem.r.bits.data, mem.r.fire).asTypeOf(read.data)
+    read
+  }
+
+  override def getTopMemoryMasterWrite: DifftestMemWriteIO = {
+    val mem = chisel3.util.experimental.BoringUtils.tapAndRead(memory.elts.head)
+    val req_bits_reg = Reg(chiselTypeOf(mem.aw.bits))
+    val req_bits = Mux(mem.aw.fire, mem.aw.bits, req_bits_reg)
+    when (mem.aw.fire) {
+      req_bits_reg := mem.aw.bits
+      when (mem.w.fire) {
+        req_bits_reg.addr := mem.aw.bits.addr + (mem.w.bits.data.getWidth / 8).U
+      }
+    }.elsewhen(mem.w.fire) {
+      req_bits_reg.addr := req_bits.addr + (mem.w.bits.data.getWidth / 8).U
+    }
+    val write = Wire(Output(new DifftestMemWriteIO(mem.w.bits.data.getWidth / 64)))
+    write.valid := mem.w.fire
+    write.index := req_bits.addr >> log2Ceil(mem.w.bits.data.getWidth / 8 - 1)
+    write.data := mem.w.bits.data.asTypeOf(write.data)
+    write.mask := MaskExpand(mem.w.bits.strb).asTypeOf(write.mask)
+    write
+  }
+}
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
 
-  val l_soc = LazyModule(new XSTop())
-  val soc = Module(l_soc.module)
+  val soc = DifftestModule.designTop(Module(new XiangShan))
   // Don't allow the top-level signals to be optimized out,
   // so that we can re-use this SimTop for any generated Verilog RTL.
   dontTouch(soc.io)
 
-  l_soc.module.dma <> 0.U.asTypeOf(l_soc.module.dma)
+  soc.dma <> 0.U.asTypeOf(soc.dma)
 
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
+  val l_simMMIO = LazyModule(new SimMMIO(soc.l_soc.misc.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4 <> soc.peripheral
 
   val l_simAXIMem = AXI4MemorySlave(
-    l_soc.misc.memAXI4SlaveNode,
-    16L * 1024 * 1024 * 1024,
+    soc.l_soc.misc.memAXI4SlaveNode,
+    2L * 1024 * 1024 * 1024,
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
@@ -75,22 +140,22 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
-  val difftest = DifftestModule.finish("XiangShan")
+  DifftestModule.atSimTop { difftest =>
+    simMMIO.io.uart <> difftest.uart
 
-  simMMIO.io.uart <> difftest.uart
+    val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+    val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+    val hasPerfLog = hasPerf || hasLog
+    val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
+    val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
+    val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
+    val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
-  val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
-  val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
-  val hasPerfLog = hasPerf || hasLog
-  val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
-  val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
-  val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
-  val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
-
-  dontTouch(timer)
-  dontTouch(logEnable)
-  dontTouch(clean)
-  dontTouch(dump)
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
+  }
 }
 
 object SimTop extends App {

@@ -28,8 +28,8 @@ object XSLogLevel extends Enumeration {
   val ALL   = Value(0, "ALL  ")
   val DEBUG = Value("DEBUG")
   val INFO  = Value("INFO ")
-  val PERF  = Value("PERF ")
   val WARN  = Value("WARN ")
+  val PERF  = Value("PERF ")
   val ERROR = Value("ERROR")
   val OFF   = Value("OFF  ")
 }
@@ -40,13 +40,14 @@ object XSLog {
            (prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any =
   {
     val debugOpts = p(DebugOptionsKey)
-    val enableDebug = debugOpts.EnableDebug && debugLevel != XSLogLevel.PERF
+    val enableDebug = debugOpts.EnableDebug && debugLevel < XSLogLevel.PERF
     val enablePerf = debugOpts.EnablePerfDebug && debugLevel == XSLogLevel.PERF
-    if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR)) {
+    val enableError = debugOpts.EnableAssert && debugLevel == XSLogLevel.ERROR
+    if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || enableError)) {
       val ctrlInfo = ctrlInfoOpt.getOrElse(Module(new LogPerfHelper).io)
       val logEnable = ctrlInfo.logEnable
       val logTimestamp = ctrlInfo.timer
-      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond && RegNext(true.B, false.B)
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
       when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)

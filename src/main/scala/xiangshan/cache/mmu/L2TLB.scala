@@ -421,7 +421,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
-      val difftest = DifftestModule(new DiffL2TLBEvent)
+      val difftest = DifftestModule(new DiffL2TLBEvent, dontCare = true)
       difftest.coreid := io.hartId
       difftest.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
       difftest.index := i.U

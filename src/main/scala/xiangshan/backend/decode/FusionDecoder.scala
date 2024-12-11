@@ -538,7 +538,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
     val fusionVec = RegEnable(VecInit(fusionList.map(_.isValid)), fire)
     val thisCleared = io.clear(i)
-    out.valid := instrPairValid && !thisCleared && fusionVec.asUInt.orR
+    out.valid := false.B
     XSError(instrPairValid && PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
     def connectByInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[Int]]): Unit = {
       field(out.bits).valid := false.B

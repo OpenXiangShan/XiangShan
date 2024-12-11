@@ -25,7 +25,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
-import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
+import xiangshan.backend.fu.{CSR, DividerWrapper, FUWithRedirect, Fence, FenceToSbuffer}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
@@ -105,6 +105,14 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   if (fmaModules.nonEmpty) {
     require(fmaModules.length == 1)
     fmaModules.head.midResult <> fmaMid.get
+  }
+
+  if (config.fuConfigs.contains(divCfg)) {
+    val (div, divSel) = functionUnits.zip(arbSelReg).collectFirst{
+      case (d: DividerWrapper, sel) => (d, sel)
+    }.get
+    io.out.bits.debug.div_data.valid := divSel && div.io.out.bits.extra_data.valid
+    io.out.bits.debug.div_data.bits := div.io.out.bits.extra_data.bits
   }
 
   if (config.readIntRf) {

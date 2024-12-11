@@ -39,6 +39,7 @@ object ArgParser {
       |--with-chiseldb
       |--with-rollingdb
       |--disable-perf
+      |--disable-assert
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -101,6 +102,11 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
+        // --disable-assert disables XSError and implies --remove-assert which removes the native Chisel assert
+        case "--disable-assert" :: tail =>
+          nextOption(config.alter((_, _, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableAssert = false)
+          }), "--remove-assert" :: tail)
         case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))

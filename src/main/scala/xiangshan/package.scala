@@ -201,6 +201,7 @@ package object xiangshan {
     def seti = "b110".U
     def clri = "b111".U
     def needAccess(op: UInt): Bool = op(1, 0) =/= 0.U
+    def needWrite(op: UInt, isZeroSetClear: Bool): Bool = !op(1) && op(0) || op(1) && !isZeroSetClear
   }
 
   // jump

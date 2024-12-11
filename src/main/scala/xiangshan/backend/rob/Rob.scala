@@ -1311,6 +1311,16 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
         difftest.isLoad   := io.commits.info(i).commitType === CommitType.LOAD
         difftest.isStore  := io.commits.info(i).commitType === CommitType.STORE
       }
+
+      if (env.EnableDifftest) {
+        val difftest_guidance = DifftestModule(new DiffGuidanceInfo, delay = 3)
+        difftest_guidance.coreid := 0.U
+        difftest_guidance.index := i.U
+        difftest_guidance.valid := difftest.valid
+        difftest_guidance.div := exuOut.div_data.bits
+        difftest_guidance.data_paddr.valid := CommitType.isLoadStore(io.commits.info(i).commitType)
+        difftest_guidance.data_paddr.bits := exuOut.paddr
+      }
     }
   }
 
@@ -1326,7 +1336,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.valid  := io.commits.commitValid(i) && io.commits.isCommit
       difftest.paddr  := exuOut.paddr
       difftest.opType := uop.ctrl.fuOpType
-      difftest.fuType := uop.ctrl.fuType
+      difftest.isAtomic := false.B
+      difftest.isLoad := false.B
     }
   }
 

@@ -145,7 +145,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val ramBaseAddr = outer.address.head.base
   val (ramIndexBits, ramOffsetBits) = (log2Ceil(outer.beatBytes), log2Ceil(outer.memByte))
   def ramIndex(addr: UInt) = ((addr - ramBaseAddr.U)(ramOffsetBits - 1, 0) >> ramIndexBits).asUInt
-  val ramHelper = DifftestMem(outer.memByte, outer.beatBytes, 8, singlePort = false)
+  val ramHelper = DifftestMem(outer.memByte, outer.beatBytes)
 
   val numOutstanding = 1 << in.ar.bits.id.getWidth
   // Note: we are using in.ar.bits.addr.getWidth insead of ramOffsetBits here.

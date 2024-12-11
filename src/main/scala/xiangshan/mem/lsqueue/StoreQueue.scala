@@ -678,6 +678,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
+  io.mmioStout.bits.debug := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
@@ -783,7 +784,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       val wmask = sbufferMask
       val wdata = sbufferData & MaskExpand(sbufferMask)
 
-      val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
+      val difftest = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
       difftest.coreid := io.hartId
       difftest.index  := i.U
       difftest.valid  := storeCommit

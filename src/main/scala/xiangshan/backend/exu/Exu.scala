@@ -246,6 +246,7 @@ abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
     out.debug.isMMIO := false.B
     out.debug.isPerfCnt := false.B
     out.debug.paddr := DontCare
+    out.debug.div_data.valid := false.B
     out.redirect <> DontCare
     out.redirectValid := false.B
   }

@@ -36,6 +36,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     val out_valid = Output(Bool())
     val out_data = Output(UInt(len.W))
     val out_ready = Input(Bool())
+    val out_data_extra = Output(UInt(len.W))
   })
 
   // consts
@@ -388,6 +389,11 @@ class SRT16DividerDataModule(len: Int) extends Module {
     SignExt(res(31, 0), len),
     res
   )
+  val res_extra = Mux(isHi, qFinal, rFinal)
+  io.out_data_extra := Mux(isW,
+    SignExt(res_extra(31, 0), len),
+    res_extra
+  )
   io.in_ready := state(s_idle)
   io.out_valid := state(s_post_1)
 
@@ -466,6 +472,8 @@ class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len
   io.out.valid := divDataModule.io.out_valid
   io.out.bits.data := divDataModule.io.out_data
   io.out.bits.uop := uopReg
+  io.out.bits.extra_data.valid := true.B
+  io.out.bits.extra_data.bits := divDataModule.io.out_data_extra
 }
 
 class DividerWrapper(len: Int)(implicit p: Parameters) extends FunctionUnit(len) {

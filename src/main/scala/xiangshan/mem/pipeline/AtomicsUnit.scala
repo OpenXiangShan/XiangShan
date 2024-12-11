@@ -451,10 +451,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     difftest.coreid := io.hartId
     difftest.valid  := state === s_cache_resp_latch
     difftest.addr   := paddr_reg
-    difftest.data   := data_reg
+    difftest.data   := DontCare//data_reg
     difftest.mask   := mask_reg
+    difftest.cmp    := DontCare
     difftest.fuop   := fuop_reg
-    difftest.out    := resp_data_wire
+    difftest.out    := DontCare//resp_data_wire
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {

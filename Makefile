@@ -85,8 +85,13 @@ else
 override SIM_ARGS += --with-constantin
 endif
 
+# External golden core for DiffTest
+ifneq ($(DIFFTEST_GOLDEN),)
+override SIM_ARGS += --difftest-config Td
+endif
+
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+RELEASE_ARGS += --disable-all --disable-assert --fpga-platform
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
 ifeq ($(RELEASE),1)

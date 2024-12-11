@@ -345,6 +345,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   /* add L/S inst info in EXU */
   // val L1toL2TlbLatency = UInt(XLEN.W)
   // val levelTlbHit = UInt(2.W)
+  val div_data = Valid(UInt(64.W))
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {

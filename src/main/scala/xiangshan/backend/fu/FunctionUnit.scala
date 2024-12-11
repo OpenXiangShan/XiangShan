@@ -65,6 +65,7 @@ case class FuConfig
 class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
   val data = UInt(len.W)
   val uop = new MicroOp
+  val extra_data = Valid(UInt(len.W))
 }
 
 class FunctionUnitInput(val len: Int)(implicit p: Parameters) extends XSBundle {
@@ -89,6 +90,8 @@ abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSMod
   XSPerfAccumulate("out_valid", io.out.valid)
   XSPerfAccumulate("out_fire", io.out.fire)
 
+  io.out.bits.extra_data.valid := false.B
+  io.out.bits.extra_data.bits := DontCare
 }
 
 abstract class FUWithRedirect(len: Int = 64)(implicit p: Parameters) extends FunctionUnit(len: Int) with HasRedirectOut

@@ -1088,6 +1088,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.data            := s3_in.data
   s3_out.bits.redirectValid   := false.B
   s3_out.bits.redirect        := DontCare
+  s3_out.bits.debug           := DontCare
   s3_out.bits.debug.isMMIO    := s3_in.mmio
   s3_out.bits.debug.isPerfCnt := false.B
   s3_out.bits.debug.paddr     := s3_in.paddr

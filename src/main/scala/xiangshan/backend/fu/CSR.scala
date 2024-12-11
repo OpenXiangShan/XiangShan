@@ -1018,7 +1018,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   ))
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
-    addr === Mip.U
+    (addr >= PmpaddrBase.U && addr < (PmpaddrBase + 16).U) ||
+    (addr >= PmpcfgBase.U && addr < (PmpcfgBase + 4).U)
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
@@ -1034,7 +1035,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
+  val isZeroImmOrRs1 = src1 === 0.U
+  val wen = valid && CSROpType.needWrite(func, isZeroImmOrRs1) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val HasH = (HasHExtension == true).asBool
@@ -1626,6 +1628,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.dpc := dpc
     difftest.dscratch0 := dscratch0
     difftest.dscratch1 := dscratch1
+  }
+
+  if(env.EnableDifftest) {
+    val difftest = DifftestModule(new DiffExtraCSRState)
+    difftest.coreid := csrio.hartId
+    difftest.fcsr := fcsr
   }
 }
 
