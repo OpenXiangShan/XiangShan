@@ -1298,7 +1298,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Only the vector store difftest required signal is separated from the rtl code.
   if (env.EnableDifftest) {
     for (i <- 0 until EnsbufferWidth) {
-      val ptr = rdataPtrExt(i).value
+      val ptr = dataBuffer.io.enq(i).bits.sqPtr.value
       difftestBuffer.get.io.enq(i).valid := dataBuffer.io.enq(i).valid
       difftestBuffer.get.io.enq(i).bits := uop(ptr)
     }
