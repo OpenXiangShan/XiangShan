@@ -6,7 +6,7 @@ import chisel3.util._
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
 import xiangshan.{XSBundle, XSModule}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput, ExuVec, ImmInfo}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, ExuVec, ImmInfo}
 import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
@@ -83,22 +83,11 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   // (exuIdx, srcIdx, bypassExuIdx)
   private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
     fromDPs.map { (x: DecoupledIO[ExuInput]) =>
-      val wakeUpSourceIdx = x.bits.params.iqWakeUpSinkPairs.map(x => x.source.getExuParam(params.allExuParams).exuIdx)
-      val mask = Wire(chiselTypeOf(x.bits.l1ExuOH.getOrElse(VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(ExuVec.width.W).asBools))))))
-      mask.map{ case m =>
-        val vecMask = Wire(Vec(m.getWidth, Bool()))
-        vecMask.zipWithIndex.map{ case(v, i) =>
-          if (wakeUpSourceIdx.contains(i)) v := true.B else v := false.B
-        }
-        m := vecMask
-      }
       println(s"[BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
-      VecInit(x.bits.l1ExuOH.getOrElse(
+      VecInit(x.bits.exuSources.map(_.map(_.toExuOH(x.bits.params))).getOrElse(
         // TODO: remove tmp max 1 for fake HYU1
-        VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(ExuVec.width.W).asBools)))
-      ).zip(mask).map{ case (l,m) =>
-        VecInit(l.zip(m).map(x => x._1 && x._2))
-      })
+        VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(params.numExu.W).asBools)))
+      ))
     }
   )
 
@@ -121,8 +110,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && (x.bits.params.isVfExeUnit || x.bits.params.isMemExeUnit)).map(_.bits.params.exuIdx)
 
   private val bypass2ValidVec3 = MixedVecInit(
-    fromDPsHasBypass2Sink.map(forwardOrBypassValidVec3(_)).map(exu => VecInit(exu.map(l1ExuOH => 
-      VecInit(fromDPsHasBypass2Source.map(l1ExuOH(_))).asUInt
+    fromDPsHasBypass2Sink.map(forwardOrBypassValidVec3(_)).map(exu => VecInit(exu.map(exuOH => 
+      VecInit(fromDPsHasBypass2Source.map(exuOH(_))).asUInt
     )))
   )
   if(params.debugEn){

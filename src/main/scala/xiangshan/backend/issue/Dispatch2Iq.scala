@@ -10,7 +10,7 @@ import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTableReadIO,VlBusyTableReadIO}
 import xiangshan.mem._
-import xiangshan.backend.Bundles.{DynInst, ExuOH}
+import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.dispatch.Dispatch2IqFpImp
