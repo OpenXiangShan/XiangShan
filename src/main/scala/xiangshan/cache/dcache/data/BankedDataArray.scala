@@ -512,11 +512,16 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   // readline port
+  val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
+  val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.valid))
+  val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
+  val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))
   (0 until DCacheBanks).map(i => {
-    io.readline_resp(i) := read_result(RegEnable(line_div_addr, io.readline.valid))(i)(RegEnable(OHToUInt(io.readline.bits.way_en),io.readline.valid))
+    io.readline_resp(i) := read_result(readline_r_div_addr)(i)(readline_r_way_addr)
+    readline_error_delayed(i) := read_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
   })
-  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) &&
-    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt.orR
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) && readline_error_delayed.asUInt.orR
 
   // write data_banks & ecc_banks
   for (div_index <- 0 until DCacheSetDiv) {
@@ -763,11 +768,16 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   // read result: expose banked read result
+  val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
+  val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.valid))
+  val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
+  val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))
   (0 until DCacheBanks).map(i => {
-    io.readline_resp(i) := bank_result(RegEnable(line_div_addr, io.readline.valid))(i)(RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid))
+    io.readline_resp(i) := bank_result(readline_r_div_addr)(i)(readline_r_way_addr)
+    readline_error_delayed(i) := bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
   })
-  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) &&
-    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt.orR
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) && readline_error_delayed.asUInt.orR
 
   // write data_banks & ecc_banks
   for (div_index <- 0 until DCacheSetDiv) {
