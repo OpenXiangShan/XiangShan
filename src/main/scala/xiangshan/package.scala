@@ -800,7 +800,7 @@ package object xiangshan {
     def VEC_VFRED        = "b111100".U // VEC_VFRED
     def VEC_VFREDOSUM    = "b111101".U // VEC_VFREDOSUM
     def VEC_MVNR         = "b000100".U // vmvnr
-    
+
     def AMO_CAS_W        = "b110101".U // amocas_w
     def AMO_CAS_D        = "b110110".U // amocas_d
     def AMO_CAS_Q        = "b110111".U // amocas_q
@@ -833,6 +833,7 @@ package object xiangshan {
     // def singleStep          = 14
     def storePageFault      = 15
     def doubleTrap          = 16
+    def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
     def virtualInstr        = 22
@@ -893,7 +894,8 @@ package object xiangshan {
       storeGuestPageFault,
       loadGuestPageFault,
       storeAccessFault,
-      loadAccessFault
+      loadAccessFault,
+      hardwareError
     )
 
     def getHigherExcpThan(excp: Int): Seq[Int] = {
