@@ -130,6 +130,16 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+            case SoCParamsKey => up(SoCParamsKey).copy(
+              L3CacheParamsOpt = up(SoCParamsKey).L3CacheParamsOpt.map(_.copy(
+                enablePerf = false,
+              )),
+            )
+            case XSTileKey => up(XSTileKey).map(p => p.copy(
+              L2CacheParamsOpt = p.L2CacheParamsOpt.map(_.copy(
+                enablePerf = false,
+              )),
+            ))
           }), tail)
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
