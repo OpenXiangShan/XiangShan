@@ -121,7 +121,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
 //  val hit:       Bool = Bool()
 //}
 
-class ICacheMainPipe(implicit p: Parameters) extends ICacheModule {
+class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
   val io: ICacheMainPipeInterface = IO(new ICacheMainPipeInterface)
 
   /** Input/Output port */
