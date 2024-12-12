@@ -382,17 +382,17 @@ object VecDecoder extends DecodeConstants {
 
     VMACC_VV     -> OPMVV(T, FuType.vimac, VimacType.vmacc, F, T, F, UopSplitType.VEC_VVV),
     VMADD_VV     -> OPMVV(T, FuType.vimac, VimacType.vmadd, F, T, F, UopSplitType.VEC_VVV),
-    VMAND_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmand_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMANDN_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmandn_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMNAND_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmnand_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMNOR_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmnor_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMOR_MM      -> OPMVV(T, FuType.vialuF, VialuFixType.vmor_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMORN_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmorn_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMXNOR_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmxnor_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMXOR_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmxor_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMSBF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsbf_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsbf.m vd, vs2, vm
-    VMSIF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsif_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsif.m vd, vs2, vm
-    VMSOF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsof_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsof.m vd, vs2, vm
+    VMAND_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmand_mm, F, T, F, UopSplitType.dummy),
+    VMANDN_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmandn_mm, F, T, F, UopSplitType.dummy),
+    VMNAND_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmnand_mm, F, T, F, UopSplitType.dummy),
+    VMNOR_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmnor_mm, F, T, F, UopSplitType.dummy),
+    VMOR_MM      -> OPMVV(T, FuType.vialuF, VialuFixType.vmor_mm, F, T, F, UopSplitType.dummy),
+    VMORN_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmorn_mm, F, T, F, UopSplitType.dummy),
+    VMXNOR_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmxnor_mm, F, T, F, UopSplitType.dummy),
+    VMXOR_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmxor_mm, F, T, F, UopSplitType.dummy),
+    VMSBF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsbf_m, F, T, F, UopSplitType.dummy, src1 = SrcType.no), // vmsbf.m vd, vs2, vm
+    VMSIF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsif_m, F, T, F, UopSplitType.dummy, src1 = SrcType.no), // vmsif.m vd, vs2, vm
+    VMSOF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsof_m, F, T, F, UopSplitType.dummy, src1 = SrcType.no), // vmsof.m vd, vs2, vm
     VMUL_VV      -> OPMVV(T, FuType.vimac, VimacType.vmul, F, T, F, UopSplitType.VEC_VVV),
     VMULH_VV     -> OPMVV(T, FuType.vimac, VimacType.vmulh, F, T, F, UopSplitType.VEC_VVV),
     VMULHSU_VV   -> OPMVV(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VVV),
