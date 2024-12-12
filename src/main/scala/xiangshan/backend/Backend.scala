@@ -44,7 +44,7 @@ import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PFEvent, PerfCounterIO}
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
+import xiangshan.backend.issue.{Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
