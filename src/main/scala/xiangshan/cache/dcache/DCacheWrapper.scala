@@ -408,7 +408,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val prefetch = Bool()
   val vecValid = Bool()
   val sqNeedDeq = Bool()
-  
+
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
     res.vaddr := vaddr
@@ -1014,10 +1014,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   // l1 dcache controller
-  outer.cacheCtrlOpt.map(mod => mod.module.io_pseudoError.foreach { case x => x.ready := false.B })
+  outer.cacheCtrlOpt.foreach {
+    case mod =>
+      mod.module.io_pseudoError.foreach {
+        case x => x.ready := false.B
+      }
+  }
+  ldu.foreach {
+    case mod =>
+      mod.io.pseudo_error.valid := false.B
+      mod.io.pseudo_error.bits := DontCare
+  }
   mainPipe.io.pseudo_error.valid := false.B
   mainPipe.io.pseudo_error.bits  := DontCare
-  ldu.map(mod => { mod.io.pseudo_error.valid := false.B; mod.io.pseudo_error.bits := DontCare; })
   bankedDataArray.io.pseudo_error.valid := false.B
   bankedDataArray.io.pseudo_error.bits  := DontCare
 
