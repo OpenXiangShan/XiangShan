@@ -140,46 +140,56 @@ object AddPipelineReg {
 }
 
 object SelectOldest {
-  class SelectOldest[T <: Data](gen: T, numIn: Int, fn: (T, T) => Bool) extends Module {
+  class SelectOldest[T <: Data, R <: Data](inType: T, selType: R, numIn: Int, fn: (R, R) => Bool) extends Module {
     val io = IO(new Bundle() {
-      val in = Flipped(Vec(numIn, ValidIO(chiselTypeOf(gen))))
-      val oldest = ValidIO(chiselTypeOf(gen))
+      val in = Flipped(Vec(numIn, ValidIO(chiselTypeOf(inType))))
+      val sel = Input(Vec(numIn, chiselTypeOf(selType)))
+      val oldest = ValidIO(chiselTypeOf(inType))
     })
 
-    def findOldest: (T, T) => Bool = fn
-
-    def selectOldest(valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-      assert(valid.length == bits.length)
-      if (valid.length == 0 || valid.length == 1) {
-        (valid, bits)
-      } else if (valid.length == 2) {
-        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-        for (i <- res.indices) {
-          res(i).valid := valid(i)
-          res(i).bits := bits(i)
-        }
-        val oldest = Mux(valid(0) && valid(1),
-          Mux(findOldest(bits(0), bits(1)), res(1), res(0)),
-          Mux(valid(0) && !valid(1), res(0), res(1)))
-        (Seq(oldest.valid), Seq(oldest.bits))
-      } else {
-        val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-        val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-        selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+    private def findOldest(ins: Seq[(Bool, (T, R))]): Seq[(Bool, (T, R))] = {
+      ins.length match {
+        case 0 | 1  => ins
+        case 2      =>
+          val (left, right) = (ins.head, ins.last)
+          val oldest = MuxT(left._1 && right._1,
+                        MuxT(fn(left._2._2, right._2._2), left._2, right._2),
+                          MuxT(left._1 && !right._1, left._2, right._2))
+          Seq((left._1 || right._1, oldest))
+        case _      =>
+          val left = findOldest(ins.take(ins.length/2))
+          val right = findOldest(ins.drop(ins.length/2))
+          findOldest(left ++ right)
       }
     }
 
-    val oldest = selectOldest(io.in.map(_.valid), io.in.map(_.bits))
-    io.oldest.valid := oldest._1.head
-    io.oldest.bits  := oldest._2.head
+    val oldest = findOldest(io.in.zip(io.sel).map(x => (x._1.valid, (x._1.bits, x._2))))
+    io.oldest.valid := oldest.head._1
+    io.oldest.bits  := oldest.head._2._1
   }
 
-  def apply[T <: Data]
-  (gen: T, ins: Vec[ValidIO[T]], fn: (T, T) => Bool,
-   moduleName: Option[String] = None
-  ) = {
-    val selectOldest = Module(new SelectOldest[T](gen = ins.head.bits.cloneType, numIn = ins.length, fn = fn))
-    selectOldest.io.in <> ins
-    selectOldest.io.oldest
+  /**
+   * `SelectOldest` is a module designed to select the "oldest" element from an
+   * input sequence.
+   *
+   * @param inType The data type of the input elements.
+   * @param selType The data type of the selection criterion.
+   * @param numIn The number of input elements.
+   * @param fn A comparison function to determine the "oldest" element based on the selection criterion.
+   */
+
+  def apply[T <: Data, R <: Data](
+    ins:  Vec[ValidIO[T]],
+    sels: Vec[R],
+    fn:   (R, R) => Bool,
+    moduleName: Option[String] = None
+  ): ValidIO[T] = {
+    def inType = ins.head.bits.cloneType
+    def selType = sels.head.cloneType
+
+    val selector = Module(new SelectOldest(inType, selType, ins.length, fn)).suggestName(moduleName.getOrElse("SelectOldest"))
+    selector.io.in  <> ins
+    selector.io.sel <> sels
+    selector.io.oldest
   }
 }
