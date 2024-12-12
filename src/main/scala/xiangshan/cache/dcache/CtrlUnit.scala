@@ -25,7 +25,6 @@ import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
-import freechips.rocketchip.util.property
 import chisel3.experimental.SourceInfo
 import xiangshan._
 
