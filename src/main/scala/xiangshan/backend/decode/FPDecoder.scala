@@ -274,14 +274,45 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   val decoder = DecodeLogic(io.instr, default, table)
 
   val ctrl = io.fpCtrl
-  val sigs = Seq(
-    ctrl.isAddSub, ctrl.typeTagIn, ctrl.typeTagOut,
-    ctrl.fromInt, ctrl.wflags, ctrl.fpWen,
-    ctrl.div, ctrl.sqrt, ctrl.fcvt
-  )
-  sigs.zip(decoder).foreach({case (s, d) => s := d})
+  val sigs = Seq(ctrl.typeTagOut, ctrl.wflags)
+  // TODO dirty code
+  sigs(0) := decoder(2)
+  sigs(1) := decoder(4)
   ctrl.typ := inst.TYP
-  ctrl.fmt := inst.FMT
+  // scalar cvt inst
+  val isSew2Cvts = Seq(
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
+    FMV_X_W,
+    // zfa inst
+    FCVTMOD_W_D,
+  )
+  /*
+  The optype for FCVT_D_H and FCVT_H_D is the same,
+  so the two instructions are distinguished by sew.
+  FCVT_H_D:VSew.e64
+  FCVT_D_H:VSew.e16
+   */
+  val isSew2Cvth = Seq(
+    FCVT_S_H, FCVT_H_S, FCVT_D_H,
+    FMV_X_H,
+    FCVT_W_H, FCVT_L_H, FCVT_H_W,
+    FCVT_H_L, FCVT_H_WU, FCVT_H_LU,
+    FCVT_WU_H, FCVT_LU_H,
+  )
+  val simpleFmt = Mux1H(
+    // scala format to vsew format, when inst.FMT === "b11".U, ctrl.fmt := "b00".U
+    Seq(
+      (inst.FMT === "b00".U) -> "b10".U, // S
+      (inst.FMT === "b01".U) -> "b11".U, // D
+      (inst.FMT === "b10".U) -> "b01".U, // H
+    )
+  )
+  val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
+  val isSew2Cvt16 = isSew2Cvth.map(io.instr === _).reduce(_ || _)
+  val complexFmt = Mux(isSew2Cvt32, VSew.e32, VSew.e16)
+  val isCompFmt = isSew2Cvt32 || isSew2Cvt16
+  ctrl.fmt := Mux(isCompFmt, complexFmt, simpleFmt)
   ctrl.rm := inst.RM
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
@@ -308,9 +339,4 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FNMSUB_H-> List(BitPat("b10"),Y)
   )
   val fmaDefault = List(BitPat("b??"), N)
-  Seq(ctrl.fmaCmd, ctrl.ren3).zip(
-    DecodeLogic(io.instr, fmaDefault, fmaTable)
-  ).foreach({
-    case (s, d) => s := d
-  })
 }

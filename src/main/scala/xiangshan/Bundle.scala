@@ -167,19 +167,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
 
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-  val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(2.W)  // H S D
   val typeTagOut = UInt(2.W) // H S D
-  val fromInt = Bool()
   val wflags = Bool()
-  val fpWen = Bool()
-  val fmaCmd = UInt(2.W)
-  val div = Bool()
-  val sqrt = Bool()
-  val fcvt = Bool()
   val typ = UInt(2.W)
   val fmt = UInt(2.W)
-  val ren3 = Bool() //TODO: remove SrcType.fp
   val rm = UInt(3.W)
 }
 
