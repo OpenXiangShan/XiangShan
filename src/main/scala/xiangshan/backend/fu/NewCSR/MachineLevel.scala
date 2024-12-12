@@ -297,10 +297,10 @@ trait MachineLevel { self: NewCSR =>
     val MML   = RO( 0) // Smepmp
   })).setAddr(CSRs.mseccfg)
 
-  val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
+  val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle with SmcntrpmfBundle {
     when(w.wen) {
       reg := w.wdata
-    }.elsewhen(!this.mcountinhibit.CY.asUInt.asBool) {
+    }.elsewhen(!this.mcountinhibit.CY.asUInt.asBool && countingEn) {
       reg := reg.ALL.asUInt + 1.U
     }.otherwise {
       reg := reg
@@ -308,10 +308,10 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mcycle)
 
 
-  val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle {
+  val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle {
     when(w.wen) {
       reg := w.wdata
-    }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid) {
+    }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid && countingEn) {
       reg := reg.ALL.asUInt + robCommit.instNum.bits
     }.otherwise {
       reg := reg
@@ -334,6 +334,12 @@ trait MachineLevel { self: NewCSR =>
       toMhpmeventOF := !countingInhibit & counterAdd.head(1)
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
+
+  val mcyclecfg = Module(new CSRModule("Mcyclecfg", new EventInhibitBundle))
+    .setAddr(CSRs.mcyclecfg)
+
+  val minstretcfg = Module(new CSRModule("Minstretcfg", new EventInhibitBundle))
+    .setAddr(CSRs.minstretcfg)
 
   val mvendorid = Module(new CSRModule("Mvendorid") { rdata := 0.U })
     .setAddr(CSRs.mvendorid)
@@ -417,6 +423,8 @@ trait MachineLevel { self: NewCSR =>
     mncause,
     mnstatus,
     mnscratch,
+    mcyclecfg,
+    minstretcfg,
   ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
@@ -674,13 +682,16 @@ class MipToMvip extends IpValidBundle {
   this.SEIP.bits.setRW()
 }
 
-class MhpmeventBundle extends CSRBundle {
-  val OF      = RW(63).withReset(0.U)
+class EventInhibitBundle extends CSRBundle {
   val MINH    = RW(62).withReset(0.U)
   val SINH    = RW(61).withReset(0.U)
   val UINH    = RW(60).withReset(0.U)
   val VSINH   = RW(59).withReset(0.U)
   val VUINH   = RW(58).withReset(0.U)
+}
+
+class MhpmeventBundle extends EventInhibitBundle {
+  val OF      = RW(63).withReset(0.U)
   val OPTYPE2 = OPTYPE(54, 50, wNoFilter).withReset(OPTYPE.OR)
   val OPTYPE1 = OPTYPE(49, 45, wNoFilter).withReset(OPTYPE.OR)
   val OPTYPE0 = OPTYPE(44, 40, wNoFilter).withReset(OPTYPE.OR)
@@ -753,10 +764,10 @@ trait HasPerfCounterBundle { self: CSRModule[_] =>
   val toMhpmeventOF = IO(Output(Bool()))
 }
 
-trait HasPerfEventBundle { self: CSRModule[_] =>
-  val perfEvents = IO(Input(Vec(perfCntNum, UInt(XLEN.W))))
-}
-
 trait HasLocalInterruptReqBundle { self: CSRModule[_] =>
   val lcofiReq = IO(Input(Bool()))
+}
+
+trait SmcntrpmfBundle { self: CSRModule[_] =>
+  val countingEn    = IO(Input(Bool()))
 }
