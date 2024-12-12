@@ -209,7 +209,7 @@ clean:
 
 init:
 	git submodule update --init
-	cd rocket-chip && git submodule update --init cde hardfloat
+	cd rocket-chip && git submodule update --init dependencies/cde dependencies/chisel dependencies/diplomacy dependencies/hardfloat
 	cd openLLC && git submodule update --init openNCB
 
 bump:
