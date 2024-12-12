@@ -69,7 +69,7 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
 }
 
-class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
+class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICacheECCHelper {
   val io: IPrefetchIO = IO(new IPrefetchIO)
 
   private val (toITLB, fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))

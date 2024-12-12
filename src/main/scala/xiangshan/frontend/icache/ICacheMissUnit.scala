@@ -381,13 +381,15 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     tag = getPhyTagFromBlk(mshr_resp.bits.blkPaddr),
     idx = mshr_resp.bits.vSetIdx,
     waymask = waymask,
-    bankIdx = mshr_resp.bits.vSetIdx(0)
+    bankIdx = mshr_resp.bits.vSetIdx(0),
+    poison = false.B
   )
   io.data_write.bits.generate(
     data = respDataReg.asUInt,
     idx = mshr_resp.bits.vSetIdx,
     waymask = waymask,
-    bankIdx = mshr_resp.bits.vSetIdx(0)
+    bankIdx = mshr_resp.bits.vSetIdx(0),
+    poison = false.B
   )
 
   io.meta_write.valid := write_sram_valid
