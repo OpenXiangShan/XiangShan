@@ -1255,12 +1255,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // If the last flow with an exception is the LastFlow of this instruction, the flag is not set.
   // compare robidx to select the last flow
   require(EnsbufferWidth == 2, "The vector store exception handle process only support EnsbufferWidth == 2 yet.")
-  val robidxEQ = dataBuffer.io.enq(0).valid && dataBuffer.io.enq(1).valid &&
+  val robidxEQ = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire &&
     uop(rdataPtrExt(0).value).robIdx === uop(rdataPtrExt(1).value).robIdx
-  val robidxNE = dataBuffer.io.enq(0).valid && dataBuffer.io.enq(1).valid && (
+  val robidxNE = dataBuffer.io.enq(0).fire && dataBuffer.io.enq(1).fire && (
     uop(rdataPtrExt(0).value).robIdx =/= uop(rdataPtrExt(1).value).robIdx
   )
-  val onlyCommit0 = dataBuffer.io.enq(0).valid && !dataBuffer.io.enq(1).valid
+  val onlyCommit0 = dataBuffer.io.enq(0).fire && !dataBuffer.io.enq(1).fire
 
   val vecCommitLastFlow =
     // robidx equal => check if 1 is last flow
