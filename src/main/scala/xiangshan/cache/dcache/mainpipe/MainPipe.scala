@@ -399,7 +399,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
   val s2_idx = get_idx(s2_req.vaddr)
 
-  val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
@@ -426,6 +425,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_replay = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) || io.replace_block // miss_req in s2 but refill data is invalid, can block 1 cycle
+  val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   val s2_can_go_to_s3 = (s2_req.replace || s2_req.probe || (s2_req.miss && io.refill_info.valid && !io.replace_block) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
   val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay
@@ -505,7 +505,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s3_error = s3_flag_error || s3_tag_error || s3_l2_error || s3_data_error
   val s3_error = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error
   val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
-  val (_, probe_shrink_param, _) = s3_coh.onProbe(s3_req.probe_param)
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
 
@@ -631,17 +630,17 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val old_data = s3_store_data_merged(i)
     val new_data = amoalu.io.out
     val wmask = Mux(
-      s1_req.word_idx === i.U,
+      s3_req.word_idx === i.U,
       ~0.U(wordBytes.W),
       0.U(wordBytes.W)
     )
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
     s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
-      Mux(s1_req.word_idx === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
+      Mux(s3_req.word_idx === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
     )
     val l_select = !s3_cas_fail && s1_req.word_idx === i.U
     val h_select = !s3_cas_fail && s3_req.cmd === M_XA_CASQ &&
-      (if (i % 2 == 1) s1_req.word_idx === (i - 1).U else false.B)
+      (if (i % 2 == 1) s3_req.word_idx === (i - 1).U else false.B)
     s3_cas_data_merged(i) := mergePutData(
       old_data = old_data,
       new_data = Mux(h_select, s3_req.amo_data >> DataBits, s3_req.amo_data.take(DataBits)),
