@@ -319,10 +319,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
   ) // should be zero
 
   // debug
-  when (s2_mempred_update_req.valid) {
-    XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
-    XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
-  }
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
 }
 
 

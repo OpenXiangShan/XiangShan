@@ -88,13 +88,13 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   when (flush) {
     req_valid := false.B
   } .elsewhen (io.req.valid) {
-    XSError(req_valid, p"LoadQueueUncache: You can not write an valid entry: $entryIndex")
     req_valid := true.B
     req := io.req.bits
     nderr := false.B
   } .elsewhen (writeback) {
     req_valid := false.B
   }
+  XSError(!flush && io.req.valid && req_valid, p"LoadQueueUncache: You can not write an valid entry: $entryIndex")
 
   /**
     * Memory mapped IO / NC operations
@@ -224,31 +224,28 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.exception.bits.uop.exceptionVec(loadAccessFault) := nderr
 
   /* debug log */
-  when (io.uncache.req.fire) {
-    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
-      req.uop.pc,
-      io.uncache.req.bits.addr,
-      io.uncache.req.bits.data,
-      io.uncache.req.bits.cmd,
-      io.uncache.req.bits.mask
-    )
-  }
-  when(io.ncOut.fire) {
-    XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
-      io.ncOut.bits.uop.robIdx.asUInt,
-      io.ncOut.bits.uop.lqIdx.asUInt,
-      io.ncOut.bits.uop.pc,
-      true.B
-    )
-  }
-  when(io.mmioOut.fire) {
-    XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
-      io.mmioOut.bits.uop.robIdx.asUInt,
-      io.mmioOut.bits.uop.lqIdx.asUInt,
-      io.mmioOut.bits.uop.pc,
-      true.B
-    )
-  }
+  XSDebug(io.uncache.req.fire,
+    "uncache req: pc %x addr %x data %x op %x mask %x\n",
+    req.uop.pc,
+    io.uncache.req.bits.addr,
+    io.uncache.req.bits.data,
+    io.uncache.req.bits.cmd,
+    io.uncache.req.bits.mask
+  )
+  XSInfo(io.ncOut.fire,
+    "int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
+    io.ncOut.bits.uop.robIdx.asUInt,
+    io.ncOut.bits.uop.lqIdx.asUInt,
+    io.ncOut.bits.uop.pc,
+    true.B
+  )
+  XSInfo(io.mmioOut.fire,
+    "int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
+    io.mmioOut.bits.uop.robIdx.asUInt,
+    io.mmioOut.bits.uop.lqIdx.asUInt,
+    io.mmioOut.bits.uop.pc,
+    true.B
+  )
 
 }
 

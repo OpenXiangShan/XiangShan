@@ -377,8 +377,8 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
   val lqIdx = new LqPtr
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",
       cmd, vaddr, data, mask, id)
   }
 }
@@ -392,8 +392,8 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
-  def dump() = {
-    XSDebug("DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
   def idx: UInt = get_idx(vaddr)
@@ -444,8 +444,8 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
 }
@@ -482,8 +482,8 @@ class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
   // cache req nacked, replay it later
   val replay = Bool()
   val id     = UInt(reqIdWidth.W)
-  def dump() = {
-    XSDebug("DCacheLineResp: data: %x id: %d miss: %b replay: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheLineResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
 }
@@ -497,8 +497,8 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   val data_raw = UInt((cfg.blockBytes * 8).W)
   val hasdata = Bool()
   val refill_done = Bool()
-  def dump() = {
-    XSDebug("Refill: addr: %x data: %x\n", addr, data)
+  def dump(cond: Bool) = {
+    XSDebug(cond, "Refill: addr: %x data: %x\n", addr, data)
   }
   val id     = UInt(log2Up(cfg.nMissEntries).W)
 }
@@ -506,8 +506,8 @@ class Refill(implicit p: Parameters) extends DCacheBundle
 class Release(implicit p: Parameters) extends DCacheBundle
 {
   val paddr  = UInt(PAddrBits.W)
-  def dump() = {
-    XSDebug("Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
+  def dump(cond: Bool) = {
+    XSDebug(cond, "Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
   }
 }
 
@@ -532,8 +532,8 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry(nWays)
 
-  def dump() = {
-    XSDebug("UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
 }
@@ -554,8 +554,8 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
       data, id, miss, replay, tag_error, error)
   }
 }

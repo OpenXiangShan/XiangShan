@@ -62,27 +62,25 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
 
 
 //  val timer = GTimer()
-  when(in.ar.fire){
-    XSDebug(p"[ar] addr: ${Hexadecimal(in.ar.bits.addr)} " +
-      p"arlen:${in.ar.bits.len} arsize:${in.ar.bits.size} " +
-      p"id: ${in.ar.bits.id}\n"
-    )
-  }
-  when(in.aw.fire){
-    XSDebug(p"[aw] addr: ${Hexadecimal(in.aw.bits.addr)} " +
-      p"awlen:${in.aw.bits.len} awsize:${in.aw.bits.size} " +
-      p"id: ${in.aw.bits.id}\n"
-    )
-  }
-  when(in.w.fire){
-    XSDebug(p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last} data:${Hexadecimal(in.w.bits.data)}\n")
-  }
-  when(in.b.fire){
-    XSDebug(p"[b] id: ${in.b.bits.id}\n")
-  }
-  when(in.r.fire){
-    XSDebug(p"[r] id: ${in.r.bits.id} data: ${Hexadecimal(in.r.bits.data)}\n")
-  }
+  XSDebug(in.ar.fire,
+    p"[ar] addr: ${Hexadecimal(in.ar.bits.addr)} " +
+    p"arlen:${in.ar.bits.len} arsize:${in.ar.bits.size} " +
+    p"id: ${in.ar.bits.id}\n"
+  )
+  XSDebug(in.aw.fire,
+    p"[aw] addr: ${Hexadecimal(in.aw.bits.addr)} " +
+    p"awlen:${in.aw.bits.len} awsize:${in.aw.bits.size} " +
+    p"id: ${in.aw.bits.id}\n"
+  )
+  XSDebug(in.w.fire,
+    p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last} data:${Hexadecimal(in.w.bits.data)}\n"
+  )
+  XSDebug(in.b.fire,
+    p"[b] id: ${in.b.bits.id}\n"
+  )
+  XSDebug(in.r.fire,
+    p"[r] id: ${in.r.bits.id} data: ${Hexadecimal(in.r.bits.data)}\n"
+  )
 
   when(in.aw.fire){
     assert(in.aw.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")

@@ -568,9 +568,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
 
-    when (replay_req(i).fire) {
-      XSError(!allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
-    }
+    XSError(replay_req(i).fire && !allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
   }
 
   val EnableHybridUnitReplay = Constantin.createRecord("EnableHybridUnitReplay", true)
@@ -599,9 +597,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
- // when(io.refill.valid) {
- //   XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
- // }
+  // XSDebug(io.refill.valid, "miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
+
 
   // init
   freeMaskVec.map(e => e := false.B)
@@ -628,12 +625,16 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := true.B
 
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(
+      needEnqueue(w) && enq.ready &&
+      allocated(enqIndex) && !enq.bits.isLoadReplay,
+      p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
+    XSError(
+      needEnqueue(w) && enq.ready &&
+      hasExceptions(w),
+      p"LoadQueueReplay: The instruction has exception, it can not be replay, check: ldu $w, robIdx $debug_robIdx!")
     when (needEnqueue(w) && enq.ready) {
-
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex) && !enq.bits.isLoadReplay, p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
-      XSError(hasExceptions(w), p"LoadQueueReplay: The instruction has exception, it can not be replay, check: ldu $w, robIdx $debug_robIdx!")
-
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
       //  Allocate new entry

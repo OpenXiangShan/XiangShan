@@ -83,7 +83,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     * (2) For AMOCAS.W/D, 2 std uops are wanted: X(rd), X(rs2) with uopIdx = 0, 1
     * (3) For AMOCAS.Q, 4 std uops are wanted: X(rd), X(rs2), X(rd+1), X(rs2+1) with uopIdx = 0, 1, 2, 3
     * stds are not needed for write-back.
-    * 
+    *
     * The # of sta uops that an atomic instruction require, also the # of write-back:
     * (1) For AMOs(except AMOCAS.Q) and LR/SC, 1 sta uop is wanted: X(rs1) with uopIdx = 0
     * (2) For AMOCAS.Q, 2 sta uop is wanted: X(rs1)*2 with uopIdx = 0, 2
@@ -230,7 +230,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   TriggerUtil.triggerActionGen(triggerAction, backendTriggerCanFireVec, actionVec, triggerCanRaiseBpExp)
   val triggerDebugMode = TriggerAction.isDmode(triggerAction)
   val triggerBreakpoint = TriggerAction.isExp(triggerAction)
-  
+
   // tlb translation, manipulating signals && deal with exception
   // at the same time, flush sbuffer
   when (state === s_tlb_and_flush_sbuffer_req) {
@@ -258,7 +258,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
-      
+
       exceptionVec(breakPoint) := triggerBreakpoint
       trigger                  := triggerAction
 
@@ -528,7 +528,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   pipe_req.amo_data := genWdataAMO(rs2, uop.fuOpType)
   pipe_req.amo_mask := genWmaskAMO(paddr, uop.fuOpType)
   pipe_req.amo_cmp  := genWdataAMO(rd, uop.fuOpType)
-  
+
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
     val en = io.dcache.req.fire

@@ -65,9 +65,7 @@ class WaitTable(implicit p: Parameters) extends XSModule {
   }
 
   // debug
-  when (io.update.valid) {
-    XSDebug("%d: waittable update: pc %x data: %x\n", GTimer(), io.update.waddr, io.update.wdata)
-  }
+  XSDebug(io.update.valid, "%d: waittable update: pc %x data: %x\n", GTimer(), io.update.waddr, io.update.wdata)
 
   XSPerfAccumulate("wait_table_bit_set", PopCount(data.map(d => d(1))))
 }

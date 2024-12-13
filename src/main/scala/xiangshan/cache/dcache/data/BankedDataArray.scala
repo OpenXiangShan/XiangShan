@@ -131,25 +131,23 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
   XSPerfAccumulate("part_data_read_counter", data_sram.io.r.req.valid)
 
   def dump_r() = {
-    when(RegNext(io.r.en)) {
-      XSDebug("bank read set %x bank %x way %x data %x\n",
-        RegEnable(io.r.addr, io.r.en),
-        bankIdx.U,
-        wayIdx.U,
-        io.r.data
-      )
-    }
+    XSDebug(RegNext(io.r.en),
+      "bank read set %x bank %x way %x data %x\n",
+      RegEnable(io.r.addr, io.r.en),
+      bankIdx.U,
+      wayIdx.U,
+      io.r.data
+    )
   }
 
   def dump_w() = {
-    when(io.w.en) {
-      XSDebug("bank write set %x bank %x way %x data %x\n",
-        io.w.addr,
-        bankIdx.U,
-        wayIdx.U,
-        io.w.data
-      )
-    }
+    XSDebug(io.w.en,
+      "bank write set %x bank %x way %x data %x\n",
+      io.w.addr,
+      bankIdx.U,
+      wayIdx.U,
+      io.w.data
+    )
   }
 
   def dump() = {
@@ -205,22 +203,20 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   io.r.data := data_bank.map(_.io.r.resp.data(0))
 
   def dump_r() = {
-    when(RegNext(io.r.en)) {
-      XSDebug("bank read addr %x data %x\n",
-        RegEnable(io.r.addr, io.r.en),
-        io.r.data.asUInt
-      )
-    }
+    XSDebug(RegNext(io.r.en),
+      "bank read addr %x data %x\n",
+      RegEnable(io.r.addr, io.r.en),
+      io.r.data.asUInt
+    )
   }
 
   def dump_w() = {
-    when(io.w.en) {
-      XSDebug("bank write addr %x way_en %x data %x\n",
-        io.w.addr,
-        io.w.way_en,
-        io.w.data
-      )
-    }
+    XSDebug(io.w.en,
+      "bank write addr %x way_en %x data %x\n",
+      io.w.addr,
+      io.w.way_en,
+      io.w.data
+    )
   }
 
   def dump() = {
@@ -294,26 +290,24 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
 
   def dumpRead = {
     (0 until LoadPipelineWidth) map { w =>
-      when(io.read(w).valid) {
-        XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
-          io.read(w).bits.way_en, io.read(w).bits.addr)
-      }
+      XSDebug(io.read(w).valid,
+        s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
+        io.read(w).bits.way_en, io.read(w).bits.addr)
     }
-    when(io.readline.valid) {
-      XSDebug(s"DataArray Read Line, valid way_en: %x addr: %x rmask %x\n",
-        io.readline.bits.way_en, io.readline.bits.addr, io.readline.bits.rmask)
-    }
+    XSDebug(io.readline.valid,
+      s"DataArray Read Line, valid way_en: %x addr: %x rmask %x\n",
+      io.readline.bits.way_en, io.readline.bits.addr, io.readline.bits.rmask)
   }
 
   def dumpWrite = {
-    when(io.write.valid) {
-      XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
-        io.write.bits.way_en, io.write.bits.addr)
+    XSDebug(io.write.valid,
+      s"DataArray Write valid way_en: %x addr: %x\n",
+      io.write.bits.way_en, io.write.bits.addr)
 
-      (0 until DCacheBanks) map { r =>
-        XSDebug(s"cycle: $r data: %x wmask: %x\n",
-          io.write.bits.data(r), io.write.bits.wmask(r))
-      }
+    (0 until DCacheBanks) map { r =>
+      XSDebug(io.write.valid,
+        s"cycle: $r data: %x wmask: %x\n",
+        io.write.bits.data(r), io.write.bits.wmask(r))
     }
   }
 

@@ -1129,15 +1129,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("predecode_flush_notCFIFault", checkNotCFIFault)
   XSPerfAccumulate("predecode_flush_incalidTakenFault", checkInvalidTaken)
 
-  when(checkRetFault) {
-    XSDebug(
-      "startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n",
-      wb_ftq_req.startAddr,
-      wb_ftq_req.nextStartAddr,
-      wb_ftq_req.ftqOffset.valid,
-      wb_ftq_req.ftqOffset.bits
-    )
-  }
+  XSDebug(
+    checkRetFault,
+    "startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n",
+    wb_ftq_req.startAddr,
+    wb_ftq_req.nextStartAddr,
+    wb_ftq_req.ftqOffset.valid,
+    wb_ftq_req.ftqOffset.bits
+  )
 
   /** performance counter */
   val f3_perf_info = RegEnable(f2_perf_info, f2_fire)

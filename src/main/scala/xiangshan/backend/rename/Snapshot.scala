@@ -58,8 +58,9 @@ class SnapshotGenerator[T <: Data](dataType: T)(implicit p: Parameters) extends 
   when(!io.redirect && io.deq) {
     snptValids(snptDeqPtr.value) := false.B
     snptDeqPtr := snptDeqPtr + 1.U
-    XSError(isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
   }
+  XSError(!io.redirect && io.deq && isEmpty(snptEnqPtr, snptDeqPtr), "snapshots should not be empty when dequeue!\n")
+
   snptValids.zip(io.flushVec).foreach { case (valid, flush) =>
     when(flush) { valid := false.B }
   }

@@ -505,9 +505,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.resp.bits := resp.bits
   assert(RegNext(!(resp.valid && !io.lsu.resp.ready)), "lsu should be ready in s2")
 
-  when (resp.valid) {
-    resp.bits.dump()
-  }
+  resp.bits.dump(resp.valid)
 
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
@@ -587,16 +585,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {
-      when (valid) {
-        XSDebug(s"$pipeline_stage_name: ")
-        req.dump()
-      }
+      XSDebug(valid, s"$pipeline_stage_name: ")
+      req.dump(valid)
   }
 
   def dump_pipeline_valids(pipeline_stage_name: String, signal_name: String, valid: Bool) = {
-    when (valid) {
-      XSDebug(s"$pipeline_stage_name $signal_name\n")
-    }
+    XSDebug(valid, s"$pipeline_stage_name $signal_name\n")
   }
 
   val load_trace = Wire(new LoadPfDbBundle)

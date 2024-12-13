@@ -346,22 +346,25 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
       scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3))
 
+      val pred     = s2_scPreds(s2_chooseBit)
+      val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
       when(s2_provideds(w)) {
         s2_sc_used(w) := true.B
         s2_unconf(w)  := !s2_sumAboveThresholds(s2_chooseBit)
         s2_conf(w)    := s2_sumAboveThresholds(s2_chooseBit)
         // Use prediction from Statistical Corrector
-        XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
         when(s2_sumAboveThresholds(s2_chooseBit)) {
-          val pred     = s2_scPreds(s2_chooseBit)
-          val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
           s2_agree(w)    := s2_tageTakens_dup(3)(w) === pred
           s2_disagree(w) := s2_tageTakens_dup(3)(w) =/= pred
           // fit to always-taken condition
           // io.out.s2.full_pred.br_taken_mask(w) := pred
-          XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
+      XSDebug(s2_provideds(w), p"---------tage_bank_${w} provided so that sc used---------\n")
+      XSDebug(
+        s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
+        p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n"
+      )
 
       val s3_pred_dup   = io.s2_fire.map(f => RegEnable(s2_pred, f))
       val sc_enable_dup = dup(RegNext(io.ctrl.sc_enable))
@@ -374,17 +377,19 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
 
-      val updateTageMeta = updateMeta
+      val updateTageMeta    = updateMeta
+      val scPred            = updateSCMeta.scPreds(w)
+      val tagePred          = updateTageMeta.takens(w)
+      val taken             = update.br_taken_mask(w)
+      val scOldCtrs         = updateSCMeta.ctrs(w)
+      val pvdrCtr           = updateTageMeta.providerResps(w).ctr
+      val tableSum          = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered))
+      val totalSumAbs       = (tableSum +& getPvdrCentered(pvdrCtr)).abs.asUInt
+      val updateThres       = updateThresholds(w)
+      val sumAboveThreshold = aboveThreshold(tableSum, getPvdrCentered(pvdrCtr), updateThres)
+      val thres             = useThresholds(w)
+      val newThres          = scThresholds(w).update(scPred =/= taken)
       when(updateValids(w) && updateTageMeta.providers(w).valid) {
-        val scPred            = updateSCMeta.scPreds(w)
-        val tagePred          = updateTageMeta.takens(w)
-        val taken             = update.br_taken_mask(w)
-        val scOldCtrs         = updateSCMeta.ctrs(w)
-        val pvdrCtr           = updateTageMeta.providerResps(w).ctr
-        val tableSum          = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered))
-        val totalSumAbs       = (tableSum +& getPvdrCentered(pvdrCtr)).abs.asUInt
-        val updateThres       = updateThresholds(w)
-        val sumAboveThreshold = aboveThreshold(tableSum, getPvdrCentered(pvdrCtr), updateThres)
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w)    := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach { case (t, c) => t := c }
@@ -397,30 +402,40 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
         sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
-        val thres = useThresholds(w)
         when(scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U) {
-          val newThres = scThresholds(w).update(scPred =/= taken)
           scThresholds(w) := newThres
-          XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
         }
 
         when(scPred =/= taken || !sumAboveThreshold) {
           scUpdateMask(w).foreach(_ := true.B)
-          XSDebug(
-            tableSum < 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-              p"scSum(-${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-          )
-          XSDebug(
-            tableSum >= 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-              p"scSum(+${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-          )
-          XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
           update_on_mispred(w) := scPred =/= taken
           update_on_unconf(w)  := scPred === taken
         }
       }
+      XSDebug(
+        updateValids(w) && updateTageMeta.providers(w).valid &&
+          scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U,
+        p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n"
+      )
+      XSDebug(
+        updateValids(w) && updateTageMeta.providers(w).valid &&
+          (scPred =/= taken || !sumAboveThreshold) &&
+          tableSum < 0.S,
+        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(-${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+      )
+      XSDebug(
+        updateValids(w) && updateTageMeta.providers(w).valid &&
+          (scPred =/= taken || !sumAboveThreshold) &&
+          tableSum >= 0.S,
+        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(+${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+      )
+      XSDebug(
+        updateValids(w) && updateTageMeta.providers(w).valid &&
+          (scPred =/= taken || !sumAboveThreshold),
+        p"bank(${w}), update: sc: ${updateSCMeta}\n"
+      )
     }
 
     val realWens = scUpdateMask.transpose.map(v => v.reduce(_ | _))

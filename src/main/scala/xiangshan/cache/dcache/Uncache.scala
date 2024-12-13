@@ -482,14 +482,11 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask)
   XSDebug(resp.fire, "data: %x\n", req.bits.data)
   // print tilelink messages
-  when(mem_acquire.valid){
-    XSDebug("mem_acquire valid, ready=%d ", mem_acquire.ready)
-    mem_acquire.bits.dump
-  }
-  when (mem_grant.fire) {
-    XSDebug("mem_grant fire ")
-    mem_grant.bits.dump
-  }
+  XSDebug(mem_acquire.valid, "mem_acquire valid, ready=%d ", mem_acquire.ready)
+  mem_acquire.bits.dump(mem_acquire.valid)
+
+  XSDebug(mem_grant.fire, "mem_grant fire ")
+  mem_grant.bits.dump(mem_grant.fire)
 
   /* Performance Counters */
   XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)

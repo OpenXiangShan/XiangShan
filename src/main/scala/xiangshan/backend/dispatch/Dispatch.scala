@@ -195,23 +195,23 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward  = VecInit(io.fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
-  
+
   // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
-  
+
   val robidxStepHold  = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
   val robidxStepReg   = RegInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
   val robidxCanCommitStepping = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
   robidxStepReg := robidxCanCommitStepping
-  
+
   when(!io.singleStep) {
     singleStepState := s_updateRobidx
   }.elsewhen(io.singleStep && io.fromRename(0).fire && io.enqRob.req(0).valid) {
     singleStepState := s_holdRobidx
     robidxStepHold := io.fromRename(0).bits.robIdx
   }
-  
+
   when(singleStepState === s_updateRobidx) {
     robidxCanCommitStepping := robidxStepHold
   }.elsewhen(singleStepState === s_holdRobidx) {
@@ -252,10 +252,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && (io.fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
-    when (io.fromRename(i).fire) {
-      XSDebug(TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
-      XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
-    }
+    XSDebug(io.fromRename(i).fire &&
+              (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)),
+            s"Debug Mode: inst ${i} has frontend trigger exception\n")
+    XSDebug(io.fromRename(i).fire &&
+              updatedUop(i).singleStep,
+            s"Debug Mode: inst ${i} has single step exception\n")
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
