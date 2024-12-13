@@ -910,8 +910,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
+  val f3_exception_merge_vec = ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+  val f3_filter_instrs = VecInit((0 until PredictWidth).map(i =>
+    Mux(f3_exception_merge_vec(i) =/= 0.U, 0.U, f3_expd_instr(i))
+  ))
   io.toIbuffer.valid          := f3_toIbuffer_valid
-  io.toIbuffer.bits.instrs    := f3_expd_instr
+  io.toIbuffer.bits.instrs    := f3_filter_instrs // f3_expd_instr
   io.toIbuffer.bits.valid     := f3_instr_valid.asUInt
   io.toIbuffer.bits.enqEnable := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt
   io.toIbuffer.bits.pd        := f3_pd
@@ -923,7 +927,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio
   }
   io.toIbuffer.bits.foldpc        := f3_foldpc
-  io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
+  io.toIbuffer.bits.exceptionType := f3_exception_merge_vec
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
@@ -993,7 +997,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset                        = jal_offset(inst, currentIsRVC)
     val brOffset                         = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs(0) := Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
+    io.toIbuffer.bits.instrs(0) := Mux(
+      ExceptionType.hasException(mmio_resend_exception),
+      0.U,
+      Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
+    )
 
     io.toIbuffer.bits.pd(0).valid  := true.B
     io.toIbuffer.bits.pd(0).isRVC  := currentIsRVC
