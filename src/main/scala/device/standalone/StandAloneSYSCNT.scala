@@ -24,7 +24,7 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
 import utility.IntBuffer
 
-class StandAloneCLINT (
+class StandAloneSYSCNT (
   useTL: Boolean = false,
   baseAddress: BigInt,
   addrWidth: Int,
@@ -40,7 +40,7 @@ class StandAloneCLINT (
   private val clint = LazyModule(new SYSCNT(clintParam, dataWidth / 8))
   clint.node := xbar
 
-  class StandAloneSYSCNTImp(outer: StandAloneCLINT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
+  class StandAloneSYSCNTImp(outer: StandAloneSYSCNT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val io = IO(new Bundle {
       val rtcTick = Input(Bool())
       val stopen = Input(Bool())
