@@ -512,6 +512,9 @@ class CtrlBlockImp(
     rename.io.in(i).bits := decodePipeRename(i).bits
     dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
+    rename.io.validVec(i) := decodePipeRename(i).valid
+    rename.io.isFusionVec(i) := false.B
+    rename.io.fusionCross2FtqVec(i) := false.B
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -532,7 +535,14 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      rename.io.in(i).bits.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
+      val cross2Ftq = decodePipeRename(i).bits.lastInFtqEntry && decodePipeRename(i + 1).bits.lastInFtqEntry
+      val cross1Ftq = decodePipeRename(i).bits.lastInFtqEntry || decodePipeRename(i + 1).bits.lastInFtqEntry
+      rename.io.in(i + 1).bits.lastInFtqEntry := cross1Ftq
+      rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
+      rename.io.in(i).bits.lastInFtqEntry := false.B
+      rename.io.in(i).bits.canRobCompress := !cross2Ftq
+      rename.io.isFusionVec(i) := true.B
+      rename.io.fusionCross2FtqVec(i) := cross2Ftq
     }
     XSError(fusionDecoder.io.out(i).valid && !cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
   }
