@@ -769,6 +769,20 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
 
+  val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
+    case bank =>
+      Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
+  }
+  val readline_hit = io.readline.fire &&
+                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
+  val readbank_hit = io.read.zip(bank_addrs.zip(io.is128Req)).zipWithIndex.map {
+                          case ((read, (bank_addr, is128Req)), i) =>
+                            val error_bank0 = io.pseudo_error.bits(bank_addr(0))
+                            val error_bank1 = io.pseudo_error.bits(bank_addr(1))
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) && !io.bank_conflict_slow(i)
+                      }.reduce(_|_)
+  io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
+
   for (div_index <- 0 until DCacheSetDiv) {
     for (bank_index <- 0 until DCacheBanks) {
       //     Set Addr & Read Way Mask
