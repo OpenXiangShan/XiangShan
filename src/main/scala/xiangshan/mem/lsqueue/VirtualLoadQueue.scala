@@ -183,12 +183,18 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
           debug_mmio((index + j.U).value) := false.B
           debug_paddr((index + j.U).value) := 0.U
-
-          XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
-          XSError(index.value =/= lqIdx.value, s"must be the same entry $i\n")
         }
       }
     }
+    val cond = VecInit.tabulate(VecMemLSQEnqIteratorNumberSeq(i)){j => j.U < validVLoadOffset(i)}.asUInt.orR
+    XSError(
+      canEnqueue(i) && !enqCancel(i) && cond &&
+        (!io.enq.canAccept || !io.enq.sqCanAccept),
+      s"must accept $i\n")
+    XSError(
+      canEnqueue(i) && !enqCancel(i) && cond &&
+      index.value =/= lqIdx.value,
+      s"must be the same entry $i\n")
     io.enq.resp(i) := lqIdx
   }
 
@@ -200,8 +206,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   (0 until DeqPtrMoveStride).map(i => {
     when (commitCount > i.U) {
       allocated((deqPtr+i.U).value) := false.B
-      XSError(!allocated((deqPtr+i.U).value), s"why commit invalid entry $i?\n")
     }
+    XSError(commitCount > i.U && !allocated((deqPtr+i.U).value), s"why commit invalid entry $i?\n")
   })
 
   // vector commit or replay
@@ -242,11 +248,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
+    val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
+    val need_rep = io.ldin(i).bits.rep_info.need_rep
+    val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
-      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      val need_rep = io.ldin(i).bits.rep_info.need_rep
-      val need_valid = io.ldin(i).bits.updateAddrValid
-
       when (!need_rep && need_valid) {
       // update control flag
         addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss || io.ldin(i).bits.isSWPrefetch
@@ -276,21 +281,21 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
-
-        XSInfo(io.ldin(i).valid,
-          "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
-          io.ldin(i).bits.uop.lqIdx.asUInt,
-          io.ldin(i).bits.uop.pc,
-          io.ldin(i).bits.vaddr,
-          io.ldin(i).bits.paddr,
-          io.ldin(i).bits.mask,
-          io.ldin(i).bits.forwardData.asUInt,
-          io.ldin(i).bits.forwardMask.asUInt,
-          io.ldin(i).bits.mmio,
-          io.ldin(i).bits.isvec
-        )
       }
     }
+
+    XSInfo(io.ldin(i).valid && !need_rep && need_valid,
+      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+      io.ldin(i).bits.uop.lqIdx.asUInt,
+      io.ldin(i).bits.uop.pc,
+      io.ldin(i).bits.vaddr,
+      io.ldin(i).bits.paddr,
+      io.ldin(i).bits.mask,
+      io.ldin(i).bits.forwardData.asUInt,
+      io.ldin(i).bits.forwardMask.asUInt,
+      io.ldin(i).bits.mmio,
+      io.ldin(i).bits.isvec
+    )
   }
 
   //  perf counter
@@ -305,11 +310,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtr.flag, deqPtr.value)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
-    when(flag) {
-      XSDebug(false, true.B, name)
-    }.otherwise {
-      XSDebug(false, true.B, " ")
-    }
+    XSDebug(false, flag, name) // when(flag)
+    XSDebug(false, !flag, " ") // otherwise
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {

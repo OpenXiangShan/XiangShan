@@ -221,13 +221,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
-          XSError(checkTargetPtr(i).value =/= checkTargetPtr(i + 1).value, "not-taken br should have same ftqPtr\n")
         }.otherwise {
           // last br, record its info
           prevNotTakenValid  := true.B
           prevNotTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr &&
+          ibuffer.io.out(i + 1).fire &&
+          checkTargetPtr(i).value =/= checkTargetPtr(i + 1).value,
+        "not-taken br should have same ftqPtr\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr) {
       // last instr is a br, record its info
@@ -235,9 +240,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       prevNotTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevNotTakenValid && ibuffer.io.out(0).fire) {
-      XSError(prevNotTakenFtqPtr.value =/= checkTargetPtr(0).value, "not-taken br should have same ftqPtr\n")
       prevNotTakenValid := false.B
     }
+    XSError(
+      prevNotTakenValid && ibuffer.io.out(0).fire &&
+        prevNotTakenFtqPtr.value =/= checkTargetPtr(0).value,
+      "not-taken br should have same ftqPtr\n"
+    )
+
     when(needFlush) {
       prevNotTakenValid := false.B
     }
@@ -252,16 +262,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
-          XSError(
-            (checkTargetPtr(i) + 1.U).value =/= checkTargetPtr(i + 1).value,
-            "taken br should have consecutive ftqPtr\n"
-          )
         }.otherwise {
           // last br, record its info
           prevTakenValid  := true.B
           prevTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          (checkTargetPtr(i) + 1.U).value =/= checkTargetPtr(i + 1).value,
+        "taken br should have consecutive ftqPtr\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && ibuffer.io.out(
       DecodeWidth - 1
@@ -271,9 +283,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevTakenValid && ibuffer.io.out(0).fire) {
-      XSError((prevTakenFtqPtr + 1.U).value =/= checkTargetPtr(0).value, "taken br should have consecutive ftqPtr\n")
       prevTakenValid := false.B
     }
+    XSError(
+      prevTakenValid && ibuffer.io.out(0).fire &&
+        (prevTakenFtqPtr + 1.U).value =/= checkTargetPtr(0).value,
+      "taken br should have consecutive ftqPtr\n"
+    )
     when(needFlush) {
       prevTakenValid := false.B
     }
@@ -286,19 +302,20 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken) {
-        when(ibuffer.io.out(i + 1).fire) {
-          XSError(
-            ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(
-              i + 1
-            ).bits.pc,
-            "not-taken br should have consecutive pc\n"
-          )
-        }.otherwise {
+        when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevNotTakenValid := true.B
           prevIsRVC         := ibuffer.io.out(i).bits.pd.isRVC
           prevNotTakenPC    := ibuffer.io.out(i).bits.pc
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(
+            i + 1
+          ).bits.pc,
+        "not-taken br should have consecutive pc\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && !ibuffer.io.out(
       DecodeWidth - 1
@@ -308,12 +325,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       prevNotTakenPC    := ibuffer.io.out(DecodeWidth - 1).bits.pc
     }
     when(prevNotTakenValid && ibuffer.io.out(0).fire) {
-      XSError(
-        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc,
-        "not-taken br should have same pc\n"
-      )
       prevNotTakenValid := false.B
     }
+    XSError(
+      prevNotTakenValid && ibuffer.io.out(0).fire &&
+        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc,
+      "not-taken br should have same pc\n"
+    )
     when(needFlush) {
       prevNotTakenValid := false.B
     }
@@ -327,13 +345,17 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {
-        when(ibuffer.io.out(i + 1).fire) {
-          XSError(checkTarget(i) =/= ibuffer.io.out(i + 1).bits.pc, "taken instr should follow target pc\n")
-        }.otherwise {
+        when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevTakenValid  := true.B
           prevTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          checkTarget(i) =/= ibuffer.io.out(i + 1).bits.pc,
+        "taken instr should follow target pc\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && !ibuffer.io.out(DecodeWidth - 1).bits.pd.notCFI && ibuffer.io.out(
       DecodeWidth - 1
@@ -342,9 +364,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevTakenValid && ibuffer.io.out(0).fire) {
-      XSError(prevTakenTarget =/= ibuffer.io.out(0).bits.pc, "taken instr should follow target pc\n")
       prevTakenValid := false.B
     }
+    XSError(
+      prevTakenValid && ibuffer.io.out(0).fire &&
+        prevTakenTarget =/= ibuffer.io.out(0).bits.pc,
+      "taken instr should follow target pc\n"
+    )
     when(needFlush) {
       prevTakenValid := false.B
     }
