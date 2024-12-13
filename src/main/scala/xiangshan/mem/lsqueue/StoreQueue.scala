@@ -674,18 +674,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // Forward result will be generated 1 cycle later (load_s2)
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
     io.forward(i).forwardData := dataModule.io.forwardData(i)
-    // If addr match, data not ready, mark it as dataInvalid
-    // load_s1: generate dataInvalid in load_s1 to set fastUop
-    val dataInvalidMask1 = (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & forwardMask1.asUInt)
-    val dataInvalidMask2 = (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & forwardMask2.asUInt)
-    val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2
-    io.forward(i).dataInvalidFast := dataInvalidMask.orR
 
     //TODO If the previous store appears out of alignment, then simply FF, this is a very unreasonable way to do it.
     //TODO But for the time being, this is the way to ensure correctness. Such a suitable opportunity to support unaligned forward.
-    val unalignedMask1 = unaligned.asUInt & forwardMask1.asUInt & allocated.asUInt
-    val unalignedMask2 = unaligned.asUInt & forwardMask2.asUInt & allocated.asUInt
-    val forwardPreWithUnaligned = (unalignedMask1 | unalignedMask2).asUInt.orR
+    // If addr match, data not ready, mark it as dataInvalid
+    // load_s1: generate dataInvalid in load_s1 to set fastUop
+    val dataInvalidMask1 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask1.asUInt
+    val dataInvalidMask2 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask2.asUInt
+    val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2
+    io.forward(i).dataInvalidFast := dataInvalidMask.orR
 
     // make chisel happy
     val dataInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
@@ -708,7 +705,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidMaskReg = addrInvalidMask1Reg | addrInvalidMask2Reg
 
     // load_s2
-    io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast) || RegNext(forwardPreWithUnaligned)
+    io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
     // check if vaddr forward mismatched
     io.forward(i).matchInvalid := vaddrMatchFailed
 
