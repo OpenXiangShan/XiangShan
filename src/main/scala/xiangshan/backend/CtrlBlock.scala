@@ -474,6 +474,9 @@ class CtrlBlockImp(
     decodePipeRename(i).ready := rename.io.in(i).ready
     rename.io.in(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i)
     rename.io.in(i).bits := decodePipeRename(i).bits
+    rename.io.validVec(i) := decodePipeRename(i).valid
+    rename.io.isFusionVec(i) := false.B
+    rename.io.fusionCross2FtqVec(i) := false.B
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -484,17 +487,14 @@ class CtrlBlockImp(
     decode.io.fusion(i) := fusionDecoder.io.out(i).valid && rename.io.out(i).fire
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
-      // TODO: remove this dirty code for ftq update
-      val sameFtqPtr = rename.io.in(i).bits.ftqPtr.value === rename.io.in(i + 1).bits.ftqPtr.value
-      val ftqOffset0 = rename.io.in(i).bits.ftqOffset
-      val ftqOffset1 = rename.io.in(i + 1).bits.ftqOffset
-      val ftqOffsetDiff = ftqOffset1 - ftqOffset0
-      val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
-      val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
-      val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
-      val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
-      rename.io.in(i).bits.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
-      XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
+      val cross2Ftq = decodePipeRename(i).bits.lastInFtqEntry && decodePipeRename(i + 1).bits.lastInFtqEntry
+      val cross1Ftq = decodePipeRename(i).bits.lastInFtqEntry || decodePipeRename(i + 1).bits.lastInFtqEntry
+      rename.io.in(i + 1).bits.lastInFtqEntry := cross1Ftq
+      rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
+      rename.io.in(i).bits.lastInFtqEntry := false.B
+      rename.io.in(i).bits.canRobCompress := !cross2Ftq
+      rename.io.isFusionVec(i) := true.B
+      rename.io.fusionCross2FtqVec(i) := cross2Ftq
     }
 
   }
