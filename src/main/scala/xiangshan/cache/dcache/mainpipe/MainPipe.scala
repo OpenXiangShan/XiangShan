@@ -504,7 +504,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // error signal for amo inst
   // s3_error = s3_flag_error || s3_tag_error || s3_l2_error || s3_data_error
   val s3_error = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error
-  val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
+  val (_, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
 
@@ -661,7 +661,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val replace_wb = s3_req.replace
   val need_wb = miss_wb || probe_wb || replace_wb
 
-  val writeback_param = Mux(probe_wb, probe_new_coh, miss_shrink_param)
+  val writeback_param = Mux(probe_wb, probe_shrink_param, miss_shrink_param)
   val writeback_data = if (dcacheParameters.alwaysReleaseData) {
     s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
       s3_coh === ClientStates.Dirty || (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
