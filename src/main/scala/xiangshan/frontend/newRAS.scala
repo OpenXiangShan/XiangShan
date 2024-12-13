@@ -766,9 +766,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       spec_debug.spec_queue(i).ctr,
       spec_debug.spec_nos(i).value
     )
-    when(i.U === stack.TOSW.value)(XSDebug(io.s2_fire(2), "   <----TOSW"))
-    when(i.U === stack.TOSR.value)(XSDebug(io.s2_fire(2), "   <----TOSR"))
-    when(i.U === stack.BOS.value)(XSDebug(io.s2_fire(2), "   <----BOS"))
+    XSDebug(io.s2_fire(2) && i.U === stack.TOSW.value, "   <----TOSW")
+    XSDebug(io.s2_fire(2) && i.U === stack.TOSR.value, "   <----TOSR")
+    XSDebug(io.s2_fire(2) && i.U === stack.BOS.value, "   <----BOS")
     XSDebug(io.s2_fire(2), "\n")
   }
   XSDebug(io.s2_fire(2), "  index       addr           ctr   (committed part)\n")
@@ -780,8 +780,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       spec_debug.commit_stack(i).retAddr,
       spec_debug.commit_stack(i).ctr
     )
-    when(i.U === stack.ssp)(XSDebug(io.s2_fire(2), "   <----ssp"))
-    when(i.U === stack.nsp)(XSDebug(io.s2_fire(2), "   <----nsp"))
+    XSDebug(io.s2_fire(2) && i.U === stack.ssp, "   <----ssp")
+    XSDebug(io.s2_fire(2) && i.U === stack.nsp, "   <----nsp")
     XSDebug(io.s2_fire(2), "\n")
   }
   /*

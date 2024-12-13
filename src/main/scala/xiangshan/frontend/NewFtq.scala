@@ -949,13 +949,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       entry_hit_status(ifuPtr.value) := h_false_hit
       // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
     }
-    XSDebug(
-      true.B,
-      "fallThruError! start:%x, fallThru:%x\n",
-      io.toIfu.req.bits.startAddr,
-      io.toIfu.req.bits.nextStartAddr
-    )
   }
+  XSDebug(
+    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit,
+    "fallThruError! start:%x, fallThru:%x\n",
+    io.toIfu.req.bits.startAddr,
+    io.toIfu.req.bits.nextStartAddr
+  )
 
   XSPerfAccumulate(
     f"fall_through_error_to_ifu",
@@ -1037,10 +1037,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         (pred_ftb_entry.isRet && !(jmp_pd.valid && jmp_pd.isRet)))
 
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
-    XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
-
     // assert(!has_false_hit)
   }
+  XSDebug(
+    RegNext(hit_pd_valid) && has_false_hit,
+    "FTB false hit by br or jal or hit_pd, startAddr: %x\n",
+    pdWb.bits.pc(0)
+  )
 
   when(has_false_hit) {
     entry_hit_status(wb_idx_reg) := h_false_hit
@@ -1452,9 +1455,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       bpu_ftb_update_stall := 0.U
     }
     is(3.U) {
-      XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+      // XSError below
     }
   }
+  XSError(bpu_ftb_update_stall === 3.U, "bpu_ftb_update_stall should be 0, 1 or 2")
 
   // TODO: remove this
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")

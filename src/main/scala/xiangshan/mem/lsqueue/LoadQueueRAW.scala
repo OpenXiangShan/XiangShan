@@ -141,9 +141,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (needEnqueue(w) && enq.ready) {
       acceptedVec(w) := true.B
 
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
-
       freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
@@ -163,6 +160,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       uop(enqIndex) := enq.bits.uop
       datavalid(enqIndex) := enq.bits.data_valid
     }
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {

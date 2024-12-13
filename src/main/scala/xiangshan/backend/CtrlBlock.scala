@@ -519,22 +519,21 @@ class CtrlBlockImp(
 
     // update the first RenameWidth - 1 instructions
     decode.io.fusion(i) := fusionDecoder.io.out(i).valid && rename.io.out(i).fire
+    // TODO: remove this dirty code for ftq update
+    val sameFtqPtr = rename.io.in(i).bits.ftqPtr.value === rename.io.in(i + 1).bits.ftqPtr.value
+    val ftqOffset0 = rename.io.in(i).bits.ftqOffset
+    val ftqOffset1 = rename.io.in(i + 1).bits.ftqOffset
+    val ftqOffsetDiff = ftqOffset1 - ftqOffset0
+    val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
+    val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
+    val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
+    val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      // TODO: remove this dirty code for ftq update
-      val sameFtqPtr = rename.io.in(i).bits.ftqPtr.value === rename.io.in(i + 1).bits.ftqPtr.value
-      val ftqOffset0 = rename.io.in(i).bits.ftqOffset
-      val ftqOffset1 = rename.io.in(i + 1).bits.ftqOffset
-      val ftqOffsetDiff = ftqOffset1 - ftqOffset0
-      val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
-      val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
-      val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
-      val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
       rename.io.in(i).bits.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
-      XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
     }
-
+    XSError(fusionDecoder.io.out(i).valid && !cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
   }
 
   // memory dependency predict

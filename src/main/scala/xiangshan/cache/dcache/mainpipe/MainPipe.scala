@@ -656,7 +656,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       when (s3_sc_fail) {
         debug_sc_fail_addr := s3_req_addr_dup(2)
         debug_sc_fail_cnt  := 1.U
-        XSWarn(s3_sc_fail === 100.U, p"L1DCache failed too many SCs in a row 0x${Hexadecimal(debug_sc_fail_addr)}, check if sth went wrong\n")
       }
     }
   }
