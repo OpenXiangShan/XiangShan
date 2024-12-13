@@ -1,6 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package freechips.rocketchip.devices.tilelink
+package device.standalone
 
 import chisel3._
 import chisel3.util.ShiftRegister
@@ -78,17 +78,9 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
        time_low := time(i-1,0)
      }
    }
-    val inc_update = WireInit(false.B)
     val inczero = (incwidth==0.U)
     val timelow_zero = (time_low ==0.U)
-//    val inc_update = (io.rtcTick.asUInt() ==1.U) & (inc_up_dis.asUInt() ==1.U) & ((incwidth.asUInt()==0.U) | (time_low.asUInt() ==0.U))
-    when(io.rtcTick){
-      when(inc_up_dis) {
-        when(inczero.B | timelow_zero.B) {
-          inc_update := true.B
-        }
-      }
-    }.otherwise(inc_update := false.B)
+    val inc_update = io.rtcTick & inc_up_dis & (inczero.B | timelow_zero.B)
 
     val incr_width_value = RegInit(0.U(2.W))
     when(inc_update){
@@ -110,7 +102,6 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
 
     io.time.valid := RegNext(io.rtcTick)
     io.time.bits  := time_sw >> incr_width_value
-//    val time_sw = time_shift(timeWidth-1,0)
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
@@ -133,23 +124,5 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
         RegField.bytes(time_sw, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
       )
     )
-  }
-}
-
-/** Trait that will connect a CLINT to a subsystem */
-trait CanHavePeripheryCLINT { this: BaseSubsystem =>
-  val clintOpt = p(CLINTKey).map { params =>
-    val tlbus = locateTLBusWrapper(p(CLINTAttachKey).slaveWhere)
-    val clint = LazyModule(new CLINT(params, cbus.beatBytes))
-    clint.node := tlbus.coupleTo("clint")(TLFragmenter(tlbus) := _)
-
-    // Override the implicit clock and reset -- could instead include a clockNode in the clint, and make it a RawModuleImp?
-    InModuleBody {
-      clint.module.clock := tlbus.module.clock
-      clint.module.reset := tlbus.module.reset
-    }
-
-    clint
-
   }
 }
