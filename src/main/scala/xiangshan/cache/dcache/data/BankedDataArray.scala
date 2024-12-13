@@ -419,7 +419,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val load_req_index = (0 until LoadPipelineWidth).map(_.asUInt)
 
 
-  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_valid, load_req_lqIdx, load_req_index)
+  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_with_bank_conflict, load_req_lqIdx, load_req_index)
   val load_req_bank_select_port  = UIntToOH(load_req_bank_conflict_selcet._2).asBools
 
   val rr_bank_conflict_oldest = (0 until LoadPipelineWidth).map(i =>
@@ -698,7 +698,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val load_req_lqIdx = io.read.map(_.bits.lqIdx)
   val load_req_index = (0 until LoadPipelineWidth).map(_.asUInt)
 
-  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_valid, load_req_lqIdx, load_req_index)
+  val load_req_bank_conflict_selcet = selcetOldestPort(load_req_with_bank_conflict, load_req_lqIdx, load_req_index)
   val load_req_bank_select_port  = UIntToOH(load_req_bank_conflict_selcet._2).asBools
 
   val rr_bank_conflict_oldest = (0 until LoadPipelineWidth).map(i =>
