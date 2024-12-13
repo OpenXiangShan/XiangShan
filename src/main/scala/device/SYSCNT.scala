@@ -66,7 +66,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val time = RegInit(0.U(timeWidth.W))
 //    val incwidth = RegInit(0.U(3.W))
     val increg = RegInit(0.U(8.W))
-    val incwidth = increg.tail(2) //bit[1:0] is incr width
+    val incwidth = increg(1,0) //bit[1:0] is incr width
     val inccutdly = RegNext(incwidth)
     val inccfg_vld = inccutdly =/= incwidth // flag is high firstly when incr update.
     val inc_up_dis = RegInit(false.B)
@@ -83,13 +83,11 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val timelow_zero = (time_low ==0.U)
 //    val inc_update = (io.rtcTick.asUInt() ==1.U) & (inc_up_dis.asUInt() ==1.U) & ((incwidth.asUInt()==0.U) | (time_low.asUInt() ==0.U))
     when(io.rtcTick){
-      inc_update := true.B
-    }.elsewhen(inc_up_dis){
-      inc_update := true.B
-    }.elsewhen(inczero.B){
-    inc_update := true.B
-    }.elsewhen(timelow_zero.B){
-      inc_update := true.B
+      when(inc_up_dis) {
+        when(inczero.B | timelow_zero.B) {
+          inc_update := true.B
+        }
+      }
     }.otherwise(inc_update := false.B)
 
     val incr_width_value = RegInit(0.U(2.W))
@@ -102,15 +100,17 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     }.elsewhen(inc_update) {
       inc_up_dis := false.B
     }
-
+    val time_sw = RegInit(0.U(timeWidth.W))
     when(io.stopen) {
       time := time
-    }.elsewhen(io.rtcTick)(time := time + 1.U)
+    }.elsewhen(io.rtcTick){
+      time := time + 1.U
+      time_sw := time << incr_width_value
+    }
 
     io.time.valid := RegNext(io.rtcTick)
-    io.time.bits  := time
-    val time_shift = time << incr_width_value
-    val time_sw = time_shift(63,0)
+    io.time.bits  := time_sw >> incr_width_value
+//    val time_sw = time_shift(timeWidth-1,0)
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
@@ -130,7 +130,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       timeOffset -> RegFieldGroup(
         "mtime",
         Some("Timer Register"),
-        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
+        RegField.bytes(time_sw, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true)))
       )
     )
   }
