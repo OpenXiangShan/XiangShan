@@ -740,13 +740,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.data_write_dup(i).bits.way_en := s3_way_en
     io.data_write_dup(i).bits.addr := s3_req.vaddr
   }
-  // -------------------------------------------------------------------------------------
 
   s3_ready := !s3_valid || s3_can_go
   s3_s0_set_conflict := s3_valid && s3_idx === s0_idx
   s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
-
 
   io.meta_read.valid := req.valid && !set_conflict
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
@@ -769,7 +767,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.pf_source := L1_HW_PREFETCH_NULL
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
-  miss_req.vaddr := s2_req.addr
+  miss_req.vaddr := s2_req.vaddr
   miss_req.store_data := s2_req.store_data
   miss_req.store_mask := s2_req.store_mask
   miss_req.word_idx := s2_req.word_idx
