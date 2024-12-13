@@ -51,7 +51,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val noExc = io.in.map(in => !in.bits.exceptionVec.asUInt.orR && !TriggerAction.isDmode(in.bits.trigger))
   val uopCanCompress = io.in.map(_.bits.canRobCompress)
   val canCompress = io.in.zip(noExc).zip(uopCanCompress).map { case ((in, noExc), canComp) =>
-    in.valid && !CommitType.isFused(in.bits.commitType) && in.bits.lastUop && noExc && canComp
+    in.valid && in.bits.lastUop && noExc && canComp
   }
   val extendedCanCompress = canCompress.zip(io.in).zip(io.oddFtqVec).flatMap { case ((canComp, in), oddFtq) =>
     Seq(FuType.isBlockBackCompress(in.bits.fuType) || canComp ,canComp && !oddFtq)
