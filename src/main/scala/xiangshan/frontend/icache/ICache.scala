@@ -539,8 +539,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   // backend/BEU
   val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
   // backend/CSR
-  val csr_pf_enable:     Bool = Input(Bool())
-  val csr_parity_enable: Bool = Input(Bool()) // TODO: delete this
+  val csr_pf_enable: Bool = Input(Bool())
   // flush
   val fencei: Bool = Input(Bool())
   val flush:  Bool = Input(Bool())
