@@ -464,10 +464,13 @@ class CtrlBlockImp(
   val flushVecNext = flushVec zip snpt.io.valids map (x => GatedValidRegNext(x._1 && x._2, false.B))
   snpt.io.flushVec := flushVecNext
 
-  val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
-      !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head)
-  ).reduceTree(_ || _)
+  val redirectRobidx = s1_s3_redirect.bits.robIdx
+  val useSnpt = VecInit.tabulate(RenameSnapshotNum){ case idx =>
+    val snptRobidx = snpt.io.snapshots(idx).robIdx.head
+    // (redirectRobidx.value =/= snptRobidx.value) for only flag diffrence
+    snpt.io.valids(idx) && ((redirectRobidx > snptRobidx) && (redirectRobidx.value =/= snptRobidx.value) ||
+      !s1_s3_redirect.bits.flushItself() && redirectRobidx === snptRobidx)
+  }.reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
