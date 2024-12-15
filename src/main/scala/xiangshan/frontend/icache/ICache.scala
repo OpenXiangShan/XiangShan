@@ -540,7 +540,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
   // backend/CSR
   val csr_pf_enable:     Bool = Input(Bool())
-  val csr_parity_enable: Bool = Input(Bool())
+  val csr_parity_enable: Bool = Input(Bool()) // TODO: delete this
   // flush
   val fencei: Bool = Input(Bool())
   val flush:  Bool = Input(Bool())
@@ -623,11 +623,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ctrlUnit.io.metaReadResp         := metaArray.io.readResp
   prefetcher.io.metaRead.fromIMeta := metaArray.io.readResp
 
-  prefetcher.io.flush             := io.flush
-  prefetcher.io.csr_pf_enable     := io.csr_pf_enable
-  prefetcher.io.csr_parity_enable := io.csr_parity_enable
-  prefetcher.io.MSHRResp          := missUnit.io.fetch_resp
-  prefetcher.io.flushFromBpu      := io.ftqPrefetch.flushFromBpu
+  prefetcher.io.flush         := io.flush
+  prefetcher.io.csr_pf_enable := io.csr_pf_enable
+  prefetcher.io.ecc_enable    := ctrlUnit.io.ecc_enable
+  prefetcher.io.MSHRResp      := missUnit.io.fetch_resp
+  prefetcher.io.flushFromBpu  := io.ftqPrefetch.flushFromBpu
   // cache softPrefetch
   private val softPrefetchValid = RegInit(false.B)
   private val softPrefetch      = RegInit(0.U.asTypeOf(new IPrefetchReq))
@@ -665,11 +665,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.mem_grant.bits  := DontCare
   missUnit.io.mem_grant <> bus.d
 
-  mainPipe.io.flush             := io.flush
-  mainPipe.io.respStall         := io.stop
-  mainPipe.io.csr_parity_enable := io.csr_parity_enable
-  mainPipe.io.hartId            := io.hartId
-  mainPipe.io.mshr.resp         := missUnit.io.fetch_resp
+  mainPipe.io.flush      := io.flush
+  mainPipe.io.respStall  := io.stop
+  mainPipe.io.ecc_enable := ctrlUnit.io.ecc_enable
+  mainPipe.io.hartId     := io.hartId
+  mainPipe.io.mshr.resp  := missUnit.io.fetch_resp
   mainPipe.io.fetch.req <> io.fetch.req
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 

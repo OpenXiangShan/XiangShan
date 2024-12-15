@@ -54,9 +54,9 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
 
 class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
-  val csr_pf_enable:     Bool = Input(Bool())
-  val csr_parity_enable: Bool = Input(Bool())
-  val flush:             Bool = Input(Bool())
+  val csr_pf_enable: Bool = Input(Bool())
+  val ecc_enable:    Bool = Input(Bool())
+  val flush:         Bool = Input(Bool())
 
   val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
   val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
@@ -505,7 +505,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 //  })
 //
 //  // generate exception
-//  val s2_meta_exception = VecInit(s2_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+//  val s2_meta_exception = VecInit(s2_meta_corrupt.map(ExceptionType.fromECC(io.ecc_enable, _)))
 //
 //  // merge meta exception and itlb/pmp exception
 //  val s2_exception = ExceptionType.merge(s2_exception_in, s2_meta_exception)

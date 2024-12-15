@@ -97,6 +97,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val touch:          Vec[Valid[ReplacerTouch]]         = Vec(PortNumber, ValidIO(new ReplacerTouch))
   val wayLookupRead:  DecoupledIO[WayLookupInfo]        = Flipped(DecoupledIO(new WayLookupInfo))
   val mshr:           ICacheMSHRBundle                  = new ICacheMSHRBundle
+  val ecc_enable:     Bool                              = Input(Bool())
 
   /*** outside interface ***/
   // FTQ
@@ -108,8 +109,6 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val respStall: Bool = Input(Bool())
   // backend/BEU
   val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
-  // backend/CSR
-  val csr_parity_enable: Bool = Input(Bool())
 
   /*** PERF ***/
   val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
@@ -131,8 +130,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val (toMSHR, fromMSHR) = (io.mshr.req, io.mshr.resp)
   private val (toPMP, fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   private val fromWayLookup      = io.wayLookupRead
-  private val csr_parity_enable =
-    if (ICacheForceMetaECCError || ICacheForceDataECCError) true.B else io.csr_parity_enable
+  private val ecc_enable =
+    if (ICacheForceMetaECCError || ICacheForceDataECCError) true.B else io.ecc_enable
 
   // Statistics on the frequency distribution of FTQ fire interval
   private val cntFtqFireInterval      = RegInit(0.U(32.W))
@@ -263,7 +262,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
       hit_num > 1.U                                        // hit multi-way, must be an ECC failure
   })
   // force clear meta_corrupt when parity check is disabled
-  when(!csr_parity_enable) {
+  when(!ecc_enable) {
     s1_meta_corrupt := VecInit(Seq.fill(PortNumber)(false.B))
   }
 
@@ -383,7 +382,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     }.reduce(_ || _) && s2_SRAMhits(port)
   })
   // force clear data_corrupt when parity check is disabled
-  when(!csr_parity_enable) {
+  when(!ecc_enable) {
     s2_data_corrupt := VecInit(Seq.fill(PortNumber)(false.B))
   }
   // meta error is checked in s1 stage

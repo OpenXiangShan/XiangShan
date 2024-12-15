@@ -38,6 +38,8 @@ case class L1ICacheCtrlParams(
 }
 
 class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
+  // ecc control
+  val ecc_enable: Bool = Output(Bool())
   // ecc inject
   val injecting:    Bool                               = Output(Bool())
   val metaRead:     DecoupledIO[ICacheReadBundle]      = DecoupledIO(new ICacheReadBundle)
@@ -139,6 +141,8 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
 
     private val eccctrl  = RegInit(eccctrlBundle.default)
     private val ecciaddr = RegInit(ecciaddrBundle.default)
+
+    io.ecc_enable := eccctrl.enable
 
     // default wiring, will be overridden by inject FSM
     io.metaRead.valid  := false.B
