@@ -20,7 +20,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val vdAfterMerge = Wire(UInt(VLEN.W))
 
   val wbFire = !io.writeback.bits.robIdx.needFlush(io.flush) && io.writeback.fire
-  wbReg.bits := Mux(wbFire, io.writeback.bits, wbReg.bits)
+  wbReg.bits := Mux(io.writeback.fire, io.writeback.bits, wbReg.bits)
   wbReg.valid := wbFire
   mgu.io.in.vd := wbReg.bits.data(0)
   // oldVd is contained in data and is already masked with new data
