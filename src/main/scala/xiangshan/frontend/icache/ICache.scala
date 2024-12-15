@@ -27,6 +27,7 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
@@ -57,9 +58,10 @@ case class ICacheParameters(
     ICacheDataBanks:     Int = 8,
     ICacheDataSRAMWidth: Int = 66,
     // TODO: hard code, need delete
-    partWayNum: Int = 4,
-    nMMIOs:     Int = 1,
-    blockBytes: Int = 64
+    partWayNum:       Int = 4,
+    nMMIOs:           Int = 1,
+    blockBytes:       Int = 64,
+    cacheCtrlAddress: AddressSet = AddressSet(0x38022000, 0x7f)
 ) extends L1CacheParameters {
 
   val setBytes:     Int         = nSets * blockBytes
@@ -76,6 +78,11 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst {
   val cacheParams: ICacheParameters = icacheParameters
+
+  def ctrlUnitParams: L1ICacheCtrlParams = L1ICacheCtrlParams(
+    address = cacheParams.cacheCtrlAddress,
+    XLEN = XLEN
+  )
 
   def ICacheSets:          Int = cacheParams.nSets
   def ICacheWays:          Int = cacheParams.nWays
@@ -556,6 +563,8 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
+  val ctrlUnit = LazyModule(new ICacheCtrlUnit(ctrlUnitParams))
+
   lazy val module: ICacheImp = new ICacheImp(this)
 }
 
@@ -577,6 +586,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val (bus, edge) = outer.clientNode.out.head
 
+  private val ctrlUnit   = outer.ctrlUnit.module
   private val metaArray  = Module(new ICacheMetaArray)
   private val dataArray  = Module(new ICacheDataArray)
   private val mainPipe   = Module(new ICacheMainPipe)
@@ -585,15 +595,33 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new IPrefetchPipe)
   private val wayLookup  = Module(new WayLookup)
 
-  dataArray.io.write <> missUnit.io.data_write
+  // dataArray io
+  when(ctrlUnit.io.injecting) {
+    dataArray.io.write <> ctrlUnit.io.dataWrite
+    missUnit.io.data_write.ready := false.B
+  }.otherwise {
+    ctrlUnit.io.dataWrite.ready := false.B
+    dataArray.io.write <> missUnit.io.data_write
+  }
   dataArray.io.read <> mainPipe.io.dataArray.toIData
-  dataArray.io.readResp <> mainPipe.io.dataArray.fromIData
+  mainPipe.io.dataArray.fromIData := dataArray.io.readResp
 
+  // metaArray io
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaArrayFlush
-  metaArray.io.write <> missUnit.io.meta_write
-  metaArray.io.read <> prefetcher.io.metaRead.toIMeta
-  metaArray.io.readResp <> prefetcher.io.metaRead.fromIMeta
+  when(ctrlUnit.io.injecting) {
+    metaArray.io.write <> ctrlUnit.io.metaWrite
+    metaArray.io.read <> ctrlUnit.io.metaRead
+    missUnit.io.meta_write.ready         := false.B
+    prefetcher.io.metaRead.toIMeta.ready := false.B
+  }.otherwise {
+    ctrlUnit.io.metaWrite.ready := false.B
+    ctrlUnit.io.metaRead.ready  := false.B
+    metaArray.io.write <> missUnit.io.meta_write
+    metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+  }
+  ctrlUnit.io.metaReadResp         := metaArray.io.readResp
+  prefetcher.io.metaRead.fromIMeta := metaArray.io.readResp
 
   prefetcher.io.flush             := io.flush
   prefetcher.io.csr_pf_enable     := io.csr_pf_enable
