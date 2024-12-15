@@ -120,6 +120,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val nc = Bool()
   val mmio = Bool()
   val atomic = Bool()
+  val hasException = Bool()
 
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
