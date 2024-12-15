@@ -218,5 +218,68 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
     }
 
     io.injecting := eccctrl.istatus === eccctrlInjStatus.working
+
+    private def eccctrlRegDesc: RegFieldDesc =
+      RegFieldDesc(
+        name = s"ecc_control",
+        desc = s"ECC control",
+        group = Option(s"ecc_control"),
+        groupDesc = Option(s"ECC Control"),
+        reset = Option(0)
+      )
+
+    private def ecciaddrRegDesc: RegFieldDesc =
+      RegFieldDesc(
+        name = s"ecc_iaddr",
+        desc = s"ECC Inject Address",
+        group = Option(s"ecc_iaddr"),
+        groupDesc = Option(s"ECC Inject Address"),
+        reset = Option(0)
+      )
+
+    private def eccctrlRegField(x: eccctrlBundle): RegField =
+      RegField(
+        params.regWidth,
+        RegReadFn { ready =>
+          val res = WireInit(x)
+          res.inject := false.B // read always 0
+          // always read valid
+          (true.B, res.asUInt)
+        },
+        RegWriteFn { (valid, data) =>
+          when(valid) {
+            val req = data.asTypeOf(new eccctrlBundle)
+            x.enable := req.enable
+            when(req.inject && x.istatus === eccctrlInjStatus.idle) {
+              // if istatus is not idle, ignore the inject request
+              when(req.enable === false.B) {
+                // check if enable is not valid
+                x.istatus := eccctrlInjStatus.error
+                x.ierror  := eccctrlInjError.notEnabled
+              }.elsewhen(req.itarget =/= eccctrlInjTarget.metaArray && req.itarget =/= eccctrlInjTarget.dataArray) {
+                // check if itarget is not valid
+                x.istatus := eccctrlInjStatus.error
+                x.ierror  := eccctrlInjError.targetInvalid
+              }.otherwise {
+                x.istatus := eccctrlInjStatus.working
+              }
+            }
+            x.itarget := req.itarget
+            // istatus is read-only, ignore req.istatus
+            // ierror is read-only, ignore req.ierror
+          }
+          // always ready to write
+          true.B
+        },
+        eccctrlRegDesc
+      )
+
+    private def ecciaddrRegField(x: ecciaddrBundle): RegField =
+      RegField(params.regWidth, x.asUInt, ecciaddrRegDesc)
+
+    node.regmap(
+      params.eccctrlOffset  -> Seq(eccctrlRegField(eccctrl)),
+      params.ecciaddrOffset -> Seq(ecciaddrRegField(ecciaddr))
+    )
   }
 }
