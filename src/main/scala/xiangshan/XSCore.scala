@@ -66,6 +66,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
+  frontend.inner.icache.ctrlUnit.node := memBlock.inner.frontendBridge.icachectrl_node
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
