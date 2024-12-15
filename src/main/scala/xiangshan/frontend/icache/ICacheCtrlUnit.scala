@@ -247,6 +247,13 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         RegReadFn { ready =>
           val res = WireInit(x)
           res.inject := false.B // read always 0
+          when(ready) {
+            // if istatus is injected or error, clear it after read
+            when(x.istatus === eccctrlInjStatus.injected || x.istatus === eccctrlInjStatus.error) {
+              x.istatus := eccctrlInjStatus.idle
+              x.ierror  := eccctrlInjError.notEnabled
+            }
+          }
           // always read valid
           (true.B, res.asUInt)
         },
