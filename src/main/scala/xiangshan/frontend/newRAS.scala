@@ -733,9 +733,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val update_pc = io.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  update.meta := RegEnable(io.update.bits.meta, io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))
-
-  val updateMeta = update.meta.asTypeOf(new RASMeta)
+  // update.meta := RegEnable(io.update.bits.meta, io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))
+  val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid)
 
   stack.commit_valid      := updateValid
   stack.commit_push_valid := updateValid && update.is_call_taken
