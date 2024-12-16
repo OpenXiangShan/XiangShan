@@ -795,7 +795,6 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
-  val csr = new L1CacheToCsrIO
   val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
