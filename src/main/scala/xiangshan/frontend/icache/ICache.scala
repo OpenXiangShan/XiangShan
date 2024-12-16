@@ -37,6 +37,7 @@ import huancun.AliasField
 import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -58,10 +59,10 @@ case class ICacheParameters(
     ICacheDataBanks:     Int = 8,
     ICacheDataSRAMWidth: Int = 66,
     // TODO: hard code, need delete
-    partWayNum:       Int = 4,
-    nMMIOs:           Int = 1,
-    blockBytes:       Int = 64,
-    cacheCtrlAddress: AddressSet = AddressSet(0x38022080, 0x7f)
+    partWayNum:          Int = 4,
+    nMMIOs:              Int = 1,
+    blockBytes:          Int = 64,
+    cacheCtrlAddressOpt: Option[AddressSet] = None
 ) extends L1CacheParameters {
 
   val setBytes:     Int         = nSets * blockBytes
@@ -79,9 +80,12 @@ case class ICacheParameters(
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst {
   val cacheParams: ICacheParameters = icacheParameters
 
-  def ctrlUnitParams: L1ICacheCtrlParams = L1ICacheCtrlParams(
-    address = cacheParams.cacheCtrlAddress,
-    XLEN = XLEN
+  def ctrlUnitParamsOpt: Option[L1ICacheCtrlParams] = OptionWrapper(
+    cacheParams.cacheCtrlAddressOpt.nonEmpty,
+    L1ICacheCtrlParams(
+      address = cacheParams.cacheCtrlAddressOpt.get,
+      regWidth = XLEN
+    )
   )
 
   def ICacheSets:          Int = cacheParams.nSets
@@ -562,7 +566,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
-  val ctrlUnit = LazyModule(new ICacheCtrlUnit(ctrlUnitParams))
+  val ctrlUnitOpt: Option[ICacheCtrlUnit] = ctrlUnitParamsOpt.map(params => LazyModule(new ICacheCtrlUnit(params)))
 
   lazy val module: ICacheImp = new ICacheImp(this)
 }
@@ -585,7 +589,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val (bus, edge) = outer.clientNode.out.head
 
-  private val ctrlUnit   = outer.ctrlUnit.module
   private val metaArray  = Module(new ICacheMetaArray)
   private val dataArray  = Module(new ICacheDataArray)
   private val mainPipe   = Module(new ICacheMainPipe)
@@ -594,12 +597,19 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new IPrefetchPipe)
   private val wayLookup  = Module(new WayLookup)
 
+  private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else false.B
+
   // dataArray io
-  when(ctrlUnit.io.injecting) {
-    dataArray.io.write <> ctrlUnit.io.dataWrite
-    missUnit.io.data_write.ready := false.B
-  }.otherwise {
-    ctrlUnit.io.dataWrite.ready := false.B
+  if (outer.ctrlUnitOpt.nonEmpty) {
+    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    when(ctrlUnit.io.injecting) {
+      dataArray.io.write <> ctrlUnit.io.dataWrite
+      missUnit.io.data_write.ready := false.B
+    }.otherwise {
+      ctrlUnit.io.dataWrite.ready := false.B
+      dataArray.io.write <> missUnit.io.data_write
+    }
+  } else {
     dataArray.io.write <> missUnit.io.data_write
   }
   dataArray.io.read <> mainPipe.io.dataArray.toIData
@@ -608,23 +618,29 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   // metaArray io
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaArrayFlush
-  when(ctrlUnit.io.injecting) {
-    metaArray.io.write <> ctrlUnit.io.metaWrite
-    metaArray.io.read <> ctrlUnit.io.metaRead
-    missUnit.io.meta_write.ready         := false.B
-    prefetcher.io.metaRead.toIMeta.ready := false.B
-  }.otherwise {
-    ctrlUnit.io.metaWrite.ready := false.B
-    ctrlUnit.io.metaRead.ready  := false.B
+  if (outer.ctrlUnitOpt.nonEmpty) {
+    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    when(ctrlUnit.io.injecting) {
+      metaArray.io.write <> ctrlUnit.io.metaWrite
+      metaArray.io.read <> ctrlUnit.io.metaRead
+      missUnit.io.meta_write.ready         := false.B
+      prefetcher.io.metaRead.toIMeta.ready := false.B
+    }.otherwise {
+      ctrlUnit.io.metaWrite.ready := false.B
+      ctrlUnit.io.metaRead.ready  := false.B
+      metaArray.io.write <> missUnit.io.meta_write
+      metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+    }
+    ctrlUnit.io.metaReadResp := metaArray.io.readResp
+  } else {
     metaArray.io.write <> missUnit.io.meta_write
     metaArray.io.read <> prefetcher.io.metaRead.toIMeta
   }
-  ctrlUnit.io.metaReadResp         := metaArray.io.readResp
   prefetcher.io.metaRead.fromIMeta := metaArray.io.readResp
 
   prefetcher.io.flush         := io.flush
   prefetcher.io.csr_pf_enable := io.csr_pf_enable
-  prefetcher.io.ecc_enable    := ctrlUnit.io.ecc_enable
+  prefetcher.io.ecc_enable    := ecc_enable
   prefetcher.io.MSHRResp      := missUnit.io.fetch_resp
   prefetcher.io.flushFromBpu  := io.ftqPrefetch.flushFromBpu
   // cache softPrefetch
@@ -666,7 +682,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   mainPipe.io.flush      := io.flush
   mainPipe.io.respStall  := io.stop
-  mainPipe.io.ecc_enable := ctrlUnit.io.ecc_enable
+  mainPipe.io.ecc_enable := ecc_enable
   mainPipe.io.hartId     := io.hartId
   mainPipe.io.mshr.resp  := missUnit.io.fetch_resp
   mainPipe.io.fetch.req <> io.fetch.req

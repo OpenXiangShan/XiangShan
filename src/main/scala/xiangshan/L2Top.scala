@@ -81,7 +81,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   ))
 
   val i_mmio_port = TLTempNode()
-  val icachectrl_port = TLTempNode()
+  val icachectrl_port_opt = if(icacheParameters.cacheCtrlAddressOpt.nonEmpty) Option(TLTempNode()) else None
   val d_mmio_port = TLTempNode()
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
@@ -138,19 +138,19 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  icachectrl_port := TLBuffer.chainNode(1) := mmio_xbar
-  if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    mmio_port :=
-      TLFilter(TLFilter.mSubtract(dcacheParameters.cacheCtrlAddressOpt.get)) :=
-      TLFilter(TLFilter.mSubtract(icacheParameters.cacheCtrlAddress)) :=
-      TLBuffer() :=
-      mmio_xbar
-  } else {
-    mmio_port :=
-      TLFilter(TLFilter.mSubtract(icacheParameters.cacheCtrlAddress)) :=
-      TLBuffer() :=
-      mmio_xbar
+  if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+    icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }
+
+  // filter out in-core addresses before sent to mmio_port
+  // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
+  private def mmioFilters: Seq[AddressSet] =
+    (icacheParameters.cacheCtrlAddressOpt ++ dcacheParameters.cacheCtrlAddressOpt).toSeq
+  mmio_port :=
+    TLFilter(TLFilter.mSubtract(mmioFilters)) :=
+    TLBuffer() :=
+    mmio_xbar
+
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val beu_errors = Input(chiselTypeOf(beu.module.io.errors))

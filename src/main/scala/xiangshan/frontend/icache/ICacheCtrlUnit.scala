@@ -28,10 +28,9 @@ import utils._
 
 case class L1ICacheCtrlParams(
     address:   AddressSet,
-    beatBytes: Int = 8,
-    XLEN:      Int = 64
+    regWidth:  Int,
+    beatBytes: Int = 8
 ) {
-  def regWidth: Int = XLEN
   def regBytes: Int = regWidth / 8
 
   def eccctrlOffset:  Int = 0
@@ -141,6 +140,10 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
 
     private val eccctrl  = RegInit(eccctrlBundle.default)
     private val ecciaddr = RegInit(ecciaddrBundle.default)
+
+    // sanity check
+    require(params.regWidth >= eccctrl.asUInt.getWidth)
+    require(params.regWidth >= ecciaddr.asUInt.getWidth)
 
     // control signal
     io.ecc_enable := eccctrl.enable
