@@ -391,6 +391,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept && !fromRename(i).bits.eliminatedMove
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
   }
+  for (i <- 0 until RenameWidth){
+    // check is drop amocas sta
+    fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 1.U
+  }
   var temp = 0
   allIssueParams.zipWithIndex.map{ case(issue, iqidx) => {
     for (i <- 0 until issue.numEnq){

@@ -202,6 +202,7 @@ object Bundles {
     val vlsInstr        = Bool()
     val wfflags         = Bool()
     val isMove          = Bool()
+    val isDropAmocasSta = Bool()
     val uopIdx          = UopIdx()
     val isVset          = Bool()
     val firstUop        = Bool()

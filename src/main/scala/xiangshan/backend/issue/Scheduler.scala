@@ -385,6 +385,10 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   staIdx.zipWithIndex.map{ case (sta, i) => {
     io.fromDispatch.uops(sta).ready := staReady(i) && stdReady(i)
   }}
+  issueQueues.filter(iq => iq.params.StaCnt > 0).zip(staIdx).zipWithIndex.map{ case ((iq, idx),i) =>
+    iq.io.enq(i).valid := io.fromDispatch.uops(idx).valid && !io.fromDispatch.uops(idx).bits.isDropAmocasSta
+  }
+  val staValidFromDispatch = staIdx.map(idx => io.fromDispatch.uops(idx).valid)
   val memAddrIQs = issueQueues.filter(_.params.isMemAddrIQ)
   val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
   val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
@@ -493,7 +497,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   }
 
   (stdEnqs ++ hydEnqs).zip(staEnqs ++ hyaEnqs).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>
-    stdIQEnq.valid := staIQEnq.valid && FuType.FuTypeOrR(staIQEnq.bits.fuType, FuType.stu, FuType.mou)
+    stdIQEnq.valid := staValidFromDispatch(i)
     stdIQEnq.bits  := staIQEnq.bits
     // Store data reuses store addr src(1) in dispatch2iq
     // [dispatch2iq] --src*------src*(0)--> [staIQ|hyaIQ]
