@@ -122,7 +122,7 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         x.istatus := eccctrlInjStatus.idle
         x.itarget := eccctrlInjTarget.metaArray
         x.inject  := false.B
-        x.enable  := false.B
+        x.enable  := true.B
         x
       }
     }

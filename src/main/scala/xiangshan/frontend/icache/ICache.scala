@@ -597,7 +597,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new IPrefetchPipe)
   private val wayLookup  = Module(new WayLookup)
 
-  private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else false.B
+  private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else true.B
 
   // dataArray io
   if (outer.ctrlUnitOpt.nonEmpty) {
