@@ -36,7 +36,7 @@ class FromEncoder extends Bundle {
   val stall  = Bool()
 }
 
-class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSParameter {
+class TraceCoreInterface(hasOffset: Boolean = false)(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val fromEncoder = Input(new Bundle {
     val enable = Bool()
     val stall  = Bool()
@@ -49,6 +49,7 @@ class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSPa
     }
     val groups = Vec(TraceGroupNum, ValidIO(new Bundle{
       val iaddr     = UInt(IaddrWidth.W)
+      val ftqOffset = if (hasOffset)  Some(UInt(log2Up(PredictWidth).W)) else None
       val itype     = UInt(ItypeWidth.W)
       val iretire   = UInt(IretireWidthCompressed.W)
       val ilastsize = UInt(IlastsizeWidth.W)
