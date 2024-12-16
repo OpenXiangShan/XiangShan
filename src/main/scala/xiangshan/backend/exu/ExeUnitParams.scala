@@ -337,6 +337,8 @@ case class ExeUnitParams(
 
   def isIQWakeUpSink = this.iqWakeUpSinkPairs.nonEmpty
 
+  def numWakeupFromIQ = this.iqWakeUpSinkPairs.size
+
   def getIntWBPort = {
     wbPortConfigs.collectFirst {
       case x: IntWB => x
