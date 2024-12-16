@@ -26,7 +26,7 @@ import xiangshan.backend.MemCoreTopDownIO
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.mem.mdp._
 import xiangshan.mem.{HasVLSUParameters, _}
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuOH, ExuVec, IssueQueueIQWakeUpBundle}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTable
 import chisel3.util.experimental.decode._
@@ -524,6 +524,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   }
 
   private val isVlsType = fuType.map(fuTypeItem => FuType.isVls(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
+  private val isLSType = fuType.map(fuTypeItem => FuType.isLoad(fuTypeItem) || FuType.isStore(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
   private val isSegment = fuType.map(fuTypeItem => FuType.isVsegls(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
   // TODO
   private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
@@ -542,13 +543,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   // The 'allowDispatch' calculations are done conservatively for timing purposes:
   //   The Flow of scalar instructions is considered 1,
   //   The flow of vector 'unit-stride' instructions is considered 2, and the flow of other vector instructions is considered 16.
-  private val conserveFlows = isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
+  private val conserveFlows = VecInit(isVlsType.zip(isLSType).zipWithIndex.map { case ((isVlsTyepItem, isLSTypeItem), index) =>
     Mux(
       isVlsTyepItem,
-      if (index == 0) Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, 16.U) else VecMemUnitStrideMaxFlowNum.U,
-      1.U
+      Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, 16.U),
+      Mux(isLSTypeItem, 1.U, 0.U)
     )
-  }
+  })
 
   // A conservative allocation strategy is adopted here.
   // Vector 'unit-stride' instructions and scalar instructions can be issued from all six ports,
@@ -563,27 +564,16 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (index <- allowDispatch.indices) {
     val flowTotal = Wire(UInt(log2Up(VirtualLoadQueueMaxStoreQueueSize + 1).W))
     flowTotal := conserveFlows.take(index + 1).reduce(_ +& _)
-    if (index == 0) {
-      when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := sqFreeCount > flowTotal
-      }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := lqFreeCount > flowTotal
-      }.elsewhen(isAMOVec(index)) {
-        allowDispatch(index) := true.B
-      }.otherwise {
-        allowDispatch(index) := true.B
-      }
-    }
-    else {
-      when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := (sqFreeCount > flowTotal) && (isVecUnitType(index) || !isVlsType(index)) && allowDispatch(index - 1)
-      }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := (lqFreeCount > flowTotal) && (isVecUnitType(index) || !isVlsType(index)) && allowDispatch(index - 1)
-      }.elsewhen(isAMOVec(index)) {
-        allowDispatch(index) := allowDispatch(index - 1)
-      }.otherwise {
-        allowDispatch(index) := allowDispatch(index - 1)
-      }
+    val allowDispatchPrevious = if (index == 0) true.B else allowDispatch(index - 1)
+    val allowDispatchThisUop = true.B
+    when(isStoreVec(index) || isVStoreVec(index)) {
+      allowDispatch(index) := (sqFreeCount > flowTotal) && allowDispatchThisUop && allowDispatchPrevious
+    }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
+      allowDispatch(index) := (lqFreeCount > flowTotal) && allowDispatchThisUop && allowDispatchPrevious
+    }.elsewhen(isAMOVec(index)) {
+      allowDispatch(index) := allowDispatchPrevious
+    }.otherwise {
+      allowDispatch(index) := allowDispatchPrevious
     }
   }
 
@@ -609,17 +599,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
-
-
-
-
-
-
-
-
-
-
-
 
   val isFp = VecInit(fromRename.map(req => FuType.isFArith(req.bits.fuType)))
   val isVec     = VecInit(fromRename.map(req => FuType.isVArith (req.bits.fuType) ||
@@ -736,6 +715,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   }
   if(backendParams.debugEn){
     dontTouch(blockedByWaitForward)
+    dontTouch(conserveFlows)
   }
 
   // Only the uop with block backward flag will block the next uop

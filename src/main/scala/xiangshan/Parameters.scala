@@ -229,7 +229,7 @@ case class XSCoreParameters
   VecMemDispatchWidth: Int = 1,
   VecMemDispatchMaxNumber: Int = 16,
   VecMemUnitStrideMaxFlowNum: Int = 2,
-  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 2, 2, 2, 2, 2),
+  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 16, 16, 16, 16, 16),
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
