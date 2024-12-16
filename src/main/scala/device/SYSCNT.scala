@@ -13,6 +13,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Field
 import org.chipsalliance.cde.config.Parameters
+import chisel3.util._
 
 object SYSCNTConsts {
   def msipOffset(hart:    Int) = hart * msipBytes
@@ -60,30 +61,49 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val io = IO(new Bundle {
       val rtcTick = Input(Bool())
       val stopen = Input(Bool())
-      val time    = Output(ValidIO(UInt(timeWidth.W)))
+      val time = Output(ValidIO(UInt(timeWidth.W)))
     })
 
     val time = RegInit(0.U(timeWidth.W))
-//    val incwidth = RegInit(0.U(3.W))
     val increg = RegInit(0.U(8.W))
+    val stop_cfg = increg(2)
     val incwidth = increg(1,0) //bit[1:0] is incr width
     val inccutdly = RegNext(incwidth)
     val inccfg_vld = inccutdly =/= incwidth // flag is high firstly when incr update.
     val inc_up_dis = RegInit(false.B)
-
-    //generate the low bit
-    val time_low = WireInit(1.U(2.W))
-   for(i<- 1 to 3){
-     if(i.asUInt==incwidth){
-       time_low := time(i-1,0)
-     }
-   }
-    val inczero = (incwidth==0.U)
-    val timelow_zero = (time_low ==0.U)
-    val inc_update = io.rtcTick & inc_up_dis & (inczero.B | timelow_zero.B)
+    val stopen = io.stopen & (stop_cfg === true.B)
+    //generate the low bit: time_low= time[increg-1:0]
+    val time_low = WireInit(1.U(3.W))
+    switch(incwidth) {
+      is(1.U) {
+        time_low := time(0)
+      }
+      is(2.U) {
+        time_low := time(1, 0)
+      }
+      is(3.U) {
+        time_low := time(2, 0)
+      }
+      is(0.U) {
+        time_low := 1.U
+      }
+    }
+    val inczero = WireInit(false.B)
+    when(incwidth === 0.U) {
+      inczero := true.B
+    }.otherwise {
+      inczero := false.B
+    }
+    val timelow_zero = WireInit(false.B)
+    when(time_low === 0.U) {
+      timelow_zero := true.B
+    }.otherwise {
+      timelow_zero := false.B
+    }
+    val inc_update = io.rtcTick & inc_up_dis & (inczero | timelow_zero)
 
     val incr_width_value = RegInit(0.U(2.W))
-    when(inc_update){
+    when(inc_update) {
       incr_width_value := incwidth
     }
     // count step will not update before count arrive at 2^n,n is increg
@@ -93,15 +113,15 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       inc_up_dis := false.B
     }
     val time_sw = RegInit(0.U(timeWidth.W))
-    when(io.stopen) {
+    when(stopen) {
       time := time
-    }.elsewhen(io.rtcTick){
+    }.elsewhen(io.rtcTick) {
       time := time + 1.U
       time_sw := time << incr_width_value
     }
 
     io.time.valid := RegNext(io.rtcTick)
-    io.time.bits  := time_sw >> incr_width_value
+    io.time.bits := time_sw >> incr_width_value
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
@@ -111,8 +131,6 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
      */
 
     node.regmap(
-//      incOffset -> RegFieldGroup("incwidth", Some("mtime incwidth Register"), incwidth{ case r =>
-//        RegField(3, r, RegFieldDesc("incwidth", "", reset=Some(0))) :: RegField(ipiWidth - 1) :: Nil }),
       incOffset -> RegFieldGroup(
         "incwidth",
         Some("mtime incwidth Register"),
