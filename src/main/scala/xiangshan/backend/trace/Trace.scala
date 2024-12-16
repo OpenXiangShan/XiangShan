@@ -17,18 +17,17 @@ class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = new Bundle {
     val fromEncoder    = Input(new FromEncoder)
     val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe))
-    val fromPcMem      = Input(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
   }
   val out = new Bundle {
     val toPcMem        = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
-    val toEncoder      = new TraceBundle(hasIaddr = true,  TraceGroupNum, IretireWidthCompressed)
+    val toEncoder      = new TraceBundle(hasIaddr = false,  TraceGroupNum, IretireWidthCompressed)
     val blockRobCommit = Output(Bool())
   }
 }
 
 class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new TraceIO)
-  val (fromEncoder, fromRob, fromPcMem, toPcMem, toEncoder) = (io.in.fromEncoder, io.in.fromRob, io.in.fromPcMem, io.out.toPcMem, io.out.toEncoder)
+  val (fromEncoder, fromRob, toPcMem, toEncoder) = (io.in.fromEncoder, io.in.fromRob, io.out.toPcMem, io.out.toEncoder)
 
   /**
    * stage 0: CommitInfo from rob
@@ -62,13 +61,5 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
   val s3_in_groups = s2_out_groups
   val s3_out_groups = RegNext(s3_in_groups)
   toPcMem := s3_in_groups
-
-  for(i <- 0 until TraceGroupNum) {
-    toEncoder.blocks(i).valid := s3_out_groups.blocks(i).valid
-    toEncoder.blocks(i).bits.iaddr.foreach(_ := Mux(s3_out_groups.blocks(i).valid, fromPcMem(i), 0.U))
-    toEncoder.blocks(i).bits.tracePipe := s3_out_groups.blocks(i).bits.tracePipe
-  }
-  if(backendParams.debugEn) {
-    dontTouch(io.out.toEncoder)
-  }
+  io.out.toEncoder := s3_out_groups
 }

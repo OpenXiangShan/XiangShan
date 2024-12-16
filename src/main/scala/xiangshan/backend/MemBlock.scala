@@ -335,7 +335,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val toL2Top      = Output(Bool())
     }
     val traceCoreInterfaceBypass = new Bundle{
-      val fromBackend = Flipped(new TraceCoreInterface)
+      val fromBackend = Flipped(new TraceCoreInterface(hasOffset = true))
       val toL2Top     = new TraceCoreInterface
     }
   })
@@ -1940,7 +1940,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     traceFromBackend.toEncoder.priv,
     traceFromBackend.toEncoder.groups(0).valid
   )
-  (0 until TraceGroupNum).foreach{ i =>
+  (0 until TraceGroupNum).foreach { i =>
     traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid)
     traceToL2Top.toEncoder.groups(i).bits.iretire := RegNext(traceFromBackend.toEncoder.groups(i).bits.iretire)
     traceToL2Top.toEncoder.groups(i).bits.itype := RegNext(traceFromBackend.toEncoder.groups(i).bits.itype)
@@ -1951,7 +1951,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     traceToL2Top.toEncoder.groups(i).bits.iaddr := RegEnable(
       traceFromBackend.toEncoder.groups(i).bits.iaddr,
       traceFromBackend.toEncoder.groups(i).valid
-    )
+    ) + (RegEnable(
+      traceFromBackend.toEncoder.groups(i).bits.ftqOffset.getOrElse(0.U),
+      traceFromBackend.toEncoder.groups(i).valid
+    ) << instOffsetBits)
   }
 
 

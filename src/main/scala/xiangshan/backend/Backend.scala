@@ -1039,8 +1039,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
 
   val toTop = new BackendToTopBundle
 
-  val traceCoreInterface = new TraceCoreInterface
-
+  val traceCoreInterface = new TraceCoreInterface(hasOffset = true)
   val fenceio = new FenceIO
   // Todo: merge these bundles into BackendFrontendIO
   val frontend = Flipped(new FrontendToCtrlIO)
