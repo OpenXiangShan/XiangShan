@@ -385,8 +385,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   staIdx.zipWithIndex.map{ case (sta, i) => {
     io.fromDispatch.uops(sta).ready := staReady(i) && stdReady(i)
   }}
-  issueQueues.filter(iq => iq.params.StaCnt > 0).zip(staIdx).zipWithIndex.map{ case ((iq, idx),i) =>
-    iq.io.enq(i).valid := io.fromDispatch.uops(idx).valid && !io.fromDispatch.uops(idx).bits.isDropAmocasSta
+  issueQueues.filter(iq => iq.params.StaCnt > 0).map(_.io.enq).flatten.zipWithIndex.map{ case (iq, idx) =>
+    iq.valid := io.fromDispatch.uops(staIdx(idx)).valid && !io.fromDispatch.uops(staIdx(idx)).bits.isDropAmocasSta
   }
   val staValidFromDispatch = staIdx.map(idx => io.fromDispatch.uops(idx).valid)
   val memAddrIQs = issueQueues.filter(_.params.isMemAddrIQ)
