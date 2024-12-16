@@ -45,7 +45,7 @@ class StandAloneTIMER (
   clintIntNode :*= IntBuffer() :*= clint.intnode
   val int = InModuleBody(clintIntNode.makeIOs())
 
-  class StandAloneCLINTImp(outer: StandAloneTIMER)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
+  class StandAloneTIMERImp(outer: StandAloneTIMER)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val io = IO(new Bundle {
       val time = Input(ValidIO(UInt(64.W)))
     })
