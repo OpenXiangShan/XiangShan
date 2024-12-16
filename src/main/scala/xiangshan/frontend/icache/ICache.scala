@@ -61,7 +61,7 @@ case class ICacheParameters(
     partWayNum:       Int = 4,
     nMMIOs:           Int = 1,
     blockBytes:       Int = 64,
-    cacheCtrlAddress: AddressSet = AddressSet(0x38022000, 0x7f)
+    cacheCtrlAddress: AddressSet = AddressSet(0x38022080, 0x7f)
 ) extends L1CacheParameters {
 
   val setBytes:     Int         = nSets * blockBytes
