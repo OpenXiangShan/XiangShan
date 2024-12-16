@@ -22,7 +22,7 @@ import chisel3.util._
 import coupledL2.VaddrField
 import coupledL2.IsKeywordField
 import coupledL2.IsKeywordKey
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import huancun.{AliasField, PrefetchField}
@@ -57,7 +57,8 @@ case class DCacheParameters
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = false
+  enableTagEcc: Boolean = false,
+  cacheCtrlAddressOpt: Option[AddressSet] = None,
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -166,6 +167,11 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
   def dataECCBits = encDataBits - DCacheSRAMRowBits
 
+  // L1 DCache controller
+  val cacheCtrlParamsOpt  = OptionWrapper(
+                              cacheParams.cacheCtrlAddressOpt.nonEmpty,
+                              L1CacheCtrlParams(cacheParams.cacheCtrlAddressOpt.get)
+                            )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
   // hardware prefetch parameters
@@ -402,7 +408,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val prefetch = Bool()
   val vecValid = Bool()
   val sqNeedDeq = Bool()
-  
+
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
     res.vaddr := vaddr
@@ -914,6 +920,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
+  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new CtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
 }
@@ -1005,6 +1012,41 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
+
+  // l1 dcache controller
+  outer.cacheCtrlOpt.foreach {
+    case mod =>
+      mod.module.io_pseudoError.foreach {
+        case x => x.ready := false.B
+      }
+  }
+  ldu.foreach {
+    case mod =>
+      mod.io.pseudo_error.valid := false.B
+      mod.io.pseudo_error.bits := DontCare
+  }
+  mainPipe.io.pseudo_error.valid := false.B
+  mainPipe.io.pseudo_error.bits  := DontCare
+  bankedDataArray.io.pseudo_error.valid := false.B
+  bankedDataArray.io.pseudo_error.bits  := DontCare
+
+  // pseudo tag ecc error
+  if (outer.cacheCtrlOpt.nonEmpty && EnableTagEcc) {
+    val ctrlUnit = outer.cacheCtrlOpt.head.module
+    ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
+    mainPipe.io.pseudo_error <> ctrlUnit.io_pseudoError(0)
+    ctrlUnit.io_pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
+                                        ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
+  }
+
+  // pseudo data ecc error
+  if (outer.cacheCtrlOpt.nonEmpty && EnableDataEcc) {
+    val ctrlUnit = outer.cacheCtrlOpt.head.module
+    bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)
+    ctrlUnit.io_pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
+                                        (mainPipe.io.pseudo_data_error_inj_done ||
+                                         ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
+  }
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
@@ -1701,7 +1743,10 @@ class AMOHelper() extends ExtModule {
   val rdata  = IO(Output(UInt(64.W)))
 }
 
-class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class DCacheWrapper()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasDCacheParameters
+{
   override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
@@ -1709,6 +1754,13 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
   val dcache = if (useDcache) LazyModule(new DCache()) else null
   if (useDcache) {
     clientNode := dcache.clientNode
+  }
+  val uncacheNode = OptionWrapper(cacheCtrlParamsOpt.isDefined, TLIdentityNode())
+  require(
+    (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) ||
+    (!uncacheNode.isDefined && !dcache.cacheCtrlOpt.isDefined), "uncacheNode and ctrlUnitOpt are not connected!")
+  if (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) {
+    dcache.cacheCtrlOpt.get.node := uncacheNode.get
   }
 
   class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
