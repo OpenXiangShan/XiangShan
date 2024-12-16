@@ -68,9 +68,9 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
     // eccctrl.ierror: inject error code
     private def nInjError: Int = 8
     private object eccctrlInjError extends NamedUInt(log2Up(nInjError)) {
-      def notEnabled:    UInt = 0.U(width.W)
-      def targetInvalid: UInt = 1.U(width.W)
-      def notFound:      UInt = 2.U(width.W)
+      def notEnabled:    UInt = 0.U(width.W) // try to inject when ECC check is not enabled
+      def targetInvalid: UInt = 1.U(width.W) // try to inject to invalid(rsvd) eccctrl.itarget
+      def notFound:      UInt = 2.U(width.W) // try to inject to ecciaddr.paddr does not exist in ICache
       @unused
       def rsvd3: UInt = 3.U(width.W)
       @unused
@@ -82,7 +82,6 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
       @unused
       def rsvd7: UInt = 7.U(width.W)
     }
-
     // eccctrl.istatus: inject status
     private def nInjStatus: Int = 8
     private object eccctrlInjStatus extends NamedUInt(log2Up(nInjStatus)) {
@@ -110,7 +109,7 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
       def rsvd3: UInt = 3.U(width.W)
     }
     private class eccctrlBundle extends Bundle {
-      val ierror:  UInt = eccctrlInjError()  // inject error code, read-only
+      val ierror:  UInt = eccctrlInjError()  // inject error code, read-only, valid only when istatus === error
       val istatus: UInt = eccctrlInjStatus() // inject status, read-only
       val itarget: UInt = eccctrlInjTarget() // inject target
       val inject:  Bool = Bool()             // request to inject, write-only, read 0
@@ -142,25 +141,44 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
     private val eccctrl  = RegInit(eccctrlBundle.default)
     private val ecciaddr = RegInit(ecciaddrBundle.default)
 
+    // control signal
     io.ecc_enable := eccctrl.enable
+    io.injecting  := eccctrl.istatus === eccctrlInjStatus.working
 
-    // default wiring, will be overridden by inject FSM
-    io.metaRead.valid  := false.B
-    io.metaRead.bits   := DontCare
-    io.metaWrite.valid := false.B
-    io.metaWrite.bits  := DontCare
-    io.dataWrite.valid := false.B
-    io.dataWrite.bits  := DontCare
-
-    // inject data
+    // inject position
     private val ivirIdx  = get_idx(ecciaddr.paddr)
     private val iphyTag  = get_tag(ecciaddr.paddr)
-    private val iwaymask = RegInit(0.U(nWays.W))
+    private val iwaymask = RegInit(0.U(nWays.W)) // read from metaArray, valid after istate === is_readMetaResp
 
     // inject FSM
     private val is_idle :: is_readMetaReq :: is_readMetaResp :: is_writeMeta :: is_writeData :: Nil =
       Enum(5)
     private val istate = RegInit(is_idle)
+
+    io.metaRead.valid             := istate === is_readMetaReq
+    io.metaRead.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
+    io.metaRead.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(ivirIdx))
+    io.metaRead.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
+    io.metaRead.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
+
+    io.metaWrite.valid := istate === is_writeMeta
+    io.metaWrite.bits.generate(
+      tag = iphyTag,
+      idx = ivirIdx,
+      waymask = iwaymask,
+      bankIdx = ivirIdx(0),
+      poison = true.B
+    )
+
+    io.dataWrite.valid := istate === is_writeData
+    io.dataWrite.bits.generate(
+      data = 0.U, // inject poisoned data, don't care actual data
+      idx = ivirIdx,
+      waymask = iwaymask,
+      bankIdx = ivirIdx(0),
+      poison = true.B
+    )
+
     switch(istate) {
       is(is_idle) {
         when(eccctrl.istatus === eccctrlInjStatus.working) {
@@ -169,15 +187,12 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         }
       }
       is(is_readMetaReq) {
-        io.metaRead.valid := true.B
-        // we inject into first cacheline and ignore the rest port
-        io.metaRead.bits.isDoubleLine := false.B
-        io.metaRead.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(ivirIdx))
         when(io.metaRead.fire) {
           istate := is_readMetaResp
         }
       }
       is(is_readMetaResp) {
+        // metaArray ensures resp is valid one cycle after req
         val waymask = VecInit((0 until nWays).map { w =>
           io.metaReadResp.entryValid.head(w) && io.metaReadResp.tags.head(w) === iphyTag
         }).asUInt
@@ -192,36 +207,18 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         }
       }
       is(is_writeMeta) {
-        io.metaWrite.valid := true.B
-        io.metaWrite.bits.generate(
-          tag = iphyTag,
-          idx = ivirIdx,
-          waymask = iwaymask,
-          bankIdx = ivirIdx(0),
-          poison = true.B
-        )
         when(io.metaWrite.fire) {
           istate          := is_idle
           eccctrl.istatus := eccctrlInjStatus.injected
         }
       }
       is(is_writeData) {
-        io.dataWrite.valid := true.B
-        io.dataWrite.bits.generate(
-          data = 0.U,
-          idx = ivirIdx,
-          waymask = iwaymask,
-          bankIdx = ivirIdx(0),
-          poison = true.B
-        )
         when(io.dataWrite.fire) {
           istate          := is_idle
           eccctrl.istatus := eccctrlInjStatus.injected
         }
       }
     }
-
-    io.injecting := eccctrl.istatus === eccctrlInjStatus.working
 
     private def eccctrlRegDesc: RegFieldDesc =
       RegFieldDesc(
