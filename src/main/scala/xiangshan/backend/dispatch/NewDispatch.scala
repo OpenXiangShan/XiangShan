@@ -388,7 +388,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val lsqCanAccept = Wire(Bool())
   for (i <- 0 until RenameWidth){
     // update valid logic
-    fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept && !fromRename(i).bits.eliminatedMove
+    fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
+      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
   }
   for (i <- 0 until RenameWidth){
@@ -734,7 +735,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   // (2) previous instructions are ready
   thisCanActualOut := VecInit((0 until RenameWidth).map(i => !blockedByWaitForward(i) && notBlockedByPrevious(i) && io.enqRob.canAccept))
   val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
-  val hasValidException = fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ
   for (i <- 0 until RenameWidth) {
