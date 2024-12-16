@@ -120,7 +120,9 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       time_sw := time << incr_width_value
     }
 
-    io.time.valid := RegNext(io.rtcTick)
+
+    val tick_1dly = RegNext(io.rtcTick)
+    io.time.valid := RegNext(tick_1dly)
     io.time.bits := time_sw >> incr_width_value
     /* 0000 msip hart 0
      * 0004 msip hart 1
