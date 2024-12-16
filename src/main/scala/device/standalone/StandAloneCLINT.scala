@@ -34,23 +34,26 @@ class StandAloneCLINT (
   useTL, baseAddress, addrWidth, dataWidth, hartNum
 ) {
 
-  private def clintParam = SYSCNTParams(baseAddress)
+  private def clintParam = CLINTParams(baseAddress)
   def addressSet: AddressSet = clintParam.address
 
-  private val clint = LazyModule(new SYSCNT(clintParam, dataWidth / 8))
+  private val clint = LazyModule(new CLINT(clintParam, dataWidth / 8))
   clint.node := xbar
 
-  class StandAloneSYSCNTImp(outer: StandAloneCLINT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
+  // interrupts
+  val clintIntNode = IntSinkNode(IntSinkPortSimple(hartNum, 2))
+  clintIntNode :*= IntBuffer() :*= clint.intnode
+  val int = InModuleBody(clintIntNode.makeIOs())
+
+  class StandAloneCLINTImp(outer: StandAloneCLINT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val io = IO(new Bundle {
       val rtcTick = Input(Bool())
-      val stopen = Input(Bool())
       val time = Output(ValidIO(UInt(64.W)))
     })
     outer.clint.module.io.rtcTick := io.rtcTick
-    outer.clint.module.io.stopen := io.stopen
     io.time := outer.clint.module.io.time
   }
 
-  override lazy val module = new StandAloneSYSCNTImp(this)
+  override lazy val module = new StandAloneCLINTImp(this)
 
 }
