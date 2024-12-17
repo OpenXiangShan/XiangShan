@@ -279,6 +279,34 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   sigs(0) := decoder(2)
   sigs(1) := decoder(4)
   ctrl.typ := inst.TYP
+  val isFP16Instrs = Seq(
+    // zfh inst
+    FADD_H, FSUB_H, FEQ_H, FLT_H, FLE_H, FMIN_H, FMAX_H,
+    FMUL_H, FDIV_H, FSQRT_H,
+    FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
+    FCLASS_H, FSGNJ_H, FSGNJX_H, FSGNJN_H,
+    // zfa inst
+    FLEQ_H, FLTQ_H, FMINM_H, FMAXM_H,
+    FROUND_H, FROUNDNX_H,
+  )
+  val isFP16Instr = isFP16Instrs.map(io.instr === _).reduce(_ || _)
+  val isFP32Instrs = Seq(
+    FADD_S, FSUB_S, FEQ_S, FLT_S, FLE_S, FMIN_S, FMAX_S,
+    FMUL_S, FDIV_S, FSQRT_S,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S,
+    FCLASS_S, FSGNJ_S, FSGNJX_S, FSGNJN_S,
+    // zfa inst
+    FLEQ_S, FLTQ_S, FMINM_S, FMAXM_S,
+    FROUND_S, FROUNDNX_S,
+  )
+  val isFP32Instr = isFP32Instrs.map(io.instr === _).reduce(_ || _)
+  val isFP64Instrs = Seq(
+    FADD_D, FSUB_D, FEQ_D, FLT_D, FLE_D, FMIN_D, FMAX_D,
+    FMUL_D, FDIV_D, FSQRT_D,
+    FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FCLASS_D, FSGNJ_D, FSGNJX_D, FSGNJN_D,
+  )
+  val isFP64Instr = isFP64Instrs.map(io.instr === _).reduce(_ || _)
   // scalar cvt inst
   val isSew2Cvts = Seq(
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
@@ -310,9 +338,7 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   )
   val isSew2Cvt32 = isSew2Cvts.map(io.instr === _).reduce(_ || _)
   val isSew2Cvt16 = isSew2Cvth.map(io.instr === _).reduce(_ || _)
-  val complexFmt = Mux(isSew2Cvt32, VSew.e32, VSew.e16)
-  val isCompFmt = isSew2Cvt32 || isSew2Cvt16
-  ctrl.fmt := Mux(isCompFmt, complexFmt, simpleFmt)
+  ctrl.fmt := Mux(isFP32Instr || isSew2Cvt32, VSew.e32, Mux(isFP16Instr || isSew2Cvt16, VSew.e16, VSew.e64))
   ctrl.rm := inst.RM
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
