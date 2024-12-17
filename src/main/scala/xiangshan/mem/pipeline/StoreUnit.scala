@@ -437,6 +437,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_exception = RegNext(s1_feedback.bits.hit) &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR)
   val s2_mmio = (s2_in.mmio || (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio)) && RegNext(s1_feedback.bits.hit)
+  val s2_memBackTypeMM = !s2_pmp.mmio
   val s2_actually_uncache = (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
   val s2_uncache = !s2_exception && !s2_in.tlbMiss && s2_actually_uncache
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec && !s2_frm_mabuf) || s2_in.uop.robIdx.needFlush(io.redirect)
@@ -445,6 +446,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out.af     := s2_out.uop.exceptionVec(storeAccessFault)
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || Pbmt.isPMA(s2_pbmt) && s2_pmp.atomic
+  s2_out.memBackTypeMM := s2_memBackTypeMM
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
                                                 s2_pmp.st ||
                                                 ((s2_in.isvec || s2_frm_mabuf) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
