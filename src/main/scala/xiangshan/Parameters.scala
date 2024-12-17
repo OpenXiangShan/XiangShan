@@ -228,6 +228,7 @@ case class XSCoreParameters
     nProbeEntries = 8,
     nReleaseEntries = 18
   )),
+  L2MSHRs: Int = 14,
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
     level = 2,
@@ -409,6 +410,7 @@ trait HasXSParameter {
 
   val icacheParameters = coreParams.icacheParameters
   val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
+  val L2MSHRs = coreParams.L2MSHRs
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
   // for constrained LR/SC loop

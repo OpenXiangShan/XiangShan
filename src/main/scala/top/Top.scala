@@ -200,6 +200,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         node.out.head._1 := false.B.asAsyncReset
       }
     }
+    val pL3MSHRs = WireInit(0.U(64.W))
+    ExcitingUtils.addSink(pL3MSHRs, "DSE_L3MSHRS")
+    if(l3cacheOpt.isDefined){
+      l3cacheOpt.get.module.io.mshrs := pL3MSHRs
+    }
 
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
