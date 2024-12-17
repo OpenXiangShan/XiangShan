@@ -119,6 +119,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val af = Bool()
   val nc = Bool()
   val mmio = Bool()
+  val memBackTypeMM = Bool() // 1: main memory, 0: IO
   val atomic = Bool()
   val hasException = Bool()
 
@@ -213,6 +214,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) af := RegEnable(input.af, enable) else af := input.af
     if (latch) nc := RegEnable(input.nc, enable) else nc := input.nc
     if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
+    if (latch) memBackTypeMM := RegEnable(input.memBackTypeMM, enable) else memBackTypeMM := input.memBackTypeMM
     if (latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
     if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch

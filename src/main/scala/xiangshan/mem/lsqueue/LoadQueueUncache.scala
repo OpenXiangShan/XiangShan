@@ -157,6 +157,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.uncache.req.bits.replayCarry := DontCare
   io.uncache.req.bits.atomic := req.atomic
   io.uncache.req.bits.nc := req.nc
+  io.uncache.req.bits.memBackTypeMM := req.memBackTypeMM
 
   io.uncache.resp.ready := true.B
 
