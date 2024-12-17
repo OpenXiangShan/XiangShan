@@ -41,6 +41,7 @@ case class SoCParameters
   PAddrBits: Int = 36,
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
+  L3MSHRs: Int = 14,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l3",
     level = 3,
@@ -69,6 +70,7 @@ trait HasSoCParameter {
   val L3InnerBusWidth = soc.L3InnerBusWidth
   val L3BlockSize = soc.L3BlockSize
   val L3NBanks = soc.L3NBanks
+  val L3MSHRs = soc.L3MSHRs
 
   // on chip network configurations
   val L3OuterBusWidth = soc.L3OuterBusWidth

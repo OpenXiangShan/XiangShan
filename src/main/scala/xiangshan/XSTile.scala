@@ -165,8 +165,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.reset_vector := io.reset_vector
 
 //    core.module.io.robSize := io.robSize
+    val pL2MSHRs = WireInit(0.U(64.W))
+    ExcitingUtils.addSink(pL2MSHRs, "DSE_L2MSHRS")
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+      l2cache.get.module.io.mshrs := pL2MSHRs
     }
     else {
       core.module.io.perfEvents <> DontCare

@@ -9,6 +9,7 @@ import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, Re
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 import xiangshan.backend.regfile.Regfile
+import system.HasSoCParameter
 
 import javax.swing.SwingWorker
 
@@ -29,7 +30,7 @@ class DSECtrlUnit(params: DSEParams)(implicit p: Parameters) extends LazyModule 
   lazy val module = new DSECtrlUnitImp(this)
 }
 
-class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter {
+class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyRawModuleImp(wrapper) with HasXSParameter with HasSoCParameter {
 
   val io = IO(new Bundle{
     val clk = Input(Clock())
@@ -84,6 +85,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val lsDqSize1 = RegInit(dpParams.LsDqSize.U(64.W))
     val lsDqSize = Wire(UInt(64.W))
 
+    val l2MSHRs0 = RegInit(L2MSHRs.U(64.W))
+    val l2MSHRs1 = RegInit(L2MSHRs.U(64.W))
+    val l2MSHRs = Wire(UInt(64.W))
+
+    val l3MSHRs0 = RegInit(L3MSHRs.U(64.W))
+    val l3MSHRs1 = RegInit(L3MSHRs.U(64.W))
+    val l3MSHRs = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -110,7 +119,11 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x160 -> Seq(RegField(64, fpDqSize0)),
       0x168 -> Seq(RegField(64, fpDqSize1)),
       0x170 -> Seq(RegField(64, lsDqSize0)),
-      0x178 -> Seq(RegField(64, lsDqSize1))
+      0x178 -> Seq(RegField(64, lsDqSize1)),
+      0x180 -> Seq(RegField(64, l2MSHRs0)),
+      0x188 -> Seq(RegField(64, l2MSHRs1)),
+      0x190 -> Seq(RegField(64, l3MSHRs0)),
+      0x198 -> Seq(RegField(64, l3MSHRs1))
     )
 
     // Mux logic
@@ -122,6 +135,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     intDqSize := Mux(ctrlSel.orR, intDqSize1, intDqSize0)
     fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
     lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
+    l2MSHRs := Mux(ctrlSel.orR, l2MSHRs1, l2MSHRs0)
+    l3MSHRs := Mux(ctrlSel.orR, l3MSHRs1, l3MSHRs0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -132,6 +147,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(intDqSize, "DSE_INTDQSIZE")
     ExcitingUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
     ExcitingUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
+    ExcitingUtils.addSource(l2MSHRs, "DSE_L2MSHRS")
+    ExcitingUtils.addSource(l3MSHRs, "DSE_L3MSHRS")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -145,6 +162,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(intDqSize <= dpParams.IntDqSize.U, "DSE parameter must not exceed IntDqSize")
     assert(fpDqSize <= dpParams.FpDqSize.U, "DSE parameter must not exceed FpDqSize")
     assert(lsDqSize <= dpParams.LsDqSize.U, "DSE parameter must not exceed LsDqSize")
+    assert(l2MSHRs <= L2MSHRs.U, "DSE parameter must not exceed L2MSHRs")
+    assert(l3MSHRs <= L3MSHRs.U, "DSE parameter must not exceed L3MSHRs")
 
 
     // core reset generation
