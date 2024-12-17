@@ -159,35 +159,44 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
    * Enqueue at dispatch
    *
    * Currently, VirtualLoadQueue only allows enqueue when #emptyEntries > EnqWidth
+   * Dynamic enq based on numLsElem number
    */
   io.enq.canAccept := allowEnqueue
+  val enqLowBound = io.enq.req.map(_.bits.lqIdx)
+  val enqUpBound  = io.enq.req.map(x => x.bits.lqIdx + x.bits.numLsElem)
+  val enqCrossLoop = enqLowBound.zip(enqUpBound).map{case (low, up) => low.flag =/= up.flag}
+
+  for(i <- 0 until VirtualLoadQueueSize) {
+    val entryCanEnqSeq = (0 until io.enq.req.length).map { j =>
+      val entryHitBound = Mux(
+        enqCrossLoop(j),
+        enqLowBound(j).value <= i.U || i.U < enqUpBound(j).value,
+        enqLowBound(j).value <= i.U && i.U < enqUpBound(j).value
+      )
+      canEnqueue(j) && !enqCancel(j) && entryHitBound
+    }
+    val entryCanEnq = entryCanEnqSeq.reduce(_ || _)
+    val selectBits = ParallelPriorityMux(entryCanEnqSeq, io.enq.req.map(_.bits))
+    when (entryCanEnq) {
+      uop(i) := selectBits
+      allocated(i) := true.B
+      datavalid(i) := false.B
+      addrvalid(i) := false.B
+      isvec(i) :=  FuType.isVLoad(selectBits.fuType)
+      veccommitted(i) := false.B
+
+      debug_mmio(i) := false.B
+      debug_paddr(i) := 0.U
+    }
+
+  }
+
   for (i <- 0 until io.enq.req.length) {
     val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.lqIdx
-    val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      // The maximum 'numLsElem' number that can be emitted per dispatch port is:
-      //    16 2 2 2 2 2.
-      // Therefore, VecMemLSQEnqIteratorNumberSeq = Seq(16, 2, 2, 2, 2, 2)
-      for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
-        when (j.U < validVLoadOffset(i)) {
-          allocated((index + j.U).value) := true.B
-          uop((index + j.U).value) := io.enq.req(i).bits
-          uop((index + j.U).value).lqIdx := lqIdx + j.U
-
-          // init
-          addrvalid((index + j.U).value) := false.B
-          datavalid((index + j.U).value) := false.B
-          isvec((index + j.U).value) := FuType.isVLoad(io.enq.req(i).bits.fuType)
-          veccommitted((index + j.U).value) := false.B
-
-          debug_mmio((index + j.U).value) := false.B
-          debug_paddr((index + j.U).value) := 0.U
-
-          XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
-          XSError(index.value =/= lqIdx.value, s"must be the same entry $i\n")
-        }
-      }
+      XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
+      XSError(index.value =/= lqIdx.value, s"must be the same entry $i\n")
     }
     io.enq.resp(i) := lqIdx
   }

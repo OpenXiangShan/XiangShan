@@ -348,6 +348,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * Enqueue at dispatch
     *
     * Currently, StoreQueue only allows enqueue when #emptyEntries > EnqWidth
+    * Dynamic enq based on numLsElem number
     */
   io.enq.canAccept := allowEnqueue
   val canEnqueue = io.enq.req.map(_.valid)
@@ -357,38 +358,49 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val validVStoreOffset = vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVStoreOffsetRShift = 0.U +: validVStoreOffset.take(vStoreFlow.length - 1)
 
+  val enqLowBound = io.enq.req.map(_.bits.sqIdx)
+  val enqUpBound  = io.enq.req.map(x => x.bits.sqIdx + x.bits.numLsElem)
+  val enqCrossLoop = enqLowBound.zip(enqUpBound).map{case (low, up) => low.flag =/= up.flag}
+
+  for(i <- 0 until StoreQueueSize) {
+    val entryCanEnqSeq = (0 until io.enq.req.length).map { j =>
+      val entryHitBound = Mux(
+        enqCrossLoop(j),
+        enqLowBound(j).value <= i.U || i.U < enqUpBound(j).value,
+        enqLowBound(j).value <= i.U && i.U < enqUpBound(j).value
+      )
+      canEnqueue(j) && !enqCancel(j) && entryHitBound
+    }
+
+    val entryCanEnq = entryCanEnqSeq.reduce(_ || _)
+    val selectBits = ParallelPriorityMux(entryCanEnqSeq, io.enq.req.map(_.bits))
+    val selectUpBound = ParallelPriorityMux(entryCanEnqSeq, enqUpBound)
+    when (entryCanEnq) {
+      uop(i) := selectBits
+      vecLastFlow(i) := Mux((i + 1).U === selectUpBound.value, selectBits.lastUop, false.B)
+      allocated(i) := true.B
+      datavalid(i) := false.B
+      addrvalid(i) := false.B
+      unaligned(i) := false.B
+      cross16Byte(i) := false.B
+      committed(i) := false.B
+      pending(i) := false.B
+      prefetch(i) := false.B
+      nc(i) := false.B
+      mmio(i) := false.B
+      isVec(i) :=  FuType.isVStore(selectBits.fuType)
+      vecMbCommit(i) := false.B
+      hasException(i) := false.B
+      waitStoreS2(i) := true.B
+    }
+  }
+
   for (i <- 0 until io.enq.req.length) {
     val sqIdx = enqPtrExt(0) + validVStoreOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.sqIdx
-    val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      // The maximum 'numLsElem' number that can be emitted per dispatch port is:
-      //    16 2 2 2 2 2.
-      // Therefore, VecMemLSQEnqIteratorNumberSeq = Seq(16, 2, 2, 2, 2, 2)
-      for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
-        when (j.U < validVStoreOffset(i)) {
-          uop((index + j.U).value) := io.enq.req(i).bits
-          // NOTE: the index will be used when replay
-          uop((index + j.U).value).sqIdx := sqIdx + j.U
-          vecLastFlow((index + j.U).value) := Mux((j + 1).U === validVStoreOffset(i), io.enq.req(i).bits.lastUop, false.B)
-          allocated((index + j.U).value) := true.B
-          datavalid((index + j.U).value) := false.B
-          addrvalid((index + j.U).value) := false.B
-          unaligned((index + j.U).value) := false.B
-          cross16Byte((index + j.U).value) := false.B
-          committed((index + j.U).value) := false.B
-          pending((index + j.U).value) := false.B
-          prefetch((index + j.U).value) := false.B
-          nc((index + j.U).value) := false.B
-          mmio((index + j.U).value) := false.B
-          isVec((index + j.U).value) :=  FuType.isVStore(io.enq.req(i).bits.fuType)
-          vecMbCommit((index + j.U).value) := false.B
-          hasException((index + j.U).value) := false.B
-          waitStoreS2((index + j.U).value) := true.B
           XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
           XSError(index.value =/= sqIdx.value, s"must be the same entry $i\n")
-        }
-      }
     }
     io.enq.resp(i) := sqIdx
   }
@@ -800,6 +812,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         mmioState := s_req
         uncacheUop := uop(deqPtr)
         uncacheUop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
+        uncacheUop.trigger := 0.U.asTypeOf(TriggerAction())
         cboFlushedSb := false.B
         cboMmioPAddr := paddrModule.io.rdata(0)
       }
