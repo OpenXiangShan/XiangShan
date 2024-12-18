@@ -97,10 +97,6 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))
     val write = Flipped(DecoupledIO(new TagWriteReq))
-    // customized cache op port
-    val cacheOp = Flipped(new L1CacheInnerOpIO)
-    val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
-    val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
@@ -130,8 +126,6 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
     io.resp(i) := array(i).io.resp
     tag_read_oh(i) := PopCount(array(i).io.read.fire)
   }
-  io.cacheOp.resp.valid := false.B
-  io.cacheOp.resp.bits  := DontCare
 
   XSPerfAccumulate("tag_read_counter", tag_read_oh.reduce(_ + _))
 }
