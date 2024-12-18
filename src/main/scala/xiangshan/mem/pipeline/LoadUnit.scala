@@ -1389,7 +1389,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
 
   val s3_vp_match_fail = GatedValidRegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
-  val s3_rep_frm_fetch = s3_vp_match_fail
+  val s3_rep_frm_fetch_rep_full = io.lq_rep_full && s3_in.rep_info.need_rep && !s3_in.isLoadReplay
+  val s3_rep_frm_fetch = s3_vp_match_fail || s3_rep_frm_fetch_rep_full
   val s3_ldld_rep_inst =
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
