@@ -144,6 +144,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           Seq((512, 4, 6),
             (512, 9, 6),
             (1024, 19, 6)),
+        // Based on the statistical results of continuous unused counters
+        // using spec2k6 coverage 0.3, the threshold is obtained
+        TageTableCloseThresholds = Seq(300, 300, 300),
         SCNRows = 128,
         SCNTables = 2,
         SCHistLens = Seq(0, 5),

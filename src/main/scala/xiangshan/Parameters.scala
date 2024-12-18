@@ -109,6 +109,9 @@ case class XSCoreParameters
         ( 4096,   13,    8),
         ( 4096,   32,    8),
         ( 4096,  119,    8)),
+  // Based on the statistical results of continuous unused counters
+  // using spec2k6 coverage 0.3, the threshold is obtained
+  TageTableCloseThresholds: Seq[Int] = Seq(300, 300, 300, 300),
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 256,    4,    9),
@@ -693,6 +696,7 @@ trait HasXSParameter {
   }
   def numBr = coreParams.numBr
   def TageTableInfos = coreParams.TageTableInfos
+  def TageTableCloseThresholds = coreParams.TageTableCloseThresholds
   def TageBanks = coreParams.numBr
   def SCNRows = coreParams.SCNRows
   def SCCtrBits = coreParams.SCCtrBits

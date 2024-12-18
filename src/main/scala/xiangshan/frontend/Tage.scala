@@ -65,6 +65,9 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   def get_phy_br_idx(unhashed_idx: UInt, br_lidx: Int) = get_unshuffle_bits(unhashed_idx) ^ br_lidx.U(log2Ceil(numBr).W)
   def get_lgc_br_idx(unhashed_idx: UInt, br_pidx: UInt) = get_unshuffle_bits(unhashed_idx) ^ br_pidx
 
+  // Based on the statistical results of continuous unused counters
+  // using spec2k6 coverage 0.3, the threshold is obtained
+  def TABLES_CLOSE_THRESHOLD = TageTableCloseThresholds
 }
 
 trait HasFoldedHistory {
@@ -607,10 +610,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val resp_meta          = Wire(new TageMeta)
   override val meta_size = resp_meta.getWidth
+
+  // tables read request close signal
+  val s0_tables_req_closed = RegInit(VecInit(Seq.fill(TABLES_CLOSE_THRESHOLD.size)(false.B)))
+
   val tables = TageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) => {
       val t = Module(new TageTable(nRows, histLen, tagLen, i))
-      t.io.req.valid            := io.s0_fire(1)
+      t.io.req.valid            := io.s0_fire(1) && !s0_tables_req_closed(i)
       t.io.req.bits.pc          := s0_pc_dup(1)
       t.io.req.bits.folded_hist := io.in.bits.folded_hist(1)
       t.io.req.bits.ghist       := io.in.bits.ghist
@@ -640,6 +647,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val debug_pc_s0 = s0_pc_dup(1)
   val debug_pc_s1 = RegEnable(s0_pc_dup(1), io.s0_fire(1))
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(1))
+
+  // This prediction shows the usage of each table and slot
+  val table_unused = Wire(Vec(TageNTables, Vec(numBr, Bool())))
 
   val s1_provideds     = Wire(Vec(numBr, Bool()))
   val s1_providers     = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))
@@ -931,6 +941,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
         updateResetU(i)              := true.B
       }
     }
+    for (t <- 0 until TageNTables) {
+      // If the table t is hit but not select or missed, it can be closed
+      table_unused(t)(i) := !(t.U === providerInfo.tableIdx && provided) || !s1_per_br_resp(t).valid
+    }
     XSPerfAccumulate(f"tage_bank_${i}_update_allocate_failure", needToAllocate && !canAllocate)
     XSPerfAccumulate(f"tage_bank_${i}_update_allocate_success", needToAllocate && canAllocate)
     XSPerfAccumulate(s"tage_bank_${i}_mispred", hasUpdate && updateMispred)
@@ -939,6 +953,36 @@ class Tage(implicit p: Parameters) extends BaseTage {
       XSPerfAccumulate(f"tage_bank_${i}_tick_inc_${t}", needToAllocate && tickInc && tickIncVal === t.U)
       XSPerfAccumulate(f"tage_bank_${i}_tick_dec_${t}", needToAllocate && tickDec && tickDecVal === t.U)
     }
+  }
+
+  for (t <- 0 until TageNTables) {
+    require(TABLES_CLOSE_THRESHOLD.size == TageNTables)
+    val unused_counter = RegInit(0.U(log2Ceil(TABLES_CLOSE_THRESHOLD(t)).W))
+    val unused         = table_unused(t).reduce(_ && _)
+    // Update the counters of each table
+    when(io.s1_fire(1)) {
+      unused_counter := Mux(
+        !unused,
+        0.U,
+        // If the counter increases to the threshold, to prevent overflow,
+        // when the status is unused, the counter value remains at its original value.
+        Mux(unused_counter >= TABLES_CLOSE_THRESHOLD(t).asUInt, unused_counter, unused_counter + 1.U)
+      )
+    }
+    // Determine whether to turn off req based on the threshold
+    when(unused_counter >= TABLES_CLOSE_THRESHOLD(t).asUInt) {
+      s0_tables_req_closed(t) := true.B
+    }
+    // When a redirect occurs, reopen the closed table
+    val reopen = s0_tables_req_closed(t) && io.redirect.valid
+    when(reopen) {
+      s0_tables_req_closed(t) := false.B
+      unused_counter          := 0.U
+    }
+
+    XSPerfAccumulate(f"tage_table_${t}_close_cycle", s0_tables_req_closed(t) && io.s0_fire(0))
+    XSPerfAccumulate(f"tage_table_${t}_open_cycle", !s0_tables_req_closed(t) && io.s0_fire(0))
+    // XSPerfHistogram(f"tage_table_${t}_continuous_miss", unused_counter, !unused && unused_counter > 100.U, 100, 1000, 100)
   }
 
   val realWens = updateMask.transpose.map(v => v.reduce(_ | _))
