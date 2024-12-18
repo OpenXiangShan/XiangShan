@@ -922,9 +922,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val redirectValidReg = RegNext(io.redirect.valid)
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
+  val redirectAll = RegInit(false.B)
   when(io.redirect.valid){
     redirectBegin := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx.value - 1.U, io.redirect.bits.robIdx.value)
     redirectEnd := enqPtr.value
+    redirectAll := io.redirect.bits.flushItself() && (io.redirect.bits.robIdx.value === enqPtr.value) && (io.redirect.bits.robIdx.flag ^ enqPtr.flag)
   }
 
   // update robEntries valid
@@ -933,7 +935,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val commitCond = io.commits.isCommit && io.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     val needFlush = redirectValidReg && Mux(
-      redirectEnd > redirectBegin,
+      (redirectEnd > redirectBegin) && !redirectAll,
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
     )
