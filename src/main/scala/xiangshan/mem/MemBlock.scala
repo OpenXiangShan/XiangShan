@@ -349,6 +349,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
 
+    //lvp
+    val loadtolvp = Vec(LduCnt, Valid(new LoadToIfu))
+
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
     // Reset singal from frontend.
@@ -386,6 +389,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.outer_cpu_critical_error)
   dontTouch(io.inner_beu_errors_icache)
   dontTouch(io.outer_beu_errors_icache)
+  dontTouch(io.loadtolvp)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
@@ -443,6 +447,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
+
+  io.loadtolvp := VecInit(Seq.fill(LduCnt)(0.U.asTypeOf(Valid(new LoadToIfu))))
+  for (i <- 0 until LduCnt) {
+    io.loadtolvp(i).valid := loadUnits(i).io.toifu.valid
+    io.loadtolvp(i).bits := loadUnits(i).io.toifu.bits
+    io.loadtolvp(i).bits.loadpc := io.ooo_to_mem.loadPc(i)
+  }
+
   val hartId = p(XSCoreParamsKey).HartId
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>

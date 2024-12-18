@@ -1,0 +1,12 @@
+{
+    "settings": {
+        "files.watcherExclude": {
+            "**/target": true
+        }
+    },
+    "folders": [
+        {
+            "path": "../../../.."
+        }
+    ]
+}

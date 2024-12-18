@@ -85,7 +85,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val io = IO(new DecodeStageIO)
 
-  io.in.zipWithIndex.foreach{ case (d, i) => 
+  io.in.zipWithIndex.foreach{ case (d, i) =>
     PerfCCT.updateInstPos(d.bits.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
   }
 

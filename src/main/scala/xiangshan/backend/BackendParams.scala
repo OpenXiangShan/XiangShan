@@ -97,6 +97,7 @@ case class BackendParams(
   def numFpRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numFpSrc).max).max
   def numVecRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numVecSrc).max).max
 
+  def numPvtReadPort = 16
 
   def AluCnt = allSchdParams.map(_.AluCnt).sum
   def StaCnt = allSchdParams.map(_.StaCnt).sum

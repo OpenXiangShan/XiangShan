@@ -23,11 +23,12 @@ class DataSource extends Bundle {
 
   def readImm: Bool = value === DataSource.imm
 
+  def readPvt: Bool = value === DataSource.pvt
 }
 
 object DataSource {
   def apply() = new DataSource
-
+  
   def reg: UInt = "b1000".U
 
   def regcache: UInt = "b0110".U
@@ -45,5 +46,6 @@ object DataSource {
 
   def imm: UInt = "b0100".U
 
+  def pvt: UInt = "b0111".U
 }
 

@@ -22,10 +22,17 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
+import freechips.rocketchip.rocket.Instructions._
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import utils._
+import utility._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import xiangshan.mem.LoadToIfu
+import utility.ChiselDB
+import freechips.rocketchip.regmapper.RRTest0Map.map
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst {
   def mmioBusWidth = 64
@@ -67,6 +74,16 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
   val toUncache   = DecoupledIO(new InsUncacheReq)
 }
 
+class LvpPredict(implicit p: Parameters) extends XSBundle {
+  val Predictvalue = Output(UInt(XLEN.W))
+  val Predict = Output(Bool())
+  val ldest = Output(UInt(LogicRegsWidth.W))
+  val rfWen = Output(Bool())
+  val fpWen = Output(Bool())
+  val vecWen = Output(Bool())
+}
+
+
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
   val icacheInter     = Flipped(new IFUICacheIO)
@@ -80,6 +97,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = new TlbRequestIO
   val pmp             = new ICachePMPBundle
   val mmioCommitRead  = new mmioCommitRead
+  val fromload        = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToIfu)))
+  val torename        = Vec(backendParams.LduCnt, new LvpPredict)
   val csr_fsIsOff     = Input(Bool())
 }
 
@@ -139,6 +158,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val (toFtq, fromFtq)         = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val fromICache               = io.icacheInter.resp
   val (toUncache, fromUncache) = (io.uncacheInter.toUncache, io.uncacheInter.fromUncache)
+  val lvp = Module(new Lvp)
+
+  dontTouch(io.torename)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
@@ -968,6 +990,21 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
       a := 0.U
     }
+  }
+  io.torename := 0.U.asTypeOf(Vec(backendParams.LduCnt, new LvpPredict))
+  lvp.io.fromload.zip(io.fromload).foreach{ case (sink, source) =>
+    sink.pc := source.bits.loadpc
+    sink.loadvalue := source.bits.loadvalue
+    sink.loadvalid := source.valid
+  }
+
+  io.torename.zipWithIndex.foreach{ case (lvpTorename, i) =>
+    lvpTorename.Predictvalue := lvp.io.PredictValue(i)
+    lvpTorename.Predict := lvp.io.Predict(i)
+    lvpTorename.ldest := io.fromload(i).bits.ldest
+    lvpTorename.rfWen := io.fromload(i).bits.rfWen
+    lvpTorename.fpWen := io.fromload(i).bits.fpWen
+    lvpTorename.vecWen := io.fromload(i).bits.vecWen
   }
 
   /** to backend */

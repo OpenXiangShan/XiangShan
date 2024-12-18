@@ -24,6 +24,8 @@ import utility.ParallelPriorityMux
 import utility.GatedValidRegNext
 import utility.XSError
 import xiangshan._
+import xiangshan.frontend.LvpPredict
+import java.lang.reflect.Parameter
 
 abstract class RegType
 case object Reg_I extends RegType
@@ -42,6 +44,11 @@ class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val wen = Bool()
   val addr = UInt(ratAddrWidth.W)
   val data = UInt(PhyRegIdxWidth.W)
+}
+
+class RatPredPort(implicit p: Parameters) extends XSBundle {
+  val addr = Input(UInt(log2Ceil(IntLogicRegs).W))
+  val pred = Output(Bool())
 }
 
 class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -217,16 +224,19 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
     val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
-    val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(IntLogicRegs)))
+    val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs)))) //wide index
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(IntLogicRegs)))
-    val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(FpLogicRegs)))
+    val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(log2Ceil(FpLogicRegs))))
     val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort(FpLogicRegs)))
-    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort(VecLogicRegs)))
+    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort(log2Ceil(VecLogicRegs))))
     val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort(VecLogicRegs)))
-    val v0ReadPorts = Vec(RenameWidth, new RatReadPort(V0LogicRegs))
+    val v0ReadPorts = Vec(RenameWidth, new RatReadPort(log2Ceil(V0LogicRegs)))
     val v0RenamePorts = Vec(RenameWidth, Input(new RatWritePort(V0LogicRegs)))
-    val vlReadPorts = Vec(RenameWidth, new RatReadPort(VlLogicRegs))
+    val vlReadPorts = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     val vlRenamePorts = Vec(RenameWidth, Input(new RatWritePort(VlLogicRegs)))
+    val intSrcPred = Vec(RenameWidth, Vec(2, new RatPredPort))
+    val fpSrcPred = Vec(RenameWidth, Vec(3, new RatPredPort))
+    val vecSrcPred = Vec(RenameWidth, Vec(numVecRatPorts, new RatPredPort))
 
     val int_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
@@ -235,6 +245,10 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vl_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
+    val fromlvp = Vec(backendParams.LduCnt, Flipped(new LvpPredict))
+    val pvtfull = Input(Bool())
+    val pvtWriteFail = Vec(backendParams.LduCnt, Input(Bool()))
+    val pvtLdestUpdate = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
 
     // for debug assertions
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
@@ -256,6 +270,56 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val vecRat = Module(new RenameTable(Reg_V))
   val v0Rat  = Module(new RenameTable(Reg_V0))
   val vlRat  = Module(new RenameTable(Reg_Vl))
+
+  dontTouch(io.fromlvp)
+  dontTouch(io.pvtfull)
+  dontTouch(io.pvtWriteFail)
+  dontTouch(io.intSrcPred)
+  dontTouch(io.fpSrcPred)
+
+  // set predict table
+  val intPdt = RegInit(VecInit(Seq.fill(IntLogicRegs)(false.B)))
+  val intPdtNext = WireInit(intPdt)
+  val fpPdt = RegInit(VecInit(Seq.fill(FpLogicRegs)(false.B)))
+  val fpPdtNext = WireInit(fpPdt)
+  dontTouch(intPdt)
+  dontTouch(fpPdt)
+  //val vecPdt = VecInit.fill(VfPhyRegs)(false.B)
+  io.fromlvp.zipWithIndex.foreach{ case (lvp, i) =>
+    when (lvp.Predict && !io.pvtfull && !io.pvtWriteFail(i)) {
+      when (lvp.rfWen) {
+        intPdtNext(lvp.ldest) := true.B
+      }.elsewhen (lvp.fpWen) {
+        fpPdtNext(lvp.ldest) := true.B
+      }/*.elsewhen (lvp.vecWen) {
+        vecPdt(lvp.pdest) := true.B
+      }*/
+    }
+  }
+  // pvt writeback update 
+  io.pvtLdestUpdate.zipWithIndex.foreach { case (addr, i) =>
+    intPdtNext(addr) := false.B
+    fpPdtNext(addr) := false.B
+  }
+  intPdt := intPdtNext
+  fpPdt := fpPdtNext
+
+  // readports predict
+  io.intSrcPred.zipWithIndex.foreach {
+    case (predict, i) =>
+      predict(0).pred := intPdt(predict(0).addr)
+      predict(1).pred := intPdt(predict(1).addr)
+  }
+  io.fpSrcPred.zipWithIndex.foreach {
+    case (predict, i) =>
+      predict(0).pred := fpPdt(predict(0).addr)
+      predict(1).pred := fpPdt(predict(1).addr)
+      predict(2).pred := fpPdt(predict(2).addr)
+  }
+  io.vecSrcPred.zipWithIndex.foreach {
+    case (predict, i) =>
+      predict.foreach(_.pred := DontCare)
+  }
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)
   io.diff_int_rat  .foreach(_ := intRat.io.diff_rdata.get)

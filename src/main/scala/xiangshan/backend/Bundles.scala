@@ -183,9 +183,10 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
-    // passed from DecodedInst
+    // passed from DecodedInstP
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
+    val lsrc            = Vec(numSrc, UInt(LogicRegsWidth.W))
     val fuType          = FuType()
     val fuOpType        = FuOpType()
     val rfWen           = Bool()
@@ -217,6 +218,7 @@ object Bundles {
     val srcState        = Vec(numSrc, SrcState())
     val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val lsrcPred        = Vec(numSrc, Bool())
     val pdest           = UInt(PhyRegIdxWidth.W)
     // reg cache
     val useRegCache     = Vec(backendParams.numIntRegSrc, Bool())
@@ -513,6 +515,7 @@ object Bundles {
 
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
+    val pvtIdx = Vec(backendParams.numSrc, UInt(LogicRegsWidth.W))
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
     val addrOH = UInt(iqParams.numEntries.W)
@@ -615,6 +618,7 @@ object Bundles {
     val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
+    val ldest         = UInt(LogicRegsWidth.W)
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
@@ -660,6 +664,7 @@ object Bundles {
       this.imm           := source.common.imm
       this.robIdx        := source.common.robIdx
       this.pdest         := source.common.pdest
+      this.ldest         := source.common.ldest
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources

@@ -43,8 +43,10 @@ import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
+import xiangshan.mem.LoadToIfu
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import xiangshan.backend.fu.NewCSR.PMPCfgAField.isOffOrTor
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -80,6 +82,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val fencei       = Input(Bool())
     val ptw          = new TlbPtwIO()
     val backend      = new FrontendToCtrlIO
+    val mem          = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToIfu)))
+    val torename     = Vec(backendParams.LduCnt, new LvpPredict)
     val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
     val sfence       = Input(new SfenceBundle)
     val tlbCsr       = Input(new TlbCsrBundle)
@@ -120,6 +124,9 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val tlbCsr  = DelayN(io.tlbCsr, 2)
   val csrCtrl = DelayN(io.csrCtrl, 2)
   val sfence  = RegNext(RegNext(io.sfence))
+
+  //dontTouch(io.mem)
+  //dontTouch(io.torename)
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
@@ -202,6 +209,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromFtq := ftq.io.toBackend
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
+
+  //IFU-lvp
+  ifu.io.fromload := io.mem
+  io.torename := ifu.io.torename
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
   when(ftq.io.toBackend.pc_mem_wen) {

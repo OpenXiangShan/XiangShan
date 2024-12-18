@@ -48,7 +48,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
+import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo, LvpPredict}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable
@@ -198,6 +198,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   val io = IO(new BackendIO()(p, wrapper.params))
 
+  dontTouch(io.mem.loadPcRead)
+
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val intScheduler: SchedulerImpBase = wrapper.intScheduler.get.module
   private val fpScheduler = wrapper.fpScheduler.get.module
@@ -316,6 +318,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
+  ctrlBlock.io.fromlvp := io.fromlvp
+  ctrlBlock.io.pvtread <> dataPath.io.pvtRead
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
 
   val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
@@ -532,6 +536,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       case (immInfo, og2ImmInfo) => immInfo := og2ImmInfo
     }
   bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
+  bypassNetwork.io.fromDataPath.pvtData := dataPath.io.toBypassNetworkPvtData
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.fp)(fpExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
@@ -796,6 +801,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.uop.imm            := source.bits.imm
     sink.bits.uop.robIdx         := source.bits.robIdx
     sink.bits.uop.pdest          := source.bits.pdest
+    sink.bits.uop.ldest          := source.bits.ldest
     sink.bits.uop.rfWen          := source.bits.rfWen.getOrElse(false.B)
     sink.bits.uop.fpWen          := source.bits.fpWen.getOrElse(false.B)
     sink.bits.uop.vecWen         := source.bits.vecWen.getOrElse(false.B)
@@ -1092,4 +1098,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val topDownInfo = new TopDownInfo
   val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
   val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+
+  val fromlvp = Vec(backendParams.LduCnt ,Flipped(new LvpPredict))
 }

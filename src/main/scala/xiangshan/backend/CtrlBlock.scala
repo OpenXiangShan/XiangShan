@@ -34,7 +34,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components, LvpPredict}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
@@ -85,6 +85,8 @@ class CtrlBlockImp(
   println(s"pcMem read num: $numPcMemRead")
 
   val io = IO(new CtrlBlockIO())
+
+  dontTouch(io.memLdPcRead)
 
   val dispatch = Module(new NewDispatch)
   val gpaMem = wrapper.gpaMem.module
@@ -634,6 +636,10 @@ class CtrlBlockImp(
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
   rat.io.v0RenamePorts := rename.io.v0RenamePorts
   rat.io.vlRenamePorts := rename.io.vlRenamePorts
+  rat.io.fromlvp := io.fromlvp
+  rat.io.pvtfull := rename.io.pvtfull
+  rat.io.pvtWriteFail := rename.io.pvtWriteFail
+  rat.io.pvtLdestUpdate := rename.io.pvtLdestUpdate
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
@@ -646,11 +652,17 @@ class CtrlBlockImp(
   dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
   rename.io.waittable := 0.U.asTypeOf(rename.io.waittable)
   rename.io.ssit := 0.U.asTypeOf(rename.io.ssit)
+  // reg number
   rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.v0ReadPorts := VecInit(rat.io.v0ReadPorts.map(x => VecInit(x.data)))
   rename.io.vlReadPorts := VecInit(rat.io.vlReadPorts.map(x => VecInit(x.data)))
+  // reg pred
+  rename.io.intSrcPred <> rat.io.intSrcPred
+  rename.io.fpSrcPred <> rat.io.fpSrcPred
+  rename.io.vecSrcPred <> rat.io.vecSrcPred
+  // reg old pdest
   rename.io.int_need_free := rat.io.int_need_free
   rename.io.int_old_pdest := rat.io.int_old_pdest
   rename.io.fp_old_pdest := rat.io.fp_old_pdest
@@ -671,6 +683,8 @@ class CtrlBlockImp(
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
+  rename.io.fromlvp := io.fromlvp
+  rename.io.pvtreadports <> io.pvtread
 
   val renameOut = Wire(chiselTypeOf(rename.io.out))
   renameOut <> rename.io.out
@@ -980,6 +994,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
+  val fromlvp = Vec(params.LduCnt, Flipped(new LvpPredict))
+  val pvtread = Vec(params.numPvtReadPort, new PvtReadPort)
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

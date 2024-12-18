@@ -308,11 +308,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
+        //enq.bits.status.srcStatus(j).psrcPred                   := s0_enqBits(enqIdx).psrcPred(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
                                                                           SrcState.rdy,
-                                                                          s0_enqBits(enqIdx).srcState(j))
+                                                                          (Mux(s0_enqBits(enqIdx).lsrcPred(j), SrcState.rdy, s0_enqBits(enqIdx).srcState(j))))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
@@ -321,6 +322,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
+                                                                        (s0_enqBits(enqIdx).lsrcPred(j) && SrcType.isReg(s0_enqBits(enqIdx).srcType(j)))      -> DataSource.pvt
                                                                       ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
@@ -774,6 +776,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen)
     deq.bits.common.flushPipe.foreach(_ := deqEntryVec(i).bits.payload.flushPipe)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
+    deq.bits.common.ldest := deqEntryVec(i).bits.payload.ldest
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
@@ -788,6 +791,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       // psrc in status array can be pregIdx of IntRegFile or VfRegFile
       rf.foreach(_.addr := psrc)
       rf.foreach(_.srcType := srcType)
+    }
+    deq.bits.pvtIdx.zip(deqEntryVec(i).bits.payload.lsrc).foreach { case (pvt, lsrc) =>
+      pvt := lsrc
     }
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>
       sink := source

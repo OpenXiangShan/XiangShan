@@ -18,9 +18,15 @@ import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemSche
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
+import xiangshan.backend.PcToDataPathIO
+import xiangshan.backend.{Pvt, PvtReadPort}
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.SrcType
+import scala.annotation.meta.param
+import utility.GatedRegEnable.regEnableVec
+import fudian.RawFloat.fromFP
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -104,6 +110,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
   private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
+  dontTouch(io.pvtRead)
+  dontTouch(io.toBypassNetworkPvtData)
+
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
@@ -118,6 +127,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
     }
   }
+
   fpRFReadArbiter.io.in.zip(fpRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = FpRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
@@ -231,6 +241,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val intRfWen = Wire(Vec(io.fromIntWb.length, Bool()))
   private val intRfWaddr = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfWdata = Wire(Vec(io.fromIntWb.length, UInt(intSchdParams.rfDataWidth.W)))
+  //private val intLdest = Wire(Vec(io.fromIntWb.length, UInt(IntLogicRegs.W)))
+  //private val fpLdest = Wire(Vec(io.fromFpWb.length, UInt(FpLogicRegs.W)))
 
   private val fpRfRaddr = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.pregIdxWidth.W)))
   private val fpRfRdata = Wire(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W)))
@@ -335,6 +347,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   intRfWdata := io.fromIntWb.map(x => RegEnable(x.data, x.wen)).toSeq
   intRfWen := RegNext(VecInit(io.fromIntWb.map(_.wen).toSeq))
+  /*intLdest := io.fromIntIQ.flatten.map(x => x.bits.common.ldest)
+  for ((waddr, i) <- io.pvtIntUpdate.zipWithIndex) {
+    waddr := Mux(io.fromIntWb(i).wen, intLdest(i), 0.U)
+  }*/
 
   for (portIdx <- intRfRaddr.indices) {
     if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -346,6 +362,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   fpRfWaddr := io.fromFpWb.map(x => RegEnable(x.addr, x.wen)).toSeq
   fpRfWdata := io.fromFpWb.map(x => RegEnable(x.data, x.wen)).toSeq
   fpRfWen := RegNext(VecInit(io.fromFpWb.map(_.wen).toSeq))
+  /*fpLdest := io.fromFpIQ.flatten.map(x => x.bits.common.ldest).padTo(io.fromFpWb.length, 0.U)
+  for ((waddr, i) <- io.pvtFpUpdate.zipWithIndex) {
+    waddr := Mux(io.fromFpWb(i).wen, fpLdest(i), 0.U)
+  }*/
 
   for (portIdx <- fpRfRaddr.indices) {
     if (fpRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -462,6 +482,30 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
     readPorts
   }
+  def IssueBundle2PvtReadPort(issue: DecoupledIO[IssueQueueIssueBundle]): Vec[PvtReadPort] = {
+    val readPorts = Wire(Vec(issue.bits.exuParams.numIntSrc, new PvtReadPort()))
+    readPorts.zipWithIndex.foreach{ case (r, idx) =>
+      r.valid  := issue.valid && issue.bits.common.dataSources(idx).readPvt
+      r.addr := issue.bits.pvtIdx(idx)
+      r.data := DontCare
+    }
+    readPorts
+  }
+
+  private val pvtReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2PvtReadPort(_))
+  private val pvtReadData = io.pvtRead.map(_.data)
+
+  io.pvtRead.zip(pvtReadReq).foreach{ case (r, req) =>
+    r.valid := req.valid
+    r.addr := req.addr
+  }
+
+  val s1_PvtReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
+  s1_PvtReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  s1_PvtReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten
+    .zip(pvtReadData).foreach{ case (s1_data, rdata) =>
+      s1_data := rdata
+    }
 
   private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++ 
                                 fromMemIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
@@ -474,6 +518,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     r.ren := req.ren
     r.addr := req.addr
   }
+
+  io.toBypassNetworkPvtData := s1_PvtReadData
 
   val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   s1_RCReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
@@ -512,6 +558,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)).toSeq)))
+  val s1_DataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => RegEnable(xx.bits.common.dataSources, xx.fire)).toSeq)
 
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -663,7 +710,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
                   }.toSeq
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
 
-
   if (backendParams.debugEn){
     dontTouch(og0_cancel_no_load)
     dontTouch(is_0latency)
@@ -701,13 +747,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
             Seq(None)
             :+
             OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty, 
-              (SrcType.isXp(s1_srcType(i)(j)(k)) -> s1_intPregRData(i)(j)(k)))
+              ((SrcType.isXp(s1_srcType(i)(j)(k)) && s1_DataSources(i)(j)(k).readReg) -> s1_intPregRData(i)(j)(k)))
             :+
             OptionWrapper(s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VecRegSrcDataSet).nonEmpty,
               (SrcType.isVp(s1_srcType(i)(j)(k)) -> s1_vfPregRData(i)(j)(k)))
             :+
             OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty, 
-              (SrcType.isFp(s1_srcType(i)(j)(k)) -> s1_fpPregRData(i)(j)(k)))
+              ((SrcType.isFp(s1_srcType(i)(j)(k)) && s1_DataSources(i)(j)(k).readReg) -> s1_fpPregRData(i)(j)(k)))
           )}
         ).filter(_.nonEmpty).map(_.get)
 
@@ -952,13 +998,20 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
-  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val pvtRead = Vec(params.numPvtReadPort, Flipped(new PvtReadPort))
+
+  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
   )
 
   val toBypassNetworkRCData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
     Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
       MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
+    )).flatten
+  )
+  val toBypassNetworkPvtData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
+    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq =>
+      MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(XLEN.W)))))
     )).flatten
   )
 

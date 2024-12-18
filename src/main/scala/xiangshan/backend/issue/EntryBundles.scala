@@ -49,6 +49,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class SrcStatus(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val psrc                  = UInt(params.rdPregIdxWidth.W)
+    //val lsrc                  = UInt(LogicRegsWidth.W)
+    //val psrcPred              = Bool()
     val srcType               = SrcType()
     val srcState              = SrcState()
     val dataSources           = DataSource()
