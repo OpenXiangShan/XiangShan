@@ -11,6 +11,7 @@ import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemSche
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.regcache._
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -38,10 +39,10 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
   }
 
   class ToExus extends Bundle {
-    val int: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
-    val fp : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = fpSchdParams.genExuInputBundle
-    val vf : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = vfSchdParams.genExuInputBundle
-    val mem: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = memSchdParams.genExuInputBundle
+    val int: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputCopySrcBundle
+    val fp : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = fpSchdParams.genExuInputCopySrcBundle
+    val vf : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = vfSchdParams.genExuInputCopySrcBundle
+    val mem: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = memSchdParams.genExuInputCopySrcBundle
   }
 
   class FromExus extends Bundle {
@@ -130,7 +131,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   println(s"[BypassNetwork] HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
 
   toExus.zip(fromDPs).foreach { case (sink, source) =>
-    sink <> source
+    connectSamePort(sink.bits, source.bits)
+    sink.valid := source.valid
+    source.ready := sink.ready
   }
 
   toExus.zipWithIndex.foreach { case (exuInput, exuIdx) =>
@@ -184,6 +187,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       exuInput.bits.imm := immBJU
       exuInput.bits.nextPcOffset.get := nextPcOffset
     }
+    exuInput.bits.copySrc.get.map( copysrc =>
+      copysrc.zip(exuInput.bits.src).foreach{ case(copy, src) => copy := src}
+    )
   }
 
   // to reg cache

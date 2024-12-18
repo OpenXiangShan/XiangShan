@@ -133,6 +133,10 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
   }
 
+  def genExuInputCopySrcBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledCopySrcBundle))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
   }
