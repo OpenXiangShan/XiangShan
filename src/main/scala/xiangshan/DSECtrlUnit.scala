@@ -9,6 +9,7 @@ import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, Re
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 import xiangshan.backend.regfile.Regfile
+import huancun.{HCCacheParamsKey, HuanCun}
 
 import javax.swing.SwingWorker
 
@@ -84,6 +85,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val lsDqSize1 = RegInit(dpParams.LsDqSize.U(64.W))
     val lsDqSize = Wire(UInt(64.W))
 
+    val l2ways0 = RegInit(p(HCCacheParamsKey).ways.U(64.W))
+    val l2ways1 = RegInit(p(HCCacheParamsKey).ways.U(64.W))
+    val l2ways = Wire(UInt(64.W))
+
+    val l3ways0 = RegInit(p(HCCacheParamsKey).ways.U(64.W))
+    val l3ways1 = RegInit(p(HCCacheParamsKey).ways.U(64.W))
+    val l3ways = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -110,7 +119,11 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x160 -> Seq(RegField(64, fpDqSize0)),
       0x168 -> Seq(RegField(64, fpDqSize1)),
       0x170 -> Seq(RegField(64, lsDqSize0)),
-      0x178 -> Seq(RegField(64, lsDqSize1))
+      0x178 -> Seq(RegField(64, lsDqSize1)),
+      0x180 -> Seq(RegField(64, l2ways0)),
+      0x188 -> Seq(RegField(64, l2ways1)),
+      0x190 -> Seq(RegField(64, l3ways0)),
+      0x198 -> Seq(RegField(64, l3ways1))
     )
 
     // Mux logic
@@ -122,6 +135,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     intDqSize := Mux(ctrlSel.orR, intDqSize1, intDqSize0)
     fpDqSize := Mux(ctrlSel.orR, fpDqSize1, fpDqSize0)
     lsDqSize := Mux(ctrlSel.orR, lsDqSize1, lsDqSize0)
+    l2ways := Mux(ctrlSel.orR, l2ways1, l2ways0)
+    l3ways := Mux(ctrlSel.orR, l3ways1, l3ways0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -132,6 +147,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(intDqSize, "DSE_INTDQSIZE")
     ExcitingUtils.addSource(fpDqSize, "DSE_FPDQSIZE")
     ExcitingUtils.addSource(lsDqSize, "DSE_LSDQSIZE")
+    ExcitingUtils.addSource(l2ways, "DSE_L2WAYS")
+    ExcitingUtils.addSource(l3ways, "DSE_L3WAYS")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -145,6 +162,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(intDqSize <= dpParams.IntDqSize.U, "DSE parameter must not exceed IntDqSize")
     assert(fpDqSize <= dpParams.FpDqSize.U, "DSE parameter must not exceed FpDqSize")
     assert(lsDqSize <= dpParams.LsDqSize.U, "DSE parameter must not exceed LsDqSize")
+    assert(l2ways <= p(HCCacheParamsKey).ways.U(64.W), "DSE parameter must not exceed l2 ways")
+    assert(l3ways <= p(HCCacheParamsKey).ways.U(64.W), "DSE parameter must not exceed l3 ways")
 
 
     // core reset generation

@@ -201,6 +201,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
+    // l3 ways parameter
+    val l3ways = WireInit(soc.L3CacheParamsOpt.get.ways)
+    ExcitingUtils.addSink(l3ways, "DSE_L3WAYS")
+
+    if (l3cacheOpt.isDefined) {
+      l3cacheOpt.get.module.io.pways := l3ways
+    }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock

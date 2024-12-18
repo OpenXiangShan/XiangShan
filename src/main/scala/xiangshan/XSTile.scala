@@ -164,7 +164,14 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     // reset vector
     core.module.io.reset_vector := io.reset_vector
 
-//    core.module.io.robSize := io.robSize
+    // l2 ways parameter
+    val l2ways = WireInit(coreParams.L2CacheParamsOpt.get.ways)
+    ExcitingUtils.addSink(l2ways, "DSE_L2WAYS")
+
+    if(l2cache.isDefined){
+      l2cache.get.module.io.pways := l2ways
+    }
+
     if(l2cache.isDefined){
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
     }

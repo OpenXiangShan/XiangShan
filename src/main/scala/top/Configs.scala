@@ -435,8 +435,8 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
 // Cache Hierarchy Config: 
 // * Including L1D/L2/L3 Cache
 class NanHuGCacheConfig extends Config(
-  new WithNKBL3(6 * 256, inclusive = false, banks = 4, ways = 6)
-  ++ new WithNKBL2(256,inclusive = false, banks = 4, alwaysReleaseData = true) 
+  new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 8)
+  ++ new WithNKBL2(1024, inclusive = false, banks = 4, alwaysReleaseData = true)
   ++ new WithNKBL1D(32) 
 )
 
