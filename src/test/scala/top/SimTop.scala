@@ -66,7 +66,7 @@ class XiangShan(implicit p: Parameters) extends Module with HasTopMemoryMasterPo
     val read = Wire(Output(new DifftestMemReadIO(mem.r.bits.data.getWidth / 64)))
     read.valid := mem.r.fire
     read.index := (req_bits.addr >> log2Ceil(mem.r.bits.data.getWidth / 8 - 1)) + req_beat_count
-    read.data := RegEnable(mem.r.bits.data, mem.r.fire).asTypeOf(read.data)
+    read.data := mem.r.bits.data.asTypeOf(read.data)
     read
   }
 

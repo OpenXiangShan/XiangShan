@@ -101,6 +101,18 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+            case SoCParamsKey => up(SoCParamsKey).copy(
+              L3CacheParamsOpt = up(SoCParamsKey).L3CacheParamsOpt.map(_.copy(
+                enablePerf = false,
+              )),
+            )
+            case XSTileKey => up(XSTileKey).zipWithIndex.map{ case (p, i) =>
+              p.copy(
+                L2CacheParamsOpt = up(XSTileKey)(i).L2CacheParamsOpt.map(_.copy(
+                  enablePerf = false,
+                )),
+              )
+            }
           }), tail)
         // --disable-assert disables XSError and implies --remove-assert which removes the native Chisel assert
         case "--disable-assert" :: tail =>
