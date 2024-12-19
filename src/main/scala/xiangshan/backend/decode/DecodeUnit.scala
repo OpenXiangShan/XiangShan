@@ -923,7 +923,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   private val isLs = FuType.isLoadStore(decodedInst.fuType)
-  private val isVls = FuType.isVls(decodedInst.fuType)
+  private val isVls = inst.isVecStore || inst.isVecLoad
   private val isStore = FuType.isStore(decodedInst.fuType)
   private val isAMO = FuType.isAMO(decodedInst.fuType)
   private val isVStore = FuType.isVStore(decodedInst.fuType)
@@ -1061,6 +1061,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.srcType(4) := SrcType.vp // vconfig
 
   val uopInfoGen = Module(new UopInfoGen)
+  uopInfoGen.io.in.preInfo.isVecArith := inst.isVecArith
+  uopInfoGen.io.in.preInfo.isVecMem := inst.isVecStore || inst.isVecLoad
+  uopInfoGen.io.in.preInfo.isAmoCAS := inst.isAMOCAS
+
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
   uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
   uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
