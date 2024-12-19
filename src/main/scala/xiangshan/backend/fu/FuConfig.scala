@@ -60,6 +60,7 @@ case class FuConfig (
   writeVxsat    : Boolean = false,
   destDataBits  : Int = 64,
   srcDataBits   : Option[Int] = None,
+  srcNeedCopy   : Boolean = false,
   latency       : HasFuLatency = CertainLatency(0),// two field (base latency, extra latency(option))
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),

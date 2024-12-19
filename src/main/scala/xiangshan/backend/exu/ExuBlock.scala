@@ -71,7 +71,7 @@ class ExuBlockImp(
 class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   // in(i)(j): issueblock(i), exu(j)
-  val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputBundle)
+  val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputCopySrcBundle)
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
 

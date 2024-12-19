@@ -333,6 +333,10 @@ case class IssueBlockParams(
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
   }
 
+  def genExuInputDecoupledCopySrcBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputCopySrcBundle)))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuOutputBundle)))
   }
