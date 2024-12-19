@@ -427,7 +427,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
 
-  s2_ready := !s2_valid || s2_kill || s3_ready
+  s2_ready := !s2_valid || s2_kill || io.stout.ready
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
