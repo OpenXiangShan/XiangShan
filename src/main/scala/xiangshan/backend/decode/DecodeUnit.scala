@@ -923,8 +923,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   private val isLs = FuType.isLoadStore(decodedInst.fuType)
-  private val isVls = (inst.OPCODE5Bit === OPCODE5Bit.LOAD_FP || inst.OPCODE5Bit === OPCODE5Bit.STORE_FP) &&
-    inst.WIDTH ===
+  private val isVls = inst.isVecStore || inst.isVecLoad
   private val isStore = FuType.isStore(decodedInst.fuType)
   private val isAMO = FuType.isAMO(decodedInst.fuType)
   private val isVStore = FuType.isVStore(decodedInst.fuType)
