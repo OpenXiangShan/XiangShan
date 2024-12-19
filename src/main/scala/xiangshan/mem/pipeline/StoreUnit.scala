@@ -419,7 +419,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_in     = RegEnable(s1_out, s1_fire)
   val s2_out    = Wire(new LsPipelineBundle)
   val s2_kill   = Wire(Bool())
-  val s2_can_go = s3_ready
+  val s2_can_go = io.stout.ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_frm_mabuf    = s2_in.isFrmMisAlignBuf
