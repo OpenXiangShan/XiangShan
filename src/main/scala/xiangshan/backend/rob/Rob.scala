@@ -552,10 +552,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * RedirectOut: Interrupt and Exceptions
    */
-  val deqDispatchData = robEntries(deqPtr.value)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  val deqPtrEntry = robDeqGroup(deqPtr.value(bankAddrWidth-1,0))
+  val deqPtrEntry = rawInfo(0)
   val deqPtrEntryValid = deqPtrEntry.commit_v
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
@@ -604,10 +603,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
-  io.flushOut.bits.isRVC := deqDispatchData.isRVC
+  io.flushOut.bits.isRVC := deqPtrEntry.isRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
-  io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqDispatchData.ftqIdx)
-  io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqDispatchData.ftqOffset)
+  io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqPtrEntry.ftqIdx)
+  io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqPtrEntry.ftqOffset)
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
@@ -621,7 +620,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(debug_deqUop.instr, exceptionHappen)
-  io.exception.bits.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
+  io.exception.bits.commitType := RegEnable(deqPtrEntry.commitType, exceptionHappen)
   io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   // fetch trigger fire or execute ebreak
   io.exception.bits.isPcBkpt := RegEnable(
@@ -635,8 +634,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
-  io.exception.bits.isHls := RegEnable(deqDispatchData.isHls, exceptionHappen)
-  io.exception.bits.vls := RegEnable(robEntries(deqPtr.value).vls, exceptionHappen)
+  io.exception.bits.isHls := RegEnable(deqPtrEntry.isHls, exceptionHappen)
+  io.exception.bits.vls := RegEnable(deqPtrEntry.vls, exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
   // data will be one cycle after valid
@@ -806,12 +805,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
-  io.lsq.pendingMMIOld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && robEntries(deqPtr.value).valid && robEntries(deqPtr.value).mmio)
-  io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && robEntries(deqPtr.value).valid)
+  io.lsq.pendingMMIOld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && deqPtrEntryValid && deqPtrEntry.mmio)
+  io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && deqPtrEntryValid)
   // TODO: Check if need deassert pendingst when it is vst
-  io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && robEntries(deqPtr.value).valid)
+  io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && deqPtrEntryValid)
   // TODO: Check if set correctly when vector store is at the head of ROB
-  io.lsq.pendingVst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && robEntries(deqPtr.value).valid && robEntries(deqPtr.value).vls)
+  io.lsq.pendingVst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && deqPtrEntryValid && deqPtrEntry.vls)
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
@@ -890,7 +889,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
   }
   walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
-    case (reg, ptrNext) => reg := robEntries(deqPtr.value).realDestSize
+    case (reg, ptrNext) => reg := deqPtrEntry.realDestSize
   }
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
