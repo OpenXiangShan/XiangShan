@@ -27,6 +27,7 @@ import coupledL2.MemBackTypeMM
 import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import coupledL2.MemBackTypeMMField
 
 class UncacheFlushBundle extends Bundle {
   val valid = Output(Bool())
@@ -155,7 +156,8 @@ class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
     clients = Seq(TLMasterParameters.v1(
       "uncache",
       sourceId = IdRange(0, idRange)
-    ))
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
   )
   val clientNode = TLClientNode(Seq(clientParameters))
 
