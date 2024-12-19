@@ -41,8 +41,6 @@ class DataArray[T <: Data](gen: T, numRead: Int, numWrite: Int, numEntries: Int)
   for (i <- 0 until numEntries) {
     val wCnt = VecInit(io.write.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
     XSError(RegNext(PopCount(wCnt) > 1.U), s"why not OH $i?")
-    when(PopCount(wCnt) > 1.U) {
-      XSDebug("ERROR: IssueQueue DataArray write overlap!\n")
-    }
+    XSDebug(PopCount(wCnt) > 1.U, "ERROR: IssueQueue DataArray write overlap!\n")
   }
 }

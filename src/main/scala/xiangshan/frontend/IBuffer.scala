@@ -441,12 +441,10 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   XSDebug(io.flush, "IBuffer Flushed\n")
 
-  when(io.in.fire) {
-    XSDebug("Enque:\n")
-    XSDebug(p"MASK=${Binary(io.in.bits.valid)}\n")
-    for (i <- 0 until PredictWidth) {
-      XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
-    }
+  XSDebug(io.in.fire, "Enque:\n")
+  XSDebug(io.in.fire, p"MASK=${Binary(io.in.bits.valid)}\n")
+  for (i <- 0 until PredictWidth) {
+    XSDebug(io.in.fire, p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
   }
 
   for (i <- 0 until DecodeWidth) {

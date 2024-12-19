@@ -99,9 +99,8 @@ class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircu
   io.commitCnt := commitCnt
   io.commitEn := io.state === 0.U && !redirectOutValid && !io.blockCommit
 
-  when (io.state === 0.U) {
-    XSInfo(io.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
-  }
+  XSInfo(io.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
+
   if(backendParams.debugEn){
     dontTouch(commitDeqPtrVec)
     dontTouch(commitDeqPtrAll)

@@ -53,22 +53,21 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
 
   def dumpRead = {
     (0 until 3) map { w =>
-      when(io.read(w).valid) {
-        XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
-          io.read(w).bits.way_en, io.read(w).bits.addr)
-      }
+      XSDebug(io.read(w).valid,
+        s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
+        io.read(w).bits.way_en, io.read(w).bits.addr)
     }
   }
 
   def dumpWrite = {
-    when(io.write.valid) {
-      XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
-        io.write.bits.way_en, io.write.bits.addr)
+    XSDebug(io.write.valid,
+      s"DataArray Write valid way_en: %x addr: %x\n",
+      io.write.bits.way_en, io.write.bits.addr)
 
-      (0 until blockRows) map { r =>
-        XSDebug(s"cycle: $r data: %x wmask: %x\n",
-          io.write.bits.data(r), io.write.bits.wmask(r))
-      }
+    (0 until blockRows) map { r =>
+      XSDebug(io.write.valid,
+        s"cycle: $r data: %x wmask: %x\n",
+        io.write.bits.data(r), io.write.bits.wmask(r))
     }
   }
 
@@ -83,9 +82,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
 
   def dumpNack = {
     (0 until 3) map { w =>
-      when(io.nacks(w)) {
-        XSDebug(s"DataArray NACK channel: $w\n")
-      }
+      XSDebug(io.nacks(w), s"DataArray NACK channel: $w\n")
     }
   }
 
