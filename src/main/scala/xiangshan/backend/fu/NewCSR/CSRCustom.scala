@@ -31,16 +31,12 @@ trait CSRCustom { self: NewCSR =>
   val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
-  val sfetchctl = Module(new CSRModule("Sfetchctl", new SfetchctlBundle))
-    .setAddr(0x9E0)
-
   val customCSRMods = Seq(
     sbpctl,
     spfctl,
     slvpredctl,
     smblockctl,
     srnctl,
-    sfetchctl,
   )
 
   val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
@@ -97,10 +93,6 @@ class SmblockctlBundle extends CSRBundle {
 class SrnctlBundle extends CSRBundle {
   val WFI_ENABLE     = RW(2).withReset(true.B)
   val FUSION_ENABLE  = RW(0).withReset(true.B)
-}
-
-class SfetchctlBundle extends CSRBundle {
-  val ICACHE_PARITY_ENABLE = RW(0).withReset(false.B) // L1I Cache Parity check enable
 }
 
 object SbufferThreshold extends CSREnum with RWApply {
