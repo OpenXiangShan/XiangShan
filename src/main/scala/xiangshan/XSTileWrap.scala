@@ -74,6 +74,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
       }
+      //val l2Flush = Input(Bool()) 
+      //val l2FlushDone = Output(Bool()) 
     })
 
     val reset_sync = withClockAndReset(clock, reset)(ResetGen())

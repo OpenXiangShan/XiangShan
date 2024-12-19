@@ -172,6 +172,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+      //val l2Flush = Input(UInt(1.W))
+      //val l2FlushDone = Output(UInt(1.W))
       // val reset_core = IO(Output(Reset()))
     })
 
