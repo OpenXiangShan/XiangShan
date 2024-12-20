@@ -103,6 +103,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isVset = Bool()
     val isHls = Bool()
     val isVls = Bool()
+    val vls = Bool()
+    val mmio = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -161,6 +163,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
+    robCommitEntry.vls := robEntry.vls
+    robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
