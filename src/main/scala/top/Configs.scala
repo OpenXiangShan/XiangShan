@@ -396,6 +396,28 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
+class CVMCompile extends Config((site, here, up) => {
+  case SoCParamsKey => up(SoCParamsKey).copy(
+    KeyIDBits = Some(5),
+    HasMEMencryption = Some(true),
+    HasDelayNoencryption = Some(false)
+  )
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasCVMExtension = Some(true),
+    HasBitmapCheckDefault = Some(false)))
+})
+
+class CVMTestCompile extends Config((site, here, up) => {
+  case SoCParamsKey => up(SoCParamsKey).copy(
+    KeyIDBits = Some(5),
+    HasMEMencryption = Some(true),
+    HasDelayNoencryption = Some(true)
+  )
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasCVMExtension = Some(true),
+    HasBitmapCheckDefault = Some(true)))
+})
+
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
     new WithNKBL2(256, inclusive = true) ++
@@ -417,6 +439,22 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 4)
+    ++ new BaseConfig(n)
+)
+
+class CVMConfig(n: Int = 1) extends Config(
+  new CVMCompile
+    ++ new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 4)
+    ++ new BaseConfig(n)
+)
+
+class CVMTestConfig(n: Int = 1) extends Config(
+  new CVMTestCompile
+    ++ new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
