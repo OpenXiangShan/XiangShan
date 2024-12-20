@@ -73,7 +73,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val s0_s1_valid = Output(Bool())
   })
 
-  val s1_ready, s2_ready, s3_ready = WireInit(false.B)
+  val s1_ready, s2_ready = WireInit(false.B)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -529,7 +529,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.hasException := false.B
 
   // write back: normal store, nc store
-  io.stout.valid := s2_valid && io.feedback_slow.bits.hit && !s2_out.isvec//isStore(s2_out.output.uop.fuType)
+  val s2_can_writeback = (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch && !s2_mis_align && !s2_frm_mabuf
+  io.stout.valid := s2_valid && s2_can_writeback && io.feedback_slow.bits.hit && !s2_out.isvec
   io.stout.bits.uop             := s2_out.uop
   io.stout.bits.data            := DontCare
   io.stout.bits.debug.isMMIO    := s2_out.mmio
@@ -540,7 +541,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg)
   io.stout.bits.isFromLoadUnit := false.B
 
-  io.vecstout.valid := s2_valid && io.feedback_slow.bits.hit && s2_out.isvec //isVStore(s2_out.output.uop.fuType)
+  io.vecstout.valid := s2_valid && s2_can_writeback && s2_out.isvec
   // TODO: implement it!
   io.vecstout.bits.mBIndex := s2_out.mbIndex
   io.vecstout.bits.hit := io.feedback_slow.bits.hit
