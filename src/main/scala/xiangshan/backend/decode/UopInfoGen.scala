@@ -245,7 +245,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val numOfWB = Mux(UopSplitType.isAMOCAS(typeOfSplit), numOfUop >> 1, numOfUop)
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
-  isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
+  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
@@ -263,6 +263,9 @@ class UopInfoGenIO(implicit p: Parameters) extends XSBundle {
 }
 
 class PreInfo(implicit p: Parameters) extends XSBundle {
+  val isVecArith = Bool() // is vector arith or config instr
+  val isVecMem = Bool()
+  val isAmoCAS = Bool()
   val typeOfSplit = UopSplitType()
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()
