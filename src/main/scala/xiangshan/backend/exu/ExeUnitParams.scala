@@ -90,6 +90,11 @@ case class ExeUnitParams(
   def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
+  def numCopySrc: Int = fuConfigs.map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _)
+  def idxCopySrc: Seq[Int] = (0 until fuConfigs.length).map { idx =>
+    fuConfigs.take(idx + 1).map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _) - 1
+  }
+
   // exu writeback: 0 normalout; 1 intout; 2 fpout; 3 vecout
   val wbNeedIntWen : Boolean = writeIntRf && !isMemExeUnit
   val wbNeedFpWen  : Boolean = writeFpRf  && !isMemExeUnit
@@ -425,6 +430,10 @@ case class ExeUnitParams(
 
   def genExuInputBundle(implicit p: Parameters): ExuInput = {
     new ExuInput(this)
+  }
+
+  def genExuInputCopySrcBundle(implicit p: Parameters): ExuInput = {
+    new ExuInput(this, hasCopySrc = true)
   }
 
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {

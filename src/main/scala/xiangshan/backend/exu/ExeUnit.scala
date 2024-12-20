@@ -33,7 +33,7 @@ import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
-  val in = Flipped(DecoupledIO(new ExuInput(params)))
+  val in = Flipped(DecoupledIO(new ExuInput(params, hasCopySrc = true)))
   val out = DecoupledIO(new ExuOutput(params))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
@@ -245,7 +245,6 @@ class ExeUnitImp(
       sink.valid := source.valid
       source.ready := sink.ready
 
-      sink.bits.data.src.zip(source.bits.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
       sink.bits.data.pc          .foreach(x => x := source.bits.pc.get)
       sink.bits.data.nextPcOffset.foreach(x => x := source.bits.nextPcOffset.get)
       sink.bits.data.imm         := source.bits.imm
@@ -299,6 +298,13 @@ class ExeUnitImp(
       sinkData.pc.foreach(x => x := sourceData.pc.get)
       sinkData.nextPcOffset.foreach(x => x := sourceData.nextPcOffset.get)
       sinkData.imm := sourceData.imm
+    }
+  }
+
+  funcUnits.zip(exuParams.idxCopySrc).map{ case(fu, idx) =>
+    (fu.io.in.bits.data.src).zip(io.in.bits.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
+    if(fu.cfg.srcNeedCopy) {
+      (fu.io.in.bits.data.src).zip(io.in.bits.copySrc.get(idx)).foreach { case(fuSrc, copySrc) => fuSrc := copySrc }
     }
   }
 
