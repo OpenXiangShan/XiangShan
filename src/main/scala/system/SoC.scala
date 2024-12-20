@@ -51,7 +51,7 @@ case class SoCParameters
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   MEMENCRange: AddressSet = AddressSet(0x38030000L, 0xfff),
-  KeyIDBits: Int = 5,
+  KeyIDBits: Option[Int] = Some(0),
   MemencPipes: Int = 4,
   HasMEMencryption: Option[Boolean] = Some(false),
   HasDelayNoencryption: Option[Boolean] = Some(false), // Test specific
