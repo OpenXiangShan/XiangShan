@@ -111,9 +111,6 @@ trait HasCSRConst {
   /** 0x5C5-0x5E5 for cache instruction register*/
   val Scachebase    = 0x5C5
 
-  // Supervisor Custom Read/Write
-  val Sfetchctl     = 0x9e0
-
   // Hypervisor Trap Setup
   val Hstatus       = 0x600
   val Hedeleg       = 0x602

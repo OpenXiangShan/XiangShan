@@ -181,8 +181,6 @@ object CSRBundles {
     val l1D_pf_active_stride = Output(UInt(6.W))
     val l1D_pf_enable_stride = Output(Bool())
     val l2_pf_store_only = Output(Bool())
-    // ICache
-    val icache_parity_enable = Output(Bool())
     // Load violation predictor
     val lvpred_disable = Output(Bool())
     val no_spec_load = Output(Bool())
