@@ -201,7 +201,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst{
   io.cache.resp.ready := !flush && cache_wait
 
   val hit = WireInit(false.B)
-  io.cache.req.valid := cache_req_arb.io.out.fire && !flush
+  io.cache.req.valid := cache_req_arb.io.out.valid && !flush
   io.cache.req.bits.tag := cache_req_arb.io.out.bits.tag
   io.cache.req.bits.order := cache_req_arb.io.out.bits.order
   cache_req_arb.io.out.ready := io.cache.req.ready
@@ -389,7 +389,9 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst{
   resp_res.apply(hit,cfs,order)
 
   val resp_valid_reg = RegInit(false.B)
-  when(io.req.fire) {
+  when(flush) {
+    resp_valid_reg := false.B
+  }.elsewhen(io.req.fire) {
     resp_valid_reg := true.B
   }.elsewhen(io.resp.fire) {
     resp_valid_reg := false.B
