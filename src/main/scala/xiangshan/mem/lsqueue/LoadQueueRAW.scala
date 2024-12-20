@@ -293,13 +293,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val storeIn = io.storeIn
 
   def detectRollback(i: Int) = {
-    paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
-    maskModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.mask, storeIn(i).valid)
+    paddrModule.io.violationMdata(i) := genPartialPAddr(storeIn(i).bits.paddr)
+    maskModule.io.violationMdata(i) := storeIn(i).bits.mask
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
-    val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
+    val entryNeedCheck = VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && storeIn(i).valid && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
-    })))
+    }))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
