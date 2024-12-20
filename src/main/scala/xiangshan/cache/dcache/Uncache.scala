@@ -27,7 +27,7 @@ import coupledL2.MemBackTypeMM
 import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
-import coupledL2.MemBackTypeMMField
+import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 
 class UncacheFlushBundle extends Bundle {
   val valid = Output(Bool())
