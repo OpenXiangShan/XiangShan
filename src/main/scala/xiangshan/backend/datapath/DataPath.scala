@@ -237,7 +237,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val fpRfWaddr = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.pregIdxWidth.W)))
   private val fpRfWdata = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.rfDataWidth.W)))
 
-  private val vfRfSplitNum = VLEN / XLEN
+  private val vfRfSplitNum = 4
   private val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.pregIdxWidth.W)))
   private val vfRfRdata = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.rfDataWidth.W)))
   private val vfRfWen = Wire(Vec(vfRfSplitNum, Vec(io.fromVfWb.length, Bool())))
@@ -311,7 +311,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     debugReadAddr = intDiffRead.map(_._1),
     debugReadData = intDiffRead.map(_._2)
   )
-  FpRegFile("FpRegFile", fpSchdParams.numPregs, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
+  FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum = 4, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
     bankNum = 1,
     debugReadAddr = fpDiffRead.map(_._1),
     debugReadData = fpDiffRead.map(_._2)
