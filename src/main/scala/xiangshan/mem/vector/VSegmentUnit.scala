@@ -347,10 +347,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     )
   }.elsewhen(state === s_fof_fix_vl){ // writeback uop
     stateNext := Mux(!fofBufferValid, s_idle, s_fof_fix_vl)
-
-  }.otherwise{
+  }.otherwise{ // unknown state
     stateNext := s_idle
-    XSError(true.B, s"Unknown state!\n")
+    assert(false.B)
   }
 
   /*************************************************************************

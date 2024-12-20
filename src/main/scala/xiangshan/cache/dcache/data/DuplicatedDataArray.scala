@@ -128,9 +128,8 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         data = getECCFromRow(io.write.bits.data(r)),
         waymask = io.write.bits.way_en
       )
-      when(ecc_array.io.w.req.valid) {
-        XSDebug(p"write in ecc sram ${j.U} row ${r.U}: setIdx=${Hexadecimal(ecc_array.io.w.req.bits.setIdx)} ecc(0)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(0))} ecc(1)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(1))} waymask=${Hexadecimal(io.write.bits.way_en)}\n")
-      }
+      XSDebug(ecc_array.io.w.req.valid,
+        p"write in ecc sram ${j.U} row ${r.U}: setIdx=${Hexadecimal(ecc_array.io.w.req.bits.setIdx)} ecc(0)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(0))} ecc(1)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(1))} waymask=${Hexadecimal(io.write.bits.way_en)}\n")
       ecc_array.io.r.req.valid := io.read(j).valid && rmask(r)
       ecc_array.io.r.req.bits.apply(setIdx = raddr)
 

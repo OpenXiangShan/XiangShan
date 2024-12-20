@@ -158,9 +158,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     when (needEnqueue(w) && enq.ready) {
       acceptedVec(w) := true.B
 
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
-
       freeList.io.doAllocate(w) := true.B
       //  Allocate new entry
       allocated(enqIndex) := true.B
@@ -182,6 +179,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
       )
     }
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(
+      needEnqueue(w) && enq.ready && allocated(enqIndex),
+      p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
   //  LoadQueueRAR deallocate

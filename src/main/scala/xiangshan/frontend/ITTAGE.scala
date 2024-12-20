@@ -685,15 +685,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   metaAltProviderTargetOffset.pointer     := rTable.io.update_pointer(1)
   metaAltProviderTargetOffset.usePCRegion := !rTable.io.update_hit(1)
 
+  val provider    = updateMeta.provider.bits
+  val altProvider = updateMeta.altProvider.bits
+  val usedAltpred = updateMeta.altProvider.valid && updateMeta.providerCtr === 0.U
   when(updateValid) {
     when(updateMeta.provider.valid) {
-      val provider = updateMeta.provider.bits
-      XSDebug(true.B, p"update provider $provider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
-      val altProvider = updateMeta.altProvider.bits
-      val usedAltpred = updateMeta.altProvider.valid && updateMeta.providerCtr === 0.U
       when(usedAltpred && updateMisPred) { // update altpred if used as pred
-        XSDebug(true.B, p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
-
         updateMask(altProvider)            := true.B
         updateUMask(altProvider)           := false.B
         updateCorrect(altProvider)         := false.B
@@ -718,16 +715,23 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       updateOldTargetOffset(provider) := metaProviderTargetOffset
     }
   }
+  XSDebug(
+    updateValid && updateMeta.provider.valid,
+    p"update provider $provider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n"
+  )
+  XSDebug(
+    updateValid && updateMeta.provider.valid && usedAltpred && updateMisPred,
+    p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n"
+  )
 
   // if mispredicted and not the case that
   // provider offered correct target but used altpred due to unconfident
   val providerCorrect = updateMeta.provider.valid && updateMeta.providerTarget === updateRealTarget
   val providerUnconf  = updateMeta.providerCtr === 0.U
+  val allocate        = updateMeta.allocate
   when(updateValid && updateMisPred && !(providerCorrect && providerUnconf)) {
-    val allocate = updateMeta.allocate
     tickCtr := satUpdate(tickCtr, TickWidth, !allocate.valid)
     when(allocate.valid) {
-      XSDebug(true.B, p"allocate new table entry, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
       updateMask(allocate.bits)         := true.B
       updateCorrect(allocate.bits)      := true.B // useless for alloc
       updateAlloc(allocate.bits)        := true.B
@@ -736,6 +740,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       updateTargetOffset(allocate.bits) := updateRealTargetOffset
     }
   }
+  XSDebug(
+    updateValid && updateMisPred && !(providerCorrect && providerUnconf) && allocate.valid,
+    p"allocate new table entry, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n"
+  )
 
   when(tickCtr === ((1 << TickWidth) - 1).U) {
     tickCtr      := 0.U
