@@ -575,6 +575,52 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     )
   })
 
+  private val conserveFlowsIs16 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
+    isVlsTyepItem && !isUnitStride(index)
+  })
+  private val conserveFlowsIs2 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
+    isVlsTyepItem && isUnitStride(index)
+  })
+  private val conserveFlowsIs1 = VecInit(isLSType.zipWithIndex.map { case (isLSTyepItem, index) =>
+    isLSTyepItem
+  })
+  private val flowTotalWidth = (VecMemLSQEnqIteratorNumberSeq.max * RenameWidth).U.getWidth
+  private val conserveFlowTotalDispatch = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
+  private val lowCountMaxWidth = (2 * RenameWidth).U.getWidth
+  conserveFlowTotalDispatch.zipWithIndex.map{ case (flowTotal, idx) =>
+    val highCount = PopCount(conserveFlowsIs16.take(idx + 1))
+    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2.zip(conserveFlowsIs1).map(x => Cat(x._1, x._2)))
+    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
+    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
+  }
+  // renameIn
+  private val isVlsTypeRename = io.renameIn.map(x => x.valid && FuType.isVls(x.bits.fuType))
+  private val isLSTypeRename = io.renameIn.map(x => x.valid && (FuType.isLoad(x.bits.fuType)) || FuType.isStore(x.bits.fuType))
+  private val isUnitStrideRename = io.renameIn.map(x => LSUOpType.isAllUS(x.bits.fuOpType))
+  private val conserveFlowsIs16Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
+    isVlsTyepItem && !isUnitStrideRename(index)
+  })
+  private val conserveFlowsIs2Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
+    isVlsTyepItem && isUnitStrideRename(index)
+  })
+  private val conserveFlowsIs1Rename = VecInit(isLSTypeRename.zipWithIndex.map { case (isLSTyepItem, index) =>
+    isLSTyepItem
+  })
+  private val conserveFlowTotalRename = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
+  conserveFlowTotalRename.zipWithIndex.map { case (flowTotal, idx) =>
+    val highCount = PopCount(conserveFlowsIs16Rename.take(idx + 1))
+    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2Rename.zip(conserveFlowsIs1Rename).map(x => Cat(x._1, x._2)))
+    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
+    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
+  }
+
+
+  private val conserveFlowTotal = Reg(Vec(RenameWidth, UInt(flowTotalWidth.W)))
+  when(io.toRenameAllFire){
+    conserveFlowTotal := conserveFlowTotalRename
+  }.otherwise(
+    conserveFlowTotal := conserveFlowTotalDispatch
+  )
   // A conservative allocation strategy is adopted here.
   // Vector 'unit-stride' instructions and scalar instructions can be issued from all six ports,
   // while other vector instructions can only be issued from the first port
@@ -586,14 +632,12 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
 
   for (index <- allowDispatch.indices) {
-    val flowTotal = Wire(UInt(log2Up(VirtualLoadQueueMaxStoreQueueSize + 1).W))
-    flowTotal := conserveFlows.take(index + 1).reduce(_ +& _)
+    val flowTotal = conserveFlowTotal(index)
     val allowDispatchPrevious = if (index == 0) true.B else allowDispatch(index - 1)
-    val allowDispatchThisUop = true.B
     when(isStoreVec(index) || isVStoreVec(index)) {
-      allowDispatch(index) := (sqFreeCount > flowTotal) && allowDispatchThisUop && allowDispatchPrevious
+      allowDispatch(index) := (sqFreeCount > flowTotal) && allowDispatchPrevious
     }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-      allowDispatch(index) := (lqFreeCount > flowTotal) && allowDispatchThisUop && allowDispatchPrevious
+      allowDispatch(index) := (lqFreeCount > flowTotal) && allowDispatchPrevious
     }.elsewhen(isAMOVec(index)) {
       allowDispatch(index) := allowDispatchPrevious
     }.otherwise {
