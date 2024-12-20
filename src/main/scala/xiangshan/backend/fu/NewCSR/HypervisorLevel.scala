@@ -23,7 +23,15 @@ trait HypervisorLevel { self: NewCSR =>
   val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle))
     .setAddr(CSRs.hedeleg)
 
-  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle))
+  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle)
+    with HasIpIeBundle
+  {
+    regOut := reg & mideleg
+    regOut.getLocal.zip(reg.getLocal).zip(mideleg.getLocal).zip(mvien.getLocal).foreach {
+      case (((regOutLCI, regLCI), midelegLCI), mvienLCI) =>
+        regOutLCI := regLCI && (midelegLCI || mvienLCI)
+    }
+  })
     .setAddr(CSRs.hideleg)
 
   val hie = Module(new CSRModule("Hie", new HieBundle)
