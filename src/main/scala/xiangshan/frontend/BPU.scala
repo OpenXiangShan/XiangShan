@@ -107,6 +107,35 @@ trait BPUUtils extends HasXSParameter {
     )
   }
 
+  def signedSatUpdate(uMask: Vec[Bool], old: SInt, len: Int, deltaType: Vec[UInt]): SInt = {
+    val maxValue = ((1 << (len - 1)) - 1).S(len.W)
+    val minValue = (-(1 << (len - 1))).S(len.W)
+
+    val uIdx = PriorityEncoder(uMask)
+
+    val finalDelta = MuxLookup(deltaType(uIdx), 0.S)(
+      Seq(
+        0.U -> 1.S,   // SC opened, SC agree and correct, can be closed
+        1.U -> 1.S,   // SC opened, SC agree but wrong, should be closed more
+        2.U -> 5.S,   // SC opened, SC disagree and wrong, should definitely be closed
+        3.U -> -50.S, // SC opened, SC disagree but correct, should stay open
+        4.U -> 1.S,   // SC closed, TAGE pred correct, SC can be closed
+        5.U -> -30.S  // SC closed, TAGE pred wrong, SC should be opened
+      )
+    )
+
+    val updated = old +& finalDelta
+
+    val saturated = MuxCase(
+      updated,
+      Seq(
+        (updated > maxValue) -> maxValue,
+        (updated < minValue) -> minValue
+      )
+    )
+    saturated(len - 1, 0).asSInt
+  }
+
   def getFallThroughAddr(start: UInt, carry: Bool, pft: UInt) = {
     val higher = start.head(VAddrBits - log2Ceil(PredictWidth) - instOffsetBits)
     Cat(Mux(carry, higher + 1.U, higher), pft, 0.U(instOffsetBits.W))
