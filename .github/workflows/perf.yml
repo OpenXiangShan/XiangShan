@@ -20,7 +20,7 @@ on:
 jobs:
   run:
     runs-on: perf
-    continue-on-error: false
+    continue-on-error: true
     #At most 2 days to finish
     timeout-minutes: 2880
     name: Checkpoints
@@ -94,7 +94,7 @@ jobs:
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
-            -L "node033 node034 node036 node037 node038 node039 node040 node041 node042"
+            -L "$SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
 
       - name: Report SPEC CPU2006 score
