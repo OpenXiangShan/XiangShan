@@ -43,6 +43,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     // mmio select
     val mmioSelect = Output(Bool())
+    val robIdx = Output(new RobPtr)
 
     /* transaction */
     // from ldu
@@ -69,6 +70,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
 
+  io.robIdx := req.uop.robIdx
   /**
     * Flush
     * 
@@ -143,6 +145,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
+  io.robIdx := req.uop.robIdx
 
   /* uncahce req */
   io.uncache.req.valid     := uncacheState === s_req
@@ -280,6 +283,17 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     val exception = Valid(new LqWriteBundle)
   })
   
+  def selectOldest[T <: Bundle](xs: Seq[Valid[T]], robIdxVec: Seq[RobPtr]): Vec[Bool] = {
+    require(xs.length == robIdxVec.length, s"Unequal lengths appear: xs.length = ${xs.length}, robIdxVec.length = ${robIdxVec.length}.")
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(robIdxVec(j), robIdxVec(i))))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
+  }
+
   /******************************************************************
    * Structure
    ******************************************************************/
@@ -351,7 +365,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val s2_enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for (w <- 0 until LoadPipelineWidth) {
-    freeList.io.allocateReq(w) := true.B
+    freeList.io.allocateReq(w) := s1_valid(w)
   }
 
   // freeList real-allocate
@@ -361,9 +375,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   for (w <- 0 until LoadPipelineWidth) {
     s2_enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(w)
-
-    val offset = PopCount(s2_enqueue.take(w))
-    s2_enqIndexVec(w) := freeList.io.allocateSlot(offset)
+    s2_enqIndexVec(w) := freeList.io.allocateSlot(w)
   }
 
 
@@ -379,8 +391,10 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val uncacheReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
   val mmioSelect = entries.map(e => e.io.mmioSelect).reduce(_ || _)
   val mmioReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
-  // TODO lyq: It's best to choose in robIdx order / the order in which they enter 
-  val ncReqArb = Module(new RRArbiterInit(io.uncache.req.bits.cloneType, LoadUncacheBufferSize))
+  val ncReqVec = Wire(Vec(LoadUncacheBufferSize, Valid(new UncacheWordReq)))
+  val ncRobIdxVec = Wire(Vec(LoadUncacheBufferSize, new RobPtr))
+  val ncSelectVec = selectOldest(ncReqVec, ncRobIdxVec)
+  val ncSelectReq = Mux1H(ncSelectVec, ncReqVec)
 
   val mmioOut = Wire(DecoupledIO(io.mmioOut(0).bits.cloneType))
   val mmioRawData = Wire(io.mmioRawData(0).cloneType)
@@ -397,8 +411,9 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   mmioOut.bits := DontCare
   mmioRawData := DontCare
   for (i <- 0 until LoadUncacheBufferSize) {
-    ncReqArb.io.in(i).valid := false.B
-    ncReqArb.io.in(i).bits := DontCare
+    ncReqVec(i).valid := false.B
+    ncReqVec(i).bits := DontCare
+    ncRobIdxVec(i) := DontCare
   }
   for (i <- 0 until LoadPipelineWidth) {
     ncOut(i).valid := false.B
@@ -431,9 +446,10 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
         mmioRawData := e.io.mmioRawData
 
       }.otherwise{
-        ncReqArb.io.in(i).valid := e.io.uncache.req.valid
-        ncReqArb.io.in(i).bits := e.io.uncache.req.bits
-        e.io.uncache.req.ready := ncReqArb.io.in(i).ready
+        ncReqVec(i).valid := e.io.uncache.req.valid
+        ncReqVec(i).bits := e.io.uncache.req.bits
+        ncRobIdxVec(i) := e.io.robIdx
+        e.io.uncache.req.ready := !mmioSelect && ncSelectVec(i) && uncacheReq.ready
 
         (0 until NC_WB_MOD).map { w =>
           val (idx, ncOutValid) = PriorityEncoderWithFlag(ncOutValidVecRem(w))
@@ -455,11 +471,11 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   }
 
   mmioReq.ready := false.B
-  ncReqArb.io.out.ready := false.B
   when(mmioSelect){
     uncacheReq <> mmioReq
   }.otherwise{
-    uncacheReq <> ncReqArb.io.out
+    uncacheReq.valid := ncSelectReq.valid
+    uncacheReq.bits := ncSelectReq.bits
   }
 
   // uncache Request
@@ -528,15 +544,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *                     rollback req
    * 
    ******************************************************************/
-  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
-    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
-      (if (j < i) !xs(j).valid || compareVec(i)(j)
-      else if (j == i) xs(i).valid
-      else !xs(j).valid || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
   val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
     s2_enqueue(w) && !s2_enqValidVec(w)
   ))
@@ -554,7 +561,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
-  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val allRobIdx = (0 until LoadPipelineWidth).map(i => reqSelUops(i).robIdx)
+  val oldestOneHot = selectOldest(allRedirect, allRobIdx)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = Wire(Valid(new Redirect))
   lastCycleRedirect.valid := RegNext(io.redirect.valid)
