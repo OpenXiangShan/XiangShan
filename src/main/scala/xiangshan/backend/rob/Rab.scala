@@ -271,12 +271,12 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.status.commitEnd := commitEndNext
 
   for (i <- 0 until RabCommitWidth) {
-    io.toVecExcpMod.logicPhyRegMap(i).valid := (state === s_special_walk) && vecLoadExcp.valid &&
-      io.commits.commitValid(i)
+    val valid = (state === s_special_walk) && vecLoadExcp.valid && io.commits.commitValid(i)
+    io.toVecExcpMod.logicPhyRegMap(i).valid := RegNext(valid)
     io.toVecExcpMod.logicPhyRegMap(i).bits match {
       case x =>
-        x.lreg := io.commits.info(i).ldest
-        x.preg := io.commits.info(i).pdest
+        x.lreg := RegEnable(io.commits.info(i).ldest, valid)
+        x.preg := RegEnable(io.commits.info(i).pdest, valid)
     }
   }
 
