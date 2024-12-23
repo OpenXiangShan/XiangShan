@@ -21,8 +21,8 @@ jobs:
   run:
     runs-on: perf
     continue-on-error: true
-    #At most 2 days to finish
-    timeout-minutes: 2880
+    #At most 2.5/Kun days to finish
+    timeout-minutes: 3600
     name: Checkpoints
     steps:
       - name: Set test commit
