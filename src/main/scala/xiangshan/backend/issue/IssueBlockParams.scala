@@ -26,6 +26,7 @@ case class IssueBlockParams(
   VLEN                 : Int = 128,
   // calculate in scheduler
   var idxInSchBlk      : Int = 0,
+  val needEnqReadyReg  : Boolean = true,
 )(
   implicit
   val schdType: SchedulerType,

@@ -228,6 +228,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   val validVec = VecInit(entries.io.valid.asBools)
   val issuedVec = VecInit(entries.io.issued.asBools)
+  val validNextVec = VecInit(entries.io.validNext.asBools)
+  val issuedNextVec = VecInit(entries.io.issuedNext.asBools)
   val requestForTrans = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
   dontTouch(canIssueVec)
@@ -885,26 +887,43 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   for (i <- 0 until params.numEnq) {
     io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
   }
-  private val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
-  othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
-    leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
-  }
-  private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq)).asUInt).reduce(_ | _)
-  private val othersCanotIn = Wire(Bool())
-  othersCanotIn := othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
-  // if has simp Entry, othersCanotIn will be simpCanotIn
-  if (params.numSimp > 0) {
-    val simpLeftOneCaseVec = Wire(Vec(params.numSimp, UInt((params.numSimp).W)))
-    simpLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
-      leftone := ~(1.U((params.numSimp).W) << i)
+
+  private def othersCanotInFunc(entriesValidVec: Vec[Bool]): Bool ={
+    val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
+    othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
+      leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
     }
-    val simpLeftOne = simpLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt).reduce(_ | _)
-    val simpCanotIn = simpLeftOne || validVec.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
-    othersCanotIn := simpCanotIn
+    val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(entriesValidVec.drop(params.numEnq)).asUInt).reduce(_ | _)
+    val othersCanotIn = Wire(Bool())
+    othersCanotIn := othersLeftOne || entriesValidVec.drop(params.numEnq).reduce(_ & _)
+    // if has simp Entry, othersCanotIn will be simpCanotIn
+    if (params.numSimp > 0) {
+      val simpLeftOneCaseVec = Wire(Vec(params.numSimp, UInt((params.numSimp).W)))
+      simpLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
+        leftone := ~(1.U((params.numSimp).W) << i)
+      }
+      val simpLeftOne = simpLeftOneCaseVec.map(_ === VecInit(entriesValidVec.drop(params.numEnq).take(params.numSimp)).asUInt).reduce(_ | _)
+      val simpCanotIn = simpLeftOne || entriesValidVec.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
+      othersCanotIn := simpCanotIn
+    }
+    othersCanotIn
   }
-  io.enq.foreach(_.ready := (!othersCanotIn || !enqHasValid) && !enqHasIssued)
+
+  if(params.needEnqReadyReg){
+    val enqHasValidNext = validNextVec.take(params.numEnq).reduce(_ | _)
+    val enqHasIssuedNext = validNextVec.zip(issuedNextVec).take(params.numEnq).map(x => x._1 & x._2).reduce(_ | _)
+    val othersCanotInNext = othersCanotInFunc(validNextVec)
+    val readyReg = RegNext((!othersCanotInNext || !enqHasValidNext) && !enqHasIssuedNext)
+    io.enq.foreach(_.ready := readyReg)
+    io.status.full := RegNext(othersCanotInNext)
+  } else {
+    val othersCanotIn = othersCanotInFunc(validVec)
+    val ready = (!othersCanotIn || !enqHasValid) && !enqHasIssued
+    io.enq.foreach(_.ready := ready)
+    io.status.full := othersCanotIn
+  }
+
   io.status.empty := !Cat(validVec).orR
-  io.status.full := othersCanotIn
   io.status.validCnt := PopCount(validVec)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {

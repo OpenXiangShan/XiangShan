@@ -126,7 +126,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class CommonOutBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     //status
     val valid                 = Output(Bool())
+    val validNext             = Output(Bool())
     val issued                = Output(Bool())
+    val issuedNext            = Output(Bool())
     val canIssue              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
@@ -385,10 +387,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
   }
 
-  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, issuedRegNext: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     commonOut.valid                                   := validReg
+    commonOut.validNext                               := common.validRegNext
     commonOut.issued                                  := entryReg.status.issued
+    commonOut.issuedNext                              := issuedRegNext
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
