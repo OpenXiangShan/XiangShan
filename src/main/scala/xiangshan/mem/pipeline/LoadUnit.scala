@@ -1339,6 +1339,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.uop.fpWen           := s2_in.uop.fpWen
   s2_out.nc                  := s2_in.nc
   s2_out.mmio                := s2_mmio
+  s2_out.isMisalign          := s2_isMisalign
   s2_out.memBackTypeMM       := s2_memBackTypeMM
   s2_out.isMisalign          := s2_isMisalign
   s2_out.uop.flushPipe       := false.B
