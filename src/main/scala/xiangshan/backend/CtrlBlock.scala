@@ -732,20 +732,22 @@ class CtrlBlockImp(
   io.toVecExcpMod.ratOldPest match {
     case fromRat =>
       (0 until RabCommitWidth).foreach { idx =>
-        fromRat.v0OldVdPdest(idx).valid := RegNext(
+        val v0Valid = RegNext(
           rat.io.rabCommits.isCommit &&
           rat.io.rabCommits.isWalk &&
           rat.io.rabCommits.commitValid(idx) &&
           rat.io.rabCommits.info(idx).v0Wen
         )
-        fromRat.v0OldVdPdest(idx).bits := rat.io.v0_old_pdest(idx)
-        fromRat.vecOldVdPdest(idx).valid := RegNext(
+        fromRat.v0OldVdPdest(idx).valid := RegNext(v0Valid)
+        fromRat.v0OldVdPdest(idx).bits := RegEnable(rat.io.v0_old_pdest(idx), v0Valid)
+        val vecValid = RegNext(
           rat.io.rabCommits.isCommit &&
           rat.io.rabCommits.isWalk &&
           rat.io.rabCommits.commitValid(idx) &&
           rat.io.rabCommits.info(idx).vecWen
         )
-        fromRat.vecOldVdPdest(idx).bits := rat.io.vec_old_pdest(idx)
+        fromRat.vecOldVdPdest(idx).valid := RegNext(vecValid)
+        fromRat.vecOldVdPdest(idx).bits := RegEnable(rat.io.vec_old_pdest(idx), vecValid)
       }
   }
 
