@@ -513,10 +513,33 @@ class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
   }
 }
 
+//add mcvm csr
+class McvmStruct(implicit p: Parameters) extends XSBundle {
+  val BME = UInt(1.W)
+  val CMODE = UInt(1.W)
+  val BCLEAR = UInt(1.W)
+  val BMA = UInt(61.W)
+}
+
+class TlbMcvmBundle(implicit p: Parameters) extends McvmStruct {
+  //val changed = Bool()
+
+  def apply(mcvm_value: UInt): Unit = {
+    require(mcvm_value.getWidth == XLEN)
+    val mc = mcvm_value.asTypeOf(new McvmStruct)
+    BME := mc.BME
+    CMODE := mc.CMODE
+    BCLEAR := mc.BCLEAR
+    BMA := mc.BMA
+    //changed := DataChanged(mc.CMODE)
+  }
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
   val vsatp = new TlbSatpBundle()
   val hgatp = new TlbHgatpBundle()
+  val mcvm = new TlbMcvmBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
