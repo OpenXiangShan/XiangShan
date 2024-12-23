@@ -80,7 +80,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = StorePipelineWidth
   ))
   paddrModule.io := DontCare
@@ -90,7 +90,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
@@ -276,9 +276,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
-      val selValidNext = GatedValidRegNext(selValid(0))
-      val selBitsNext = RegEnable(selBits(0), selValid(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
+      val selValidNext = selValid(0)
+      val selBitsNext = selBits(0)
+      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect)), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
@@ -334,10 +334,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).valid := detectedRollback._1 && RegNext(storeIn(w).valid && !storeIn(w).bits.miss)
     rollbackLqWb(w).bits  := detectedRollback._2
-    stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
-    stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
+    stFtqIdx(w) := RegNext(storeIn(w).bits.uop.ftqPtr)
+    stFtqOffset(w) := RegNext(storeIn(w).bits.uop.ftqOffset)
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
