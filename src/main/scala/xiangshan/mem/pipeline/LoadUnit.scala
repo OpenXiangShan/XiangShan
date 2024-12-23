@@ -1935,10 +1935,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   generatePerfEvent()
 
-  when(io.ldout.fire){
-    XSDebug("ldout %x\n", io.ldout.bits.uop.pc)
-  }
-
   if (backendParams.debugEn){
     dontTouch(s0_src_valid_vec)
     dontTouch(s0_src_ready_vec)
@@ -1950,5 +1946,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s3_picked_data_frm_pipe.map(x=> dontTouch(x))
   }
 
+  XSDebug(io.ldout.fire, "ldout %x\n", io.ldout.bits.uop.pc)
   // end
 }

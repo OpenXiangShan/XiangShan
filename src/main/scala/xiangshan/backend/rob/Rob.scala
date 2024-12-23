@@ -244,7 +244,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i))
     }
   }
-  
+
   // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed,
   // That is Necessary when exceptions happen.
   // Update the ftqOffset to correctly notify the frontend which instructions have been committed.
@@ -520,8 +520,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
    * Writeback (from execution units)
    */
   for (wb <- exuWBs) {
+    val wbIdx = wb.bits.robIdx.value
+    val debug_Uop = debug_microOp(wbIdx)
     when(wb.valid) {
-      val wbIdx = wb.bits.robIdx.value
       debug_exuData(wbIdx) := wb.bits.data(0)
       debug_exuDebug(wbIdx) := wb.bits.debug
       debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.debugInfo.enqRsTime
@@ -532,14 +533,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // debug for lqidx and sqidx
       debug_microOp(wbIdx).lqIdx := wb.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
       debug_microOp(wbIdx).sqIdx := wb.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
-
-      val debug_Uop = debug_microOp(wbIdx)
-      XSInfo(true.B,
-        p"writebacked pc 0x${Hexadecimal(debug_Uop.pc)} wen ${debug_Uop.rfWen} " +
-          p"data 0x${Hexadecimal(wb.bits.data(0))} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
-          p"skip ${wb.bits.debug.isSkipDiff} robIdx: ${wb.bits.robIdx}\n"
-      )
     }
+    XSInfo(wb.valid,
+      p"writebacked pc 0x${Hexadecimal(debug_Uop.pc)} wen ${debug_Uop.rfWen} " +
+        p"data 0x${Hexadecimal(wb.bits.data(0))} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
+        p"skip ${wb.bits.debug.isSkipDiff} robIdx: ${wb.bits.robIdx}\n"
+    )
   }
 
   val writebackNum = PopCount(exuWBs.map(_.valid))
@@ -771,11 +770,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     io.commits.robIdx(i) := deqPtrVec(i)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
-    when(state === s_walk) {
-      when(io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
-        XSError(!walk_v(i), s"The walking entry($i) should be valid\n")
-      }
-    }
+    XSError(
+      state === s_walk &&
+      io.commits.isWalk && state === s_walk && shouldWalkVec(i) &&
+      !walk_v(i),
+      s"The walking entry($i) should be valid\n")
 
     XSInfo(io.commits.isCommit && io.commits.commitValid(i),
       "retired pc %x wen %d ldest %d pdest %x data %x fflags: %b vxsat: %b\n",
