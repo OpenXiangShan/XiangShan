@@ -1155,6 +1155,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_in := RegEnable(s1_out, s1_fire)
 
   val s2_pmp = WireInit(io.pmp)
+  val s2_isMisalign = WireInit(s2_in.isMisalign)
 
   val s2_prf    = s2_in.isPrefetch
   val s2_hw_prf = s2_in.isHWPrefetch
@@ -1179,7 +1180,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                 s2_in.uop.exceptionVec(breakPoint)
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss && !s2_tlb_unrelated_exceps)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
-    s2_out.isMisalign := false.B
+    s2_isMisalign := false.B
   }
   val s2_exception = s2_vecActive &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
@@ -1335,6 +1336,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.uop.fpWen           := s2_in.uop.fpWen
   s2_out.nc                  := s2_in.nc
   s2_out.mmio                := s2_mmio
+  s2_out.isMisalign          := s2_isMisalign
   s2_out.uop.flushPipe       := false.B
   s2_out.uop.exceptionVec    := s2_real_exceptionVec
   s2_out.forwardMask         := s2_fwd_mask
