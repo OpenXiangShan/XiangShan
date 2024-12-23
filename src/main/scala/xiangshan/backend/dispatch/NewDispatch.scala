@@ -296,7 +296,28 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     }
   }
 
+  // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
+  val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
+  val singleStepState = RegInit(s_updateRobidx)
 
+  val robidxStepNext  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+
+  when(!io.singleStep) {
+    singleStepState := s_updateRobidx
+  }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
+    singleStepState := s_holdRobidx
+    robidxStepNext := fromRename(0).bits.robIdx
+  }
+
+  when(singleStepState === s_updateRobidx) {
+    robidxStepReg := robidxStepNext
+    robidxCanCommitStepping := robidxStepNext
+  }.elsewhen(singleStepState === s_holdRobidx) {
+    robidxStepReg := robidxStepReg
+    robidxCanCommitStepping := robidxStepReg
+  }
 
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
   needMultiExu.zipWithIndex.map{ case ((fus, exuidx), needMultiExuidx) => {
@@ -389,12 +410,14 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException
+      lsqCanAccept && !fromRename(i).bits.eliminatedMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
   }
   for (i <- 0 until RenameWidth){
     // check is drop amocas sta
     fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 1.U
+    // update singleStep
+    fromRenameUpdate(i).bits.singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
   }
   var temp = 0
   allIssueParams.zipWithIndex.map{ case(issue, iqidx) => {
@@ -613,29 +636,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val isAMO    = VecInit(fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward  = VecInit(fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(fromRename.map(x => x.valid && x.bits.waitForward))
-  
-  // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
-  val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
-  val singleStepState = RegInit(s_updateRobidx)
-  
-  val robidxStepNext  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
-  val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
-  val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
-  
-  when(!io.singleStep) {
-    singleStepState := s_updateRobidx
-  }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
-    singleStepState := s_holdRobidx
-    robidxStepNext := fromRename(0).bits.robIdx
-  }
-  
-  when(singleStepState === s_updateRobidx) {
-    robidxStepReg := robidxStepNext
-    robidxCanCommitStepping := robidxStepNext
-  }.elsewhen(singleStepState === s_holdRobidx) {
-    robidxStepReg := robidxStepReg 
-    robidxCanCommitStepping := robidxStepReg
-  }
 
   val updatedUop = Wire(Vec(RenameWidth, new DynInst))
   val checkpoint_id = RegInit(0.U(64.W))
