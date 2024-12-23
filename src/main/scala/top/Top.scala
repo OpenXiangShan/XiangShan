@@ -202,8 +202,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     }
     val pL3MSHRs = WireInit(0.U(64.W))
     ExcitingUtils.addSink(pL3MSHRs, "DSE_L3MSHRS")
+    val pL3Sets = WireInit(0.U(64.W))
+    ExcitingUtils.addSink(pL3Sets, "DSE_L3SETS")
     if(l3cacheOpt.isDefined){
       l3cacheOpt.get.module.io.mshrs := pL3MSHRs
+      l3cacheOpt.get.module.io.sets := pL3Sets
     }
 
 
