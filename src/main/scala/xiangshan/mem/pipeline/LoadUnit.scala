@@ -1159,11 +1159,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s2_prf    = s2_in.isPrefetch
   val s2_hw_prf = s2_in.isHWPrefetch
-  val s2_check_mmio = !s2_prf && !s2_in.tlbMiss && Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio)
+  val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
+  val s2_un_misalign_exception =  s2_vecActive &&
+                                  (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_exception_vec, LduCfg, Seq(loadAddrMisaligned)).asUInt.orR)
+  val s2_check_mmio = !s2_prf && !s2_in.tlbMiss && Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio) && !s2_un_misalign_exception
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
-  val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
