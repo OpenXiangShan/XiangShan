@@ -23,7 +23,11 @@ trait HypervisorLevel { self: NewCSR =>
   val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle))
     .setAddr(CSRs.hedeleg)
 
-  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle))
+  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle)
+    with HasIpIeBundle
+  {
+    regOut := reg & mideleg
+  })
     .setAddr(CSRs.hideleg)
 
   val hie = Module(new CSRModule("Hie", new HieBundle)
