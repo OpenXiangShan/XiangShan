@@ -15,6 +15,7 @@ import xiangshan.backend.Bundles.TrapInstInfo
 import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
+import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.FtqPtr
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -89,6 +90,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     CSROpType.isCSRRSorRC(func)
   )
 
+  private val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
+  private val thisRobIdx = Wire(new RobPtr)
+  when (io.in.valid) {
+    thisRobIdx := io.in.bits.ctrl.robIdx
+  }.otherwise {
+    thisRobIdx := robIdxReg
+  }
+  private val redirectFlush = thisRobIdx.needFlush(io.flush)
 
   csrMod.io.in match {
     case in =>
@@ -103,6 +112,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.mnret := isMNret
       in.bits.sret := isSret
       in.bits.dret := isDret
+      in.bits.redirectFlush := redirectFlush
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
@@ -273,7 +283,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
-  redirect.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
+  redirect.robIdx := robIdxReg
   redirect.ftqIdx := RegEnable(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
   redirect.ftqOffset := RegEnable(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
   redirect.cfiUpdate.predTaken := true.B
