@@ -262,6 +262,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val nc = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // nc: inst is a nc inst
   val mmio = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // mmio: inst is an mmio inst
   val atomic = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
+  val memBackTypeMM = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val prefetch = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // need prefetch when committing this store to sbuffer?
   val isVec = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store instruction
   val vecLastFlow = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // last uop the last flow of vector store instruction
@@ -536,6 +537,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
       atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
+      memBackTypeMM(stWbIndexReg) := io.storeAddrInRe(i).memBackTypeMM
       hasException(stWbIndexReg) := io.storeAddrInRe(i).hasException
       waitStoreS2(stWbIndexReg) := false.B
     }
@@ -853,6 +855,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mmioReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   mmioReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
   mmioReq.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
+  mmioReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   mmioReq.bits.nc := false.B
   mmioReq.bits.id := rdataPtrExt(0).value
 
@@ -898,6 +901,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   ncReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
   ncReq.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
+  ncReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   ncReq.bits.nc := true.B
   ncReq.bits.id := rptr0
 

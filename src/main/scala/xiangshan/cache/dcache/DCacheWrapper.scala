@@ -529,6 +529,7 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
   val nc = Bool()
+  val memBackTypeMM = Bool()
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry(nWays)
 

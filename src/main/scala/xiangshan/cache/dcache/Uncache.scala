@@ -23,8 +23,11 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.mem._
+import coupledL2.MemBackTypeMM
+import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 
 class UncacheFlushBundle extends Bundle {
   val valid = Output(Bool())
@@ -40,6 +43,7 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
   val id = UInt(uncacheIdxBits.W)
   val nc = Bool()
   val atomic = Bool()
+  val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
 
@@ -55,6 +59,7 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     mask := x.mask
     id := x.id
     nc := x.nc
+    memBackTypeMM := x.memBackTypeMM
     atomic := x.atomic
     resp_nderr := false.B
     // fwd_data := 0.U
@@ -151,7 +156,8 @@ class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
     clients = Seq(TLMasterParameters.v1(
       "uncache",
       sourceId = IdRange(0, idRange)
-    ))
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
   )
   val clientNode = TLClientNode(Seq(clientParameters))
 
@@ -345,6 +351,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   mem_acquire.valid := q0_canSent
   mem_acquire.bits := Mux(q0_isStore, q0_store, q0_load)
+  mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q0_entry.memBackTypeMM)
+  mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q0_entry.nc)
   when(mem_acquire.fire){
     states(q0_canSentIdx).setInflight(true.B)
 
@@ -489,6 +497,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   mem_grant.bits.dump(mem_grant.fire)
 
   /* Performance Counters */
+  XSPerfAccumulate("uncache_memBackTypeMM", io.lsq.req.fire && io.lsq.req.bits.memBackTypeMM)
   XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
