@@ -416,7 +416,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
+  new WithNKBL3(3 * 1024, inclusive = false, banks = 2, ways = 12)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
