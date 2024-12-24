@@ -565,7 +565,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
-  val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException
+  val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && (!deqPtrEntry.isVls || RegNext(RegNext(deqPtrEntry.commit_w)))
   val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && (!deqPtrEntry.isVls || RegNext(RegNext(deqPtrEntry.commit_w)))
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
   val deqIsVlsException = deqHasException && deqPtrEntry.isVls && !exceptionDataRead.bits.isEnqExcp
@@ -763,7 +763,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed && !deqHasFlushPipe)
+    val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed)
     val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
     io.commits.info(i) := commitInfo(i)
