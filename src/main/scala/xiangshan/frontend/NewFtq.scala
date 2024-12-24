@@ -1362,9 +1362,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_ftb_update_stall    = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
 
-  val validInstructions       = commitStateQueueReg(commPtr.value).map(s => s === c_toCommit || s === c_committed)
-  val lastInstructionStatus   = PriorityMux(validInstructions.reverse.zip(commitStateQueueReg(commPtr.value).reverse))
-  val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed
+  val validInstructions     = commitStateQueueReg(commPtr.value).map(s => s === c_toCommit || s === c_committed)
+  val lastInstructionStatus = PriorityMux(validInstructions.reverse.zip(commitStateQueueReg(commPtr.value).reverse))
+  val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed ||
+    commitStateQueueReg(commPtr.value)(0) === c_empty && commitStateQueueReg(commPtr.value)(1) === c_flushed
   canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     (isAfter(robCommPtr, commPtr) ||
       validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed)
