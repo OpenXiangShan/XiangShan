@@ -37,7 +37,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(ValidIO(new Redirect))
-    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
 
     // violation query
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
@@ -177,18 +176,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // when the stores that "older than" current load address were ready.
   // current load will be released.
-  val vecLdCanceltmp = Wire(Vec(LoadQueueRAWSize, Vec(VecLoadPipelineWidth, Bool())))
-  val vecLdCancel = Wire(Vec(LoadQueueRAWSize, Bool()))
   for (i <- 0 until LoadQueueRAWSize) {
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
-    val fbk = io.vecFeedback
-    for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-    }
-    vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocated(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
+    when (allocated(i) && (deqNotBlock || needCancel)) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }
