@@ -329,12 +329,21 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val needEnqStoreQueue = VecInit(io.enq.req.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isVNonsegStore(x.bits.fuType))))
   val loadQueueElem = needEnqLoadQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
   val storeQueueElem = needEnqStoreQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
+
   val loadFlowPopCount = 0.U +: loadQueueElem.zipWithIndex.map{ case (l, i) =>
-    loadQueueElem.take(i + 1).reduce(_ + _)
+    loadQueueElem.take(i + 1).reduce(_ +& _).asTypeOf(UInt(elemIdxBits.W))
   }
   val storeFlowPopCount = 0.U +: storeQueueElem.zipWithIndex.map { case (s, i) =>
-    storeQueueElem.take(i + 1).reduce(_ + _)
+    storeQueueElem.take(i + 1).reduce(_ +& _).asTypeOf(UInt(elemIdxBits.W))
   }
+
+  loadQueueElem.map(dontTouch(_))
+  storeQueueElem.map(dontTouch(_))
+  loadFlowPopCount.takeRight(loadFlowPopCount.length - 1).map(dontTouch(_))
+  storeFlowPopCount.takeRight(storeFlowPopCount.length - 1).map(dontTouch(_))
+  needEnqLoadQueue.map(dontTouch(_))
+  needEnqStoreQueue.map(dontTouch(_))
+
   val lqAllocNumber = PriorityMux(blockVec.zip(loadFlowPopCount))
   val sqAllocNumber = PriorityMux(blockVec.zip(storeFlowPopCount))
 
