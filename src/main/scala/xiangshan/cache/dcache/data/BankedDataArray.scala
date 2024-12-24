@@ -258,10 +258,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
-    // customized cache op port
-    val cacheOp = Flipped(new L1CacheInnerOpIO)
-    val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
-    val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
 
@@ -597,9 +593,6 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
-  io.cacheOp.resp.valid := false.B
-  io.cacheOp.resp.bits  := DontCare
-
   val tableName =  "BankConflict" + p(XSCoreParamsKey).HartId.toString
   val siteName = "BankedDataArray" + p(XSCoreParamsKey).HartId.toString
   val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB)
@@ -886,9 +879,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       data_bank.io.w.data := asECCData(write_ecc_reg, write_data_reg(bank_index))
     }
   }
-
-  io.cacheOp.resp.valid := false.B
-  io.cacheOp.resp.bits  := DontCare
 
   val tableName = "BankConflict" + p(XSCoreParamsKey).HartId.toString
   val siteName = "BankedDataArray" + p(XSCoreParamsKey).HartId.toString
