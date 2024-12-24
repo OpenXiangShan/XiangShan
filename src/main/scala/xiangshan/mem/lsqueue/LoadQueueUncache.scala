@@ -357,9 +357,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   }
 
   for (w <- 0 until LoadPipelineWidth) {
-    s2_enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(w)
-
     val offset = PopCount(s2_enqueue.take(w))
+    s2_enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(offset)
     s2_enqIndexVec(w) := freeList.io.allocateSlot(offset)
   }
 
