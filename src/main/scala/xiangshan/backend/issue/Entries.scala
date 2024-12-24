@@ -77,7 +77,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val entries             = Wire(Vec(params.numEntries, ValidIO(new EntryBundle)))
   val robIdxVec           = Wire(Vec(params.numEntries, new RobPtr))
   val validVec            = Wire(Vec(params.numEntries, Bool()))
+  val validNextVec        = Wire(Vec(params.numEntries, Bool()))
   val issuedVec           = Wire(Vec(params.numEntries, Bool()))
+  val issuedNextVec       = Wire(Vec(params.numEntries, Bool()))
   val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
   val canIssueVec         = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
@@ -385,7 +387,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   }
 
   io.valid                          := validVec.asUInt
+  io.validNext                      := validNextVec.asUInt
   io.issued                         := issuedVec.asUInt
+  io.issuedNext                     := issuedNextVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
@@ -419,7 +423,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       in.fromLsq.get.lqDeqPtr   := io.vecMemIn.get.lqDeqPtr
     }
     validVec(entryIdx)          := out.valid
+    validNextVec(entryIdx)      := out.validNext
     issuedVec(entryIdx)         := out.issued
+    issuedNextVec(entryIdx)     := out.issuedNext
     canIssueVec(entryIdx)       := out.canIssue
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
@@ -544,7 +550,9 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val ldCancel            = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
   //entries status
   val valid               = Output(UInt(params.numEntries.W))
+  val validNext           = Output(UInt(params.numEntries.W))
   val issued              = Output(UInt(params.numEntries.W))
+  val issuedNext          = Output(UInt(params.numEntries.W))
   val canIssue            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
