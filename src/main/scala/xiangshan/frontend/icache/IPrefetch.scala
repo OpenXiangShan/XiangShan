@@ -1,18 +1,19 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-  * Copyright (c) 2020-2021 Peng Cheng Laboratory
-  *
-  * XiangShan is licensed under Mulan PSL v2.
-  * You can use this software according to the terms and conditions of the Mulan PSL v2.
-  * You may obtain a copy of Mulan PSL v2 at:
-  *          http://license.coscl.org.cn/MulanPSL2
-  *
-  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-  *
-  * See the Mulan PSL v2 for more details.
-  ***************************************************************************************/
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
 
 package xiangshan.frontend.icache
 
@@ -54,9 +55,9 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
 
 class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   // control
-  val csr_pf_enable:     Bool = Input(Bool())
-  val csr_parity_enable: Bool = Input(Bool())
-  val flush:             Bool = Input(Bool())
+  val csr_pf_enable: Bool = Input(Bool())
+  val ecc_enable:    Bool = Input(Bool())
+  val flush:         Bool = Input(Bool())
 
   val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
   val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
@@ -69,7 +70,7 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
 }
 
-class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
+class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICacheECCHelper {
   val io: IPrefetchIO = IO(new IPrefetchIO)
 
   private val (toITLB, fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
@@ -505,7 +506,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule {
 //  })
 //
 //  // generate exception
-//  val s2_meta_exception = VecInit(s2_meta_corrupt.map(ExceptionType.fromECC(io.csr_parity_enable, _)))
+//  val s2_meta_exception = VecInit(s2_meta_corrupt.map(ExceptionType.fromECC(io.ecc_enable, _)))
 //
 //  // merge meta exception and itlb/pmp exception
 //  val s2_exception = ExceptionType.merge(s2_exception_in, s2_meta_exception)

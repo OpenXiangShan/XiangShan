@@ -336,6 +336,7 @@ case class XSCoreParameters
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
+    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
