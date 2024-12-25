@@ -283,9 +283,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // for pipeline writeback
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex          = pipewb.bits.mBIndex
-    val flowNumOffset    = Mux(pipewb.bits.usSecondInv,
-                               2.U,
-                               PopCount(mergePortMatrix(i)))
+    val flowNumOffset    = PopCount(mergePortMatrix(i))
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
     val hasExp           = ExceptionNO.selectByFu(pipewb.bits.exceptionVec, fuCfg).asUInt.orR
 
