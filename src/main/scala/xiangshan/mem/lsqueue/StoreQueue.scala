@@ -378,7 +378,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val selectUpBound = ParallelPriorityMux(entryCanEnqSeq, enqUpBound)
     when (entryCanEnq) {
       uop(i) := selectBits
-      vecLastFlow(i) := Mux((i + 1).U === selectUpBound.value, selectBits.lastUop, false.B)
+      if (i + 1 == StoreQueueSize)
+        vecLastFlow(i) := Mux(0.U === selectUpBound.value, selectBits.lastUop, false.B) else
+        vecLastFlow(i) := Mux((i + 1).U === selectUpBound.value, selectBits.lastUop, false.B)
       allocated(i) := true.B
       datavalid(i) := false.B
       addrvalid(i) := false.B
