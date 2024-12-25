@@ -174,43 +174,20 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val entryCanEnq = entryCanEnqSeq.reduce(_ || _)
     val selectBits = ParallelPriorityMux(entryCanEnqSeq, io.enq.req.map(_.bits))
     when (entryCanEnq) {
-      uop(i) := selectBits
       allocated(i) := true.B
-      datavalid(i) := false.B
-      addrvalid(i) := false.B
+      robIdx(i) := selectBits.robIdx
+      uopIdx(i) := selectBits.uopIdx
       isvec(i) :=  FuType.isVLoad(selectBits.fuType)
-      veccommitted(i) := false.B
+      committed(i) := false.B
 
       debug_mmio(i) := false.B
       debug_paddr(i) := 0.U
     }
-
   }
 
   for (i <- 0 until io.enq.req.length) {
     val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.lqIdx
-    val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
-    when (canEnqueue(i) && !enqCancel(i)) {
-      // The maximum 'numLsElem' number that can be emitted per dispatch port is:
-      //    16 2 2 2 2 2.
-      // Therefore, VecMemLSQEnqIteratorNumberSeq = Seq(16, 2, 2, 2, 2, 2)
-      for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
-        val enqIdx = (index + j.U).value
-        when (j.U < validVLoadOffset(i)) {
-          allocated(enqIdx) := true.B
-          robIdx(enqIdx) := io.enq.req(i).bits.robIdx
-          uopIdx(enqIdx) := io.enq.req(i).bits.uopIdx
-
-          // init
-          isvec(enqIdx) := FuType.isVLoad(io.enq.req(i).bits.fuType)
-          committed(enqIdx) := false.B
-
-          debug_mmio(enqIdx) := false.B
-          debug_paddr(enqIdx) := 0.U
-        }
-      }
-    }
     XSError(canEnqueue(i) && !enqCancel(i) && (!io.enq.canAccept || !io.enq.sqCanAccept), s"must accept $i\n")
     XSError(canEnqueue(i) && !enqCancel(i) && index.value =/= lqIdx.value, s"must be the same entry $i\n")
     io.enq.resp(i) := lqIdx
@@ -278,20 +255,20 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
       }
-    }
 
-    XSInfo(io.ldin(i).valid && !need_rep && need_valid,
-      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
-      io.ldin(i).bits.uop.lqIdx.asUInt,
-      io.ldin(i).bits.uop.pc,
-      io.ldin(i).bits.vaddr,
-      io.ldin(i).bits.paddr,
-      io.ldin(i).bits.mask,
-      io.ldin(i).bits.forwardData.asUInt,
-      io.ldin(i).bits.forwardMask.asUInt,
-      io.ldin(i).bits.mmio,
-      io.ldin(i).bits.isvec
-    )
+      XSInfo(!need_rep && need_valid,
+        "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+        io.ldin(i).bits.uop.lqIdx.asUInt,
+        io.ldin(i).bits.uop.pc,
+        io.ldin(i).bits.vaddr,
+        io.ldin(i).bits.paddr,
+        io.ldin(i).bits.mask,
+        io.ldin(i).bits.forwardData.asUInt,
+        io.ldin(i).bits.forwardMask.asUInt,
+        io.ldin(i).bits.mmio,
+        io.ldin(i).bits.isvec
+      )
+    }
   }
 
   //  perf counter
