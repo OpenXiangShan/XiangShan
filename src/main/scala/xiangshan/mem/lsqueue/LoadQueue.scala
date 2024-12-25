@@ -22,16 +22,17 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.mmu._
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).VirtualLoadQueueSize

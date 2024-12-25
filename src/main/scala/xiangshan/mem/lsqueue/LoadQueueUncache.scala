@@ -16,19 +16,20 @@
  ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
-import xiangshan.ExceptionNO._
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.backend.rob.{RobPtr, RobLsqIO}
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.mem.HasMemBlockParameters
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper

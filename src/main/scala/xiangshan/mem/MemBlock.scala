@@ -45,6 +45,7 @@ import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
+import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import system.SoCParamsKey

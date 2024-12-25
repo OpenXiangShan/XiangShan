@@ -28,14 +28,15 @@ package xiangshan.mem.prefetch
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utils._
 import utility._
-import xiangshan.cache.HasDCacheParameters
-import xiangshan.cache.mmu._
-import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
+import xiangshan._
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
 import xiangshan.mem.trace._
 import xiangshan.mem.HasL1PrefetchSourceParameter
+import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.mmu._
 
 case class SMSParams
 (
@@ -264,7 +265,7 @@ class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val access_cnt = UInt((REGION_BLKS-1).U.getWidth.W)
   val decr_mode = Bool()
   val single_update = Bool()//this is a signal update request
-  val has_been_signal_updated = Bool() 
+  val has_been_signal_updated = Bool()
 }
 
 class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -368,7 +369,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s0_agt_entry.pht_tag := s0_lookup.pht_tag
   s0_agt_entry.region_bits := region_offset_to_bits(s0_lookup.region_offset)
   // update bits this time
-  s0_agt_entry.region_bit_single := region_offset_to_bits(s0_lookup.region_offset) 
+  s0_agt_entry.region_bit_single := region_offset_to_bits(s0_lookup.region_offset)
   s0_agt_entry.region_tag := s0_lookup.region_tag
   s0_agt_entry.region_offset := s0_lookup.region_offset
   s0_agt_entry.access_cnt := 1.U
@@ -505,7 +506,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s1_pht_lookup.region_vaddr := s1_region_vaddr
   s1_pht_lookup.region_paddr := s1_region_paddr
   s1_pht_lookup.region_offset := s1_region_offset
-  s1_pht_lookup.region_bit_single := s1_bit_region_signal 
+  s1_pht_lookup.region_bit_single := s1_bit_region_signal
 
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
@@ -664,7 +665,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_region_offset = RegEnable(s0_region_offset, s1_reg_en)
   val s1_single_update = RegEnable(s0_single_update, s1_reg_en)
   val s1_has_been_single_update = RegEnable(s0_has_been_single_update, s1_reg_en)
-  val s1_region_bit_single = RegEnable(s0_region_bit_single, s1_reg_en)  
+  val s1_region_bit_single = RegEnable(s0_region_bit_single, s1_reg_en)
   val s1_pht_valids = pht_valids_reg.map(way => Mux1H(
     (0 until PHT_SETS).map(i => i.U === s1_ram_raddr),
     way
@@ -745,13 +746,13 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
 
 
   // pipe s3: send addr/data to ram, gen pf_req
-  val s3_valid = GatedValidRegNext(s2_valid && signal_update_write, false.B) 
+  val s3_valid = GatedValidRegNext(s2_valid && signal_update_write, false.B)
   val s3_evict = RegEnable(s2_evict, s2_valid)
   val s3_hist = RegEnable(s2_hist, s2_valid)
   val s3_hist_pf_gen = RegEnable(s2_hist_pf_gen, s2_valid)
 
   val s3_hist_update_mask = RegEnable(s2_hist_update_mask.asUInt, s2_valid)
-  
+
   val s3_region_offset = RegEnable(s2_region_offset, s2_valid)
   val s3_region_offset_mask = RegEnable(s2_region_offset_mask, s2_valid)
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)

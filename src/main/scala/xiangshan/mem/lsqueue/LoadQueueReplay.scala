@@ -15,23 +15,23 @@
 ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import xiangshan.cache._
-import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.fu.FuConfig._
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.cache.wpu.ReplayCarry
-import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.fu.FuConfig._
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.mmu._
+import xiangshan.cache.wpu.ReplayCarry
 import math._
 
 object LoadReplayCauses {

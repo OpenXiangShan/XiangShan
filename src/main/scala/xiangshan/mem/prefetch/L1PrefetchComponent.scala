@@ -1,17 +1,18 @@
 package xiangshan.mem.prefetch
 
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.util._
 import chisel3._
 import chisel3.util._
-import xiangshan._
+import freechips.rocketchip.util._
 import utils._
 import utility._
-import xiangshan.cache.HasDCacheParameters
-import xiangshan.cache.mmu._
-import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
+import xiangshan._
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
 import xiangshan.mem.trace._
 import xiangshan.mem.L1PrefetchSource
+import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.mmu._
 
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
@@ -650,7 +651,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     }.otherwise {
       val inner_index = s2_tlb_update_index - MLP_L1_SIZE.U
       l2_array(inner_index).is_vaddr := s2_tlb_resp.bits.miss
-  
+
       when(!s2_tlb_resp.bits.miss) {
         l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
         when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
@@ -808,7 +809,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   XSPerfAccumulate("l2_prefetche_queue_busby", io.l2PfqBusy)
   XSPerfHistogram("filter_active", PopCount(VecInit(
-    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++ 
+    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++
     l2_array.zip(l2_valids).map{ case (e, v) => e.can_send_pf(v) }
     ).asUInt), true.B, 0, MLP_SIZE, 1)
   XSPerfHistogram("l1_filter_active", PopCount(VecInit(l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v)}).asUInt), true.B, 0, MLP_L1_SIZE, 1)

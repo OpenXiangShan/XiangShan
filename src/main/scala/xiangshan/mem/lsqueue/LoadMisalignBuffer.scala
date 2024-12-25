@@ -22,18 +22,19 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache.mmu.HasTlbConst
-import xiangshan.cache._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
 import xiangshan.backend.fu.FuConfig.LduCfg
+import xiangshan.mem.Bundles._
+import xiangshan.cache.mmu.HasTlbConst
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper

@@ -11,7 +11,8 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReq
 
 
 class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -92,7 +93,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
                                                     (enqDelayOut1.srcWakeUpByIQ(i).asBool && enqDelay1IsWakeupByMemIQ)   -> DataSource.bypass2,
                                                     (enqDelayOut2.srcWakeUpByIQ(i).asBool && !enqDelay2IsWakeupByMemIQ)  -> DataSource.bypass2,
                                                  ))
-      enqDelayExuSources.get(i).value         := Mux(enqDelay1WakeUpValid, 
+      enqDelayExuSources.get(i).value         := Mux(enqDelay1WakeUpValid,
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))),
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))))
     }
@@ -101,7 +102,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
                                                     enqDelayOut1.srcWakeUpByIQ(i).asBool                                 -> DataSource.bypass,
                                                     (enqDelayOut2.srcWakeUpByIQ(i).asBool && enqDelay2IsWakeupByVfIQ)    -> DataSource.bypass2,
                                                  ))
-      enqDelayExuSources.get(i).value         := Mux(enqDelay1WakeUpValid, 
+      enqDelayExuSources.get(i).value         := Mux(enqDelay1WakeUpValid,
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))),
                                                       ExuSource().fromExuOH(params, Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)))))
     }

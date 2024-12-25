@@ -27,6 +27,7 @@ import coupledL2.MemBackTypeMM
 import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import xiangshan.mem.Bundles._
 import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 
 class UncacheFlushBundle extends Bundle {
@@ -104,7 +105,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool() // uncache -> L2
   val waitSame = Bool()
   val waitReturn = Bool() // uncache -> LSQ
-  
+
   def init: Unit = {
     valid := false.B
     inflight := false.B
@@ -118,12 +119,12 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def isWaitSame(): Bool = waitSame
   def can2Uncache(): Bool = valid && !inflight && !waitSame && !waitReturn
   def can2Lsq(): Bool = valid && waitReturn
-  
+
   def setValid(x: Bool): Unit = { valid := x}
   def setInflight(x: Bool): Unit = { inflight := x}
   def setWaitReturn(x: Bool): Unit = { waitReturn := x }
   def setWaitSame(x: Bool): Unit = { waitSame := x}
-  
+
   def updateUncacheResp(): Unit = {
     assert(inflight, "The request was not sent and a response was received")
     inflight := false.B
@@ -203,7 +204,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val fence = RegInit(Bool(), false.B)
   val s_idle :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
   val uState = RegInit(s_idle)
-  
+
   def sizeMap[T <: Data](f: Int => T) = VecInit((0 until UncacheBufferSize).map(f))
   def isStore(e: UncacheEntry): Bool = e.cmd === MemoryOpConstants.M_XWR
   def isStore(x: UInt): Bool = x === MemoryOpConstants.M_XWR
