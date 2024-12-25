@@ -493,8 +493,10 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitIO(isVStore=false))
   val splitPipeline = Module(new VLSplitPipelineImp())
   val splitBuffer = Module(new VLSplitBufferImp())
+  val mergeBufferNack = io.threshold.get.valid && io.threshold.get.bits =/= io.in.bits.uop.lqIdx
   // Split Pipeline
   splitPipeline.io.in <> io.in
+  io.in.ready := splitPipeline.io.in.ready && !mergeBufferNack
   splitPipeline.io.redirect <> io.redirect
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
