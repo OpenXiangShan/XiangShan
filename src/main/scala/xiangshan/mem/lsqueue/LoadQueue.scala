@@ -216,7 +216,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueRAR
    */
   loadQueueRAR.io.redirect  <> io.redirect
-  loadQueueRAR.io.vecFeedback <> io.vecFeedback
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
   for (w <- 0 until LoadPipelineWidth) {
@@ -229,7 +228,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueRAW
    */
   loadQueueRAW.io.redirect         <> io.redirect
-  loadQueueRAW.io.vecFeedback      <> io.vecFeedback
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
