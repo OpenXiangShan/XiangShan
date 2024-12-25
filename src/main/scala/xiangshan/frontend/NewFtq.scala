@@ -37,9 +37,9 @@ import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.icache._
 
-class FtqDebugBundle extends Bundle {
-  val pc        = UInt(39.W)
-  val target    = UInt(39.W)
+class FtqDebugBundle(implicit p: Parameters) extends XSBundle {
+  val pc        = PrunedAddr(VAddrBits)
+  val target    = PrunedAddr(VAddrBits)
   val isBr      = Bool()
   val isJmp     = Bool()
   val isCall    = Bool()
@@ -98,21 +98,21 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
 }
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
-  val startAddr     = UInt(VAddrBits.W)
-  val nextLineAddr  = UInt(VAddrBits.W)
+  val startAddr     = PrunedAddr(VAddrBits)
+  val nextLineAddr  = PrunedAddr(VAddrBits)
   val isNextMask    = Vec(PredictWidth, Bool())
   val fallThruError = Bool()
   // val carry = Bool()
-  def getPc(offset: UInt) = {
-    def getHigher(pc: UInt) = pc(VAddrBits - 1, log2Ceil(PredictWidth) + instOffsetBits + 1)
-    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth) + instOffsetBits, instOffsetBits)
+  def getPc(offset: UInt): UInt = {
+    def getHigher(pc: PrunedAddr): UInt = pc(VAddrBits - 1, log2Ceil(PredictWidth) + instOffsetBits + 1)
+    def getOffset(pc: PrunedAddr): UInt = pc(log2Ceil(PredictWidth) + instOffsetBits, instOffsetBits)
     Cat(
       getHigher(Mux(isNextMask(offset) && startAddr(log2Ceil(PredictWidth) + instOffsetBits), nextLineAddr, startAddr)),
       getOffset(startAddr) + offset,
       0.U(instOffsetBits.W)
     )
   }
-  def fromBranchPrediction(resp: BranchPredictionBundle) = {
+  def fromBranchPrediction(resp: BranchPredictionBundle): Unit = {
     def carryPos(addr: UInt) = addr(instOffsetBits + log2Ceil(PredictWidth) + 1)
     this.startAddr    := resp.pc(3)
     this.nextLineAddr := resp.pc(3) + (FetchWidth * 4 * 2).U // may be broken on other configs
@@ -123,14 +123,14 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
     this
   }
   override def toPrintable: Printable =
-    p"startAddr:${Hexadecimal(startAddr)}"
+    p"startAddr:${Hexadecimal(startAddr.toUInt)}"
 }
 
 class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   val brMask    = Vec(PredictWidth, Bool())
   val jmpInfo   = ValidUndirectioned(Vec(3, Bool()))
   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
-  val jalTarget = UInt(VAddrBits.W)
+  val jalTarget = PrunedAddr(VAddrBits)
   val rvcMask   = Vec(PredictWidth, Bool())
   def hasJal    = jmpInfo.valid && !jmpInfo.bits(0)
   def hasJalr   = jmpInfo.valid && jmpInfo.bits(0)
@@ -179,7 +179,7 @@ class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst
 }
 
 class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
-  val target   = UInt(VAddrBits.W)
+  val target   = PrunedAddr(VAddrBits)
   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 }
 
@@ -250,11 +250,11 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
 
 class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo with HasBPUParameter {
   val io = IO(new Bundle {
-    val start_addr     = Input(UInt(VAddrBits.W))
+    val start_addr     = Input(PrunedAddr(VAddrBits))
     val old_entry      = Input(new FTBEntry)
     val pd             = Input(new Ftq_pd_Entry)
     val cfiIndex       = Flipped(Valid(UInt(log2Ceil(PredictWidth).W)))
-    val target         = Input(UInt(VAddrBits.W))
+    val target         = Input(PrunedAddr(VAddrBits))
     val hit            = Input(Bool())
     val mispredict_vec = Input(Vec(PredictWidth, Bool()))
 
@@ -292,7 +292,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val cfi_is_jalr = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jalr
 
   def carryPos = log2Ceil(PredictWidth) + instOffsetBits
-  def getLower(pc: UInt) = pc(carryPos - 1, instOffsetBits)
+  private def getLower(pc: PrunedAddr) = pc(carryPos - 1, instOffsetBits)
   // if not hit, establish a new entry
   init_entry.valid := true.B
   // tag is left for ftb to assign
@@ -672,8 +672,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
 
   // multi-write
-  val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
-  val newest_entry_target          = Reg(UInt(VAddrBits.W))
+  val update_target =
+    Reg(Vec(FtqSize, PrunedAddr(VAddrBits))) // could be taken target or fallThrough //TODO: remove this
+  val newest_entry_target          = Reg(PrunedAddr(VAddrBits))
   val newest_entry_target_modified = RegInit(false.B)
   val newest_entry_ptr             = Reg(new FtqPtr)
   val newest_entry_ptr_modified    = RegInit(false.B)
@@ -854,7 +855,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val toIfuPcBundle                  = Wire(new Ftq_RF_Components)
   val entry_is_to_send               = WireInit(entry_fetch_status(ifuPtr.value) === f_to_send)
   val entry_ftq_offset               = WireInit(cfiIndex_vec(ifuPtr.value))
-  val entry_next_addr                = Wire(UInt(VAddrBits.W))
+  val entry_next_addr                = Wire(PrunedAddr(VAddrBits))
 
   val pc_mem_ifu_ptr_rdata   = VecInit(Seq.fill(copyNum)(RegNext(ftq_pc_mem.io.ifuPtr_rdata)))
   val pc_mem_ifu_plus1_rdata = VecInit(Seq.fill(copyNum)(RegNext(ftq_pc_mem.io.ifuPtrPlus1_rdata)))
@@ -949,7 +950,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // TODO: remove this
   XSError(
     io.toIfu.req.valid && diff_entry_next_addr =/= entry_next_addr,
-    p"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr)}\n"
+    p"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr.toUInt)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr.toUInt)}\n"
   )
 
   // when fall through is smaller in value than start address, there must be a false hit
@@ -964,8 +965,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSDebug(
     toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit,
     "fallThruError! start:%x, fallThru:%x\n",
-    io.toIfu.req.bits.startAddr,
-    io.toIfu.req.bits.nextStartAddr
+    io.toIfu.req.bits.startAddr.toUInt,
+    io.toIfu.req.bits.nextStartAddr.toUInt
   )
 
   XSPerfAccumulate(
@@ -1053,7 +1054,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSDebug(
     RegNext(hit_pd_valid) && has_false_hit,
     "FTB false hit by br or jal or hit_pd, startAddr: %x\n",
-    pdWb.bits.pc(0)
+    pdWb.bits.pc(0).toUInt
   )
 
   when(has_false_hit) {
@@ -1146,10 +1147,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   fromIfuRedirect.bits.debugIsCtrl   := false.B
 
   val ifuRedirectCfiUpdate = fromIfuRedirect.bits.cfiUpdate
-  ifuRedirectCfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits)
+  ifuRedirectCfiUpdate.pc        := pdWb.bits.pc(pdWb.bits.misOffset.bits).toUInt
   ifuRedirectCfiUpdate.pd        := pdWb.bits.pd(pdWb.bits.misOffset.bits)
   ifuRedirectCfiUpdate.predTaken := cfiIndex_vec(pdWb.bits.ftqIdx.value).valid
-  ifuRedirectCfiUpdate.target    := pdWb.bits.target
+  ifuRedirectCfiUpdate.target    := pdWb.bits.target.toUInt
   ifuRedirectCfiUpdate.taken     := pdWb.bits.cfiOffset.valid
   ifuRedirectCfiUpdate.isMisPred := pdWb.bits.misOffset.valid
 
@@ -1185,7 +1186,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
   io.toBackend.newest_entry_en     := RegNext(newest_entry_en)
   io.toBackend.newest_entry_ptr    := RegEnable(newest_entry_ptr, newest_entry_en)
-  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
+  io.toBackend.newest_entry_target := RegEnable(newest_entry_target.toUInt, newest_entry_en)
 
   // *********************************************************************
   // **************************** wb from exu ****************************
@@ -1568,10 +1569,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       ((commit_hit === h_hit) && inFtbEntry) || (!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)
     XSDebug(
       v && do_commit && isCfi,
-      p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
+      p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc.toUInt)}) " +
         p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
-        p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
-        p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n"
+        p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr.toUInt)}) AddIntoHist(${addIntoHist}) " +
+        p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target.toUInt)})\n"
     )
 
     val logbundle = Wire(new FtqDebugBundle)
@@ -1674,7 +1675,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftb_modified_entry_br_full              = ftb_modified_entry && ftbEntryGen.is_br_full
   val ftb_modified_entry_strong_bias          = ftb_modified_entry && ftbEntryGen.is_strong_bias_modified
 
-  def getFtbEntryLen(pc: UInt, entry: FTBEntry) = (entry.getFallThrough(pc) - pc) >> instOffsetBits
+  def getFtbEntryLen(pc: PrunedAddr, entry: FTBEntry): UInt = (entry.getFallThrough(pc) - pc) >> instOffsetBits
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)
@@ -1727,7 +1728,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
       p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n"
   )
-  XSDebug(do_commit, p"[deq info] cfiIndex: $commit_cfi, $commit_pc_bundle, target: ${Hexadecimal(commit_target)}\n")
+  XSDebug(
+    do_commit,
+    p"[deq info] cfiIndex: $commit_cfi, $commit_pc_bundle, target: ${Hexadecimal(commit_target.toUInt)}\n"
+  )
 
   //   def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
   //     commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
