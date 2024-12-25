@@ -26,14 +26,15 @@ import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
 import utility._
+import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.cache.mmu._
-import xiangshan.frontend._
+import xiangshan.mem._
 import xiangshan.mem.L1PrefetchFuzzer
-import scala.collection.mutable.ListBuffer
+import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
+import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
