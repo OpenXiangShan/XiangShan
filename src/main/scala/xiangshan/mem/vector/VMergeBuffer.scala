@@ -309,8 +309,6 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, s"entry: $latchWbIndex, FlowWriteback overflow!!\n")
     XSError(!allocated(latchWbIndex) && latchWbValid, s"entry: $latchWbIndex, Writeback error flow!!\n")
   }
-  // for inorder mem asscess
-  io.toSplit := DontCare
 
   //uopwriteback(deq)
   for (i <- 0 until uopSize){
@@ -379,6 +377,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     enablePreAlloc = false,
     moduleName = "VLoad MergeBuffer freelist"
   ))
+  io.toSplit.get.thresold := freeCount <= 6.U
 
   //merge data
   val flowWbElemIdx     = Wire(Vec(pipeWidth, UInt(elemIdxBits.W)))

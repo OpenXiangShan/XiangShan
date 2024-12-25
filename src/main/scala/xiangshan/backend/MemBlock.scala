@@ -1496,6 +1496,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
                               vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
+    vlSplit(i).io.thresold.get.valid := vlMergeBuffer.io.toSplit.get.thresold
+    vlSplit(i).io.thresold.get.bits  := lsq.io.lqDeqPtr
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
       Mux(vlSplit(i).io.out.fire, vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
