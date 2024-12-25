@@ -30,6 +30,7 @@ import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
+import scala.collection.mutable
 import math._
 
 object genWmask {
@@ -97,7 +98,7 @@ object shiftMaskToHigh {
 }
 
 object ReplayCauseNO {
-  private val causes: Set[(Int, String)] = Set()
+  private val causes: mutable.Set[(Int, String)] = mutable.Set()
 
   private var initVal = 0
 
@@ -127,27 +128,27 @@ object ReplayCauseNO {
 
   def apply(init: Bool) = VecInit(Seq.fill(numCauses)(init))
 
-  def isMA(cause: Vec[Bool]): Bool = cause(C_MA)
+  def hasMA(cause: Vec[Bool]): Bool = cause(C_MA)
 
-  def isTM(cause: Vec[Bool]): Bool = cause(C_TM)
+  def hasTM(cause: Vec[Bool]): Bool = cause(C_TM)
 
-  def isFF(cause: Vec[Bool]): Bool = cause(C_FF)
+  def hasFF(cause: Vec[Bool]): Bool = cause(C_FF)
 
-  def isDR(cause: Vec[Bool]): Bool = cause(C_DR)
+  def hasDR(cause: Vec[Bool]): Bool = cause(C_DR)
 
-  def isDM(cause: Vec[Bool]): Bool = cause(C_DM)
+  def hasDM(cause: Vec[Bool]): Bool = cause(C_DM)
 
-  def isWPF(cause: Vec[Bool]): Bool = cause(C_WPF)
+  def hasWPF(cause: Vec[Bool]): Bool = cause(C_WPF)
 
-  def isBC(cause: Vec[Bool]): Bool = cause(C_BC)
+  def hasBC(cause: Vec[Bool]): Bool = cause(C_BC)
 
-  def isRARN(cause: Vec[Bool]): Bool = cause(C_RARN)
+  def hasRARN(cause: Vec[Bool]): Bool = cause(C_RARN)
 
-  def isRAWN(cause: Vec[Bool]): Bool = cause(C_RAWN)
+  def hasRAWN(cause: Vec[Bool]): Bool = cause(C_RAWN)
 
-  def isSN(cause: Vec[Bool]): Bool = cause(C_SN)
+  def hasSN(cause: Vec[Bool]): Bool = cause(C_SN)
 
-  def isMBN(cause: Vec[Bool]): Bool = cause(C_MBN)
+  def hasMBN(cause: Vec[Bool]): Bool = cause(C_MBN)
 
   def getHigherCauseThan(cause: Int): Seq[Int] = {
     val priorities = causes.map(_._1).toSeq
