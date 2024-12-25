@@ -795,7 +795,6 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
-  val csr = new L1CacheToCsrIO
   val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
@@ -1670,32 +1669,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     source.ready := sink.ready   && !block_signal
     sink.bits    := source.bits
   }
-
-
-  //----------------------------------------
-  // Customized csr cache op support
-  val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
-  cacheOpDecoder.io.csr <> io.csr
-  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  // dup cacheOp_req_valid
-  bankedDataArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
-  // dup cacheOp_req_bits_opCode
-  bankedDataArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
-
-  tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  // dup cacheOp_req_valid
-  tagArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
-  // dup cacheOp_req_bits_opCode
-  tagArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
-
-  cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
-    tagArray.io.cacheOp.resp.valid
-  cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
-    bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
-    tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
-  ))
-  cacheOpDecoder.io.error := io.error
-  assert(!((bankedDataArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------
   // performance counters
