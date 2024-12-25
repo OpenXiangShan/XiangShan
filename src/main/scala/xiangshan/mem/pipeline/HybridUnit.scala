@@ -837,7 +837,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   when (s2_ld_flow) {
     when (!s2_in.lateKill) {
-      s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld) && s2_vecActive
+      s2_exception_vec(loadAccessFault) := s2_vecActive && (
+        s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld ||
+          s2_fwd_frm_d_chan && s2_d_corrupt ||
+          s2_fwd_frm_mshr && s2_mshr_corrupt
+      )
       // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
       when (s2_prf || s2_in.tlbMiss) {
         s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
@@ -853,8 +857,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_st_exception = ExceptionNO.selectByFu(s2_exception_vec, StaCfg).asUInt.orR && !s2_ld_flow
   val s2_exception    = s2_ld_exception || s2_st_exception
 
-  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.ldu_io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
-  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.ldu_io.forward_mshr.forward()
+  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.ldu_io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
+  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_corrupt) = io.ldu_io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
 
   // writeback access fault caused by ecc error / bus error

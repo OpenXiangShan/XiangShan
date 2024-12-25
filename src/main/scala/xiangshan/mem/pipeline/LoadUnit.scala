@@ -1186,8 +1186,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
                      s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_check_mmio
-  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
-  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
+  val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
+  val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_corrupt) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
 
   // writeback access fault caused by ecc error / bus error
@@ -1287,6 +1287,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // We will generate misaligned exceptions at mmio.
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
   s2_real_exceptionVec(loadAddrMisaligned) := s2_out.isMisalign && s2_check_mmio
+  s2_real_exceptionVec(loadAccessFault) := s2_fwd_frm_d_chan && s2_d_corrupt ||
+    s2_fwd_frm_mshr && s2_mshr_corrupt
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
 

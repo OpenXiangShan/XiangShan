@@ -661,12 +661,16 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
   val data = UInt(l1BusDataWidth.W)
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val last = Bool()
+  val corrupt = Bool()
 
-  def apply(req_valid : Bool, req_data : UInt, req_mshrid : UInt, req_last : Bool) = {
-    valid := req_valid
-    data := req_data
-    mshrid := req_mshrid
-    last := req_last
+  def apply(d: DecoupledIO[TLBundleD], edge: TLEdgeOut) = {
+    val isKeyword = d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
+    val (_, _, done, _) = edge.count(d)
+    valid := d.valid
+    data := d.bits.data
+    mshrid := d.bits.source
+    last := isKeyword ^ done
+    corrupt := d.bits.corrupt || d.bits.denied
   }
 
   def dontCare() = {
@@ -674,6 +678,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     data := DontCare
     mshrid := DontCare
     last := DontCare
+    corrupt := false.B
   }
 
   def forward(req_valid : Bool, req_mshr_id : UInt, req_paddr : UInt) = {
@@ -698,7 +703,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
       }
     }
 
-    (forward_D, forwardData)
+    (forward_D, forwardData, corrupt)
   }
 }
 
@@ -708,14 +713,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val raw_data = Vec(blockRows, UInt(rowBits.W))
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
-
-  def apply(mshr_valid : Bool, mshr_paddr : UInt, mshr_rawdata : Vec[UInt], mshr_first_valid : Bool, mshr_last_valid : Bool) = {
-    inflight := mshr_valid
-    paddr := mshr_paddr
-    raw_data := mshr_rawdata
-    firstbeat_valid := mshr_first_valid
-    lastbeat_valid := mshr_last_valid
-  }
+  val corrupt = Bool()
 
   // check if we can forward from mshr or D channel
   def check(req_valid : Bool, req_paddr : UInt) = {
@@ -746,6 +744,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 // forward mshr's data to ldu
 class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
+  // TODO: use separate Bundles for req and resp
   // req
   val valid = Input(Bool())
   val mshrid = Input(UInt(log2Up(cfg.nMissEntries).W))
@@ -754,7 +753,9 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val forward_mshr = Output(Bool())
   val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
+  val corrupt = Output(Bool())
 
+  // Why? What is the purpose of `connect`???
   def connect(sink: LduToMissqueueForwardIO) = {
     sink.valid := valid
     sink.mshrid := mshrid
@@ -762,10 +763,11 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
     forward_mshr := sink.forward_mshr
     forwardData := sink.forwardData
     forward_result_valid := sink.forward_result_valid
+    corrupt := sink.corrupt
   }
 
   def forward() = {
-    (forward_result_valid, forward_mshr, forwardData)
+    (forward_result_valid, forward_mshr, forwardData, corrupt)
   }
 }
 
@@ -1285,20 +1287,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
- val isKeyword = bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
+
   (0 until LoadPipelineWidth).map(i => {
-    val (_, _, done, _) = edge.count(bus.d)
     when(bus.d.bits.opcode === TLMessages.GrantData) {
-      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, isKeyword ^ done)
-   //   io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source,done)
+      io.lsu.forward_D(i).apply(bus.d, edge)
     }.otherwise {
       io.lsu.forward_D(i).dontCare()
     }
   })
   // tl D channel wakeup
-  val (_, _, done, _) = edge.count(bus.d)
   when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
-    io.lsu.tl_d_channel.apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+    io.lsu.tl_d_channel.apply(bus.d, edge)
   } .otherwise {
     io.lsu.tl_d_channel.dontCare()
   }

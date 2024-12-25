@@ -832,7 +832,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
-  io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst_forward_info, w_grantlast_forward_info)
+  io.forwardInfo.inflight := req_valid
+  io.forwardInfo.paddr := req.addr
+  io.forwardInfo.raw_data := refill_and_store_data
+  io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
+  io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
+  io.forwardInfo.corrupt := error
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
   io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
@@ -1024,6 +1029,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.forward(i).forward_result_valid := forwardInfo_vec(id).check(req_valid, paddr)
     io.forward(i).forward_mshr := forward_mshr
     io.forward(i).forwardData := forwardData
+    io.forward(i).corrupt := RegNext(forwardInfo_vec(id).corrupt)
   })
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
