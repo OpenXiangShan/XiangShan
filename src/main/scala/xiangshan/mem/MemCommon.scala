@@ -96,6 +96,75 @@ object shiftMaskToHigh {
   }
 }
 
+object ReplayCauseNO {
+  private val causes: Set[(Int, String)] = Set()
+
+  private var initVal = 0
+
+  private def addCause(name: String): Int = {
+    val causeNo = initVal
+    causes += (initVal -> name)
+    initVal += 1
+    causeNo
+  }
+
+  // priority: highest to lowest
+  val C_MA   = addCause(name = "memory ambiguous")
+  val C_TM   = addCause(name = "tlb miss")
+  val C_FF   = addCause(name = "forward fail")
+  val C_DR   = addCause(name = "dcache replay")
+  val C_DM   = addCause(name = "dcache miss")
+  val C_WPF  = addCause(name = "way predict fail")
+  val C_BC   = addCause(name = "bank conflict")
+  val C_RARN = addCause(name = "loadQueueRAR nack")
+  val C_RAWN = addCause(name = "loadQueueRAW nack")
+  val C_SN   = addCause(name = "slight nuke")
+  val C_MBN  = addCause(name = "misalign buffer nack")
+
+  val numCauses: Int = causes.size
+
+  def apply() = Vec(numCauses, Bool())
+
+  def apply(init: Bool) = VecInit(Seq.fill(numCauses)(init))
+
+  def isMA(cause: Vec[Bool]): Bool = cause(C_MA)
+
+  def isTM(cause: Vec[Bool]): Bool = cause(C_TM)
+
+  def isFF(cause: Vec[Bool]): Bool = cause(C_FF)
+
+  def isDR(cause: Vec[Bool]): Bool = cause(C_DR)
+
+  def isDM(cause: Vec[Bool]): Bool = cause(C_DM)
+
+  def isWPF(cause: Vec[Bool]): Bool = cause(C_WPF)
+
+  def isBC(cause: Vec[Bool]): Bool = cause(C_BC)
+
+  def isRARN(cause: Vec[Bool]): Bool = cause(C_RARN)
+
+  def isRAWN(cause: Vec[Bool]): Bool = cause(C_RAWN)
+
+  def isSN(cause: Vec[Bool]): Bool = cause(C_SN)
+
+  def isMBN(cause: Vec[Bool]): Bool = cause(C_MBN)
+
+  def getHigherCauseThan(cause: Int): Seq[Int] = {
+    val priorities = causes.map(_._1).toSeq
+    val idx = priorities.indexOf(cause, 0)
+    require(idx != -1, s"The $cause does not exists in IntPriority Seq")
+    priorities.slice(0, idx)
+  }
+
+  def highestSelect(cause: UInt): Vec[Bool] = {
+    VecInit(PriorityEncoderOH(cause.asUInt).asBools)
+  }
+
+  def highestSelect(cause: Vec[Bool]): Vec[Bool] = highestSelect(cause.asUInt)
+
+  def needReplay(cause: Vec[Bool]): Bool = cause.asUInt.orR
+}
+
 
 object AddPipelineReg {
   class PipelineRegModule[T <: Data](gen: T) extends Module {
