@@ -1164,6 +1164,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
+  val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_vecActive && (
       s2_in.uop.exceptionVec(loadAccessFault) ||
@@ -1335,6 +1336,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.uop.fpWen           := s2_in.uop.fpWen
   s2_out.nc                  := s2_in.nc
   s2_out.mmio                := s2_mmio
+  s2_out.memBackTypeMM       := s2_memBackTypeMM
   s2_out.uop.flushPipe       := false.B
   s2_out.uop.exceptionVec    := s2_real_exceptionVec
   s2_out.forwardMask         := s2_fwd_mask
