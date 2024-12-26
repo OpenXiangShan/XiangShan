@@ -948,6 +948,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mq_enq_cancel = Output(Bool())
 
     val debugTopDown = new DCacheTopDownIO
+    val l1Miss = Output(Bool())
   })
 
   // 128KBL1: FIXME: provide vaddr for l2
@@ -1199,6 +1200,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("max_inflight", max_inflight)
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
+  io.l1Miss := RegNext(~Cat(entries.map(_.io.primary_ready)).andR)
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
   XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)

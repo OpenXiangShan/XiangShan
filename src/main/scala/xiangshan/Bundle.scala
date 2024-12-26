@@ -783,3 +783,15 @@ class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParamete
   val isKeyword = Bool()                             // miss entry keyword -> L1 load queue replay
 }
 
+class TopDownInfo(implicit p: Parameters) extends XSBundle {
+  val lqEmpty = Input(Bool())
+  val sqEmpty = Input(Bool())
+  val l1Miss = Input(Bool())
+  val noUopsIssued = Output(Bool())
+  val l2TopMiss = Input(new TopDownFromL2Top)
+}
+
+class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
+  val l2Miss = Bool()
+  val l3Miss = Bool()
+}

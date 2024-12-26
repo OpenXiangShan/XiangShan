@@ -351,6 +351,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val fromBackend = Flipped(new TraceCoreInterface(hasOffset = true))
       val toL2Top     = new TraceCoreInterface
     }
+
+    val topDownInfo = new Bundle {
+      val fromL2Top = Input(new TopDownFromL2Top)
+      val toBackend = Flipped(new TopDownInfo)
+    }
   })
 
   dontTouch(io.inner_hartId)
@@ -1992,6 +1997,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
+
+  lsq.io.noUopsIssued := io.topDownInfo.toBackend.noUopsIssued
+  io.topDownInfo.toBackend.lqEmpty := lsq.io.lqEmpty
+  io.topDownInfo.toBackend.sqEmpty := lsq.io.sqEmpty
+  io.topDownInfo.toBackend.l1Miss := dcache.io.l1Miss
+  io.topDownInfo.toBackend.l2TopMiss.l2Miss := RegNext(io.topDownInfo.fromL2Top.l2Miss)
+  io.topDownInfo.toBackend.l2TopMiss.l3Miss := RegNext(io.topDownInfo.fromL2Top.l3Miss)
 
   val hyLdDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
   val hyStDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
