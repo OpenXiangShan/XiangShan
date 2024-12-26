@@ -410,8 +410,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
-  val frontendBubble = Mux(io.backend.canAccept, DecodeWidth.U - PopCount(ibuffer.io.out.map(_.valid)), 0.U)
-  XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
   io.resetInFrontend       := reset.asBool
 

@@ -810,6 +810,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l2_hint = Input(Valid(new L2ToL1Hint()))
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
+  val l1Miss = Output(Bool())
 }
 
 private object ArbiterCtrl {
@@ -1676,6 +1677,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("num_loads", num_loads)
 
   io.mshrFull := missQueue.io.full
+  io.l1Miss := missQueue.io.l1Miss
 
   // performance counter
   // val ld_access = Wire(Vec(LoadPipelineWidth, missQueue.io.debug_early_replace.last.cloneType))
