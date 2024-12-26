@@ -99,7 +99,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val req             = Vec(enqPortNum, Flipped(Decoupled(new LsPipelineBundle)))
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
-    val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
+    val splitStoreResp  = Flipped(Valid(new LsPipelineBundle))
     val writeBack       = Decoupled(new MemExuOutput)
     val vecWriteBack    = Vec(VecStorePipelineWidth, Decoupled(new VecPipelineFeedbackIO(isVStore = true)))
     val storeOutValid    = Input(Bool())
@@ -187,14 +187,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.toVecStoreMergeBuffer.zipWithIndex.map{
     case (toStMB, index) => {
       toStMB.flush   := req_valid && cross4KBPageBoundary && cross4KBPageEnq && UIntToOH(req.portIndex)(index)
-      toStMB.mbIndex := req.mbIndex
+      toStMB.mbIndex := req.mbIdx
     }
   }
   io.full := req_valid
 
   //logic
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
-  val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new SqWriteBundle))))
+  val splitStoreResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val isCrossPage    = RegInit(false.B)
   val exceptionVec   = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentStores   = RegInit(0.U(maxSplitNum.W))
@@ -205,14 +205,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val globalException = RegInit(false.B)
   val globalMMIO = RegInit(false.B)
 
-  val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.need_rep
-  val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.need_rep
+  val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.needReplay
+  val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.needReplay
 
   io.sqControl.toStoreQueue.crossPageWithHit := io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx && isCrossPage
   io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block
   io.sqControl.toStoreQueue.paddr := Cat(splitStoreResp(1).paddr(splitStoreResp(1).paddr.getWidth - 1, 3), 0.U(3.W))
 
-  io.sqControl.toStoreQueue.withSameUop := io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx && io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx && req.isvec && robMatch && isCrossPage
+  io.sqControl.toStoreQueue.withSameUop := io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx && io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx && req.isVector && robMatch && isCrossPage
 
   //state transition
   switch(bufferState) {
@@ -250,7 +250,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           bufferState := s_wb
           globalException := hasException
           globalMMIO := isMMIO
-        } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & (~clearOh).asUInt).orR) {
+        } .elsewhen(io.splitStoreResp.bits.needReplay || (unSentStores & (~clearOh).asUInt).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
@@ -261,7 +261,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
 
     is (s_wb) {
-      when (req.isvec) {
+      when (req.isVector) {
         when (io.vecWriteBack.map(x => x.fire).reduce( _ || _)) {
           bufferState := s_idle
           req_valid := false.B
@@ -305,7 +305,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isVector, req.alignedType(1,0), req.uop.fuOpType(1, 0))
 
   val highAddress = LookupTree(alignedType, List(
     SB -> 0.U,
@@ -510,12 +510,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitStoreReq.valid := req_valid && (bufferState === s_req)
   io.splitStoreReq.bits  := splitStoreReqs(curPtr)
-  io.splitStoreReq.bits.isvec  := req.isvec
+  io.splitStoreReq.bits.isVector  := req.isVector
   // Restore the information of H extension store
   // bit encoding: | hsv 1 | store 00 | size(2bit) |
   val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
-  io.splitStoreReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitStoreReq.bits.alignedType  := Mux(req.isvec, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  io.splitStoreReq.bits.uop.fuOpType := Mux(req.isVector, req.uop.fuOpType, Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0)))
+  io.splitStoreReq.bits.alignedType  := Mux(req.isVector, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
   io.splitStoreReq.bits.isFinalSplit := curPtr(0)
 
   when (io.splitStoreResp.valid) {
@@ -531,7 +531,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       unWriteStores := 0.U
       unSentStores := 0.U
       StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
-    } .elsewhen (!io.splitStoreResp.bits.need_rep) {
+    } .elsewhen (!io.splitStoreResp.bits.needReplay) {
       unSentStores := unSentStores & (~UIntToOH(curPtr)).asUInt
       curPtr := curPtr + 1.U
       exceptionVec := 0.U.asTypeOf(ExceptionVec())
@@ -560,7 +560,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isvec
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isVector
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
@@ -577,9 +577,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.vecWriteBack.zipWithIndex.map{
     case (wb, index) => {
-      wb.valid := req_valid && (bufferState === s_wb) && req.isvec && !io.storeVecOutValid && UIntToOH(req.portIndex)(index)
+      wb.valid := req_valid && (bufferState === s_wb) && req.isVector && !io.storeVecOutValid && UIntToOH(req.portIndex)(index)
 
-      wb.bits.mBIndex           := req.mbIndex
+      wb.bits.mBIndex           := req.mbIdx
       wb.bits.hit               := true.B
       wb.bits.isvec             := true.B
       wb.bits.sourceType        := RSFeedbackType.tlbMiss

@@ -101,7 +101,7 @@ trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParame
 }
 
 trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
-  def reorder[T <: LdPrefetchTrainBundle](source: Vec[ValidIO[T]]): Vec[ValidIO[T]] = {
+  def reorder[T <: LsPrefetchTrainBundle](source: Vec[ValidIO[T]]): Vec[ValidIO[T]] = {
     if(source.length == 1) {
       source
     }else if(source.length == 2) {
@@ -154,7 +154,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     val enable = Input(Bool())
     val flush = Input(Bool())
     // train input, only from load for now
-    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LsPrefetchTrainBundle())))
     // filter out
     val train_req = DecoupledIO(new PrefetchReqBundle())
   })
@@ -182,7 +182,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   require(size >= enqLen)
 
   val ld_in_reordered = reorder(io.ld_in)
-  val reqs_l = ld_in_reordered.map(_.bits.asPrefetchReqBundle())
+  val reqs_l = ld_in_reordered.map(_.bits.toPrefetchReqBundle())
   val reqs_vl = ld_in_reordered.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
@@ -819,7 +819,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
-  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LdPrefetchTrainBundle()))))
+  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LsPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))

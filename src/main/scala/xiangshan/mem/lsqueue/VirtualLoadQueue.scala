@@ -44,7 +44,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3
-    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
+    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
     // global
@@ -251,7 +251,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
     val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-    val need_rep = io.ldin(i).bits.rep_info.need_rep
+    val need_rep = io.ldin(i).bits.needReplay
     val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
       when (!need_rep && need_valid) {
@@ -271,15 +271,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
               io.ldin(i).bits.isSWPrefetch
            })
 
-        //
-        when (io.ldin(i).bits.data_wen_dup(1)) {
-          uop(loadWbIndex) := io.ldin(i).bits.uop
-        }
-        when (io.ldin(i).bits.data_wen_dup(4)) {
-          uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
-        }
-        uop(loadWbIndex).debugInfo := io.ldin(i).bits.rep_info.debug
-
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
@@ -287,16 +278,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     }
 
     XSInfo(io.ldin(i).valid && !need_rep && need_valid,
-      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x mmio %x isvec %x\n",
       io.ldin(i).bits.uop.lqIdx.asUInt,
       io.ldin(i).bits.uop.pc,
       io.ldin(i).bits.vaddr,
       io.ldin(i).bits.paddr,
       io.ldin(i).bits.mask,
-      io.ldin(i).bits.forwardData.asUInt,
-      io.ldin(i).bits.forwardMask.asUInt,
       io.ldin(i).bits.mmio,
-      io.ldin(i).bits.isvec
+      io.ldin(i).bits.isVector
     )
   }
 

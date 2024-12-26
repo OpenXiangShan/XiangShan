@@ -158,7 +158,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      datavalid(enqIndex) := enq.bits.dataValid
     }
     val debug_robIdx = enq.bits.uop.robIdx.asUInt
     XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
@@ -166,7 +166,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
-    query.bits.rep_frm_fetch := RegNext(false.B)
+    query.bits.replayInst := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate

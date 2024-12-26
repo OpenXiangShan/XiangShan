@@ -143,7 +143,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val enableOutstanding = Input(Bool())
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
-  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardIO))
 }
 
 // convert DCacheIO to TileLink
@@ -431,19 +431,21 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   f1_needDrain := f1_tagMismatchVec.asUInt.orR && !empty
 
   for ((forward, i) <- io.forward.zipWithIndex) {
-    val f0_fwdValid = forward.valid
+    val (req, resp) = (forward.req, forward.resp)
+
+    val f0_fwdValid = req.valid
     val f1_fwdValid = RegNext(f0_fwdValid)
 
     // f0 vaddr match
-    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
+    val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, req.bits.vaddr))
     val f0_validTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid)
     // f0 select
     val f0_fwdMask = shiftMaskToHigh(
-      forward.vaddr,
+      req.bits.vaddr,
       Mux1H(f0_validTagMatches, f0_fwdMaskCandidates)
     ).asTypeOf(Vec(VDataBytes, Bool()))
     val f0_fwdData = shiftDataToHigh(
-      forward.vaddr,
+      req.bits.vaddr,
       Mux1H(f0_validTagMatches, f0_fwdDataCandidates)
     ).asTypeOf(Vec(VDataBytes, UInt(8.W)))
 
@@ -451,7 +453,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_fwdMask = RegEnable(f0_fwdMask, f0_fwdValid)
     val f1_fwdData = RegEnable(f0_fwdData, f0_fwdValid)
     // forward.paddr from dtlb, which is far from uncache
-    val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), RegEnable(forward.paddr, f0_fwdValid)))
+    val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), RegEnable(req.bits.paddr, f0_fwdValid)))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
     ).asUInt.orR
@@ -459,21 +461,24 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
         f1_ptagMatches.asUInt,
         RegEnable(f0_vtagMatches.asUInt, f0_fwdValid),
-        RegEnable(forward.vaddr, f0_fwdValid),
-        RegEnable(forward.paddr, f0_fwdValid)
+        RegEnable(req.bits.vaddr, f0_fwdValid),
+        RegEnable(req.bits.paddr, f0_fwdValid)
       )
     }
     // f1 output
-    forward.addrInvalid := false.B // addr in ubuffer is always ready
-    forward.dataInvalid := false.B // data in ubuffer is always ready
-    forward.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
+    resp.addrInvalid := false.B // addr in ubuffer is always ready
+    resp.addrInvalidSqIdx := DontCare
+    resp.dataInvalid := false.B // data in ubuffer is always ready
+    resp.dataInvalidFast := DontCare
+    resp.dataInvalidSqIdx := DontCare
+    resp.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
     for (j <- 0 until VDataBytes) {
-      forward.forwardMaskFast(j) := f0_fwdMask(j)
+      resp.forwardMaskFast(j) := f0_fwdMask(j)
 
-      forward.forwardData(j) := f1_fwdData(j)
-      forward.forwardMask(j) := false.B
+      resp.forwardData(j) := f1_fwdData(j)
+      resp.forwardMask(j) := false.B
       when(f1_fwdMask(j) && f1_fwdValid) {
-        forward.forwardMask(j) := true.B
+        resp.forwardMask(j) := true.B
       }
     }
 
@@ -504,7 +509,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire)
-  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR)))
+  XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.resp.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
   val perfEvents = Seq(
@@ -513,7 +518,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire),
-    ("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR))),
+    ("forward_count", PopCount(io.forward.map(_.resp.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
   )
 

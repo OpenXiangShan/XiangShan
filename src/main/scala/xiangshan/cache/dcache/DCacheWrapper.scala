@@ -601,6 +601,37 @@ class CMOResp(implicit p: Parameters) extends Bundle {
 }
 
 // used by load unit
+class DCacheLoadReqIO(implicit p: Parameters) extends DCacheBundle {
+  val req               = DecoupledIO(new DCacheWordReq)
+  val s1_kill_data_read = Output(Bool()) // only kill bandedDataRead at s1
+  val s1_kill           = Output(Bool()) // kill loadpipe req at s1
+  val s2_kill           = Output(Bool())
+  val s0_pc             = Output(UInt(VAddrBits.W))
+  val s1_pc             = Output(UInt(VAddrBits.W))
+  val s2_pc             = Output(UInt(VAddrBits.W))
+  val replacementUpdated = Output(Bool())
+  val is128Req          = Output(Bool())
+  val pf_source         = Output(UInt(L1PfSourceBits.W))
+  val s1_paddr_dup_lsu  = Output(UInt(PAddrBits.W)) // lsu side paddr
+  val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
+}
+
+class DCacheLoadRespIO(implicit p: Parameters) extends DCacheBundle {
+  val resp                   = Flipped(DecoupledIO(new DCacheWordResp))
+  val s1_disable_fast_wakeup = Input(Bool())
+  val s2_hit                 = Input(Bool()) // hit signal for lsu,
+  val s2_first_hit           = Input(Bool())
+  val s2_bank_conflict       = Input(Bool())
+  val s2_wpu_pred_fail       = Input(Bool())
+  val s2_mq_nack             = Input(Bool())
+  // debug
+  val debug_s1_hit_way       = Input(UInt(nWays.W))
+  val debug_s2_pred_way_num  = Input(UInt(XLEN.W))
+  val debug_s2_dm_way_num    = Input(UInt(XLEN.W))
+  val debug_s2_real_way_num  = Input(UInt(XLEN.W))
+}
+
+// used by load unit
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
@@ -741,6 +772,22 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     }
 
     (forward_mshr, forwardData)
+  }
+}
+
+// forward mshr's data to ldu
+class MissQueueForwardReqBundle(implicit p: Parameters) extends DCacheBundle {
+  val mshrId = UInt(log2Up(cfg.nMissEntries).W)
+  val paddr = UInt(PAddrBits.W)
+}
+
+class MissQueueForwardRespBundle(implicit p: Parameters) extends DCacheBundle {
+  val forwardMshr = Bool()
+  val forwardData = Vec(VLEN/8, UInt(8.W))
+  val forwardResultValid = Bool()
+
+  def forward() = {
+    (forwardResultValid, forwardMshr, forwardData)
   }
 }
 

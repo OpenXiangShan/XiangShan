@@ -13,7 +13,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.Bundles.MemWaitUpdateReq
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 

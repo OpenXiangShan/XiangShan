@@ -164,7 +164,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+        val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle))) // from load_s3
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
@@ -256,7 +256,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   exceptionBuffer.io.redirect <> io.redirect
   for (i <- 0 until LoadPipelineWidth) {
-    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isvec // from load_s3
+    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isVector // from load_s3
     exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
   // vlsu exception!
@@ -294,7 +294,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3
     val ldinBits = io.ldu.ldin(w).bits
-    buff.valid := io.ldu.ldin(w).valid && (ldinBits.nc || ldinBits.mmio) && !ldinBits.rep_info.need_rep
+    buff.valid := io.ldu.ldin(w).valid && (ldinBits.isNoncacheable || ldinBits.mmio) && !ldinBits.needReplay
     buff.bits := ldinBits
   }
 

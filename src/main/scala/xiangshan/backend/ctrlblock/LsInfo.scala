@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.XSBundle
-import xiangshan.mem.LoadReplayCauses
+import xiangshan.mem.ReplayCauseNO
 
 class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
   val ssid = UInt(SSIDWidth.W)
@@ -21,7 +21,7 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle{
   val s3_isReplaySlow = Bool()
   val s3_isReplayRS = Bool()
   val s3_isReplay = Bool()
-  val replayCause = Vec(LoadReplayCauses.allCauses, Bool())
+  val replayCause = Vec(ReplayCauseNO.numCauses, Bool())
   val replayCnt = UInt(XLEN.W)
 
   def s1SignalEnable(ena: DebugLsInfo) = {
@@ -61,7 +61,7 @@ object DebugLsInfo {
     lsInfo.s3_isReplayRS := false.B
     lsInfo.s3_isReplay := false.B
     lsInfo.replayCnt := 0.U
-    lsInfo.replayCause := Seq.fill(LoadReplayCauses.allCauses)(false.B)
+    lsInfo.replayCause := Seq.fill(ReplayCauseNO.numCauses)(false.B)
     lsInfo
   }
 }

@@ -1078,8 +1078,8 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val io = IO(new Bundle() {
     // train input
     // hybrid load store
-    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
-    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
     // filter out
     val train_req = ValidIO(new PrefetchReqBundle())
   })
@@ -1111,7 +1111,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   val ld_reorder = reorder(io.ld_in)
   val st_reorder = reorder(io.st_in)
-  val reqs_ls = ld_reorder.map(_.bits.asPrefetchReqBundle()) ++ st_reorder.map(_.bits.asPrefetchReqBundle())
+  val reqs_ls = ld_reorder.map(_.bits.toPrefetchReqBundle()) ++ st_reorder.map(_.bits.toPrefetchReqBundle())
   val reqs_vls = ld_reorder.map(_.valid) ++ st_reorder.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
@@ -1299,7 +1299,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   for((train, i) <- io.ld_in.zipWithIndex){
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
-    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.meta_prefetch))
+    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.metaPrefetch))
   }
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U
