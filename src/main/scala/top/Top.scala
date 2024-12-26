@@ -152,6 +152,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val dse_reset_vec = Output(UInt(36.W))
       val dse_max_epoch = Output(UInt(64.W))
       val dse_epoch = Output(UInt(64.W))
+      val dse_max_instr = Output(UInt(64.W))
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset.asBool.asAsyncReset) { ResetGen() }
@@ -169,6 +170,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.dse_reset_vec := dseCtrl.module.io.reset_vector
     io.dse_max_epoch := dseCtrl.module.io.max_epoch
     io.dse_epoch := dseCtrl.module.io.epoch
+    io.dse_max_instr := dseCtrl.module.io.max_instr_cnt
 
     // input
     dontTouch(dma)

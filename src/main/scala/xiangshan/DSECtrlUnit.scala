@@ -41,6 +41,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val instrCnt = Input(UInt(64.W))
     val max_epoch = Output(UInt(64.W))
     val epoch = Output(UInt(64.W))
+    val max_instr_cnt = Output(UInt(64.W))
   })
 
   childClock := io.clk
@@ -105,6 +106,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
 
     io.max_epoch := max_epoch
     io.epoch := epoch
+    io.max_instr_cnt := max_instr_cnt
 
     ctrlnode.regmap(
       0x000 -> Seq(RegField(8, pingpong)),
