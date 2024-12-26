@@ -87,6 +87,7 @@ class NewCSRInput(implicit p: Parameters) extends Bundle {
   val mret = Input(Bool())
   val sret = Input(Bool())
   val dret = Input(Bool())
+  val redirectFlush = Input(Bool())
 }
 
 class NewCSROutput(implicit p: Parameters) extends Bundle {
@@ -246,6 +247,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val ren   = io.in.bits.ren && valid
   val raddr = io.in.bits.addr
+
+  // flush
+  val redirectFlush = io.in.bits.redirectFlush
 
   val hasTrap = io.fromRob.trap.valid
   val trapVec = io.fromRob.trap.bits.trapVec
@@ -954,14 +958,18 @@ class NewCSR(implicit val p: Parameters) extends Module
   /** State machine of newCSR */
   switch(state) {
     is(s_idle) {
-      when(valid && asyncAccess) {
+      when(valid && redirectFlush) {
+        stateNext := s_idle
+      }.elsewhen(valid && asyncAccess) {
         stateNext := s_waitIMSIC
       }.elsewhen(valid) {
         stateNext := s_finish
       }
     }
     is(s_waitIMSIC) {
-      when(fromAIA.rdata.valid) {
+      when(redirectFlush) {
+        stateNext := s_idle
+      }.elsewhen(fromAIA.rdata.valid) {
         when(io.out.ready) {
           stateNext := s_idle
         }.otherwise {
@@ -970,7 +978,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       }
     }
     is(s_finish) {
-      when(io.out.ready) {
+      when(redirectFlush || io.out.ready) {
         stateNext := s_idle
       }
     }
@@ -995,7 +1003,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val normalCSRValid = state === s_idle && valid && !asyncAccess
   val waitIMSICValid = state === s_waitIMSIC && fromAIA.rdata.valid
 
-  io.out.valid := waitIMSICValid || state === s_finish
+  io.out.valid := (waitIMSICValid || state === s_finish) && !redirectFlush
   io.out.bits.EX_II := DataHoldBypass(Mux1H(Seq(
     normalCSRValid -> (permitMod.io.out.EX_II || noCSRIllegal),
     waitIMSICValid -> imsic_EX_II,
