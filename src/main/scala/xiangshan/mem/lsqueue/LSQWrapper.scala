@@ -128,6 +128,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
+    val noUopsIssued = Input(Bool())
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -288,6 +289,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
+  loadQueue.io.noUopsIssed := io.noUopsIssued
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   when (!io.uncacheOutstanding) {
