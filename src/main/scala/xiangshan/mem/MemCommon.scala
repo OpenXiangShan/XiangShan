@@ -117,10 +117,10 @@ object ReplayCauseNO {
   val C_DM   = addCause(name = "dcache miss")
   val C_WPF  = addCause(name = "way predict fail")
   val C_BC   = addCause(name = "bank conflict")
-  val C_RARN = addCause(name = "loadQueueRAR nack")
-  val C_RAWN = addCause(name = "loadQueueRAW nack")
-  val C_SN   = addCause(name = "slight nuke")
-  val C_MBN  = addCause(name = "misalign buffer nack")
+  val C_RARF = addCause(name = "loadQueueRAR full")
+  val C_RAWF = addCause(name = "loadQueueRAW full")
+  val C_NK   = addCause(name = "nuke")
+  val C_MF   = addCause(name = "misalign buffer nack")
 
   val numCauses: Int = causes.size
 
@@ -142,13 +142,13 @@ object ReplayCauseNO {
 
   def hasBC(cause: Vec[Bool]): Bool = cause(C_BC)
 
-  def hasRARN(cause: Vec[Bool]): Bool = cause(C_RARN)
+  def hasRARF(cause: Vec[Bool]): Bool = cause(C_RARF)
 
-  def hasRAWN(cause: Vec[Bool]): Bool = cause(C_RAWN)
+  def hasRAWF(cause: Vec[Bool]): Bool = cause(C_RAWF)
 
-  def hasSN(cause: Vec[Bool]): Bool = cause(C_SN)
+  def hasNK(cause: Vec[Bool]): Bool = cause(C_NK)
 
-  def hasMBN(cause: Vec[Bool]): Bool = cause(C_MBN)
+  def hasMF(cause: Vec[Bool]): Bool = cause(C_MF)
 
   def getHigherCauseThan(cause: Int): Seq[Int] = {
     val priorities = causes.map(_._1).toSeq
