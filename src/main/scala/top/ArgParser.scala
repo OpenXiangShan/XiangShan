@@ -146,6 +146,44 @@ object ArgParser {
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
+        case "--l2-cache-size" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey =>
+              val tileParams = up(XSTileKey)
+              val banks = tileParams.map(_.L2NBanks)
+              val ways = tileParams.map(_.L2CacheParamsOpt.map(_.ways))
+              val l2sets = banks zip ways map { case (banks, ways) =>
+                ways.map(value.toInt * 1024 / banks / _ / 64)
+              }
+              val newL2Params = tileParams zip l2sets map { case (tileParam, l2sets) =>
+                tileParam.L2CacheParamsOpt.map(_.copy(
+                  sets = l2sets.get
+                ))
+              }
+              tileParams zip newL2Params map { case (tileParam, newL2Param) =>
+                tileParam.copy(L2CacheParamsOpt = newL2Param)
+              }
+          }), tail)
+        case "--l3-cache-size" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey =>
+              val socParam = up(SoCParamsKey)
+              val banks = socParam.L3NBanks
+              val l3Ways = socParam.L3CacheParamsOpt.map(_.ways)
+              val l3Sets = l3Ways.map(value.toInt * 1024 / banks / _ / 64)
+              val openLLCWays = socParam.OpenLLCParamsOpt.map(_.ways)
+              val openLLCSets = openLLCWays.map(value.toInt * 1024 / banks / _ / 64)
+              val newL3Param = socParam.L3CacheParamsOpt.map(_.copy(
+                sets = l3Sets.get
+              ))
+              val openLLCParam = socParam.OpenLLCParamsOpt.map(_.copy(
+                sets = openLLCSets.get
+              ))
+              socParam.copy(
+                L3CacheParamsOpt = newL3Param,
+                OpenLLCParamsOpt = openLLCParam
+              )
+          }), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option

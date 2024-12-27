@@ -66,21 +66,31 @@ FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_S
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
 MFC_ARGS = --dump-fir --target $(CHISEL_TARGET) --split-verilog \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
-RELEASE_ARGS += $(MFC_ARGS)
-DEBUG_ARGS += $(MFC_ARGS)
-PLDM_ARGS += $(MFC_ARGS)
 
+# prefix of XSTop or XSNoCTop
 ifneq ($(XSTOP_PREFIX),)
-RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
-DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
-PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+COMMON_EXTRA_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 endif
 
+# IMSIC use TileLink rather than AXI4Lite
 ifeq ($(IMSIC_USE_TL),1)
-RELEASE_ARGS += --imsic-use-tl
-DEBUG_ARGS += --imsic-use-tl
-PLDM_ARGS += --imsic-use-tl
+COMMON_EXTRA_ARGS += --imsic-use-tl
 endif
+
+# L2 cache size in KB
+ifneq ($(L2_CACHE_SIZE),)
+COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
+endif
+
+# L3 cache size in KB
+ifneq ($(L3_CACHE_SIZE),)
+COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
+endif
+
+# public args sumup
+RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+PLDM_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
