@@ -23,6 +23,7 @@ import utils._
 import utility._
 import system._
 import device._
+import java.io._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -245,5 +246,60 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
 
   DifftestWiring.createAndConnectExtraIOs()
   Profile.generateJson("XiangShan")
+  XSTop_wrapperGenerator.generateCIVerilog()
 }
 
+object XSTop_wrapperGenerator {
+  def generateCIVerilog(): Unit = {
+    val verilogContent =
+      """
+        |`define CONFIG_XSCORE_NR 1
+        |`include "gateway_interface.svh"
+        |module XSTop_wrapper(
+        | input                                 cpu_clk,
+        | input                                 cpu_rstn,
+        | input                                 sys_clk,
+        | input                                 sys_rstn
+        |);
+        |gateway_if gateway_if_i();
+        |core_if core_if_o[`CONFIG_XSCORE_NR]();
+        |generate
+        |    genvar i;
+        |    for (i = 0; i < `CONFIG_XSCORE_NR; i = i+1)
+        |    begin: u_CPU_TOP
+        |    XSDiffTop u_XSTop (
+        |        .clint_0_0               (),
+        |        .clint_0_1               (),
+        |        .debug_0_0               (),
+        |        .io_hartIsInReset        (),
+        |        .plic_1_0                (1'b0),
+        |        .plic_0_0                (1'b0),
+        |        .nmi_0_0                 (1'b0),
+        |        .nmi_0_1                 (1'b0),
+        |        .clock                   (cpu_clk),
+        |        .noc_clock               (sys_clk),
+        |        .soc_clock               (sys_clk),
+        |        .io_hartId               (64'h0 + i),
+        |        .gateway_out             (core_if_o[i])
+        |    );
+        |    end
+        |endgenerate
+        |    CoreToGateway u_CoreToGateway(
+        |    .gateway_out (gateway_if_i.out),
+        |    .core_in (core_if_o)
+        |    );
+        |    GatewayEndpoint u_GatewayEndpoint(
+        |    .clock (sys_clk),
+        |    .reset (sys_rstn),
+        |    .gateway_in (gateway_if_i.in),
+        |    .step ()
+        |    );
+        |
+        |endmodule
+      """.stripMargin
+    val file = new File("build/rtl/XSTop_wrapper.sv")
+    val bw = new BufferedWriter(new FileWriter(file))
+    bw.write(verilogContent)
+    bw.close()
+  }
+}

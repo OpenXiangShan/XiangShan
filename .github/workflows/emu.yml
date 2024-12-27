@@ -289,6 +289,46 @@ jobs:
       - name: SMP Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
+  noc-mc:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 900
+    name: RTL - Check
+    steps:
+      - uses: actions/checkout@v4
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "XS_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "XS_DIFF_HOME=$GITHUB_WORKSPACE/difftest" >> $GITHUB_ENV
+          echo "XS_DIFF_RTL=$GITHUB_WORKSPACE/difftest/build/rtl" >> $GITHUB_ENV
+      - name: init
+        run: make init
+      - name: install verilator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Build XiangShan
+        run: |
+          echo "NOOP_HOME=$XS_HOME" >> $GITHUB_ENV
+          make verilog GOALS="diff" RELEASE_EXTRA_ARGS="--enable-difftest --difftest-config ZESNH" WITH_CHISELDB=0 WITH_CONSTANTIN=0 PLDM=1 CONFIG=XSNoCTopConfig JVM_XMX=10G
+      - name: Build Difftest
+        run: |
+          cd difftest
+          echo "NOOP_HOME=$XS_DIFF_HOME >> $GITHUB_ENV
+          make difftest_verilog PROFILE=../build/generated-src/difftest_profile.json NUM_CORES=2 CONFIG=ZESNH
+      - name: MC Interface Build Test
+        run: |
+          cd $GITHUB_ENV
+          python3 $XS_DIFF_HOME/scripts/st_tools/interface.py $XS_HOME/build/rtl/GatewayEndpoint.sv --filelist $XS_DIFF_RTL/filelist.f --simtop $XS_DIFF_RTL/simtop.sv
+          python3 $XS_DIFF_HOME/scripts/st_tools/interface.py $XS_DIFF_RTL/XSDiffTop.sv --core
+          cp -r $XS_DIFF_RTL $XS_HOME/build/rtl
+          verilator --lint-only -Wno-fatal --top-module XSTop_wrapper build/rtl/*sv build/rtl/*v -Ibuild/generated-src/ -LDFLAGS -"lreadline"
   simv-basics:
     runs-on: eda
     needs: changes
