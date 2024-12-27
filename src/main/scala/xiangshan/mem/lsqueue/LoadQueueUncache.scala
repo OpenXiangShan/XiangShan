@@ -324,11 +324,12 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *    ready: freelist can allocate
    ******************************************************************/
   
-  val s1_req = VecInit(io.req.map(_.bits))
-  val s1_valid = VecInit(io.req.map(_.valid))
+  val s1_sortedVec = HwSort(VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
+  val s1_req = VecInit(s1_sortedVec.map(_.bits))
+  val s1_valid = VecInit(s1_sortedVec.map(_.valid))
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   io.req.zipWithIndex.foreach{ case (r, i) =>
-    r.ready := !s2_enqueue(i) || freeList.io.canAllocate(i)
+    r.ready := true.B
   }
 
   // s2: enqueue
