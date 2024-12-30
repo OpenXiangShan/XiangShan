@@ -121,8 +121,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
   require(cfg.nMissEntries < cfg.nReleaseEntries)
-  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
-  val releaseIdBase = cfg.nMissEntries
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries + 1 // nMissEntries + nReleaseEntries + 1CMO_Entry
+  val releaseIdBase = cfg.nMissEntries + 1
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
 
