@@ -90,7 +90,7 @@ endif
 # public args sumup
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
-PLDM_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+override PLDM_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -133,13 +133,20 @@ endif
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS    += --fpga-platform --enable-difftest
+override PLDM_ARGS += --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
 override SIM_ARGS += $(PLDM_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
+endif
+
+# use RELEASE_ARGS for TopMain by default
+ifeq ($(PLDM), 1)
+TOPMAIN_ARGS += $(PLDM_ARGS)
+else
+TOPMAIN_ARGS += $(RELEASE_ARGS)
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
@@ -168,7 +175,7 @@ $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
-		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
+		--num-cores $(NUM_CORES) $(TOPMAIN_ARGS)
 ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
