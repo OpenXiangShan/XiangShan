@@ -187,7 +187,6 @@ class MergeBufferResp(isVStore: Boolean=false)(implicit p: Parameters) extends V
 class ToMergeBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val req                 = DecoupledIO(new MergeBufferReq(isVStore))
   val resp                = Flipped(ValidIO(new MergeBufferResp(isVStore)))
-  // val issueInactive       = ValidIO
 }
 
 class FromSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -197,7 +196,7 @@ class FromSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUB
 }
 
 class FeedbackToSplitIO(implicit p: Parameters) extends VLSUBundle{
-  val elemWriteback       = Bool()
+  val thresold            = Bool()
 }
 
 class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
@@ -230,6 +229,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
+  val thresold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
 }
 
 class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -252,7 +252,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val fromPipeline        = if(isVStore) Vec(StorePipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(LoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
   val fromSplit           = if(isVStore) Vec(VecStorePipelineWidth, new FromSplitIO) else Vec(VecLoadPipelineWidth, new FromSplitIO) // req mergebuffer entry, inactive elem issue
   val uopWriteback        = if(isVStore) Vec(VSUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true))) else Vec(VLUopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
-  val toSplit             = if(isVStore) Vec(VecStorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
+  val toSplit             = OptionWrapper(!isVStore, new FeedbackToSplitIO())
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 
