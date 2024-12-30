@@ -516,10 +516,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.l1D_pf_enable_stride := spfctl(16)
   csrio.customCtrl.l2_pf_store_only := spfctl(17)
 
-  // sfetchctl Bit 0: L1I Cache Parity check enable
-  val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
-  csrio.customCtrl.icache_parity_enable := sfetchctl(0)
-
   // slvpredctl: load violation predict settings
   // Default reset period: 2^16
   // Why this number: reset more frequently while keeping the overhead low
@@ -810,7 +806,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     //--- Supervisor Custom Read/Write Registers
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
-    MaskedRegMap(Sfetchctl, sfetchctl),
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),

@@ -33,12 +33,14 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
   val phyTag:  UInt = UInt(tagBits.W)
   val waymask: UInt = UInt(nWays.W)
   val bankIdx: Bool = Bool()
+  val poison:  Bool = Bool()
 
-  def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool): Unit = {
+  def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
     this.virIdx  := idx
     this.phyTag  := tag
     this.waymask := waymask
     this.bankIdx := bankIdx
+    this.poison  := poison
   }
 }
 
@@ -52,12 +54,14 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle {
   val data:    UInt = UInt(blockBits.W)
   val waymask: UInt = UInt(nWays.W)
   val bankIdx: Bool = Bool()
+  val poison:  Bool = Bool()
 
-  def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool): Unit = {
+  def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
     this.virIdx  := idx
     this.data    := data
     this.waymask := waymask
     this.bankIdx := bankIdx
+    this.poison  := poison
   }
 }
 

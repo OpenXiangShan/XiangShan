@@ -1223,8 +1223,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.l1D_pf_enable_stride    := spfctl.regOut.L1D_PF_ENABLE_STRIDE.asBool
   io.status.custom.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
 
-  io.status.custom.icache_parity_enable    := sfetchctl.regOut.ICACHE_PARITY_ENABLE.asBool
-
   io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
   io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
   io.status.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool

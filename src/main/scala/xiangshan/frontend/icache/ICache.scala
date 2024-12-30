@@ -27,6 +27,7 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
@@ -36,6 +37,7 @@ import huancun.AliasField
 import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -57,9 +59,10 @@ case class ICacheParameters(
     ICacheDataBanks:     Int = 8,
     ICacheDataSRAMWidth: Int = 66,
     // TODO: hard code, need delete
-    partWayNum: Int = 4,
-    nMMIOs:     Int = 1,
-    blockBytes: Int = 64
+    partWayNum:          Int = 4,
+    nMMIOs:              Int = 1,
+    blockBytes:          Int = 64,
+    cacheCtrlAddressOpt: Option[AddressSet] = None
 ) extends L1CacheParameters {
 
   val setBytes:     Int         = nSets * blockBytes
@@ -76,6 +79,14 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst {
   val cacheParams: ICacheParameters = icacheParameters
+
+  def ctrlUnitParamsOpt: Option[L1ICacheCtrlParams] = OptionWrapper(
+    cacheParams.cacheCtrlAddressOpt.nonEmpty,
+    L1ICacheCtrlParams(
+      address = cacheParams.cacheCtrlAddressOpt.get,
+      regWidth = XLEN
+    )
+  )
 
   def ICacheSets:          Int = cacheParams.nSets
   def ICacheWays:          Int = cacheParams.nWays
@@ -138,19 +149,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def InitQueue[T <: Data](entry: T, size: Int): Vec[T] =
     RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
 
-  def encodeMetaECC(meta: UInt): UInt = {
-    require(meta.getWidth == ICacheMetaBits)
-    val code = cacheParams.tagCode.encode(meta) >> ICacheMetaBits
-    code.asTypeOf(UInt(ICacheMetaCodeBits.W))
-  }
-
-  def encodeDataECC(data: UInt): UInt = {
-    require(data.getWidth == ICacheDataBits)
-    val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
-    val codes = VecInit(datas.map(cacheParams.dataCode.encode(_) >> (ICacheDataBits / ICacheDataCodeSegs)))
-    codes.asTypeOf(UInt(ICacheDataCodeBits.W))
-  }
-
   def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[UInt] = {
     val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
     val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
@@ -176,6 +174,21 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def getPaddrFromPtag(vaddr: UInt, ptag: UInt): UInt = Cat(ptag, vaddr(pgUntagBits - 1, 0))
   def getPaddrFromPtag(vaddrVec: Vec[UInt], ptagVec: Vec[UInt]): Vec[UInt] =
     VecInit((vaddrVec zip ptagVec).map { case (vaddr, ptag) => getPaddrFromPtag(vaddr, ptag) })
+}
+
+trait HasICacheECCHelper extends HasICacheParameters {
+  def encodeMetaECC(meta: UInt, poison: Bool = false.B): UInt = {
+    require(meta.getWidth == ICacheMetaBits)
+    val code = cacheParams.tagCode.encode(meta, poison) >> ICacheMetaBits
+    code.asTypeOf(UInt(ICacheMetaCodeBits.W))
+  }
+
+  def encodeDataECC(data: UInt, poison: Bool = false.B): UInt = {
+    require(data.getWidth == ICacheDataBits)
+    val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
+    val codes = VecInit(datas.map(cacheParams.dataCode.encode(_, poison) >> (ICacheDataBits / ICacheDataCodeSegs)))
+    codes.asTypeOf(UInt(ICacheDataCodeBits.W))
+  }
 }
 
 abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
@@ -207,17 +220,17 @@ class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
   val flushAll: Bool                               = Input(Bool())
 }
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheArray {
+class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICacheECCHelper {
   class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
     val meta: ICacheMetadata = new ICacheMetadata
     val code: UInt           = UInt(ICacheMetaCodeBits.W)
   }
 
   private object ICacheMetaEntry {
-    def apply(meta: ICacheMetadata)(implicit p: Parameters): ICacheMetaEntry = {
+    def apply(meta: ICacheMetadata, poison: Bool)(implicit p: Parameters): ICacheMetaEntry = {
       val entry = Wire(new ICacheMetaEntry)
       entry.meta := meta
-      entry.code := encodeMetaECC(meta.asUInt)
+      entry.code := encodeMetaECC(meta.asUInt, poison)
       entry
     }
   }
@@ -243,10 +256,11 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray {
   private val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   private val write_bank_1 = io.write.valid && io.write.bits.bankIdx
 
-  private val write_meta_bits = ICacheMetaEntry(meta =
-    ICacheMetadata(
+  private val write_meta_bits = ICacheMetaEntry(
+    meta = ICacheMetadata(
       tag = io.write.bits.phyTag
-    )
+    ),
+    poison = io.write.bits.poison
   )
 
   private val tagArrays = (0 until PortNumber) map { bank =>
@@ -368,17 +382,17 @@ class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
   val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
 }
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
+class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICacheECCHelper {
   class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
     val data: UInt = UInt(ICacheDataBits.W)
     val code: UInt = UInt(ICacheDataCodeBits.W)
   }
 
   private object ICacheDataEntry {
-    def apply(data: UInt)(implicit p: Parameters): ICacheDataEntry = {
+    def apply(data: UInt, poison: Bool)(implicit p: Parameters): ICacheDataEntry = {
       val entry = Wire(new ICacheDataEntry)
       entry.data := data
-      entry.code := encodeDataECC(data)
+      entry.code := encodeDataECC(data, poison)
       entry
     }
   }
@@ -391,7 +405,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
     ******************************************************************************
     */
   private val writeDatas   = io.write.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt(ICacheDataBits.W)))
-  private val writeEntries = writeDatas.map(ICacheDataEntry(_).asUInt)
+  private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.bits.poison).asUInt)
 
   // io.read() are copies to control fan-out, we can simply use .head here
   private val bankSel  = getBankSel(io.read.head.bits.blkOffset, io.read.head.valid)
@@ -529,8 +543,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   // backend/BEU
   val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
   // backend/CSR
-  val csr_pf_enable:     Bool = Input(Bool())
-  val csr_parity_enable: Bool = Input(Bool())
+  val csr_pf_enable: Bool = Input(Bool())
   // flush
   val fencei: Bool = Input(Bool())
   val flush:  Bool = Input(Bool())
@@ -552,6 +565,8 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   )
 
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
+
+  val ctrlUnitOpt: Option[ICacheCtrlUnit] = ctrlUnitParamsOpt.map(params => LazyModule(new ICacheCtrlUnit(params)))
 
   lazy val module: ICacheImp = new ICacheImp(this)
 }
@@ -582,21 +597,52 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new IPrefetchPipe)
   private val wayLookup  = Module(new WayLookup)
 
-  dataArray.io.write <> missUnit.io.data_write
-  dataArray.io.read <> mainPipe.io.dataArray.toIData
-  dataArray.io.readResp <> mainPipe.io.dataArray.fromIData
+  private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else true.B
 
+  // dataArray io
+  if (outer.ctrlUnitOpt.nonEmpty) {
+    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    when(ctrlUnit.io.injecting) {
+      dataArray.io.write <> ctrlUnit.io.dataWrite
+      missUnit.io.data_write.ready := false.B
+    }.otherwise {
+      ctrlUnit.io.dataWrite.ready := false.B
+      dataArray.io.write <> missUnit.io.data_write
+    }
+  } else {
+    dataArray.io.write <> missUnit.io.data_write
+  }
+  dataArray.io.read <> mainPipe.io.dataArray.toIData
+  mainPipe.io.dataArray.fromIData := dataArray.io.readResp
+
+  // metaArray io
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaArrayFlush
-  metaArray.io.write <> missUnit.io.meta_write
-  metaArray.io.read <> prefetcher.io.metaRead.toIMeta
-  metaArray.io.readResp <> prefetcher.io.metaRead.fromIMeta
+  if (outer.ctrlUnitOpt.nonEmpty) {
+    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    when(ctrlUnit.io.injecting) {
+      metaArray.io.write <> ctrlUnit.io.metaWrite
+      metaArray.io.read <> ctrlUnit.io.metaRead
+      missUnit.io.meta_write.ready         := false.B
+      prefetcher.io.metaRead.toIMeta.ready := false.B
+    }.otherwise {
+      ctrlUnit.io.metaWrite.ready := false.B
+      ctrlUnit.io.metaRead.ready  := false.B
+      metaArray.io.write <> missUnit.io.meta_write
+      metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+    }
+    ctrlUnit.io.metaReadResp := metaArray.io.readResp
+  } else {
+    metaArray.io.write <> missUnit.io.meta_write
+    metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+  }
+  prefetcher.io.metaRead.fromIMeta := metaArray.io.readResp
 
-  prefetcher.io.flush             := io.flush
-  prefetcher.io.csr_pf_enable     := io.csr_pf_enable
-  prefetcher.io.csr_parity_enable := io.csr_parity_enable
-  prefetcher.io.MSHRResp          := missUnit.io.fetch_resp
-  prefetcher.io.flushFromBpu      := io.ftqPrefetch.flushFromBpu
+  prefetcher.io.flush         := io.flush
+  prefetcher.io.csr_pf_enable := io.csr_pf_enable
+  prefetcher.io.ecc_enable    := ecc_enable
+  prefetcher.io.MSHRResp      := missUnit.io.fetch_resp
+  prefetcher.io.flushFromBpu  := io.ftqPrefetch.flushFromBpu
   // cache softPrefetch
   private val softPrefetchValid = RegInit(false.B)
   private val softPrefetch      = RegInit(0.U.asTypeOf(new IPrefetchReq))
@@ -634,11 +680,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.mem_grant.bits  := DontCare
   missUnit.io.mem_grant <> bus.d
 
-  mainPipe.io.flush             := io.flush
-  mainPipe.io.respStall         := io.stop
-  mainPipe.io.csr_parity_enable := io.csr_parity_enable
-  mainPipe.io.hartId            := io.hartId
-  mainPipe.io.mshr.resp         := missUnit.io.fetch_resp
+  mainPipe.io.flush      := io.flush
+  mainPipe.io.respStall  := io.stop
+  mainPipe.io.ecc_enable := ecc_enable
+  mainPipe.io.hartId     := io.hartId
+  mainPipe.io.mshr.resp  := missUnit.io.fetch_resp
   mainPipe.io.fetch.req <> io.fetch.req
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 

@@ -330,8 +330,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.l1D_pf_active_stride     := csrMod.io.status.custom.l1D_pf_active_stride
       custom.l1D_pf_enable_stride     := csrMod.io.status.custom.l1D_pf_enable_stride
       custom.l2_pf_store_only         := csrMod.io.status.custom.l2_pf_store_only
-      // ICache
-      custom.icache_parity_enable     := csrMod.io.status.custom.icache_parity_enable
       // Load violation predictor
       custom.lvpred_disable           := csrMod.io.status.custom.lvpred_disable
       custom.no_spec_load             := csrMod.io.status.custom.no_spec_load
