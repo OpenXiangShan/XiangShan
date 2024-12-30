@@ -28,6 +28,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 import utility._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
+import freechips.rocketchip.rocket.CSRs
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
@@ -354,7 +355,7 @@ class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with P
   val pmp = Wire(Vec(NumPMP, new PMPEntry()))
   val pma = Wire(Vec(NumPMA, new PMPEntry()))
 
-  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
+  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, CSRs.pmpcfg0, CSRs.pmpaddr0, pmp)
   val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
   val mapping = pmpMapping ++ pmaMapping
 

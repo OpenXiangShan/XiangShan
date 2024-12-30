@@ -5,7 +5,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
-import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan._
 import utils._
