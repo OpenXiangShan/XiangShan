@@ -479,7 +479,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_tag = RegEnable(s2_tag, s2_fire_to_s3)
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
-  val s3_tag_error = RegEnable(s2_tag_error, s2_fire_to_s3)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
   val s3_hit = RegEnable(s2_hit, s2_fire_to_s3)
