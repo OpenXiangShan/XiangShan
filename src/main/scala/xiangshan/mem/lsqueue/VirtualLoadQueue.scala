@@ -89,6 +89,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
   val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
+  val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     robIdx(i).needFlush(io.redirect) && allocated(i)
   })))
@@ -96,15 +97,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val enqCancel = canEnqueue.zip(io.enq.req).map{case (v , x) =>
     v && x.bits.robIdx.needFlush(io.redirect)
   }
-  val enqCancelNum = enqCancel.zip(io.enq.req).map{case (v, req) =>
-    Mux(v, req.bits.numLsElem, 0.U)
+  val enqCancelNum = enqCancel.zip(vLoadFlow).map{case (v, flow) =>
+    Mux(v, flow, 0.U)
   }
   val lastEnqCancel = GatedRegNext(enqCancelNum.reduce(_ + _))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect.valid)
 
   // update enqueue pointer
-  val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(canEnqueue(index), vLoadFlowNumItem, 0.U)}
   val validVLoadOffset = vLoadFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVLoadOffsetRShift = 0.U +: validVLoadOffset.take(validVLoadFlow.length - 1)
