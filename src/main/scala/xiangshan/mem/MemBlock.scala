@@ -37,7 +37,7 @@ import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
-import xiangshan.backend.fu.util.{HasCSRConst, SdtrigExt}
+import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
 import xiangshan.backend.datapath.NewPipelineConnect
@@ -294,7 +294,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters
   with HasTlbConst
-  with HasCSRConst
   with SdtrigExt
 {
   val io = IO(new Bundle {
@@ -1814,8 +1813,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val Sv48 = satp.mode === 9.U
     val Sv39x4 = vsatp.mode === 8.U || hgatp.mode === 8.U
     val Sv48x4 = vsatp.mode === 9.U || hgatp.mode === 9.U
-    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < ModeM)
-    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < ModeM)
+    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < CSRConst.ModeM)
+    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < CSRConst.ModeM)
 
     val s2xlate = MuxCase(noS2xlate, Seq(
       !isVirt                                    -> noS2xlate,
