@@ -79,6 +79,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }
   })
 
+  io.in.zipWithIndex.foreach{ case (d, i) => 
+    PerfCCT.updateInstPos(d.bits.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
+  }
+
   // io alias
   private val outReadys = io.out.map(_.ready)
   private val inValids = io.in.map(_.valid)
@@ -188,6 +192,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       SrcType.isVp(s) && (l === 0.U)
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
+    when (inst.bits.uopIdx =/= 0.U) {
+      inst.bits.debug_seqNum := 0.U
+    }
   }
 
   io.out.map(x =>

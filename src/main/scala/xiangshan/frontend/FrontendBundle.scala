@@ -247,6 +247,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
   val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
+  val debug_seqNum = Vec(PredictWidth, UInt(64.W))
   val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
 }
