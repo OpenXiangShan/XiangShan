@@ -1386,8 +1386,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqCancelValid = canEnqueue.zip(io.enq.req).map{case (v , x) =>
     v && x.bits.robIdx.needFlush(io.brqRedirect)
   }
-  val enqCancelNum = enqCancelValid.zip(io.enq.req).map{case (v, req) =>
-    Mux(v, req.bits.numLsElem, 0.U)
+  val enqCancelNum = enqCancelValid.zip(vStoreFlow).map{case (v, flow) =>
+    Mux(v, flow, 0.U)
   }
   val lastEnqCancel = RegEnable(enqCancelNum.reduce(_ + _), io.brqRedirect.valid) // 1 cycle after redirect
 
