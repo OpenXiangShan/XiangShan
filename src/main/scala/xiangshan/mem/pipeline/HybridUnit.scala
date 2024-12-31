@@ -158,6 +158,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
+  PerfCCT.updateInstPos(io.lsin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.lsin.valid, clock, reset)
+
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   val s1_ready, s2_ready, s3_ready, sx_can_go = WireInit(false.B)
 
