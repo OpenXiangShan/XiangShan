@@ -254,7 +254,7 @@ case class XSCoreParameters
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
-  EnableStorePrefetchASP: Boolean = true,
+  EnableStorePrefetchASP: Boolean = false,
   HasCMO: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
