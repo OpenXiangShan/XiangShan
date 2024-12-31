@@ -59,21 +59,23 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     Annotated.params(this, params)
 
     val io = IO(new Bundle {
-      val rtcTick = Input(Bool())
-      val stopen = Input(Bool())
-      val time = Output(ValidIO(UInt(timeWidth.W)))
+      val update_en = Input(Bool())
+      val update_value = Input(UInt(timeWidth.W))
+      val stop_en = Input(Bool())
+      val time = Output(UInt(timeWidth.W))
+      val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
     })
 
     val time = RegInit(0.U(timeWidth.W))
     val increg = RegInit(0.U(8.W))
-    val stop_cfg = increg(2)
-    val incwidth = increg(1,0) //bit[1:0] is incr width
+    val incwidth = increg(2,0) //bit[1:0] is incr width
     val inccutdly = RegNext(incwidth)
     val inccfg_vld = inccutdly =/= incwidth // flag is high firstly when incr update.
     val inc_up_dis = RegInit(false.B)
-    val stopen = io.stopen & (stop_cfg === true.B)
-    //generate the low bit: time_low= time[increg-1:0]
-    val time_low = WireInit(1.U(3.W))
+    val stopen = io.stop_en
+    io.time_freq := incwidth
+    //generate the low bit: time_low= time[incwidth-1:0]
+    val time_low = WireInit(1.U(7.W))
     switch(incwidth) {
       is(1.U) {
         time_low := time(0)
@@ -83,6 +85,18 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       }
       is(3.U) {
         time_low := time(2, 0)
+      }
+      is(4.U) {
+        time_low := time(3, 0)
+      }
+      is(5.U) {
+        time_low := time(4, 0)
+      }
+      is(6.U) {
+        time_low := time(5, 0)
+      }
+      is(7.U) {
+        time_low := time(6, 0)
       }
       is(0.U) {
         time_low := 1.U
@@ -100,7 +114,7 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     }.otherwise {
       timelow_zero := false.B
     }
-    val inc_update = io.rtcTick & inc_up_dis & (inczero | timelow_zero)
+    val inc_update = inc_up_dis & (inczero | timelow_zero)
 
     val incr_width_value = RegInit(0.U(2.W))
     when(inc_update) {
@@ -115,15 +129,14 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val time_sw = RegInit(0.U(timeWidth.W))
     when(stopen) {
       time := time
-    }.elsewhen(io.rtcTick) {
+    }.elsewhen(io.update_en) {
+      time := io.update_value
+      time_sw := io.update_value
+    }.otherwise{
       time := time + 1.U
       time_sw := time << incr_width_value
     }
-
-
-    val tick_1dly = RegNext(io.rtcTick)
-    io.time.valid := RegNext(tick_1dly)
-    io.time.bits := time_sw >> incr_width_value
+    io.time := time_sw
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
