@@ -221,6 +221,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   } else if (Width == 3) {
     require(Size == 16 || Size == 8, s"load/prefetcher filter Size ($Size) should be 16/8")
     if (Size == 16) {
+      // load filter configuration
       canenq(0) := !(Cat(v.take(8)).andR)
       enqidx(0) := firstValidIndex(v.take(8), false.B)
       canenq(1) := !(Cat(v.drop(8).take(4)).andR)
@@ -229,6 +230,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       canenq(2) := !(Cat(v.drop(12)).andR)
       enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
     } else {
+      // prefetcher filter configuration
       canenq(0) := !(Cat(v.take(4)).andR)
       enqidx(0) := firstValidIndex(v.take(4), false.B)
       canenq(1) := !(Cat(v.drop(4).take(2)).andR)
@@ -344,7 +346,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
 }
 
-class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
+class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int, PfFilterWidth: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(Size >= Width)
 
   private val LduCnt = backendParams.LduCnt
@@ -368,7 +370,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   })
 
   val prefetch_filter = VecInit(Seq.fill(1) {
-    val prefetch_entry = Module(new PTWFilterEntry(Width = 3, Size = prefetchfiltersize))
+    val prefetch_entry = Module(new PTWFilterEntry(Width = PfFilterWidth, Size = prefetchfiltersize))
     prefetch_entry.io
   })
 
@@ -734,10 +736,11 @@ object PTWNewFilter {
             ptw: TlbPtwIO,
             sfence: SfenceBundle,
             csr: TlbCsrBundle,
-            size: Int
+            size: Int,
+            pfFilterWidth: Int
            )(implicit p: Parameters) = {
     val width = tlb.req.size
-    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay, pfFilterWidth))
     filter.io.apply(tlb, ptw, sfence, csr)
     filter
   }
@@ -746,10 +749,11 @@ object PTWNewFilter {
             tlb: VectorTlbPtwIO,
             sfence: SfenceBundle,
             csr: TlbCsrBundle,
-            size: Int
+            size: Int,
+            pfFilterWidth: Int
            )(implicit p: Parameters) = {
     val width = tlb.req.size
-    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay, pfFilterWidth))
     filter.io.apply(tlb, sfence, csr)
     filter
   }

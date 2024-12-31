@@ -62,6 +62,13 @@ trait HasSbufferConst extends HasXSParameter {
   val VWordWidth: Int = log2Up(VDataBytes)
   val VWordOffsetWidth: Int = PAddrBits - VWordWidth
 
+  /*
+   * These parameters are used under MemSet pattern (sequential store access):
+   *   It causes { CacheLineBytes / Bytes written from SQ to Sbuffer per Cycle } cycles to fully write an Entry in Sbuffer,
+   *   If The BandWidth is full(STA executes 2 stores & SQ write 2 stores to Sbuffer),
+   *   The scenario that takes longest time to fully write an Entry is MemSet using `sb`
+   *   which takes { CacheLineBytes / EnsbufferWidth } cycles
+   */
   val FullWriteMaxWaitCycles = CacheLineBytes / EnsbufferWidth
   val FullWriteMaxWaitBits = log2Up(FullWriteMaxWaitCycles) + 1
 }
@@ -392,6 +399,7 @@ class Sbuffer(implicit p: Parameters)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
+  // ready when new entry can be allocated or can be merged into existing entries.
   io.in(0).ready := firstCanInsert || mergeVec(0).orR
   io.in(1).ready := (secondCanInsert || mergeVec(1).orR) && io.in(0).ready
 
@@ -617,7 +625,11 @@ class Sbuffer(implicit p: Parameters)
   val sbuffer_out_s1_ready = Wire(Bool())
 
   // ---------------------------------------------------------------------------
-  // Memset Case
+  // MemSet Case:
+  //   If MemSet Pattern is detected, let the Sbuffer Entry wait until it is 
+  //   fully written before sending a request to dcache (wait for `waitCntBeforeFull` decreasing to 0 or mask is full)
+  // Non MemSet Case:
+  //   Select an active Entry to send a request to dcache without waiting for it to be fully written.
   // ---------------------------------------------------------------------------
 
   val memSet_needDrain = io.memSetPattenDetected

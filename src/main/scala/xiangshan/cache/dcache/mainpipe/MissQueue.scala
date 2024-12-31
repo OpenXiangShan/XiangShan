@@ -942,6 +942,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
 
+  // MemSet detection: Found sequential access pattern of stores and The LQ is empty
   val memSetPattenDetected = GatedValidRegNext(io.seqStoreDetected && io.lqEmpty)
   io.memSetPattenDetected := memSetPattenDetected
 

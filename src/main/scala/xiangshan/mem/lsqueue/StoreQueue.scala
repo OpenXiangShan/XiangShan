@@ -1040,6 +1040,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   asp.io.sbuffer.zipWithIndex.foreach {case (s, idx) => {
+    // Using SQ -> Sbuffer info to train store prefetcher which follows instruction order
     s.valid := io.sbuffer(idx).fire && io.sbuffer(idx).bits.vecValid
     s.bits  := io.sbuffer(idx).bits
   }}

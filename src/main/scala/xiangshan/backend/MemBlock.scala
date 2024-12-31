@@ -539,26 +539,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val asp_pf_to_l2 = DelayNWithValid(lsq.io.aspPfIO.l2_pf_addr, 2)
 
       outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid || asp_pf_to_l2.valid
-      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(
-        l1_pf_to_l2.valid,
-        l1_pf_to_l2.bits.addr,
-        Mux(
-          sms_pf_to_l2.valid,
-          sms_pf_to_l2.bits.addr,
-          asp_pf_to_l2.bits.addr
+      outer.l2_pf_sender_opt.get.out.head._1.addr := ParallelPriorityMux(
+        Seq(
+          l1_pf_to_l2.valid  -> l1_pf_to_l2.bits.addr,
+          sms_pf_to_l2.valid -> sms_pf_to_l2.bits.addr,
+          asp_pf_to_l2.valid -> asp_pf_to_l2.bits.addr
         )
       )
-      outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(
-        l1_pf_to_l2.valid,
-        l1_pf_to_l2.bits.source,
-        Mux(
-          sms_pf_to_l2.valid,
-          sms_pf_to_l2.bits.source,
-          asp_pf_to_l2.bits.source
+      outer.l2_pf_sender_opt.get.out.head._1.pf_source := ParallelPriorityMux(
+        Seq(
+          l1_pf_to_l2.valid  -> l1_pf_to_l2.bits.source,
+          sms_pf_to_l2.valid -> sms_pf_to_l2.bits.source,
+          asp_pf_to_l2.valid -> asp_pf_to_l2.bits.source
         )
       )
       outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
-      outer.l2_pf_sender_opt.get.out.head._1.needT := !l1_pf_to_l2.valid && !sms_pf_to_l2.valid && asp_pf_to_l2.valid
+      // Only store prefetcher needs to explicitly specify the Write permission
+      outer.l2_pf_sender_opt.get.out.head._1.needT := asp_pf_to_l2.valid && !l1_pf_to_l2.valid && !sms_pf_to_l2.valid
 
       sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
 
@@ -604,17 +601,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     perfEventsPTW := DontCare
   }
 
+  // prefetch TLB read ports: sms + l2bop + option(asp)
+  val StPfUseTLB = if (EnableStorePrefetchASP) 1 else 0
+  val PrefetchTLBPortCnt = 2 + StPfUseTLB
+
   // dtlb
   val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
   val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(3, 2, pftlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(PrefetchTLBPortCnt, 2, pftlbParams))
   val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
   val dtlb_st = Seq(dtlb_st_tlb_st.io)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 3) // (load + hyu + stream pf, store, sms+l2bop+asp)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, PrefetchTLBPortCnt) // (load + hyu + stream pf, store, sms+l2bop+asp)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
@@ -650,7 +651,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
-      val replace_pf = Module(new TlbReplace(3, pftlbParams))
+      val replace_pf = Module(new TlbReplace(PrefetchTLBPortCnt, pftlbParams))
       replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
@@ -691,7 +692,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dtlb_st.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(LduCnt + HyuCnt + 1, LduCnt + HyuCnt + 1 + StaCnt)).orR)
   dtlb_prefetch.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR)
 
-  val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
+  val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize, PrefetchTLBPortCnt)
   val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
 
   lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
@@ -1127,7 +1128,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
   io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
-  dtlb_reqs(ASPDTLBPortIndex) <> lsq.io.aspPfIO.tlb_req
+  if (EnableStorePrefetchASP) {
+    dtlb_reqs(ASPDTLBPortIndex) <> lsq.io.aspPfIO.tlb_req
+  } else {
+    lsq.io.aspPfIO.tlb_req.req.ready  := false.B
+    lsq.io.aspPfIO.tlb_req.resp.valid := false.B
+    lsq.io.aspPfIO.tlb_req.resp.bits  := DontCare
+  }
   // StoreUnit
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect

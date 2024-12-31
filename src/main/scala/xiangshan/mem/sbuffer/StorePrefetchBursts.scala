@@ -24,6 +24,7 @@ import utils._
 import utility._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
+import freechips.rocketchip.util._
 import xiangshan.mem.prefetch.L2PrefetchReq
 
 trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
@@ -306,10 +307,15 @@ class StorePfWrapper()(implicit p: Parameters) extends DCacheModule with HasStor
 }
 
 // prefetch request generator used by asp to burst some prefetch request to L2 Cache
+// 1. translate io.vaddr to `paddr`
+// 2. Send the prefetch requests of the whole region
+//    starting from `paddr` to the end of the region(1KB/2KB/4KB, determined by the `ASP_GRANULARITY_BYTES` parameter)
+//    to L2Cache one by one in order
 class ASPBurstGenerator(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
   val io = IO(new DCacheBundle {
     val alloc = Input(Bool())
     val vaddr = Input(UInt(VAddrBits.W))
+    val enable = Input(Bool())
     val aspPfIO = new AspPfIO
   })
 
@@ -356,7 +362,7 @@ class ASPBurstGenerator(implicit p: Parameters) extends DCacheModule with HasSto
   // tlb req
   val s0_tlb_fire_vec = VecInit((0 until SIZE).map{case i => tlb_req_arb.io.in(i).fire})
   for(i <- 0 until SIZE) {
-    tlb_req_arb.io.in(i).valid := valids(i) && !pa_vs(i) && !tlb_sent(i)
+    tlb_req_arb.io.in(i).valid := valids(i) && !pa_vs(i) && !tlb_sent(i) && io.enable
     tlb_req_arb.io.in(i).bits := 0.U.asTypeOf(new TlbReq)
     tlb_req_arb.io.in(i).bits.vaddr := vaddrs(i)
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.write
@@ -405,13 +411,14 @@ class ASPBurstGenerator(implicit p: Parameters) extends DCacheModule with HasSto
   paddrs_next := paddrs.map(_ + Cat(1.U(1.W), 0.U(BLOCKOFFSET.W)))
 
   // pf to l2
-  io.aspPfIO.l2_pf_addr.valid := l2_pf_req_arb.io.out.valid
+  val in_pmem = PmemRanges.map(range => io.aspPfIO.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  io.aspPfIO.l2_pf_addr.valid := l2_pf_req_arb.io.out.valid && in_pmem
   io.aspPfIO.l2_pf_addr.bits := l2_pf_req_arb.io.out.bits
 
   l2_pf_req_arb.io.out.ready := true.B
   
   for(i <- 0 until SIZE) {
-    l2_pf_req_arb.io.in(i).valid := valids(i) && pa_vs(i)
+    l2_pf_req_arb.io.in(i).valid := valids(i) && pa_vs(i) && io.enable
     l2_pf_req_arb.io.in(i).bits.addr := paddrs(i)
     l2_pf_req_arb.io.in(i).bits.source := MemReqSource.Prefetch2L2Stream.id.U
   }
@@ -448,8 +455,14 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
 
   private val granularity = ASP_GRANULARITY_BITS
 
-  // sequential store detection:
-  // store D, (A); store D, (A + K), store D, (A + 2K) ...
+  // detecting sequential store pattern like:
+  //   store D, (A); store D, (A + K), store D, (A + 2K) ...
+  //   1. Data Hash(D) remains the same
+  //   2. Delta address(K) remains the same
+  //   3. Delta address(K) equals to the store size(sb/sh/sw/sd)
+  //
+  //   `seqPatternCnt` means how many stores match above pattern
+  //    sequential store pattern is found when `seqPatternCnt` > `SEQTHRESHOLD`
   val DATAHASHBITS = 16
   val SEQTHRESHOLD = 32
   val seqStoreDetected = WireInit(false.B)
@@ -515,14 +528,16 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
   
   generator.io.alloc := false.B
   generator.io.vaddr := 0.U
+  generator.io.enable := io.enable
   generator.io.aspPfIO <> io.aspPfIO
 
-  // prefetch Depth for SW
+  // prefetch distance for memset using sw
   val depthSW = Wire(UInt(10.W))
   depthSW := Constantin.createRecord("ASP_DEPTH_SW" + p(XSCoreParamsKey).HartId.toString, initValue = 16)
 
-  // The larger the size of the store instruction, the greater the bandwidth for sq to write to the sbuffer,
-  // causing the sbuffer to fill up faster, so we need a larger distance.
+  // This is the dynamic distance mechanism of ASP:
+  //   The larger size of the store instruction, the larger bandwidth for SQ writing to Sbuffer has,
+  //   Causing the Sbuffer entry to be fully written faster, so a larger distance is needed.
   val depth = LookupTreeDefault(seqKStride, depthSW, List(
     1.U -> (depthSW >> 2), // memset using sb
     2.U -> (depthSW >> 1), // memset using sh
@@ -535,12 +550,15 @@ class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelp
     when (io.enable) {
       if (i == 0) {
         when(io.sbuffer(i).fire) {
+          // alloc a burst generator when detecting MemSet
           generator.io.alloc := seqStoreDetected && io.lqEmpty
           generator.io.vaddr := prefetchVaddr(0)
         }
       } else {
         when(io.sbuffer(i).fire) {
           generator.io.alloc := seqStoreDetected && io.lqEmpty
+          // The burst generator has only one port. 
+          // If it has been applied and this request is also in the same area, discard this request.
           when (!same_granularity_addr(prefetchVaddr(i), prefetchVaddr(i - 1), granularity)) {
             generator.io.vaddr := prefetchVaddr(i)
           }
