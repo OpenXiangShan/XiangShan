@@ -88,7 +88,7 @@ object ArgParser {
           }), tail)
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true, AlwaysBasicDiff = false)
           }), tail)
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {
