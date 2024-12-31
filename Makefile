@@ -24,6 +24,7 @@ FPGATOP = top.TopMain
 SIMTOP  = top.SimTop
 
 TOP_V = $(RTL_DIR)/$(TOP).v
+TOP_SV = $(RTL_DIR)/$(TOP).sv
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).v
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
@@ -135,7 +136,10 @@ endif
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 
-verilog: $(TOP_V)
+$(TOP_SV): $(TOP_V)
+	mv $(TOP_V) $(TOP_SV)
+
+verilog: $(TOP_SV)
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
