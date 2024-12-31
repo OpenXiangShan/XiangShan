@@ -13,6 +13,9 @@ class TrapHandleModule extends Module {
 
   private val trapInfo = io.in.trapInfo
   private val privState = io.in.privState
+  private val mstatus  = io.in.mstatus
+  private val vsstatus = io.in.vsstatus
+  private val mnstatus = io.in.mnstatus
   private val mideleg = io.in.mideleg.asUInt
   private val hideleg = io.in.hideleg.asUInt
   private val medeleg = io.in.medeleg.asUInt
@@ -31,44 +34,8 @@ class TrapHandleModule extends Module {
   private val hasEXVec = Mux(hasEX, exceptionVec, 0.U)
   private val hasIRVec = Mux(hasIR, intrVec, 0.U)
 
-  private val interruptGroups: Seq[(Seq[Int], String)] = Seq(
-    InterruptNO.customHighestGroup    -> "customHighest",
-    InterruptNO.localHighGroup        -> "localHigh",
-    InterruptNO.customMiddleHighGroup -> "customMiddleHigh",
-    InterruptNO.interruptDefaultPrio  -> "privArch",
-    InterruptNO.customMiddleLowGroup  -> "customMiddleLow",
-    InterruptNO.localLowGroup         -> "localLow",
-    InterruptNO.customLowestGroup     -> "customLowest",
-  )
-
-  private val filteredIRQs: Seq[UInt] = interruptGroups.map {
-    case (irqGroup, name) => (getMaskFromIRQGroup(irqGroup) & hasIRVec).suggestName(s"filteredIRQs_$name")
-  }
-  private val hasIRQinGroup: Seq[Bool] = interruptGroups.map {
-    case (irqGroup, name) => dontTouch(Cat(filterIRQs(irqGroup, hasIRVec)).orR.suggestName(s"hasIRQinGroup_$name"))
-  }
-
-  private val highestIRQinGroup: Seq[Vec[Bool]] = interruptGroups zip filteredIRQs map {
-    case ((irqGroup: Seq[Int], name), filteredIRQ: UInt) =>
-      produceHighIRInGroup(irqGroup, filteredIRQ).suggestName(s"highestIRQinGroup_$name")
-  }
-
-  private val highestPrioIRVec: Vec[Bool] = MuxCase(
-    0.U.asTypeOf(Vec(64, Bool())),
-    hasIRQinGroup zip highestIRQinGroup map{ case (hasIRQ: Bool, highestIRQ: Vec[Bool]) => hasIRQ -> highestIRQ }
-  )
-  private val highestPrioNMIVec = Wire(Vec(64, Bool()))
-  highestPrioNMIVec.zipWithIndex.foreach { case (irq, i) =>
-    if (NonMaskableIRNO.interruptDefaultPrio.contains(i)) {
-      val higherIRSeq = NonMaskableIRNO.getIRQHigherThan(i)
-      irq := (
-        higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !hasIRVec(num))).andR ||
-          higherIRSeq.isEmpty.B
-        ) && hasIRVec(i)
-      dontTouch(irq)
-    } else
-      irq := false.B
-  }
+  private val irToHS = io.in.trapInfo.bits.irToHS
+  private val irToVS = io.in.trapInfo.bits.irToVS
 
   private val highestPrioEXVec = Wire(Vec(64, Bool()))
   highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
@@ -82,23 +49,17 @@ class TrapHandleModule extends Module {
       excp := false.B
   }
 
-  private val highestPrioIR  = highestPrioIRVec.asUInt
-  private val highestPrioNMI = highestPrioNMIVec.asUInt
+  private val highestPrioIR  = hasIRVec.asUInt
   private val highestPrioEX  = highestPrioEXVec.asUInt
-
-
-  private val mIRVec  = dontTouch(WireInit(highestPrioIR))
-  private val hsIRVec = (mIRVec  & mideleg) | (mIRVec  & mvien & ~mideleg)
-  private val vsIRVec = (hsIRVec & hideleg) | (hsIRVec & hvien & ~hideleg)
 
   private val mEXVec  = highestPrioEX
   private val hsEXVec = highestPrioEX & medeleg
   private val vsEXVec = highestPrioEX & medeleg & hedeleg
 
   // nmi handle in MMode only and default handler is mtvec
-  private val  mHasIR =  mIRVec.orR
-  private val hsHasIR = hsIRVec.orR & !hasNMI
-  private val vsHasIR = (vsIRVec.orR || hasIR && virtualInterruptIsHvictlInject) & !hasNMI
+  private val  mHasIR = hasIR
+  private val hsHasIR = hasIR && irToHS & !hasNMI
+  private val vsHasIR = hasIR && irToVS & !hasNMI
 
   private val  mHasEX =  mEXVec.orR
   private val hsHasEX = hsEXVec.orR
@@ -110,57 +71,48 @@ class TrapHandleModule extends Module {
 
   private val handleTrapUnderHS = !privState.isModeM && hsHasTrap
   private val handleTrapUnderVS = privState.isVirtual && vsHasTrap
+  private val handleTrapUnderM = !handleTrapUnderVS && !handleTrapUnderHS
 
   // Todo: support more interrupt and exception
   private val exceptionRegular = OHToUInt(highestPrioEX)
-  private val interruptNO = OHToUInt(Mux(hasNMI, highestPrioNMI, highestPrioIR))
+  private val interruptNO = highestPrioIR
   private val exceptionNO = Mux(trapInfo.bits.singleStep, ExceptionNO.breakPoint.U, exceptionRegular)
 
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
+  // sm/ssdbltrp
+  private val m_EX_DT  = handleTrapUnderM  && mstatus.MDT.asBool  && hasTrap
+  private val s_EX_DT  = handleTrapUnderHS && mstatus.SDT.asBool  && hasTrap
+  private val vs_EX_DT = handleTrapUnderVS && vsstatus.SDT.asBool && hasTrap
+
+  private val dbltrpToMN = m_EX_DT && mnstatus.NMIE.asBool // NMI not allow double trap
+  private val hasDTExcp  = m_EX_DT || s_EX_DT || vs_EX_DT
+
+  private val trapToHS = handleTrapUnderHS && !s_EX_DT && !vs_EX_DT
+  private val traptoVS = handleTrapUnderVS && !vs_EX_DT
+
   private val xtvec = MuxCase(io.in.mtvec, Seq(
-    handleTrapUnderVS -> io.in.vstvec,
-    handleTrapUnderHS -> io.in.stvec
+    traptoVS -> io.in.vstvec,
+    trapToHS -> io.in.stvec
   ))
-  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, interruptNO(5, 0), 0.U), 0.U(2.W))
+  private val adjustinterruptNO = Mux(
+    InterruptNO.getVS.map(_.U === interruptNO).reduce(_ || _) && vsHasIR,
+    interruptNO - 1.U, // map VSSIP, VSTIP, VSEIP to SSIP, STIP, SEIP
+    interruptNO,
+  )
+  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, adjustinterruptNO(5, 0), 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
-    handleTrapUnderVS -> PrivState.ModeVS,
-    handleTrapUnderHS -> PrivState.ModeHS,
+    traptoVS -> PrivState.ModeVS,
+    trapToHS -> PrivState.ModeHS,
   ))
 
   io.out.causeNO.Interrupt := hasIR
   io.out.causeNO.ExceptionCode := causeNO
   io.out.pcFromXtvec := pcFromXtvec
+  io.out.hasDTExcp := hasDTExcp
+  io.out.dbltrpToMN := dbltrpToMN
 
-  def filterIRQs(group: Seq[Int], originIRQ: UInt): Seq[Bool] = {
-    group.map(irqNum => originIRQ(irqNum))
-  }
-
-  def getIRQHigherThanInGroup(group: Seq[Int])(irq: Int): Seq[Int] = {
-    val idx = group.indexOf(irq, 0)
-    require(idx != -1, s"The irq($irq) does not exists in IntPriority Seq")
-    group.slice(0, idx)
-  }
-
-  def getMaskFromIRQGroup(group: Seq[Int]): UInt = {
-    group.map(irq => BigInt(1) << irq).reduce(_ | _).U
-  }
-
-  def produceHighIRInGroup(irqGroup: Seq[Int], filteredIRVec: UInt): Vec[Bool] = {
-    val irVec = Wire(Vec(64, Bool()))
-    irVec.zipWithIndex.foreach { case (irq, i) =>
-      if (irqGroup.contains(i)) {
-        val higherIRSeq: Seq[Int] = getIRQHigherThanInGroup(irqGroup)(i)
-        irq := (
-          higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !filteredIRVec(num))).andR ||
-            higherIRSeq.isEmpty.B
-          ) && filteredIRVec(i)
-      } else
-        irq := false.B
-    }
-    irVec
-  }
 }
 
 class TrapHandleIO extends Bundle {
@@ -168,11 +120,17 @@ class TrapHandleIO extends Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
       val nmi = Bool()
-      val intrVec = UInt(64.W)
+      val intrVec = UInt(8.W)
       val isInterrupt = Bool()
       val singleStep = Bool()
+      // trap to x mode
+      val irToHS = Bool()
+      val irToVS = Bool()
     })
     val privState = new PrivState
+    val mstatus = new MstatusBundle
+    val vsstatus = new SstatusBundle
+    val mnstatus = new MnstatusBundle
     val mideleg = new MidelegBundle
     val medeleg = new MedelegBundle
     val hideleg = new HidelegBundle
@@ -190,6 +148,8 @@ class TrapHandleIO extends Bundle {
   val out = new Bundle {
     val entryPrivState = new PrivState
     val causeNO = new CauseBundle
+    val dbltrpToMN = Bool()
+    val hasDTExcp = Bool()
     val pcFromXtvec = UInt()
   }
 }

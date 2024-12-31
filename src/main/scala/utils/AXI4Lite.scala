@@ -57,7 +57,8 @@ class AXI4LiteBundle(val addrWidth: Int, val dataWidth: Int, val idWidth: Int = 
         data := right.elements(name)
       else
         data := (name match {
-          case "size" => log2Ceil(dataWidth).U
+          case "size" => log2Ceil(dataWidth/8).U
+          case "strb" => ((1L<<(dataWidth/8)) - 1).U
           case "last" => true.B.asTypeOf(data)
           case _: String => 0.U.asTypeOf(data)
         })

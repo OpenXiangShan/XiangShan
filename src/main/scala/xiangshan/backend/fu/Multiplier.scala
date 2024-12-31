@@ -12,6 +12,15 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Andrew D. Booth. "[A signed binary multiplication technique.](https://doi.org/10.1093/qjmam/4.2.236)" The
+* Quarterly Journal of Mechanics and Applied Mathematics 4.2: 236-240. 1951.
+* [2] Christopher. S. Wallace. "[A suggestion for a fast multiplier.](https://doi.org/10.1109/PGEC.1964.263830)" IEEE
+* Transactions on Electronic Computers 1: 14-17. 1964.
 ***************************************************************************************/
 
 package xiangshan.backend.fu

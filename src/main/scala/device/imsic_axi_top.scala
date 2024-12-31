@@ -146,7 +146,7 @@ class imsic_bus_top(
     )))
     val xbar = AXI4Xbar(TLArbiter.lowestIndexFirst)
     axi4nodes.foreach { _ := xbar }
-    xbar := node
+    xbar := AXI4Buffer() := node
     node
   }
 

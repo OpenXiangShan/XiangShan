@@ -30,6 +30,7 @@ import top.{BusPerfMonitor, ArgParser, Generator}
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
+import xiangshan.backend.trace.TraceCoreInterface
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
@@ -79,18 +80,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case None =>
   }
 
-  // CMO
-  l2top.inner.l2cache match {
-    case Some(l2) =>
-      l2.cmo_sink_node.foreach(recv => {
-        recv := memBlock.cmo_sender.get
-      })
-      l2.cmo_source_node.foreach(resp => {
-        memBlock.cmo_reciver.get := resp
-      })
-    case None =>
-  }
-
   val core_l3_tpmeta_source_port = l2top.inner.l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
@@ -102,7 +91,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // mmio
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.frontendBridge.instr_uncache_node
-  l2top.inner.d_mmio_port := memBlock.uncache.clientNode
+  if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+    memBlock.frontendBridge.icachectrl_node := l2top.inner.icachectrl_port_opt.get
+  }
+  l2top.inner.d_mmio_port := memBlock.uncache_port
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
@@ -111,7 +103,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
+      val traceCoreInterface = new TraceCoreInterface
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
@@ -135,11 +129,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.reset_vector.fromTile := io.reset_vector
     l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
+    l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
+    io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile
-
-    core.module.io.perfEvents <> DontCare
+    l2top.module.io.traceCoreInterface.fromCore <> core.module.io.traceCoreInterface
+    io.traceCoreInterface <> l2top.module.io.traceCoreInterface.toTile
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
@@ -157,6 +153,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+
+      core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
@@ -171,6 +169,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
       core.module.io.l2_tlb_req.resp.ready := true.B
+
+      core.module.io.perfEvents <> DontCare
     }
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr

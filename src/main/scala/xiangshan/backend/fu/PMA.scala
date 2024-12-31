@@ -110,7 +110,9 @@ trait PMAMethod extends PMAConst {
       MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
       MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
       MemMap("h00_3802_1000", "h00_3802_1FFF",   "h0", "MMPMA",       "RW"),
-      MemMap("h00_3802_2000", "h00_3900_0000",   "h0", "Reserved",    ""),
+      MemMap("h00_3802_2000", "h00_3802_207F",   "h0", "L1DCacheCtrl", "RW"),
+      MemMap("h00_3802_2080", "h00_3802_20FF",   "h0", "L1ICacheCtrl", "RW"),
+      MemMap("h00_3802_2100", "h00_38FF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3900_0000", "h00_3900_1FFF",   "h0", "L3CacheCtrl",  "RW"),
       MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3A00_0000", "h00_3FFF_FFFF",   "h0", "",            "RW),
@@ -161,7 +163,7 @@ trait PMAMethod extends PMAConst {
     addPMA(PMPPmemLowBounds(0), a = 1, w = true, r = true)
     addPMA(0x3A000000L, a = 1)
     addPMA(0x39002000L, a = 1, w = true, r = true)
-    addPMA(0x39000000L, a = 1)
+    addPMA(0x39000000L, a = 1, w = true, r = true)
     addPMA(0x38022000L, a = 1, w = true, r = true)
     addPMA(0x38021000L, a = 1, x = true, w = true, r = true)
     addPMA(0x38020000L, a = 1, w = true, r = true)
@@ -214,7 +216,11 @@ trait PMACheckMethod extends PMPConst {
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && !cfg.w
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
-    resp.mmio := !cfg.c
+    //TODO We require that a `PMA` can generate an mmio response only if the address has the appropriate `PMA` permissions.
+    resp.mmio := !cfg.c &&
+                 (TlbCmd.isRead(cmd) && cfg.r ||
+                 (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd) && cfg.atomic) && cfg.w ||
+                 TlbCmd.isExec(cmd) && cfg.x)
     resp.atomic := cfg.atomic
     resp
   }

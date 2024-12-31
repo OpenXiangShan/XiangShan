@@ -236,28 +236,21 @@ case class IssueBlockParams(
 
   def iqWakeUpSourcePairs: Seq[WakeUpConfig] = exuBlockParams.flatMap(_.iqWakeUpSourcePairs)
 
-  /** Get exu source wake up
-    * @todo replace with
-    *       exuBlockParams
-    *       .flatMap(_.iqWakeUpSinkPairs)
-    *       .map(_.source)
-    *       .distinctBy(_.name)
-    *       when xiangshan is updated to 2.13.11
+  /**
+    * Get exu source wake up
     */
   def wakeUpInExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      exuBlockParams
-        .flatMap(_.iqWakeUpSinkPairs)
-        .map(_.source)
-    )(_.name)
+    exuBlockParams
+      .flatMap(_.iqWakeUpSinkPairs)
+      .map(_.source)
+      .distinctBy(_.name)
   }
 
   def wakeUpOutExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      exuBlockParams
-        .flatMap(_.iqWakeUpSourcePairs)
-        .map(_.source)
-    )(_.name)
+    exuBlockParams
+      .flatMap(_.iqWakeUpSourcePairs)
+      .map(_.source)
+      .distinctBy(_.name)
   }
 
   def wakeUpToExuSinks = exuBlockParams
@@ -279,7 +272,13 @@ case class IssueBlockParams(
 
   def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readIntRf).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromFpWBPort = if (this.exuBlockParams.map(_.hasStdFu).reduce(_ || _)) {
+    // here add fp load WB wakeup to std
+    backendParam.allExuParams.filter(x => (!wakeUpInExuSources.map(_.name).contains(x.name) || x.hasLoadExu) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
+  }
+  else {
+    backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
+  }
 
   def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVecRf).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
@@ -332,6 +331,10 @@ case class IssueBlockParams(
 
   def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
+  }
+
+  def genExuInputDecoupledCopySrcBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputCopySrcBundle)))
   }
 
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {

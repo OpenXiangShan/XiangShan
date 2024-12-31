@@ -49,9 +49,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   io.block_addr.bits  := req.addr
 
 
-  when (state =/= s_invalid) {
-    XSDebug("AtomicsReplayEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
-  }
+  XSDebug(state =/= s_invalid, "AtomicsReplayEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
 
   // --------------------------------------------
   // s_invalid: receive requests

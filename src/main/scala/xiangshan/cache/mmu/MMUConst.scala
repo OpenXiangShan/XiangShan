@@ -58,12 +58,12 @@ case class L2TLBParameters
   l2Replacer: Option[String] = Some("plru"),
   // l1
   l1nSets: Int = 8,
-  l1nWays: Int = 4,
+  l1nWays: Int = 2,
   l1ReservedBits: Int = 10,
   l1Replacer: Option[String] = Some("setplru"),
   // l0
   l0nSets: Int = 32,
-  l0nWays: Int = 8,
+  l0nWays: Int = 4,
   l0ReservedBits: Int = 3,
   l0Replacer: Option[String] = Some("setplru"),
   // sp
@@ -137,6 +137,10 @@ trait HasTlbConst extends HasXSParameter {
 
   def Sv39x4 = "h8".U
   def Sv48x4 = "h9".U
+
+  def PMLEN7  = "b10".U
+  def PMLEN16 = "b11".U
+  def MaxMaskedWidth = 16
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)

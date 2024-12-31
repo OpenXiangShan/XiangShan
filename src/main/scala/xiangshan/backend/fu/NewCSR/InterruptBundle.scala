@@ -328,12 +328,12 @@ object InterruptNO {
   final val LPRASEI = 35
   final val HPRASEI = 43
 
-  val interruptDefaultPrio = Seq(
+  val privArchGroup = Seq(
     MEI, MSI, MTI,
     SEI, SSI, STI,
     SGEI,
     VSEI, VSSI, VSTI,
-    COI,
+    COI, 14, 15,
   )
 
   val localHighGroup = Seq(
@@ -369,6 +369,14 @@ object InterruptNO {
     51, 25, 50,
     49, 24, 48,
   )
+
+  val interruptDefaultPrio = customHighestGroup ++
+                            localHighGroup ++
+                            customMiddleHighGroup ++
+                            privArchGroup ++
+                            customMiddleLowGroup ++
+                            localLowGroup ++
+                            customLowestGroup
 
   def getPrioIdxInGroup(group: this.type => Seq[Int])(f: this.type => Int): Int = {
     val idx = group(this).indexOf(f(this))

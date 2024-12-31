@@ -60,6 +60,7 @@ case class FuConfig (
   writeVxsat    : Boolean = false,
   destDataBits  : Int = 64,
   srcDataBits   : Option[Int] = None,
+  srcNeedCopy   : Boolean = false,
   latency       : HasFuLatency = CertainLatency(0),// two field (base latency, extra latency(option))
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),
@@ -146,12 +147,12 @@ case class FuConfig (
 
   def hasPredecode: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
 
-  def needTargetPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
+  def needTargetPc: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 
   // predict info
   def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.fence).contains(fuType)
+  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
 
   def needFPUCtrl: Boolean = {
     import FuType._
@@ -160,9 +161,10 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(falu, fmac, fDivSqrt, fcvt,
-      vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
+
+  def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
   def isMul: Boolean = fuType == FuType.mul
 
@@ -188,6 +190,8 @@ case class FuConfig (
   def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || isVecMem
 
   def isSta: Boolean = name.contains("sta")
+
+  def isStd: Boolean = name.contains("std")
 
   def ckAlwaysEn: Boolean = isCsr || isFence
 
@@ -419,7 +423,7 @@ object FuConfig {
     writeIntRf = true,
     writeFpRf = true,
     latency = UncertainLatency(3),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint, hardwareError),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,

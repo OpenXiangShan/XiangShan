@@ -65,10 +65,8 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean, numCores: Int)(implicit p:
     node.regmap( mapping = clintMapping:_* )
 
     val in = node.in.head._1
-    when(in.a.valid){
-      XSDebug("[A] channel valid ready=%d ", in.a.ready)
-      in.a.bits.dump
-    }
+    XSDebug(in.a.valid, "[A] channel valid ready=%d ", in.a.ready)
+    in.a.bits.dump(in.a.valid)
 
     for (i <- 0 until numCores) {
       io.mtip(i) := RegNext(mtime >= mtimecmp(i))

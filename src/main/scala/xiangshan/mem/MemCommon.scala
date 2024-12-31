@@ -54,25 +54,45 @@ object genVWmask {
   }
 }
 
-object genWdata {
-  def apply(data: UInt, sizeEncode: UInt): UInt = {
+object genBasemask {
+  /**
+   *
+   * @param addr
+   * @param sizeEncode
+   * @return Return 16-byte aligned mask.
+   *
+   *         Example:
+   *         Address: 0x80000003 Encoding size: ‘b11
+   *         Return: 0xff
+   */
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
-      "b00".U -> Fill(16, data(7, 0)),
-      "b01".U -> Fill(8, data(15, 0)),
-      "b10".U -> Fill(4, data(31, 0)),
-      "b11".U -> Fill(2, data(63,0))
+      "b00".U -> 0x1.U,
+      "b01".U -> 0x3.U,
+      "b10".U -> 0xf.U,
+      "b11".U -> 0xff.U
     ))
   }
 }
 
 object shiftDataToLow {
-  def apply(addr: UInt,data : UInt): UInt = {
-    Mux(addr(3), (data >> 64).asUInt,data)
+  def apply(addr: UInt, data : UInt): UInt = {
+    Mux(addr(3), (data >> 64).asUInt, data)
   }
 }
 object shiftMaskToLow {
-  def apply(addr: UInt,mask: UInt): UInt = {
-    Mux(addr(3),(mask >> 8).asUInt,mask)
+  def apply(addr: UInt, mask: UInt): UInt = {
+    Mux(addr(3), (mask >> 8).asUInt, mask)
+  }
+}
+object shiftDataToHigh {
+  def apply(addr: UInt, data : UInt): UInt = {
+    Mux(addr(3), (data << 64).asUInt, data)
+  }
+}
+object shiftMaskToHigh {
+  def apply(addr: UInt, mask: UInt): UInt = {
+    Mux(addr(3), (mask << 8).asUInt, mask)
   }
 }
 
@@ -97,8 +117,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val tlbMiss = Bool()
   val ptwBack = Bool()
   val af = Bool()
+  val nc = Bool()
   val mmio = Bool()
+  val memBackTypeMM = Bool() // 1: main memory, 0: IO
   val atomic = Bool()
+  val hasException = Bool()
 
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
@@ -160,6 +183,13 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
   // hardware prefetch and fast replay no need to query tlb
   val tlbNoQuery = Bool()
+
+  // misalign
+  val isMisalign          = Bool()
+  val isFinalSplit        = Bool()
+  val misalignWith16Byte  = Bool()
+  val misalignNeedWakeUp  = Bool()
+  val updateAddrValid     = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -182,7 +212,9 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) tlbMiss := RegEnable(input.tlbMiss, enable) else tlbMiss := input.tlbMiss
     if (latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
     if (latch) af := RegEnable(input.af, enable) else af := input.af
+    if (latch) nc := RegEnable(input.nc, enable) else nc := input.nc
     if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
+    if (latch) memBackTypeMM := RegEnable(input.memBackTypeMM, enable) else memBackTypeMM := input.memBackTypeMM
     if (latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
     if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
@@ -369,6 +401,8 @@ class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle { // provide lqI
   val paddr      = UInt(PAddrBits.W)
   // dataInvalid: load data is invalid.
   val data_valid = Bool()
+  // nc: is NC access
+  val is_nc = Bool()
 }
 
 class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
@@ -398,26 +432,27 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
 class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
   // from storeMisalignBuffer to storeQueue, control it's sbuffer write
-  val control = Output(new XSBundle {
-    // control sq to write-into sb
-    val writeSb = Bool()
-    val wdata = UInt(VLEN.W)
-    val wmask = UInt((VLEN / 8).W)
+  val toStoreQueue = Output(new XSBundle {
+    // This entry is a cross page
+    val crossPageWithHit = Bool()
+    val crossPageCanDeq  = Bool()
+    // High page Paddr
     val paddr = UInt(PAddrBits.W)
-    val vaddr = UInt(VAddrBits.W)
-    val last  = Bool()
-    val hasException = Bool()
-    // remove this entry in sq
-    val removeSq = Bool()
+
+    val withSameUop = Bool()
   })
   // from storeQueue to storeMisalignBuffer, provide detail info of this store
-  val storeInfo = Input(new XSBundle {
-    val data = UInt(VLEN.W)
-    // is the data of the unaligned store ready at sq?
-    val dataReady = Bool()
-    // complete a data transfer from sq to sb
-    val completeSbTrans = Bool()
+  val toStoreMisalignBuffer = Input(new XSBundle {
+    val sqPtr = new SqPtr
+    val doDeq = Bool()
+
+    val uop = new DynInst()
   })
+}
+
+class StoreMaBufToVecStoreMergeBufferIO(implicit p: Parameters)  extends VLSUBundle{
+  val mbIndex = Output(UInt(vsmBindexBits.W))
+  val flush   = Output(Bool())
 }
 
 // Store byte valid mask write bundle

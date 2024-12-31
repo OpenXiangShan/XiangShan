@@ -7,10 +7,11 @@ import utils.NamedUInt
 import xiangshan.HasXSParameter
 import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
 
-class TraceTrap(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val cause = UInt(XLEN.W)
-  val tval  = UInt(XLEN.W)
-  val priv  = Priv()
+class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
+  val cause = UInt(CauseWidth.W)
+  val tval  = UInt(TvalWidth.W)
+  val lastPriv    = Priv()
+  val currentPriv = Priv()
 }
 
 class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
@@ -20,14 +21,13 @@ class TracePipe(iretireWidth: Int)(implicit val p: Parameters) extends Bundle wi
 }
 
 class TraceBlock(hasIaddr: Boolean, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val iaddr     = if (hasIaddr)   Some(UInt(XLEN.W))                      else None
+  val iaddr     = if (hasIaddr)   Some(UInt(IaddrWidth.W))                else None
   val ftqIdx    = if (!hasIaddr)  Some(new FtqPtr)                        else None
-  val ftqOffset = if (!hasIaddr)  Some( UInt(log2Up(PredictWidth).W))     else None
+  val ftqOffset = if (!hasIaddr)  Some(UInt(log2Up(PredictWidth).W))      else None
   val tracePipe = new TracePipe(iretireWidth)
 }
 
 class TraceBundle(hasIaddr: Boolean, blockSize: Int, iretireWidth: Int)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  val trap = Output(new TraceTrap)
   val blocks = Vec(blockSize, ValidIO(new TraceBlock(hasIaddr, iretireWidth)))
 }
 
@@ -36,30 +36,24 @@ class FromEncoder extends Bundle {
   val stall  = Bool()
 }
 
-class TraceCoreInterface(implicit val p: Parameters) extends Bundle with HasXSParameter {
-  // parameter
-  val CauseWidth             = XLEN
-  val TvalWidth              = XLEN
-  val PrivWidth              = 3
-  val IaddrWidth             = XLEN
-  val ItypeWidth             = 4
-  val IretireWidthInPipe     = log2Up(RenameWidth * 2)
-  val IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
-  val IlastsizeWidth         = 1
-  val GroupNum               = TraceGroupNum
-  
+class TraceCoreInterface(hasOffset: Boolean = false)(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val fromEncoder = Input(new Bundle {
     val enable = Bool()
     val stall  = Bool()
   })
-  val toEncoder   = Output(new Bundle {
-    val cause     = UInt(CauseWidth.W)
-    val tval      = UInt(TvalWidth.W)
-    val priv      = UInt(PrivWidth.W)
-    val iaddr     = UInt((GroupNum * IaddrWidth).W)
-    val itype     = UInt((GroupNum * ItypeWidth).W)
-    val iretire   = UInt((GroupNum * IretireWidthCompressed).W)
-    val ilastsize = UInt((GroupNum * IlastsizeWidth).W)
+  val toEncoder = Output(new Bundle {
+    val priv   = Priv()
+    val trap   = new Bundle{
+      val cause = UInt(CauseWidth.W)
+      val tval  = UInt(TvalWidth.W)
+    }
+    val groups = Vec(TraceGroupNum, ValidIO(new Bundle{
+      val iaddr     = UInt(IaddrWidth.W)
+      val ftqOffset = if (hasOffset)  Some(UInt(log2Up(PredictWidth).W)) else None
+      val itype     = UInt(ItypeWidth.W)
+      val iretire   = UInt(IretireWidthCompressed.W)
+      val ilastsize = UInt(IlastsizeWidth.W)
+    }))
   })
 }
 
@@ -81,8 +75,8 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
-  // Assuming the branchType is taken here, it will be correctly modified after writeBack.
-  def Branch = 5.U
+  // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
+  def Branch = NonTaken
 
   def jumpTypeGen(brType: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
@@ -131,6 +125,8 @@ object Itype extends NamedUInt(4) {
 
   def isTrap(itype: UInt) = Seq(Exception, Interrupt).map(_ === itype).reduce(_ || _)
 
+  def isTrapOrXret(itype: UInt) = Seq(Exception, Interrupt, ExpIntReturn).map(_ === itype).reduce(_ || _)
+
   def isNotNone(itype: UInt) = itype =/= None
 
   def isBranchType(itype: UInt) = itype === Branch
@@ -155,9 +151,9 @@ object Priv extends NamedUInt(3) {
 }
 
 class OpRegType extends Bundle {
-  val value = UInt(3.W)
+  val value = UInt(6.W)
   def isX0   = this.value === 0.U
   def isX1   = this.value === 1.U
   def isX5   = this.value === 5.U
-  def isLink = Seq(isX1, isX5).map(_ === this.value).reduce(_ || _)
+  def isLink = Seq(isX1, isX5).reduce(_ || _)
 }

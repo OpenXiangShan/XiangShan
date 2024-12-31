@@ -15,10 +15,11 @@ import xiangshan.backend.Bundles.TrapInstInfo
 import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
+import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.FtqPtr
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
-  with HasCircularQueuePtrHelper
+  with HasCircularQueuePtrHelper with HasCriticalErrors
 {
   val csrIn = io.csrio.get
   val csrOut = io.csrio.get
@@ -89,6 +90,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     CSROpType.isCSRRSorRC(func)
   )
 
+  private val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
+  private val thisRobIdx = Wire(new RobPtr)
+  when (io.in.valid) {
+    thisRobIdx := io.in.bits.ctrl.robIdx
+  }.otherwise {
+    thisRobIdx := robIdxReg
+  }
+  private val redirectFlush = thisRobIdx.needFlush(io.flush)
+
   csrMod.io.in match {
     case in =>
       in.valid := valid
@@ -102,6 +112,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.mnret := isMNret
       in.bits.sret := isSret
       in.bits.dret := isDret
+      in.bits.redirectFlush := redirectFlush
   }
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
@@ -116,6 +127,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Todo: shrink the width of trap vector.
   // We use 64bits trap vector in CSR, and 24 bits exceptionVec in exception bundle.
   csrMod.io.fromRob.trap.bits.trapVec := csrIn.exception.bits.exceptionVec.asUInt
+  csrMod.io.fromRob.trap.bits.isFetchBkpt := csrIn.exception.bits.isPcBkpt
   csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
@@ -161,6 +173,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
+  csrMod.io.fromTop.criticalErrorState := io.csrin.get.criticalErrorState
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
 
@@ -222,13 +235,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
-  // ctrl block will use theses later for flush // Todo: optimize isXRetFlag's DelayN
-  val isXRetFlag = RegInit(false.B)
-  isXRetFlag := Mux1H(Seq(
-    DelayN(flush, 5) -> false.B,
-    isXRet -> true.B,
-  ))
-
   flushPipe := csrMod.io.out.bits.flushPipe
 
   // tlb
@@ -260,6 +266,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE
   tlb.hPBMTE := csrMod.io.tlb.hPBMTE
 
+  // pointer masking extension
+  tlb.pmm := csrMod.io.tlb.pmm
+
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.out.valid := csrModOutValid
@@ -270,13 +279,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   /** initialize NewCSR's io_out_ready from wrapper's io */
   csrMod.io.out.ready := io.out.ready
 
-  io.out.bits.res.redirect.get.valid := io.out.valid && DataHoldBypass(isXRet, false.B, io.in.fire)
+  io.out.bits.res.redirect.get.valid := io.out.valid && RegEnable(isXRet, false.B, io.in.fire)
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
-  redirect.robIdx := io.in.bits.ctrl.robIdx
-  redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
-  redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
+  redirect.robIdx := robIdxReg
+  redirect.ftqIdx := RegEnable(io.in.bits.ctrl.ftqIdx.get, io.in.fire)
+  redirect.ftqOffset := RegEnable(io.in.bits.ctrl.ftqOffset.get, io.in.fire)
   redirect.cfiUpdate.predTaken := true.B
   redirect.cfiUpdate.taken := true.B
   redirect.cfiUpdate.target := csrMod.io.out.bits.targetPc.pc
@@ -286,15 +295,18 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 
-  connectNonPipedCtrlSingalForCSR
+  connectNonPipedCtrlSingal
+
+  override val criticalErrors = csrMod.getCriticalErrors
+  generateCriticalErrors()
 
   // Todo: summerize all difftest skip condition
-  csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && DataHoldBypass(func =/= CSROpType.jmp, false.B, io.in.fire)
+  csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && RegEnable(func =/= CSROpType.jmp, false.B, io.in.fire)
   csrOut.fpu.frm    := csrMod.io.status.fpState.frm.asUInt
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt
 
-  csrOut.isXRet := isXRetFlag
+  csrOut.isXRet := isXRet
 
   csrOut.trapTarget := csrMod.io.out.bits.targetPc
   csrOut.interrupt := csrMod.io.status.interrupt
@@ -303,6 +315,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.tlb := tlb
 
   csrOut.debugMode := csrMod.io.status.debugMode
+
+  csrOut.traceCSR := csrMod.io.status.traceCSR
 
   csrOut.customCtrl match {
     case custom =>
@@ -316,8 +330,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.l1D_pf_active_stride     := csrMod.io.status.custom.l1D_pf_active_stride
       custom.l1D_pf_enable_stride     := csrMod.io.status.custom.l1D_pf_enable_stride
       custom.l2_pf_store_only         := csrMod.io.status.custom.l2_pf_store_only
-      // ICache
-      custom.icache_parity_enable     := csrMod.io.status.custom.icache_parity_enable
       // Load violation predictor
       custom.lvpred_disable           := csrMod.io.status.custom.lvpred_disable
       custom.no_spec_load             := csrMod.io.status.custom.no_spec_load
@@ -339,7 +351,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory
-      custom.distribute_csr.w.valid := csrWen
+      custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
       custom.distribute_csr.w.bits.addr := addr
       custom.distribute_csr.w.bits.data := wdata
       // rename single step
@@ -349,9 +361,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.mem_trigger      := csrMod.io.status.memTrigger
       // virtual mode
       custom.virtMode := csrMod.io.status.privState.V.asBool
+      // xstatus.fs field is off
+      custom.fsIsOff := csrMod.io.toDecode.illegalInst.fsIsOff
   }
 
   csrOut.instrAddrTransType := csrMod.io.status.instrAddrTransType
+  csrOut.criticalErrorState := csrMod.io.status.criticalErrorState
 
   csrToDecode := csrMod.io.toDecode
 }
@@ -359,6 +374,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
+  val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
   val fromVecExcpMod = Input(new Bundle {

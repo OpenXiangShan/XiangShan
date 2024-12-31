@@ -19,6 +19,7 @@ package xiangshan.backend.regfile
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.exu.ExeUnitParams
@@ -223,6 +224,46 @@ object IntRegFile {
   }
 }
 
+object IntRegFileSplit {
+  // non-return version
+  def apply(
+    name         : String,
+    numEntries   : Int,
+    splitNum     : Int,
+    raddr        : Seq[UInt],
+    rdata        : Vec[UInt],
+    wen          : Seq[Bool],
+    waddr        : Seq[UInt],
+    wdata        : Seq[UInt],
+    debugReadAddr: Option[Seq[UInt]],
+    debugReadData: Option[Vec[UInt]],
+    withReset    : Boolean = false,
+    bankNum      : Int,
+ )(implicit p: Parameters): Unit = {
+    require(Seq(1, 2, 4, 8).contains(splitNum))
+    val rdataVec = Wire(Vec(splitNum, Vec(rdata.length, UInt((rdata.head.getWidth / splitNum).W))))
+    rdata.zipWithIndex.map{ case (r, i) =>
+      r := Cat((0 until splitNum).map(x => rdataVec(x)(i)).reverse)
+    }
+    val debugReadDataVec = OptionWrapper(debugReadData.nonEmpty, Wire(Vec(splitNum, Vec(debugReadData.get.length, UInt((debugReadData.get.head.getWidth / splitNum).W)))))
+    if (debugReadData.nonEmpty) {
+      debugReadData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => debugReadDataVec.get(x)(i)).reverse)
+      }
+    }
+    for (i <- 0 until splitNum){
+      val wdataThisPart = wdata.map { case x =>
+        val widthThisPart = x.getWidth / splitNum
+        x((i + 1) * widthThisPart - 1, i * widthThisPart)
+      }
+      val nameSuffix = if (splitNum > 1) s"Part${i}" else ""
+      Regfile(
+        name + nameSuffix, numEntries, raddr, rdataVec(i), wen, waddr, wdataThisPart,
+        hasZero = true, withReset, bankNum, debugReadAddr, OptionWrapper(debugReadData.nonEmpty, debugReadDataVec.get(i)))
+    }
+  }
+}
+
 object FpRegFile {
   // non-return version
   def apply(
@@ -242,6 +283,47 @@ object FpRegFile {
     Regfile(
       name, numEntries, raddr, rdata, wen, waddr, wdata,
       hasZero = false, withReset, bankNum, debugReadAddr, debugReadData, isVlRegfile)
+  }
+}
+
+object FpRegFileSplit {
+  // non-return version
+  def apply(
+             name         : String,
+             numEntries   : Int,
+             splitNum     : Int,
+             raddr        : Seq[UInt],
+             rdata        : Vec[UInt],
+             wen          : Seq[Bool],
+             waddr        : Seq[UInt],
+             wdata        : Seq[UInt],
+             debugReadAddr: Option[Seq[UInt]],
+             debugReadData: Option[Vec[UInt]],
+             withReset    : Boolean = false,
+             bankNum      : Int,
+             isVlRegfile  : Boolean = false,
+           )(implicit p: Parameters): Unit = {
+    require(Seq(1, 2, 4, 8).contains(splitNum))
+    val rdataVec = Wire(Vec(splitNum, Vec(rdata.length, UInt((rdata.head.getWidth / splitNum).W))))
+    rdata.zipWithIndex.map{ case (r, i) =>
+      r := Cat((0 until splitNum).map(x => rdataVec(x)(i)).reverse)
+    }
+    val debugReadDataVec = OptionWrapper(debugReadData.nonEmpty, Wire(Vec(splitNum, Vec(debugReadData.get.length, UInt((debugReadData.get.head.getWidth / splitNum).W)))))
+    if (debugReadData.nonEmpty) {
+      debugReadData.get.zipWithIndex.map { case (r, i) =>
+        r := Cat((0 until splitNum).map(x => debugReadDataVec.get(x)(i)).reverse)
+      }
+    }
+    for (i <- 0 until splitNum){
+      val wdataThisPart = wdata.map { case x =>
+        val widthThisPart = x.getWidth / splitNum
+        x((i + 1) * widthThisPart - 1, i * widthThisPart)
+      }
+      val nameSuffix = if (splitNum > 1) s"Part${i}" else ""
+      Regfile(
+        name + nameSuffix, numEntries, raddr, rdataVec(i), wen, waddr, wdataThisPart,
+        hasZero = false, withReset, bankNum, debugReadAddr, OptionWrapper(debugReadData.nonEmpty, debugReadDataVec.get(i)), isVlRegfile)
+    }
   }
 }
 
@@ -267,7 +349,7 @@ object VfRegFile {
         name, numEntries, raddr, rdata, wen.head, waddr, wdata,
         hasZero = false, withReset, bankNum = 1, debugReadAddr, debugReadData)
     } else {
-      val dataWidth = 64
+      val dataWidth = wdata.head.getWidth / splitNum
       val numReadPorts = raddr.length
       require(splitNum > 1 && wdata.head.getWidth == dataWidth * splitNum)
       val wdataVec = Wire(Vec(splitNum, Vec(wdata.length, UInt(dataWidth.W))))

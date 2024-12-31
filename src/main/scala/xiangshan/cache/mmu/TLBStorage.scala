@@ -128,28 +128,28 @@ class TLBFA(
 
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
-    val ppnReg   = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-    val pbmtReg  = RegEnable(VecInit(entries.map(_.pbmt)), req.fire)
-    val gpbmtReg  = RegEnable(VecInit(entries.map(_.g_pbmt)), req.fire)
-    val permReg  = RegEnable(VecInit(entries.map(_.perm)), req.fire)
-    val gPermReg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
-    val s2xLate  = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
+    val reqVpn   = RegEnable(vpn, 0.U, req.fire)
+    val pbmt     = entries.map(_.pbmt)
+    val gpbmt    = entries.map(_.g_pbmt)
+    val perm     = entries.map(_.perm)
+    val gPerm    = entries.map(_.g_perm)
+    val s2xLate  = entries.map(_.s2xlate)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := ppnReg(0)
-        resp.bits.pbmt(d) := pbmtReg(0)
-        resp.bits.g_pbmt(d) := gpbmtReg(0)
-        resp.bits.perm(d) := permReg(0)
-        resp.bits.g_perm(d) := gPermReg(0)
+        resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
+        resp.bits.pbmt(d) := pbmt(0)
+        resp.bits.g_pbmt(d) := gpbmt(0)
+        resp.bits.perm(d) := perm(0)
+        resp.bits.g_perm(d) := gPerm(0)
         resp.bits.s2xlate(d) := s2xLate(0)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := Mux1H(hitVecReg zip ppnReg)
-        resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmtReg)
-        resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmtReg)
-        resp.bits.perm(d) := Mux1H(hitVecReg zip permReg)
-        resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPermReg)
+        resp.bits.ppn(d) := Mux1H(hitVecReg zip entries.map(_.genPPN(saveLevel, resp.valid)(reqVpn)))
+        resp.bits.pbmt(d) := Mux1H(hitVecReg zip pbmt)
+        resp.bits.g_pbmt(d) := Mux1H(hitVecReg zip gpbmt)
+        resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
+        resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPerm)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
       }
     }

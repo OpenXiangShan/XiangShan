@@ -133,6 +133,10 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledBundle))
   }
 
+  def genExuInputCopySrcBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuInput]]] = {
+    MixedVec(this.issueBlockParams.map(_.genExuInputDecoupledCopySrcBundle))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
   }
@@ -146,17 +150,15 @@ case class SchdBlockParams(
   }
 
   def wakeUpInExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      issueBlockParams
-        .flatMap(_.wakeUpInExuSources)
-    )(_.name)
+    issueBlockParams
+      .flatMap(_.wakeUpInExuSources)
+      .distinctBy(_.name)
   }
 
   def wakeUpOutExuSources: Seq[WakeUpSource] = {
-    SeqUtils.distinctBy(
-      issueBlockParams
-        .flatMap(_.wakeUpOutExuSources)
-    )(_.name)
+    issueBlockParams
+      .flatMap(_.wakeUpOutExuSources)
+      .distinctBy(_.name)
   }
 
   def genIQWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {

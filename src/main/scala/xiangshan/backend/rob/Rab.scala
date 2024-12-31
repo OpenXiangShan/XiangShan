@@ -49,6 +49,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val snpt = Input(new SnapshotPort)
 
     val canEnq = Output(Bool())
+    val canEnqForDispatch = Output(Bool())
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
@@ -56,6 +57,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
     val status = Output(new Bundle {
       val walkEnd = Bool()
+      val commitEnd = Bool()
     })
     val toVecExcpMod = Output(new RabToVecExcpMod)
   })
@@ -219,6 +221,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   }
 
   private val walkEndNext = walkSizeNxt === 0.U
+  private val commitEndNext = commitSizeNxt === 0.U
   private val specialWalkEndNext = specialWalkSize <= RabCommitWidth.U
   // when robWalkEndReg is 1, walkSize donot increase and decrease RabCommitWidth per Cycle
   private val walkEndNextCycle = (robWalkEndReg || io.fromRob.walkEnd && io.fromRob.walkSize === 0.U) && (walkSize <= RabCommitWidth.U)
@@ -258,27 +261,30 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val allowEnqueue = GatedValidRegNext(numValidEntries + enqCount <= (size - RenameWidth).U, true.B)
+  val allowEnqueueForDispatch = GatedValidRegNext(numValidEntries + enqCount <= (size - 2*RenameWidth).U, true.B)
 
   io.canEnq := allowEnqueue && state === s_idle
+  io.canEnqForDispatch := allowEnqueueForDispatch && state === s_idle
   io.enqPtrVec := enqPtrVec
 
   io.status.walkEnd := walkEndNext
+  io.status.commitEnd := commitEndNext
 
   for (i <- 0 until RabCommitWidth) {
-    io.toVecExcpMod.logicPhyRegMap(i).valid := (state === s_special_walk) && vecLoadExcp.valid &&
-      io.commits.commitValid(i)
+    val valid = (state === s_special_walk) && vecLoadExcp.valid && io.commits.commitValid(i)
+    io.toVecExcpMod.logicPhyRegMap(i).valid := RegNext(valid)
     io.toVecExcpMod.logicPhyRegMap(i).bits match {
       case x =>
-        x.lreg := io.commits.info(i).ldest
-        x.preg := io.commits.info(i).pdest
+        x.lreg := RegEnable(io.commits.info(i).ldest, valid)
+        x.preg := RegEnable(io.commits.info(i).pdest, valid)
     }
   }
 
   // for difftest
   io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
-  io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
+  io.diffCommits.foreach(_.isCommit := true.B)
   for(i <- 0 until RabCommitWidth * MaxUopSize) {
-    io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
+    io.diffCommits.foreach(_.commitValid(i) := i.U < newCommitSize)
     io.diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
   }
 

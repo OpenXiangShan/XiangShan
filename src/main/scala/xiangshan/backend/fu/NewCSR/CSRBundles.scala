@@ -47,7 +47,8 @@ object CSRBundles {
     val STCE  =      RO(    63)           .withReset(0.U) // Sstc Enable
     val PBMTE =      RO(    62)           .withReset(0.U) // Svpbmt Enable
     val ADUE  =      RO(    61)           .withReset(0.U) // Svadu extension Enable
-    val PMM   =      RO(33, 32)           .withReset(0.U) // Smnpm extension
+    val DTE   =      RO(    59)           .withReset(0.U) // Ssdbltrp extension Enable
+    val PMM   =  EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable) // Smnpm extension
     val CBZE  =      RW(     7)           .withReset(1.U) // Zicboz extension
     val CBCFE =      RW(     6)           .withReset(1.U) // Zicbom extension
     val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval) // Zicbom extension
@@ -180,8 +181,6 @@ object CSRBundles {
     val l1D_pf_active_stride = Output(UInt(6.W))
     val l1D_pf_enable_stride = Output(Bool())
     val l2_pf_store_only = Output(Bool())
-    // ICache
-    val icache_parity_enable = Output(Bool())
     // Load violation predictor
     val lvpred_disable = Output(Bool())
     val no_spec_load = Output(Bool())

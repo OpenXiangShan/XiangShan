@@ -13,6 +13,13 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Elisardo Antelo, Tomas Lang, Paolo Montuschi, and Alberto Nannarelli. "[Digit-recurrence dividers with reduced
+* logical depth.](https://doi.org/10.1109/TC.2005.115)" IEEE Transactions on Computers 54.7: 837-851. 2005.
 ***************************************************************************************/
 
 // This file contains components originally written by Yifei He, see

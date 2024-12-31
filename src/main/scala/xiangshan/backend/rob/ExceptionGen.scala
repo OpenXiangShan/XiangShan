@@ -128,19 +128,33 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         current := s1_out_bits
       }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
         current.exceptionVec := Mux(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
+        current.hasException := Mux(isVecUpdate, s1_out_bits.hasException, current.hasException)
         current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.asUInt.orR
         current.replayInst := s1_out_bits.replayInst || current.replayInst
         current.singleStep := s1_out_bits.singleStep || current.singleStep
-        current.trigger := (s1_out_bits.trigger | current.trigger)
-        current.vstart  := Mux(isVecUpdate, s1_out_bits.vstart, current.vstart)
+        current.trigger   := Mux(isVecUpdate, s1_out_bits.trigger,    current.trigger)
+        current.vstart    := Mux(isVecUpdate, s1_out_bits.vstart,     current.vstart)
+        current.vstartEn  := Mux(isVecUpdate, s1_out_bits.vstartEn,   current.vstartEn)
+        current.isVecLoad := Mux(isVecUpdate, s1_out_bits.isVecLoad,  current.isVecLoad)
+        current.isVlm     := Mux(isVecUpdate, s1_out_bits.isVlm,      current.isVlm)
+        current.isStrided := Mux(isVecUpdate, s1_out_bits.isStrided,  current.isStrided)
+        current.isIndexed := Mux(isVecUpdate, s1_out_bits.isIndexed,  current.isIndexed)
+        current.isWhole   := Mux(isVecUpdate, s1_out_bits.isWhole,    current.isWhole)
+        current.nf        := Mux(isVecUpdate, s1_out_bits.nf,         current.nf)
+        current.vsew      := Mux(isVecUpdate, s1_out_bits.vsew,       current.vsew)
+        current.veew      := Mux(isVecUpdate, s1_out_bits.veew,       current.veew)
+        current.vlmul     := Mux(isVecUpdate, s1_out_bits.vlmul,      current.vlmul)
       }
+      current.isEnqExcp := false.B
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
     currentValid := true.B
     current := s1_out_bits
+    current.isEnqExcp := false.B
   }.elsewhen (enq_s1_valid && !(io.redirect.valid || io.flush)) {
     currentValid := true.B
     current := enq_s1_bits
+    current.isEnqExcp := true.B
   }
 
   io.out.valid   := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback

@@ -35,6 +35,7 @@ import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.util.CSRConst
+import yunsuan.{VfaluType, VipuType}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -196,6 +197,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.useRegCache   := DontCare
     uop.regCacheIdx   := DontCare
     uop.traceBlockInPipe := DontCare
+    uop.isDropAmocasSta := DontCare
   })
   private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
   private val isCsr        = Wire(Vec(RenameWidth, Bool()))
@@ -352,8 +354,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
-    // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
-    uops(i).dirtyVs := (compressMasksVec(i) & Cat(io.in.map(_.bits.uopSplitType =/= UopSplitType.SCA_SIM).reverse)).orR
+    uops(i).dirtyVs := (
+      compressMasksVec(i) & Cat(io.in.map(in =>
+        // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
+        in.bits.uopSplitType =/= UopSplitType.SCA_SIM &&
+        !UopSplitType.isAMOCAS(in.bits.uopSplitType) &&
+        // vfmv.f.s, vcpop.m, vfirst.m and vmv.x.s don't change vector state
+        !Seq(
+          (FuType.vfalu, VfaluType.vfmv_f_s), // vfmv.f.s
+          (FuType.vipu, VipuType.vcpop_m),    // vcpop.m
+          (FuType.vipu, VipuType.vfirst_m),   // vfirst.m
+          (FuType.vipu, VipuType.vmv_x_s)     // vmv.x.s
+        ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
+      ).reverse)
+    ).orR
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
@@ -385,6 +399,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)
+    // dirty code
+    if (i == 0) {
+      io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+    }
     // Todo: move these shit in decode stage
     // dirty code for fence. The lsrc is passed by imm.
     when (io.out(i).bits.fuType === FuType.fence.U) {
@@ -430,34 +448,38 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
    * trace begin
    */
+  // note: fusionInst can't robcompress
   val inVec = io.in.map(_.bits)
-  val canRobCompressVec = inVec.map(_.canRobCompress)
   val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
-  val halfWordNumVec = (0 until RenameWidth).map{
-    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
-      case (mask, isRVC) => Mux(mask, Mux(isRVC, 1.U, 2.U), 0.U)
+  val isFusionVec = inVec.map(_.commitType).map(ctype => CommitType.isFused(ctype))
+
+  val canRobCompressVec = compressUnit.io.out.canCompressVec
+  val iLastSizeVec = isRVCVec.map(isRVC => Mux(isRVC, Ilastsize.HalfWord, Ilastsize.Word))
+  val halfWordNumVec = isRVCVec.map(isRVC => Mux(isRVC, 1.U, 2.U))
+  val halfWordNumMatrix = (0 until RenameWidth).map(
+    i => compressMasksVec(i).asBools.zipWithIndex.map{ case(mask, j) =>
+      Mux(mask, halfWordNumVec(j), 0.U)
     }
-  }
+  )
 
   for (i <- 0 until RenameWidth) {
     // iretire
     uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
-      halfWordNumVec(i).reduce(_ +& _),
-      Mux(isRVCVec(i), 1.U, 2.U)
+      halfWordNumMatrix(i).reduce(_ +& _),
+      (if(i < RenameWidth -1) Mux(isFusionVec(i), halfWordNumVec(i+1), 0.U) else 0.U) +& halfWordNumVec(i)
     )
 
     // ilastsize
-    val j = i
+    val tmp = i
     val lastIsRVC = WireInit(false.B)
-    (j until RenameWidth).map { j =>
+    (tmp until RenameWidth).map { j =>
       when(compressMasksVec(i)(j)) {
         lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
       }
     }
-
     uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
       Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
-      Mux(isRVCVec(i), Ilastsize.HalfWord, Ilastsize.Word)
+      (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
     )
 
     // itype
@@ -491,7 +513,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc + 1, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")
@@ -499,15 +521,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val v0Cond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 3) (s === SrcType.vp) || (s === SrcType.v0)
       else false.B
-    } :+ needV0Dest(i)
+    }
     val vlCond = io.in(i).bits.srcType.zipWithIndex.map{ case (s, i) =>
       if (i == 4) s === SrcType.vp
       else false.B
-    } :+ needVlDest(i)
-    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp) :+ needVecDest(i)
-    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
-    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp) :+ needIntDest(i)
-    val target = io.in(i).bits.lsrc :+ io.in(i).bits.ldest
+    }
+    val vecCond = io.in(i).bits.srcType.map(_ === SrcType.vp)
+    val fpCond  = io.in(i).bits.srcType.map(_ === SrcType.fp)
+    val intCond = io.in(i).bits.srcType.map(_ === SrcType.xp)
+    val target = io.in(i).bits.lsrc
     for ((((((cond1, (condV0, condVl)), cond2), cond3), t), j) <- vecCond.zip(v0Cond.zip(vlCond)).zip(fpCond).zip(intCond).zip(target).zipWithIndex) {
       val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
         val indexMatch = in.bits.ldest === t
@@ -517,9 +539,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
       bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
     }
-    io.out(i).bits.psrc(0) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
+    // For the LUI instruction: psrc(0) is from register file and should always be zero.
+    io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
       (z, next) => Mux(next._2, next._1, z)
-    }
+    })
     io.out(i).bits.psrc(1) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(1)(i-1).asBools).foldLeft(uops(i).psrc(1)) {
       (z, next) => Mux(next._2, next._1, z)
     }
@@ -730,8 +753,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   val renamePerf = Seq(
-    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
-    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))),
+    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))),
     ("rename_stall               ", inHeadStall),
     ("rename_stall_cycle_walk    ", inHeadValid &&  io.rabCommits.isWalk),
     ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc),

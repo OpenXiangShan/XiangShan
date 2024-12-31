@@ -237,7 +237,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val fpRfWaddr = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.pregIdxWidth.W)))
   private val fpRfWdata = Wire(Vec(io.fromFpWb.length, UInt(fpSchdParams.rfDataWidth.W)))
 
-  private val vfRfSplitNum = VLEN / XLEN
+  private val vfRfSplitNum = 4
   private val vfRfRaddr = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.pregIdxWidth.W)))
   private val vfRfRdata = Wire(Vec(params.numPregRd(VecData()), UInt(vfSchdParams.rfDataWidth.W)))
   private val vfRfWen = Wire(Vec(vfRfSplitNum, Vec(io.fromVfWb.length, Bool())))
@@ -257,7 +257,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vlRfWaddr = Wire(Vec(io.fromVlWb.length, UInt(log2Up(VlPhyRegs).W)))
   private val vlRfWdata = Wire(Vec(io.fromVlWb.length, UInt(VlData().dataWidth.W)))
 
-  val pcReadFtqPtrFormIQ = fromIntIQ.flatten.filter(x => x.bits.exuParams.needPc)
+  val pcReadFtqPtrFormIQ = (fromIntIQ ++ fromMemIQ).flatten.filter(x => x.bits.exuParams.needPc)
   assert(pcReadFtqPtrFormIQ.size == pcReadFtqPtr.size, s"pcReadFtqPtrFormIQ.size ${pcReadFtqPtrFormIQ.size} not equal pcReadFtqPtr.size ${pcReadFtqPtr.size}")
   pcReadValid.zip(pcReadFtqPtrFormIQ.map(_.valid)).map(x => x._1 := x._2)
   pcReadFtqPtr.zip(pcReadFtqPtrFormIQ.map(_.bits.common.ftqIdx.get)).map(x => x._1 := x._2)
@@ -306,12 +306,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   io.diffVl.foreach(_ := vlDiffReadData.get)
 
-  IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
+  IntRegFileSplit("IntRegFile", intSchdParams.numPregs, splitNum = 4, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     bankNum = 1,
     debugReadAddr = intDiffRead.map(_._1),
     debugReadData = intDiffRead.map(_._2)
   )
-  FpRegFile("FpRegFile", fpSchdParams.numPregs, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
+  FpRegFileSplit("FpRegFile", fpSchdParams.numPregs, splitNum = 4, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
     bankNum = 1,
     debugReadAddr = fpDiffRead.map(_._1),
     debugReadData = fpDiffRead.map(_._2)
@@ -575,8 +575,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
   is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.common.fuType))
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
-  val isVfScheduler = VecInit(exuParamsNoLoad.map(x => x._2.schdType.isInstanceOf[VfScheduler].B))
-  val og0_cancel_delay_for_mem = VecInit(og0_cancel_delay.zip(isVfScheduler).map(x => x._1 && !x._2))
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -596,11 +594,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
       val s0_cancel = Wire(Bool())
-      val og0_cancel_delay_need = if (s0.bits.exuParams.schdType.isInstanceOf[MemScheduler]) og0_cancel_delay_for_mem else og0_cancel_delay
       if (s0.bits.exuParams.isIQWakeUpSink) {
-        val exuOHNoLoad = s0.bits.common.l1ExuOH.get.map(x => x.asTypeOf(Vec(x.getWidth, Bool())).zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1))
+        val exuOHNoLoad = s0.bits.common.exuSources.get.map(x => x.toExuOH(s0.bits.exuParams).zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1))
         s0_cancel := exuOHNoLoad.zip(s0.bits.common.dataSources).map{
-          case (exuOH, dataSource) => (VecInit(exuOH).asUInt & og0_cancel_delay_need.asUInt).orR && dataSource.readForward
+          case (exuOH, dataSource) => (VecInit(exuOH).asUInt & og0_cancel_delay.asUInt).orR && dataSource.readForward
         }.reduce(_ || _) && s0.valid
       } else s0_cancel := false.B
       val s0_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
@@ -668,8 +665,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     dontTouch(og0_cancel_no_load)
     dontTouch(is_0latency)
     dontTouch(og0_cancel_delay)
-    dontTouch(isVfScheduler)
-    dontTouch(og0_cancel_delay_for_mem)
   }
   for (i <- toExu.indices) {
     for (j <- toExu(i).indices) {
@@ -716,7 +711,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         if (readRfMap.nonEmpty)
           sinkData.src(k) := Mux1H(readRfMap)
       }
-      if (sinkData.params.hasJmpFu) {
+      if (sinkData.params.hasJmpFu || sinkData.params.hasLoadFu) {
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)
         sinkData.pc.get := pcRdata(index)
       }

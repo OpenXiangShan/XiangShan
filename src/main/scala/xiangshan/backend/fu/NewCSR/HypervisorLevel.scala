@@ -62,14 +62,16 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
-    when (!menvcfg.STCE.asBool) {
+    when(!menvcfg.STCE) {
       regOut.STCE := 0.U
     }
-    when (!menvcfg.PBMTE) {
+    when(!menvcfg.PBMTE) {
       regOut.PBMTE := 0.U
     }
-  })
-    .setAddr(CSRs.henvcfg)
+    when(!menvcfg.DTE) {
+      regOut.DTE := 0.U
+    }
+  }).setAddr(CSRs.henvcfg)
 
   val htval = Module(new CSRModule("Htval", new XtvalBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.htval)
@@ -205,6 +207,7 @@ class HstatusBundle extends CSRBundle {
   val VTW   = RW(21).withReset(0.U)
   val VTSR  = RW(22).withReset(0.U)
   val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64)
+  val HUPMM = EnvPMM(49, 48, wNoEffect).withReset(EnvPMM.Disable) // Ssnpm extension
 
 }
 
@@ -312,20 +315,11 @@ class Hviprio1Bundle extends CSRBundle {
   val PrioSSI = RW(15,  8).withReset(0.U)
   val PrioSTI = RW(31, 24).withReset(0.U)
   val PrioCOI = RW(47, 40).withReset(0.U)
-  val Prio14  = RO(55, 48).withReset(0.U)
-  val Prio15  = RO(63, 56).withReset(0.U)
+  val Prio14  = RW(55, 48).withReset(0.U)
+  val Prio15  = RW(63, 56).withReset(0.U)
 }
 
-class Hviprio2Bundle extends CSRBundle {
-  val Prio16 = RO(7, 0).withReset(0.U)
-  val Prio17 = RO(15, 8).withReset(0.U)
-  val Prio18 = RO(23, 16).withReset(0.U)
-  val Prio19 = RO(31, 24).withReset(0.U)
-  val Prio20 = RO(39, 32).withReset(0.U)
-  val Prio21 = RO(47, 40).withReset(0.U)
-  val Prio22 = RO(55, 48).withReset(0.U)
-  val Prio23 = RO(63, 56).withReset(0.U)
-}
+class Hviprio2Bundle extends FieldInitBundle
 
 class HgatpBundle extends CSRBundle {
   val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
@@ -340,6 +334,11 @@ class HEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
+  if (CSRConfig.EXT_DBLTRP) {
+    // software write envcfg to open ssdbltrp if need
+    // set 0 to pass ci
+    this.DTE.setRW().withReset(0.U)
+  }
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

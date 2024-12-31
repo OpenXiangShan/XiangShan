@@ -80,6 +80,7 @@ case class ExeUnitParams(
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
+  val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
@@ -88,6 +89,11 @@ case class ExeUnitParams(
 
   def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
+
+  def numCopySrc: Int = fuConfigs.map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _)
+  def idxCopySrc: Seq[Int] = (0 until fuConfigs.length).map { idx =>
+    fuConfigs.take(idx + 1).map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _) - 1
+  }
 
   // exu writeback: 0 normalout; 1 intout; 2 fpout; 3 vecout
   val wbNeedIntWen : Boolean = writeIntRf && !isMemExeUnit
@@ -113,9 +119,6 @@ case class ExeUnitParams(
   val wbVlIndex : Int = wbIndexeds.getOrElse("vl" , 0)
   val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
 
-
-
-  require(needPc && needTarget || !needPc && !needTarget, "The ExeUnit must need both PC and Target PC")
 
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
@@ -257,6 +260,8 @@ case class ExeUnitParams(
 
   def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
 
+  def hasAluFu = fuConfigs.map(_.fuType == FuType.alu).reduce(_ || _)
+
   def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
@@ -335,6 +340,8 @@ case class ExeUnitParams(
   def isIQWakeUpSource = this.iqWakeUpSourcePairs.nonEmpty
 
   def isIQWakeUpSink = this.iqWakeUpSinkPairs.nonEmpty
+
+  def numWakeupFromIQ = this.iqWakeUpSinkPairs.size
 
   def getIntWBPort = {
     wbPortConfigs.collectFirst {
@@ -423,6 +430,10 @@ case class ExeUnitParams(
 
   def genExuInputBundle(implicit p: Parameters): ExuInput = {
     new ExuInput(this)
+  }
+
+  def genExuInputCopySrcBundle(implicit p: Parameters): ExuInput = {
+    new ExuInput(this, hasCopySrc = true)
   }
 
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {

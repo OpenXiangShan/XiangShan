@@ -29,454 +29,154 @@ trait HasTLDump {
   implicit val p: Parameters
 
   implicit class TLDump(channel: TLChannel) {
-    def dump = channel match {
+    def dump(cond: Bool) = channel match {
       case a: TLBundleA =>
-        printChannelA(a)
+        printChannelA(a, cond)
       case b: TLBundleB =>
-        printChannelB(b)
+        printChannelB(b, cond)
       case c: TLBundleC =>
-        printChannelC(c)
+        printChannelC(c, cond)
       case d: TLBundleD =>
-        printChannelD(d)
+        printChannelD(d, cond)
       case e: TLBundleE =>
-        printChannelE(e)
+        printChannelE(e, cond)
     }
   }
 
-  def printChannelA(a: TLBundleA): Unit = {
-    switch(a.opcode) {
-      is(PutFullData) {
-        XSDebug(false, true.B,
-          a.channelName + " PutFullData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(PutPartialData) {
-        XSDebug(false, true.B,
-          a.channelName + " PutPartialData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(ArithmeticData) {
-        XSDebug(false, true.B,
-          a.channelName + " ArithmeticData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(LogicalData) {
-        XSDebug(false, true.B,
-          a.channelName + " LogicalData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(Get) {
-        XSDebug(false, true.B,
-          a.channelName + " Get param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(Hint) {
-        XSDebug(false, true.B,
-          a.channelName + " Intent param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          a.param, a.size, a.source, a.address, a.mask, a.data, a.corrupt
-        )
-      }
-
-      is(AcquireBlock) {
-        switch(a.param) {
-          is(NtoB) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquireBlock NtoB size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-          is(NtoT) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquireBlock NtoT size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-          is(BtoT) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquireBlock BtoT size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-        }
-      }
-
-      is(AcquirePerm) {
-        switch(a.param) {
-          is(NtoB) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquirePerm NtoB size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-          is(NtoT) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquirePerm NtoT size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-          is(BtoT) {
-            XSDebug(false, true.B,
-              a.channelName + " AcquirePerm BtoT size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              a.size, a.source, a.address, a.mask, a.data, a.corrupt
-            )
-          }
-        }
-      }
-
+  def printChannelA(a: TLBundleA, cond: Bool): Unit = {
+    def APrintable(opStr: String, paramStr: String = ""): Printable = {
+      a.channelName + " " + opStr + " " +
+        (if (paramStr != "") paramStr else Printable.pack("param: %x", a.param)) +
+        Printable.pack(" size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
+          a.size, a.source, a.address, a.mask, a.data, a.corrupt)
     }
+    def ACond(opCode: UInt, param: Option[UInt] = None): Bool = {
+      // skip param compare if not passed
+      val paramComp = if (param.isDefined) a.param === param.get else true.B
+      cond && a.opcode === opCode && paramComp
+    }
+
+    XSDebug(false, ACond(PutFullData), APrintable("PutFullData"))
+    XSDebug(false, ACond(PutPartialData), APrintable("PutPartialData"))
+    XSDebug(false, ACond(ArithmeticData), APrintable("ArithmeticData"))
+    XSDebug(false, ACond(LogicalData), APrintable("LogicalData"))
+    XSDebug(false, ACond(Get), APrintable("Get"))
+    XSDebug(false, ACond(Hint), APrintable("Intent"))
+
+    XSDebug(false, ACond(AcquireBlock, Some(NtoB)), APrintable("AcquireBlock", "NtoB"))
+    XSDebug(false, ACond(AcquireBlock, Some(NtoT)), APrintable("AcquireBlock", "NtoT"))
+    XSDebug(false, ACond(AcquireBlock, Some(BtoT)), APrintable("AcquireBlock", "BtoT"))
+
+    XSDebug(false, ACond(AcquirePerm, Some(NtoB)), APrintable("AcquirePerm", "NtoB"))
+    XSDebug(false, ACond(AcquirePerm, Some(NtoT)), APrintable("AcquirePerm", "NtoT"))
+    XSDebug(false, ACond(AcquirePerm, Some(BtoT)), APrintable("AcquirePerm", "BtoT"))
   }
 
-  def printChannelB(b: TLBundleB): Unit = {
-    switch(b.opcode) {
-      is(PutFullData) {
-        XSDebug(false, true.B,
-          b.channelName + " PutFullData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(PutPartialData) {
-        XSDebug(false, true.B,
-          b.channelName + " PutPartialData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(ArithmeticData) {
-        XSDebug(false, true.B,
-          b.channelName + " ArithmeticData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(LogicalData) {
-        XSDebug(false, true.B,
-          b.channelName + " LogicalData param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(Get) {
-        XSDebug(false, true.B,
-          b.channelName + " Get param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(Hint) {
-        XSDebug(false, true.B,
-          b.channelName + " Intent param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-          b.param, b.size, b.source, b.address, b.mask, b.data, b.corrupt
-        )
-      }
-
-      is(Probe) {
-        switch(b.param) {
-          is(toN) {
-            XSDebug(false, true.B,
-              b.channelName + " Probe toN size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              b.size, b.source, b.address, b.mask, b.data, b.corrupt
-            )
-          }
-          is(toB) {
-            XSDebug(false, true.B,
-              b.channelName + " Probe toB size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              b.size, b.source, b.address, b.mask, b.data, b.corrupt
-            )
-          }
-          is(toT) {
-            XSDebug(false, true.B,
-              b.channelName + " Probe toT size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
-              b.size, b.source, b.address, b.mask, b.data, b.corrupt
-            )
-          }
-        }
-      }
-
+  def printChannelB(b: TLBundleB, cond: Bool): Unit = {
+    def BPrintable(opStr: String, paramStr: String = ""): Printable = {
+      b.channelName + " " + opStr + " " +
+        (if (paramStr != "") paramStr else Printable.pack("param: %x", b.param)) +
+        Printable.pack(" size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
+          b.size, b.source, b.address, b.mask, b.data, b.corrupt)
     }
+    def BCond(opCode: UInt, param: Option[UInt] = None): Bool = {
+      // skip param compare if not passed
+      val paramComp = if (param.isDefined) b.param === param.get else true.B
+      cond && b.opcode === opCode && paramComp
+    }
+
+    XSDebug(false, BCond(PutFullData), BPrintable("PutFullData"))
+    XSDebug(false, BCond(PutPartialData), BPrintable("PutPartialData"))
+    XSDebug(false, BCond(ArithmeticData), BPrintable("ArithmeticData"))
+    XSDebug(false, BCond(LogicalData), BPrintable("LogicalData"))
+    XSDebug(false, BCond(Get), BPrintable("Get"))
+    XSDebug(false, BCond(Hint), BPrintable("Intent"))
+
+    XSDebug(false, BCond(Probe, Some(toN)), BPrintable("Probe", "toN"))
+    XSDebug(false, BCond(Probe, Some(toB)), BPrintable("Probe", "toB"))
+    XSDebug(false, BCond(Probe, Some(toT)), BPrintable("Probe", "toT"))
   }
 
-  def printChannelC(c: TLBundleC): Unit = {
-    switch(c.opcode) {
-      is(AccessAck) {
-        XSDebug(false, true.B,
-          c.channelName + " AccessAck param: %x size: %x source: %d address: %x data: %x corrupt: %b\n",
-          c.param, c.size, c.source, c.address, c.data, c.corrupt
-        )
-      }
-
-      is(AccessAckData) {
-        XSDebug(false, true.B,
-          c.channelName + " AccessAckData param: %x size: %x source: %d address: %x data: %x corrupt: %b\n",
-          c.param, c.size, c.source, c.address, c.data, c.corrupt
-        )
-      }
-
-      is(HintAck) {
-        XSDebug(false, true.B,
-          c.channelName + " HintAck param: %x size: %x source: %d address: %x data: %x corrupt: %b\n",
-          c.param, c.size, c.source, c.address, c.data, c.corrupt
-        )
-      }
-
-      is(ProbeAck) {
-        switch(c.param) {
-          is(TtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck TtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck TtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck BtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoT) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck TtoT size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck BtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(NtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAck NtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-        }
-      }
-
-      is(ProbeAckData) {
-        switch(c.param) {
-          is(TtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData TtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData TtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData BtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoT) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData TtoT size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData BtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(NtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ProbeAckData NtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-        }
-      }
-
-      is(Release) {
-        switch(c.param) {
-          is(TtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " Release TtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " Release TtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " Release BtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoT) {
-            XSDebug(false, true.B,
-              c.channelName + " Release TtoT size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " Release BtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(NtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " Release NtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-        }
-      }
-
-      is(ReleaseData) {
-        switch(c.param) {
-          is(TtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData TtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData TtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData BtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(TtoT) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData TtoT size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(BtoB) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData BtoB size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-          is(NtoN) {
-            XSDebug(false, true.B,
-              c.channelName + " ReleaseData NtoN size: %x source: %d address: %x data: %x corrupt: %b\n",
-              c.size, c.source, c.address, c.data, c.corrupt
-            )
-          }
-        }
-      }
-
+  def printChannelC(c: TLBundleC, cond: Bool): Unit = {
+    def CPrintable(opStr: String, paramStr: String = ""): Printable = {
+      c.channelName + " " + opStr + " " +
+        (if (paramStr != "") paramStr else Printable.pack("param: %x", c.param)) +
+        Printable.pack(" size: %x source: %d address: %x data: %x corrupt: %b\n",
+          c.size, c.source, c.address, c.data, c.corrupt)
     }
+    def CCond(opCode: UInt, param: Option[UInt] = None): Bool = {
+      // skip param compare if not passed
+      val paramComp = if (param.isDefined) c.param === param.get else true.B
+      cond && c.opcode === opCode && paramComp
+    }
+
+    XSDebug(false, CCond(AccessAck), CPrintable("AccessAck"))
+    XSDebug(false, CCond(AccessAckData), CPrintable("AccessAckData"))
+    XSDebug(false, CCond(HintAck), CPrintable("HintAck"))
+
+    XSDebug(false, CCond(ProbeAck, Some(TtoB)), CPrintable("ProbeAck", "TtoB"))
+    XSDebug(false, CCond(ProbeAck, Some(TtoN)), CPrintable("ProbeAck", "TtoN"))
+    XSDebug(false, CCond(ProbeAck, Some(BtoN)), CPrintable("ProbeAck", "BtoN"))
+    XSDebug(false, CCond(ProbeAck, Some(TtoT)), CPrintable("ProbeAck", "TtoT"))
+    XSDebug(false, CCond(ProbeAck, Some(BtoB)), CPrintable("ProbeAck", "BtoB"))
+    XSDebug(false, CCond(ProbeAck, Some(NtoN)), CPrintable("ProbeAck", "NtoN"))
+
+    XSDebug(false, CCond(ProbeAckData, Some(TtoB)), CPrintable("ProbeAckData", "TtoB"))
+    XSDebug(false, CCond(ProbeAckData, Some(TtoN)), CPrintable("ProbeAckData", "TtoN"))
+    XSDebug(false, CCond(ProbeAckData, Some(BtoN)), CPrintable("ProbeAckData", "BtoN"))
+    XSDebug(false, CCond(ProbeAckData, Some(TtoT)), CPrintable("ProbeAckData", "TtoT"))
+    XSDebug(false, CCond(ProbeAckData, Some(BtoB)), CPrintable("ProbeAckData", "BtoB"))
+    XSDebug(false, CCond(ProbeAckData, Some(NtoN)), CPrintable("ProbeAckData", "NtoN"))
+
+    XSDebug(false, CCond(Release, Some(TtoB)), CPrintable("Release", "TtoB"))
+    XSDebug(false, CCond(Release, Some(TtoN)), CPrintable("Release", "TtoN"))
+    XSDebug(false, CCond(Release, Some(BtoN)), CPrintable("Release", "BtoN"))
+    XSDebug(false, CCond(Release, Some(TtoT)), CPrintable("Release", "TtoT"))
+    XSDebug(false, CCond(Release, Some(BtoB)), CPrintable("Release", "BtoB"))
+    XSDebug(false, CCond(Release, Some(NtoN)), CPrintable("Release", "NtoN"))
+
+    XSDebug(false, CCond(ReleaseData, Some(TtoB)), CPrintable("ReleaseData", "TtoB"))
+    XSDebug(false, CCond(ReleaseData, Some(TtoN)), CPrintable("ReleaseData", "TtoN"))
+    XSDebug(false, CCond(ReleaseData, Some(BtoN)), CPrintable("ReleaseData", "BtoN"))
+    XSDebug(false, CCond(ReleaseData, Some(TtoT)), CPrintable("ReleaseData", "TtoT"))
+    XSDebug(false, CCond(ReleaseData, Some(BtoB)), CPrintable("ReleaseData", "BtoB"))
+    XSDebug(false, CCond(ReleaseData, Some(NtoN)), CPrintable("ReleaseData", "NtoN"))
   }
 
-  def printChannelD(d: TLBundleD): Unit = {
-    switch(d.opcode) {
-      is(AccessAck) {
-        XSDebug(false, true.B,
-          d.channelName + " AccessAck param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-          d.param, d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-        )
-      }
-
-      is(AccessAckData) {
-        XSDebug(false, true.B,
-          d.channelName + " AccessAckData param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-          d.param, d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-        )
-      }
-
-      is(HintAck) {
-        XSDebug(false, true.B,
-          d.channelName + " HintAck param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-          d.param, d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-        )
-      }
-
-      is(Grant) {
-        switch(d.param) {
-          is(toT) {
-            XSDebug(false, true.B,
-              d.channelName + " Grant toT size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-          is(toB) {
-            XSDebug(false, true.B,
-              d.channelName + " Grant toB size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-          is(toN) {
-            XSDebug(false, true.B,
-              d.channelName + " Grant toN size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-        }
-      }
-
-      is(GrantData) {
-        switch(d.param) {
-          is(toT) {
-            XSDebug(false, true.B,
-              d.channelName + " GrantData toT size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-          is(toB) {
-            XSDebug(false, true.B,
-              d.channelName + " GrantData toB size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-          is(toN) {
-            XSDebug(false, true.B,
-              d.channelName + " GrantData toN size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-              d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-            )
-          }
-        }
-      }
-
-      is(ReleaseAck) {
-        XSDebug(false, true.B,
-          d.channelName + " ReleaseAck param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
-          d.param, d.size, d.source, d.sink, d.denied, d.data, d.corrupt
-        )
-      }
-
+  def printChannelD(d: TLBundleD, cond: Bool): Unit = {
+    def DPrintable(opStr: String, paramStr: String = ""): Printable = {
+      d.channelName + " " + opStr + " " +
+        (if (paramStr != "") paramStr else Printable.pack("param: %x", d.param)) +
+        Printable.pack(" size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
+          d.size, d.source, d.sink, d.denied, d.data, d.corrupt)
     }
+    def DCond(opCode: UInt, param: Option[UInt] = None): Bool = {
+      // skip param compare if not passed
+      val paramComp = if (param.isDefined) d.param === param.get else true.B
+      cond && d.opcode === opCode && paramComp
+    }
+
+    XSDebug(false, DCond(AccessAck), DPrintable("AccessAck"))
+    XSDebug(false, DCond(AccessAckData), DPrintable("AccessAckData"))
+    XSDebug(false, DCond(HintAck), DPrintable("HintAck"))
+
+    XSDebug(false, DCond(Grant, Some(toT)), DPrintable("Grant", "toT"))
+    XSDebug(false, DCond(Grant, Some(toB)), DPrintable("Grant", "toB"))
+    XSDebug(false, DCond(Grant, Some(toN)), DPrintable("Grant", "toN"))
+
+    XSDebug(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
+    XSDebug(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
+    XSDebug(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
+
+    XSDebug(false, DCond(GrantData, Some(toT)), DPrintable("GrantData", "toT"))
+    XSDebug(false, DCond(GrantData, Some(toB)), DPrintable("GrantData", "toB"))
+    XSDebug(false, DCond(GrantData, Some(toN)), DPrintable("GrantData", "toN"))
+
+    XSDebug(false, DCond(ReleaseAck), DPrintable("ReleaseAck"))
   }
 
-  def printChannelE(e: TLBundleE): Unit = {
-    XSDebug(false, true.B, e.channelName + "GrantAck sink: %d\n", e.sink)
+  def printChannelE(e: TLBundleE, cond: Bool): Unit = {
+    XSDebug(false, cond, e.channelName + "GrantAck sink: %d\n", e.sink)
   }
 
 }

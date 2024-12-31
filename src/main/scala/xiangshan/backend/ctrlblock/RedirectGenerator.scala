@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3._
 import utility.{HasCircularQueuePtrHelper, XORFold, GatedValidRegNext}
 import xiangshan.frontend.{FtqRead, PreDecodeInfo}
-import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule}
+import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule, AddrTransType}
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
@@ -15,6 +15,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
     val hartId = Input(UInt(8.W))
     val oldestExuRedirect = Flipped(ValidIO(new Redirect))
+    val instrAddrTransType = Input(new AddrTransType)
     val oldestExuOutPredecode = Input(new PreDecodeInfo) // guarded by exuRedirect.valid
     val loadReplay = Flipped(ValidIO(new Redirect))
     val robFlush = Flipped(ValidIO(new Redirect))
@@ -29,12 +30,17 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val loadRedirect = io.loadReplay
   val robFlush = io.robFlush
-  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(io.oldestExuRedirect, loadRedirect)
+  val oldestExuRedirect = Wire(chiselTypeOf(io.oldestExuRedirect))
+  oldestExuRedirect := io.oldestExuRedirect
+  oldestExuRedirect.bits.fullTarget := Cat(io.oldestExuRedirect.bits.fullTarget.head(XLEN - VAddrBits), io.oldestExuRedirect.bits.cfiUpdate.target)
+  oldestExuRedirect.bits.cfiUpdate.backendIAF := io.instrAddrTransType.checkAccessFault(oldestExuRedirect.bits.fullTarget)
+  oldestExuRedirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.checkPageFault(oldestExuRedirect.bits.fullTarget)
+  oldestExuRedirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.checkGuestPageFault(oldestExuRedirect.bits.fullTarget)
+  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(oldestExuRedirect, loadRedirect)
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val flushAfter = RegInit(0.U.asTypeOf(ValidIO(new Redirect)))
   val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(flushAfter) || robFlush.valid))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map { case (v, f) => v && !f }).asUInt.orR
-  val oldestExuRedirect = io.oldestExuRedirect
   val oldestExuPredecode = io.oldestExuOutPredecode
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)

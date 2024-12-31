@@ -33,6 +33,7 @@ import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import xiangshan.backend.rob.RobPtr
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
+import xiangshan.backend.trace._
 
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
@@ -59,7 +60,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
   val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
-  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent)
   val retiredInstr = UInt(7.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -85,6 +86,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
+  val criticalErrorState = Output(Bool())
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
@@ -98,6 +100,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
   val wfi_event = Output(Bool())
+  //trace
+  val traceCSR = Output(new TraceCSR)
   // from LSQ
   val memExceptionVAddr = Input(UInt(XLEN.W))
   val memExceptionGPAddr = Input(UInt(XLEN.W))
@@ -512,10 +516,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.l1D_pf_enable_stride := spfctl(16)
   csrio.customCtrl.l2_pf_store_only := spfctl(17)
 
-  // sfetchctl Bit 0: L1I Cache Parity check enable
-  val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
-  csrio.customCtrl.icache_parity_enable := sfetchctl(0)
-
   // slvpredctl: load violation predict settings
   // Default reset period: 2^16
   // Why this number: reset more frequently while keeping the overhead low
@@ -806,7 +806,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     //--- Supervisor Custom Read/Write Registers
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
-    MaskedRegMap(Sfetchctl, sfetchctl),
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),

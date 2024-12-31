@@ -9,8 +9,7 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
 trait FpFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
   protected val inData  = io.in.bits.data
-  protected val fpCtrl  = inCtrl.vpu.get
-  protected val fp_fmt  = fpCtrl.vsew  // TODO: use fpu
+  protected val fp_fmt  = inCtrl.fpu.get.fmt
 
   protected val frm     = io.frm.getOrElse(0.U(3.W))
   protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm

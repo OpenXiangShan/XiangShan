@@ -22,7 +22,7 @@ import chisel3.util._
 import coupledL2.VaddrField
 import coupledL2.IsKeywordField
 import coupledL2.IsKeywordKey
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import huancun.{AliasField, PrefetchField}
@@ -57,7 +57,8 @@ case class DCacheParameters
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = false
+  enableTagEcc: Boolean = false,
+  cacheCtrlAddressOpt: Option[AddressSet] = None,
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -93,14 +94,6 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
-  def encWordBits = cacheParams.dataCode.width(wordBits)
-
-  def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
-  def eccBits = encWordBits - wordBits
-
-  def encTagBits = cacheParams.tagCode.width(tagBits)
-  def eccTagBits = encTagBits - tagBits
-
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
 
   def nSourceType = 10
@@ -128,8 +121,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
   require(cfg.nMissEntries < cfg.nReleaseEntries)
-  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
-  val releaseIdBase = cfg.nMissEntries
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries + 1 // nMissEntries + nReleaseEntries + 1CMO_Entry
+  val releaseIdBase = cfg.nMissEntries + 1
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
 
@@ -164,6 +157,21 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheLineOffset = DCacheSetOffset
 
+  def encWordBits = cacheParams.dataCode.width(wordBits)
+  def encRowBits  = encWordBits * rowWords // for DuplicatedDataArray only
+  def eccBits     = encWordBits - wordBits
+
+  def encTagBits = if (EnableTagEcc) cacheParams.tagCode.width(tagBits) else tagBits
+  def tagECCBits = encTagBits - tagBits
+
+  def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
+  def dataECCBits = encDataBits - DCacheSRAMRowBits
+
+  // L1 DCache controller
+  val cacheCtrlParamsOpt  = OptionWrapper(
+                              cacheParams.cacheCtrlAddressOpt.nonEmpty,
+                              L1CacheCtrlParams(cacheParams.cacheCtrlAddressOpt.get)
+                            )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
   // hardware prefetch parameters
@@ -369,8 +377,8 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
   val lqIdx = new LqPtr
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",
       cmd, vaddr, data, mask, id)
   }
 }
@@ -384,8 +392,8 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
-  def dump() = {
-    XSDebug("DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
   def idx: UInt = get_idx(vaddr)
@@ -399,6 +407,7 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWordReqWithVaddr {
   val prefetch = Bool()
   val vecValid = Bool()
+  val sqNeedDeq = Bool()
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
@@ -435,8 +444,8 @@ class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheWordResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
 }
@@ -473,8 +482,8 @@ class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
   // cache req nacked, replay it later
   val replay = Bool()
   val id     = UInt(reqIdWidth.W)
-  def dump() = {
-    XSDebug("DCacheLineResp: data: %x id: %d miss: %b replay: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "DCacheLineResp: data: %x id: %d miss: %b replay: %b\n",
       data, id, miss, replay)
   }
 }
@@ -488,8 +497,8 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   val data_raw = UInt((cfg.blockBytes * 8).W)
   val hasdata = Bool()
   val refill_done = Bool()
-  def dump() = {
-    XSDebug("Refill: addr: %x data: %x\n", addr, data)
+  def dump(cond: Bool) = {
+    XSDebug(cond, "Refill: addr: %x data: %x\n", addr, data)
   }
   val id     = UInt(log2Up(cfg.nMissEntries).W)
 }
@@ -497,8 +506,8 @@ class Refill(implicit p: Parameters) extends DCacheBundle
 class Release(implicit p: Parameters) extends DCacheBundle
 {
   val paddr  = UInt(PAddrBits.W)
-  def dump() = {
-    XSDebug("Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
+  def dump(cond: Bool) = {
+    XSDebug(cond, "Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
   }
 }
 
@@ -513,16 +522,19 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W) // for uncache buffer forwarding
   val data = UInt(XLEN.W)
   val mask = UInt((XLEN/8).W)
   val id   = UInt(uncacheIdxBits.W)
   val instrtype = UInt(sourceTypeWidth.W)
   val atomic = Bool()
+  val nc = Bool()
+  val memBackTypeMM = Bool()
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry(nWays)
 
-  def dump() = {
-    XSDebug("UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "UncacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
 }
@@ -531,7 +543,9 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data      = UInt(XLEN.W)
   val data_delayed = UInt(XLEN.W)
-  val id        = UInt(uncacheIdxBits.W)
+  val id        = UInt(uncacheIdxBits.W) // resp identified signals
+  val nc        = Bool() // resp identified signals
+  val is2lq     = Bool() // resp identified signals
   val miss      = Bool()
   val replay    = Bool()
   val tag_error = Bool()
@@ -541,8 +555,8 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
-  def dump() = {
-    XSDebug("UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "UncacheWordResp: data: %x id: %d miss: %b replay: %b, tag_error: %b, error: %b\n",
       data, id, miss, replay, tag_error, error)
   }
 }
@@ -556,7 +570,7 @@ class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 class MainPipeResp(implicit p: Parameters) extends DCacheBundle {
   //distinguish amo
   val source  = UInt(sourceTypeWidth.W)
-  val data    = UInt(DataBits.W)
+  val data    = UInt(QuadWordBits.W)
   val miss    = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val replay  = Bool()
@@ -575,6 +589,15 @@ class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
   val req  = DecoupledIO(new MainPipeReq)
   val resp = Flipped(ValidIO(new MainPipeResp))
   val block_lr = Input(Bool())
+}
+
+class CMOReq(implicit p: Parameters) extends Bundle {
+  val opcode = UInt(3.W)   // 0-cbo.clean, 1-cbo.flush, 2-cbo.inval, 3-cbo.zero
+  val address = UInt(64.W)
+}
+
+class CMOResp(implicit p: Parameters) extends Bundle {
+  val address = UInt(64.W)
 }
 
 // used by load unit
@@ -638,12 +661,16 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
   val data = UInt(l1BusDataWidth.W)
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val last = Bool()
+  val corrupt = Bool()
 
-  def apply(req_valid : Bool, req_data : UInt, req_mshrid : UInt, req_last : Bool) = {
-    valid := req_valid
-    data := req_data
-    mshrid := req_mshrid
-    last := req_last
+  def apply(d: DecoupledIO[TLBundleD], edge: TLEdgeOut) = {
+    val isKeyword = d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
+    val (_, _, done, _) = edge.count(d)
+    valid := d.valid
+    data := d.bits.data
+    mshrid := d.bits.source
+    last := isKeyword ^ done
+    corrupt := d.bits.corrupt || d.bits.denied
   }
 
   def dontCare() = {
@@ -651,6 +678,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
     data := DontCare
     mshrid := DontCare
     last := DontCare
+    corrupt := false.B
   }
 
   def forward(req_valid : Bool, req_mshr_id : UInt, req_paddr : UInt) = {
@@ -675,7 +703,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
       }
     }
 
-    (forward_D, forwardData)
+    (forward_D, forwardData, corrupt)
   }
 }
 
@@ -685,14 +713,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val raw_data = Vec(blockRows, UInt(rowBits.W))
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
-
-  def apply(mshr_valid : Bool, mshr_paddr : UInt, mshr_rawdata : Vec[UInt], mshr_first_valid : Bool, mshr_last_valid : Bool) = {
-    inflight := mshr_valid
-    paddr := mshr_paddr
-    raw_data := mshr_rawdata
-    firstbeat_valid := mshr_first_valid
-    lastbeat_valid := mshr_last_valid
-  }
+  val corrupt = Bool()
 
   // check if we can forward from mshr or D channel
   def check(req_valid : Bool, req_paddr : UInt) = {
@@ -723,6 +744,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
 
 // forward mshr's data to ldu
 class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
+  // TODO: use separate Bundles for req and resp
   // req
   val valid = Input(Bool())
   val mshrid = Input(UInt(log2Up(cfg.nMissEntries).W))
@@ -731,7 +753,9 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   val forward_mshr = Output(Bool())
   val forwardData = Output(Vec(VLEN/8, UInt(8.W)))
   val forward_result_valid = Output(Bool())
+  val corrupt = Output(Bool())
 
+  // Why? What is the purpose of `connect`???
   def connect(sink: LduToMissqueueForwardIO) = {
     sink.valid := valid
     sink.mshrid := mshrid
@@ -739,10 +763,11 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
     forward_mshr := sink.forward_mshr
     forwardData := sink.forwardData
     forward_result_valid := sink.forward_result_valid
+    corrupt := sink.corrupt
   }
 
   def forward() = {
-    (forward_result_valid, forward_mshr, forwardData)
+    (forward_result_valid, forward_mshr, forwardData, corrupt)
   }
 }
 
@@ -773,7 +798,6 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
-  val csr = new L1CacheToCsrIO
   val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
@@ -785,6 +809,8 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
   val l2_hint = Input(Valid(new L2ToL1Hint()))
+  val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
+  val cmoOpResp = DecoupledIO(new CMOResp)
 }
 
 private object ArbiterCtrl {
@@ -897,6 +923,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
+  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new CtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
 }
@@ -989,6 +1016,41 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
+
+  // l1 dcache controller
+  outer.cacheCtrlOpt.foreach {
+    case mod =>
+      mod.module.io_pseudoError.foreach {
+        case x => x.ready := false.B
+      }
+  }
+  ldu.foreach {
+    case mod =>
+      mod.io.pseudo_error.valid := false.B
+      mod.io.pseudo_error.bits := DontCare
+  }
+  mainPipe.io.pseudo_error.valid := false.B
+  mainPipe.io.pseudo_error.bits  := DontCare
+  bankedDataArray.io.pseudo_error.valid := false.B
+  bankedDataArray.io.pseudo_error.bits  := DontCare
+
+  // pseudo tag ecc error
+  if (outer.cacheCtrlOpt.nonEmpty && EnableTagEcc) {
+    val ctrlUnit = outer.cacheCtrlOpt.head.module
+    ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
+    mainPipe.io.pseudo_error <> ctrlUnit.io_pseudoError(0)
+    ctrlUnit.io_pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
+                                        ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
+  }
+
+  // pseudo data ecc error
+  if (outer.cacheCtrlOpt.nonEmpty && EnableDataEcc) {
+    val ctrlUnit = outer.cacheCtrlOpt.head.module
+    bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)
+    ctrlUnit.io_pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
+                                        (mainPipe.io.pseudo_data_error_inj_done ||
+                                         ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
+  }
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
@@ -1227,20 +1289,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
- val isKeyword = bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
+
   (0 until LoadPipelineWidth).map(i => {
-    val (_, _, done, _) = edge.count(bus.d)
     when(bus.d.bits.opcode === TLMessages.GrantData) {
-      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, isKeyword ^ done)
-   //   io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source,done)
+      io.lsu.forward_D(i).apply(bus.d, edge)
     }.otherwise {
       io.lsu.forward_D(i).dontCare()
     }
   })
   // tl D channel wakeup
-  val (_, _, done, _) = edge.count(bus.d)
   when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
-    io.lsu.tl_d_channel.apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+    io.lsu.tl_d_channel.apply(bus.d, edge)
   } .otherwise {
     io.lsu.tl_d_channel.dontCare()
   }
@@ -1362,8 +1421,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.atomics.resp.valid := RegNext(atomic_resp_valid)
   io.lsu.atomics.resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, atomic_resp_valid)
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
-  // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
-  // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
 
   // Request
   val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))
@@ -1418,13 +1475,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   wb.io.miss_req_conflict_check(3) := mainPipe.io.wbq_conflict_check
   mainPipe.io.wbq_block_miss_req   := wb.io.block_miss_req(3)
-  
+
   wb.io.miss_req_conflict_check(4).valid := missReqArb.io.out.valid
   wb.io.miss_req_conflict_check(4).bits  := missReqArb.io.out.bits.addr
   missQueue.io.wbq_block_miss_req := wb.io.block_miss_req(4)
 
   missReqArb.io.out <> missQueue.io.req
   missReadyGen.io.queryMQ <> missQueue.io.queryMQ
+  io.cmoOpReq <> missQueue.io.cmo_req
+  io.cmoOpResp <> missQueue.io.cmo_resp
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
@@ -1482,8 +1541,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   mainPipe.io.refill_req <> missQueue.io.main_pipe_req
 
-  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
-  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
+  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
+  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
   mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
 
   //----------------------------------------
@@ -1514,7 +1573,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // in L1DCache, we ony expect Grant[Data] and ReleaseAck
   bus.d.ready := false.B
-  when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData) {
+  when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.CBOAck) {
     missQueue.io.mem_grant <> bus.d
   } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
     wb.io.mem_grant <> bus.d
@@ -1613,32 +1672,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     sink.bits    := source.bits
   }
 
-
-  //----------------------------------------
-  // Customized csr cache op support
-  val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
-  cacheOpDecoder.io.csr <> io.csr
-  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  // dup cacheOp_req_valid
-  bankedDataArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
-  // dup cacheOp_req_bits_opCode
-  bankedDataArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
-
-  tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  // dup cacheOp_req_valid
-  tagArray.io.cacheOp_req_dup.zipWithIndex.map{ case(dup, i) => dup := cacheOpDecoder.io.cache_req_dup(i) }
-  // dup cacheOp_req_bits_opCode
-  tagArray.io.cacheOp_req_bits_opCode_dup.zipWithIndex.map{ case (dup, i) => dup := cacheOpDecoder.io.cacheOp_req_bits_opCode_dup(i) }
-
-  cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
-    tagArray.io.cacheOp.resp.valid
-  cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
-    bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
-    tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
-  ))
-  cacheOpDecoder.io.error := io.error
-  assert(!((bankedDataArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
-
   //----------------------------------------
   // performance counters
   val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire))
@@ -1685,7 +1718,10 @@ class AMOHelper() extends ExtModule {
   val rdata  = IO(Output(UInt(64.W)))
 }
 
-class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class DCacheWrapper()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasDCacheParameters
+{
   override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
@@ -1693,6 +1729,13 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
   val dcache = if (useDcache) LazyModule(new DCache()) else null
   if (useDcache) {
     clientNode := dcache.clientNode
+  }
+  val uncacheNode = OptionWrapper(cacheCtrlParamsOpt.isDefined, TLIdentityNode())
+  require(
+    (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) ||
+    (!uncacheNode.isDefined && !dcache.cacheCtrlOpt.isDefined), "uncacheNode and ctrlUnitOpt are not connected!")
+  if (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) {
+    dcache.cacheCtrlOpt.get.node := uncacheNode.get
   }
 
   class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {

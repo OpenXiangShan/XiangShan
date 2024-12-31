@@ -87,7 +87,11 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
     sNoExcp_eewOH,
   )
   private val sNoExcp_voffset = Module(new GetE8OffsetInVreg(VLEN))(sNoExcp_deewOH, sNoExcp_vecExcpInfo.bits.vstart)
-  private val sNoExcp_idxRangeVec: Vec[HWRange] = Module(new NfMappedElemIdx(VLEN))(sNoExcp_vecExcpInfo.bits.nf, sNoExcp_deewOH)
+  private val sNoExcp_idxRangeVec: Vec[HWRange] = 
+    Module(new NfMappedElemIdx(VLEN))(
+      Mux(!sNoExcp_vecExcpInfo.bits.isWhole, sNoExcp_vecExcpInfo.bits.nf, 0.U), 
+      sNoExcp_deewOH
+    )
   private val sNoExcp_vstartIsAligned: Bool = Mux(!sNoExcp_vecExcpInfo.bits.isVlm, sNoExcp_voffset === 0.U, false.B)
 
   private val sNoExcp_inRangeVec: Vec[Bool] = VecInit((0 until 8).map(idx =>
@@ -104,7 +108,9 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val sNoExcp_useNewVdUntil: UInt = PriorityEncoder(sNoExcp_inRangeVec)
   // The last exception vdIdx, hold 0~8.
   // Need to hold 8.
-  private val sNoExcp_needMergeUntil: UInt = sNoExcp_useNewVdUntil + sNoExcp_vecExcpInfo.bits.nf +& 1.U
+  private val sNoExcp_needMergeUntil: UInt = sNoExcp_useNewVdUntil +
+    Mux(!sNoExcp_vecExcpInfo.bits.isWhole, sNoExcp_vecExcpInfo.bits.nf, 0.U) +&
+    1.U
   // the max vd idx need to write
   private val sNoExcp_maxVdIdx = Mux(
     sNoExcp_vecExcpInfo.valid,

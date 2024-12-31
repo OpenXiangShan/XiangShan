@@ -29,20 +29,19 @@ import shlex
 import psutil
 import re
 
-def load_all_gcpt(gcpt_path, json_path):
+def find_files_with_suffix(root_dir, suffixes):
+    matching_files = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for filename in filenames:
+            if any(filename.endswith(suffix) for suffix in suffixes):
+                absolute_path = os.path.join(dirpath, filename)
+                matching_files.append(absolute_path)
+    return matching_files
+
+def load_all_gcpt(gcpt_paths):
     all_gcpt = []
-    with open(json_path) as f:
-        data = json.load(f)
-    for benchspec in data:
-        for point in data[benchspec]:
-            weight = data[benchspec][point]
-            gcpt = os.path.join(gcpt_path, "_".join([benchspec, point, weight]))
-            bin_dir = os.path.join(gcpt, "0")
-            bin_file = list(os.listdir(bin_dir))
-            assert(len(bin_file) == 1)
-            bin_path = os.path.join(bin_dir, bin_file[0])
-            assert(os.path.isfile(bin_path))
-            all_gcpt.append(bin_path)
+    for gcpt_path in gcpt_paths:
+        all_gcpt.extend(find_files_with_suffix(gcpt_path, ['.zstd', '.gz']))
     return all_gcpt
 
 class XSArgs(object):
@@ -352,7 +351,10 @@ class XiangShan(object):
             "asid/asid.bin",
             "isa_misc/xret_clear_mprv.bin",
             "isa_misc/satp_ppn.bin",
-            "cache-management/softprefetchtest-riscv64-xs.bin"
+            "cache-management/softprefetchtest-riscv64-xs.bin",
+            "smstateen/rvh_test.bin",
+            "zacas/zacas-riscv64-xs.bin",
+            "Svpbmt/rvh_test.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
@@ -362,6 +364,9 @@ class XiangShan(object):
         workloads = [
             "riscv-hyp-tests/rvh_test.bin",
             "xvisor_wboxtest/checkpoint.gz",
+            "pointer-masking-test/M_HS_test/rvh_test.bin",
+            "pointer-masking-test/U_test/hint_UMode_hupmm2/rvh_test.bin",
+            "pointer-masking-test/U_test/vu_senvcfgpmm2/rvh_test.bin"
         ]
         rvh_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return rvh_tests
@@ -397,6 +402,101 @@ class XiangShan(object):
         ]
         rvv_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return rvv_test
+
+    def __get_ci_F16test(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/vector/F16-tests/build"
+        workloads = [
+            "rv64uzfhmin-p-fzfhmincvt.bin",
+            "rv64uzfh-p-fadd.bin",
+            "rv64uzfh-p-fclass.bin",
+            "rv64uzfh-p-fcmp.bin",
+            "rv64uzfh-p-fcvt.bin",
+            "rv64uzfh-p-fcvt_w.bin",
+            "rv64uzfh-p-fdiv.bin",
+            "rv64uzfh-p-fmadd.bin",
+            "rv64uzfh-p-fmin.bin",
+            "rv64uzfh-p-ldst.bin",
+            "rv64uzfh-p-move.bin",
+            "rv64uzfh-p-recoding.bin",
+            "rv64uzvfh-p-vfadd.bin",
+            "rv64uzvfh-p-vfclass.bin",
+            "rv64uzvfh-p-vfcvtfx.bin",
+            "rv64uzvfh-p-vfcvtfxu.bin",
+            "rv64uzvfh-p-vfcvtrxf.bin",
+            "rv64uzvfh-p-vfcvtrxuf.bin",
+            "rv64uzvfh-p-vfcvtxf.bin",
+            "rv64uzvfh-p-vfcvtxuf.bin",
+            "rv64uzvfh-p-vfdiv.bin",
+            "rv64uzvfh-p-vfdown.bin",
+            "rv64uzvfh-p-vfmacc.bin",
+            "rv64uzvfh-p-vfmadd.bin",
+            "rv64uzvfh-p-vfmax.bin",
+            "rv64uzvfh-p-vfmerge.bin",
+            "rv64uzvfh-p-vfmin.bin",
+            "rv64uzvfh-p-vfmsac.bin",
+            "rv64uzvfh-p-vfmsub.bin",
+            "rv64uzvfh-p-vfmul.bin",
+            "rv64uzvfh-p-vfmv.bin",
+            "rv64uzvfh-p-vfncvtff.bin",
+            "rv64uzvfh-p-vfncvtfx.bin",
+            "rv64uzvfh-p-vfncvtfxu.bin",
+            "rv64uzvfh-p-vfncvtrff.bin",
+            "rv64uzvfh-p-vfncvtrxf.bin",
+            "rv64uzvfh-p-vfncvtrxuf.bin",
+            "rv64uzvfh-p-vfncvtxf.bin",
+            "rv64uzvfh-p-vfncvtxuf.bin",
+            "rv64uzvfh-p-vfnmacc.bin",
+            "rv64uzvfh-p-vfnmadd.bin",
+            "rv64uzvfh-p-vfnmsac.bin",
+            "rv64uzvfh-p-vfnmsub.bin",
+            "rv64uzvfh-p-vfrdiv.bin",
+            "rv64uzvfh-p-vfrec7.bin",
+            "rv64uzvfh-p-vfredmax.bin",
+            "rv64uzvfh-p-vfredmin.bin",
+            "rv64uzvfh-p-vfredosum.bin",
+            "rv64uzvfh-p-vfredusum.bin",
+            "rv64uzvfh-p-vfrsqrt7.bin",
+            "rv64uzvfh-p-vfrsub.bin",
+            "rv64uzvfh-p-vfsgnj.bin",
+            "rv64uzvfh-p-vfsgnjn.bin",
+            "rv64uzvfh-p-vfsgnjx.bin",
+            "rv64uzvfh-p-vfsqrt.bin",
+            "rv64uzvfh-p-vfsub.bin",
+            "rv64uzvfh-p-vfup.bin",
+            "rv64uzvfh-p-vfwadd.bin",
+            "rv64uzvfh-p-vfwadd-w.bin",
+            "rv64uzvfh-p-vfwcvtff.bin",
+            "rv64uzvfh-p-vfwcvtfx.bin",
+            "rv64uzvfh-p-vfwcvtfxu.bin",
+            "rv64uzvfh-p-vfwcvtrxf.bin",
+            "rv64uzvfh-p-vfwcvtrxuf.bin",
+            "rv64uzvfh-p-vfwcvtxf.bin",
+            "rv64uzvfh-p-vfwcvtxuf.bin",
+            "rv64uzvfh-p-vfwmacc.bin",
+            "rv64uzvfh-p-vfwmsac.bin",
+            "rv64uzvfh-p-vfwmul.bin",
+            "rv64uzvfh-p-vfwnmacc.bin",
+            "rv64uzvfh-p-vfwnmsac.bin",
+            "rv64uzvfh-p-vfwredosum.bin",
+            "rv64uzvfh-p-vfwredusum.bin",
+            "rv64uzvfh-p-vfwsub.bin",
+            "rv64uzvfh-p-vfwsub-w.bin",
+            "rv64uzvfh-p-vmfeq.bin",
+            "rv64uzvfh-p-vmfge.bin",
+            "rv64uzvfh-p-vmfgt.bin",
+            "rv64uzvfh-p-vmfle.bin",
+            "rv64uzvfh-p-vmflt.bin",
+            "rv64uzvfh-p-vmfne.bin"
+        ]
+        f16_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return f16_test
+    def __get_ci_zcbtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/zcb-test"
+        workloads = [
+            "zcb-test-riscv64-xs.bin"
+        ]
+        zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return zcb_test
 
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
@@ -442,29 +542,19 @@ class XiangShan(object):
             return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
         # select a random SPEC checkpoint
         assert(name == "random")
-        all_cpt = [
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt"
+        all_cpt_dir = [
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/take_cpt",
+            "/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/zstd-checkpoint-0-0-0",
+            "/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcbv_O3_lto_base_nemu_single_core_NEMU_archgroup_2024-10-12-16-05/checkpoint-0-0-0"
         ]
-        all_json = [
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o2_20m/json/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec06_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o2_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gcb_o3_20m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_rv64gc_o2_50m/simpoint_summary.json",
-            "/nfs-nvme/home/share/checkpoints_profiles/spec17_speed_rv64gcb_o3_20m/simpoint_summary.json"
-        ]
-        assert(len(all_cpt) == len(all_json))
-        cpt_path, json_path = random.choice(list(zip(all_cpt, all_json)))
-        all_gcpt = load_all_gcpt(cpt_path, json_path)
+        all_gcpt = load_all_gcpt(all_cpt_dir)
         return [random.choice(all_gcpt)]
 
     def run_ci(self, test):
@@ -479,7 +569,9 @@ class XiangShan(object):
             "coremark": self.__am_apps_path,
             "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
-            "rvv-test": self.__get_ci_rvvtest
+            "rvv-test": self.__get_ci_rvvtest,
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -506,7 +598,9 @@ class XiangShan(object):
             "coremark": self.__am_apps_path,
             "coremark-1-iteration": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
-            "rvv-test": self.__get_ci_rvvtest
+            "rvv-test": self.__get_ci_rvvtest,
+            "f16_test": self.__get_ci_F16test,
+            "zcb-test": self.__get_ci_zcbtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)

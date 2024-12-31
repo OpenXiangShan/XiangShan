@@ -22,10 +22,10 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   // modules
   private val fdiv = Module(new FloatDivider)
 
-  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
-                              fp_fmt === VSew.e16 && !src1.head(48).andR
-  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
+  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
                               fp_fmt === VSew.e16 && !src0.head(48).andR
+  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
+                              fp_fmt === VSew.e16 && !src1.head(48).andR
 
   val thisRobIdx = Wire(new RobPtr)
   when(io.in.ready){
@@ -38,8 +38,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   fdiv.io.finish_ready_i := io.out.ready & io.out.valid
   fdiv.io.flush_i        := thisRobIdx.needFlush(io.flush)
   fdiv.io.fp_format_i    := fp_fmt
-  fdiv.io.opa_i          := src1
-  fdiv.io.opb_i          := src0
+  fdiv.io.opa_i          := src0
+  fdiv.io.opb_i          := src1
   fdiv.io.is_sqrt_i      := opcode
   fdiv.io.rm_i           := rm
   fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
@@ -47,9 +47,9 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
   private val resultData = Mux1H(
     Seq(
-      (outCtrl.vpu.get.vsew === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
-      (outCtrl.vpu.get.vsew === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
-      (outCtrl.vpu.get.vsew === VSew.e64) -> fdiv.io.fpdiv_res_o
+      (outCtrl.fpu.get.fmt === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
+      (outCtrl.fpu.get.fmt === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
+      (outCtrl.fpu.get.fmt === VSew.e64) -> fdiv.io.fpdiv_res_o
     )
   )
   private val fflagsData = fdiv.io.fflags_o

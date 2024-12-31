@@ -25,11 +25,11 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
+import xiangshan.cache.{CMOReq, CMOResp}
 import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
-import coupledL2.{CMOReq, CMOResp}
 import xiangshan.backend.fu.FuType
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
@@ -86,13 +86,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
+    val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
     val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
-    val nack_rollback = Output(Valid(new Redirect))
+    val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
@@ -115,7 +116,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
     val exceptionAddr = new ExceptionAddrIO
-    val flushFrmMaBuf = Input(Bool())
+    val loadMisalignFull = Input(Bool())
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -137,8 +138,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.hartId := io.hartId
   storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
 
+  if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
 
-  dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
@@ -203,6 +204,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.ldout               <> io.ldout
   loadQueue.io.ld_raw_data         <> io.ld_raw_data
+  loadQueue.io.ncOut               <> io.ncOut
   loadQueue.io.rob                 <> io.rob
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
@@ -211,7 +213,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
   loadQueue.io.exceptionAddr.isStore := DontCare
-  loadQueue.io.flushFrmMaBuf       := io.flushFrmMaBuf
+  loadQueue.io.loadMisalignFull    := io.loadMisalignFull
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec
@@ -250,8 +252,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   switch(pendingstate){
     is(s_idle){
       when(io.uncache.req.fire){
-        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load,
-                          Mux(io.uncacheOutstanding, s_idle, s_store))
+        pendingstate := 
+          Mux(io.uncacheOutstanding && io.uncache.req.bits.nc, s_idle,
+          Mux(loadQueue.io.uncache.req.valid, s_load,
+          s_store))
       }
     }
     is(s_load){
@@ -272,24 +276,24 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.uncache.req.ready := false.B
   loadQueue.io.uncache.resp.valid := false.B
   storeQueue.io.uncache.resp.valid := false.B
-  when(loadQueue.io.uncache.req.valid){
-    io.uncache.req <> loadQueue.io.uncache.req
+  when(pendingstate === s_idle){
+    when(loadQueue.io.uncache.req.valid){
+      io.uncache.req <> loadQueue.io.uncache.req
+    }.otherwise{
+      io.uncache.req <> storeQueue.io.uncache.req
+    }
   }.otherwise{
-    io.uncache.req <> storeQueue.io.uncache.req
+    io.uncache.req.valid := false.B
+    io.uncache.req.bits := DontCare
   }
-  when (io.uncacheOutstanding) {
+  when (io.uncache.resp.bits.is2lq) {
     io.uncache.resp <> loadQueue.io.uncache.resp
   } .otherwise {
-    when(pendingstate === s_load){
-      io.uncache.resp <> loadQueue.io.uncache.resp
-    }.otherwise{
-      io.uncache.resp <> storeQueue.io.uncache.resp
-    }
+    io.uncache.resp <> storeQueue.io.uncache.resp
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
 
-  assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   when (!io.uncacheOutstanding) {
     assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
@@ -326,15 +330,15 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
 
   val blockVec = io.enq.iqAccept.map(!_) :+ true.B
   val numLsElem = io.enq.req.map(_.bits.numLsElem)
-  val needEnqLoadQueue = VecInit(io.enq.req.map(x => FuType.isLoad(x.bits.fuType) || FuType.isVNonsegLoad(x.bits.fuType)))
-  val needEnqStoreQueue = VecInit(io.enq.req.map(x => FuType.isStore(x.bits.fuType) || FuType.isVNonsegStore(x.bits.fuType)))
+  val needEnqLoadQueue = VecInit(io.enq.req.map(x => x.valid && (FuType.isLoad(x.bits.fuType) || FuType.isVNonsegLoad(x.bits.fuType))))
+  val needEnqStoreQueue = VecInit(io.enq.req.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isVNonsegStore(x.bits.fuType))))
   val loadQueueElem = needEnqLoadQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
   val storeQueueElem = needEnqStoreQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
   val loadFlowPopCount = 0.U +: loadQueueElem.zipWithIndex.map{ case (l, i) =>
-    loadQueueElem.take(i + 1).reduce(_ + _)
+    loadQueueElem.take(i + 1).reduce(_ +& _).asTypeOf(UInt(elemIdxBits.W))
   }
   val storeFlowPopCount = 0.U +: storeQueueElem.zipWithIndex.map { case (s, i) =>
-    storeQueueElem.take(i + 1).reduce(_ + _)
+    storeQueueElem.take(i + 1).reduce(_ +& _).asTypeOf(UInt(elemIdxBits.W))
   }
   val lqAllocNumber = PriorityMux(blockVec.zip(loadFlowPopCount))
   val sqAllocNumber = PriorityMux(blockVec.zip(storeFlowPopCount))

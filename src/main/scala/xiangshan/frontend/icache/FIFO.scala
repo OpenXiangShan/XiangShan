@@ -15,55 +15,45 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package  xiangshan.frontend.icache
+package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleFieldBase
-import huancun.{AliasField, PrefetchField}
-import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
-import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.frontend._
 
+class FIFORegIO[T <: Data](gen: T, hasFlush: Boolean = false) extends Bundle {
+  val enq:   DecoupledIO[T] = Flipped(DecoupledIO(gen))
+  val deq:   DecoupledIO[T] = DecoupledIO(gen)
+  val flush: Option[Bool]   = Option.when(hasFlush)(Input(Bool()))
+}
 
 class FIFOReg[T <: Data](
-  val gen:            T,
-  val entries:        Int,
-  val pipe:           Boolean = false,
-  val hasFlush:       Boolean = false
+    val gen:      T,
+    val entries:  Int,
+    val pipe:     Boolean = false,
+    val hasFlush: Boolean = false
 ) extends Module() {
   require(entries > 0, "Queue must have non-negative number of entries")
 
-  val io = IO(new Bundle {
-    val enq     = Flipped(DecoupledIO(gen))
-    val deq     = DecoupledIO(gen)
-    val flush   = if (hasFlush) Some(Input(Bool())) else None
-  })
-  val flush = io.flush.getOrElse(false.B)
+  val io: FIFORegIO[T] = IO(new FIFORegIO(gen, hasFlush))
+  private val flush = io.flush.getOrElse(false.B)
 
-  class FIFOPtr() extends CircularQueuePtr[FIFOPtr](entries)
-
-  object FIFOPtr {
+  private class FIFOPtr extends CircularQueuePtr[FIFOPtr](entries)
+  private object FIFOPtr {
     def apply(f: Bool, v: UInt): FIFOPtr = {
       val ptr = Wire(new FIFOPtr)
-      ptr.flag := f
+      ptr.flag  := f
       ptr.value := v
       ptr
     }
   }
 
-  val regFiles = RegInit(VecInit(Seq.fill(entries)(0.U.asTypeOf(gen.cloneType))))
-  val enq_ptr  = RegInit(FIFOPtr(false.B, 0.U))
-  val deq_ptr  = RegInit(FIFOPtr(false.B, 0.U))
+  private val regFiles = RegInit(VecInit(Seq.fill(entries)(0.U.asTypeOf(gen.cloneType))))
+  private val enq_ptr  = RegInit(FIFOPtr(false.B, 0.U))
+  private val deq_ptr  = RegInit(FIFOPtr(false.B, 0.U))
 
-  val empty = enq_ptr === deq_ptr
-  val full  = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
+  private val empty = enq_ptr === deq_ptr
+  private val full  = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
 
   when(io.enq.fire) {
     enq_ptr := enq_ptr + 1.U
@@ -86,6 +76,6 @@ class FIFOReg[T <: Data](
   io.deq.valid := !empty
   io.enq.ready := !full
   if (pipe) {
-    when(io.deq.ready) { io.enq.ready := true.B }
+    when(io.deq.ready)(io.enq.ready := true.B)
   }
 }

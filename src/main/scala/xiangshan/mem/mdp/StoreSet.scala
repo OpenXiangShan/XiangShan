@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] George Z. Chrysos, and Joel S. Emer. "[Memory dependence prediction using store sets.]
+* (https://doi.org/10.1109/ISCA.1998.694770)" 25th Annual International Symposium on Computer Architecture (ISCA).
+* 1998.
 ***************************************************************************************/
 
 package xiangshan.mem.mdp
@@ -311,10 +319,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
   ) // should be zero
 
   // debug
-  when (s2_mempred_update_req.valid) {
-    XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
-    XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
-  }
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load pc %x store pc %x\n", GTimer(), s2_mempred_update_req.ldpc, s2_mempred_update_req.stpc)
+  XSDebug(s2_mempred_update_req.valid, "%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), s2_loadAssigned, s2_loadOldSSID, s2_storeAssigned, s2_storeOldSSID)
 }
 
 

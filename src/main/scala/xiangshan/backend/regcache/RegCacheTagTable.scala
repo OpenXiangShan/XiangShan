@@ -27,14 +27,14 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.issue.SchdBlockParams
 import freechips.rocketchip.util.SeqToAugmentedSeq
 
-class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: SchdBlockParams) extends XSModule {
+class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new RegCacheTagTableIO(numReadPorts))
 
   println(s"[RegCacheTagTable] readPorts: ${numReadPorts}, " +
     s"writePorts: ${backendParams.getIntExuRCWriteSize} + ${backendParams.getMemExuRCWriteSize}")
 
-  println(s"[RegCacheTagTable] addrWidth: ${RegCacheIdxWidth}, tagWidth: ${schdParams.pregIdxWidth}")
+  println(s"[RegCacheTagTable] addrWidth: ${RegCacheIdxWidth}, tagWidth: ${IntPhyRegIdxWidth}")
 
   private val IntRegCacheReadSize = numReadPorts
   private val IntRegCacheWriteSize = backendParams.getIntExuRCWriteSize
@@ -42,10 +42,10 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: Sc
   private val MemRegCacheWriteSize = backendParams.getMemExuRCWriteSize
 
   val IntRCTagTable = Module(new RegCacheTagModule("IntRCTagTable", IntRegCacheSize, IntRegCacheReadSize, IntRegCacheWriteSize, 
-                                                   RegCacheIdxWidth - 1, schdParams.pregIdxWidth))
+                                                   RegCacheIdxWidth - 1, IntPhyRegIdxWidth))
 
   val MemRCTagTable = Module(new RegCacheTagModule("MemRCTagTable", MemRegCacheSize, MemRegCacheReadSize, MemRegCacheWriteSize, 
-                                                   RegCacheIdxWidth - 1, schdParams.pregIdxWidth))
+                                                   RegCacheIdxWidth - 1, IntPhyRegIdxWidth))
 
   // read
   io.readPorts
@@ -55,7 +55,8 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: Sc
     r_mem.ren  := r_in.ren
     r_int.tag  := r_in.tag
     r_mem.tag  := r_in.tag
-    r_in.valid := r_int.valid || r_mem.valid
+    val matchAlloc = io.allocPregs.map(x => x.valid && r_in.tag === x.bits).reduce(_ || _)
+    r_in.valid := (r_int.valid || r_mem.valid) && !matchAlloc
     r_in.addr  := Mux(r_int.valid, Cat("b0".U, r_int.addr), Cat("b1".U, r_mem.addr))
   }
 
@@ -65,7 +66,7 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: Sc
 
   require(wakeupFromIQNeedWriteRC.size == IntRegCacheWriteSize + MemRegCacheWriteSize, "wakeup size should be equal to RC write size")
 
-  shiftLoadDependency.zip(wakeupFromIQNeedWriteRC.map(_.bits.loadDependency)).zip(schdParams.wakeUpInExuSources.map(_.name)).foreach {
+  shiftLoadDependency.zip(wakeupFromIQNeedWriteRC.map(_.bits.loadDependency)).zip(backendParams.intSchdParams.get.wakeUpInExuSources.map(_.name)).foreach {
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (backendParams.getLdExuIdx(backendParams.allExuParams.find(_.name == name).get) == deqPortIdx)
@@ -108,14 +109,14 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: Sc
   }
 }
 
-class RegCacheTagTableIO(numReadPorts: Int)(implicit p: Parameters, schdParams: SchdBlockParams) extends XSBundle {
+class RegCacheTagTableIO(numReadPorts: Int)(implicit p: Parameters) extends XSBundle {
 
-  val readPorts = Vec(numReadPorts, new RCTagTableReadPort(RegCacheIdxWidth, schdParams.pregIdxWidth))
+  val readPorts = Vec(numReadPorts, new RCTagTableReadPort(RegCacheIdxWidth, IntPhyRegIdxWidth))
 
-  val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(schdParams.genIQWakeUpInValidBundle)
+  val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpInValidBundle)
 
   // set preg state to invalid
-  val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+  val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(IntPhyRegIdxWidth.W))))
 
   // cancelFromDatapath
   val og0Cancel = Input(ExuVec())
