@@ -436,6 +436,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_exception = RegNext(s1_feedback.bits.hit) &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR)
+  val s2_un_misalign_exception =  RegNext(s1_feedback.bits.hit) &&
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_out.uop.exceptionVec, StaCfg, Seq(storeAddrMisaligned)).asUInt.orR)
+
   val s2_mmio = (s2_in.mmio || (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio)) && RegNext(s1_feedback.bits.hit)
   val s2_memBackTypeMM = !s2_pmp.mmio
   val s2_actually_uncache = (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
@@ -451,7 +454,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                                                 s2_pmp.st ||
                                                 ((s2_in.isvec || s2_frm_mabuf) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
                                                 ) && s2_vecActive
-  s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_mmio && s2_in.isMisalign
+  s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_mmio && s2_in.isMisalign && !s2_un_misalign_exception
   s2_out.uop.vpu.vstart     := s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew
 
   // kill dcache write intent request when mmio or exception
@@ -460,7 +463,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // TODO: dcache resp
   io.dcache.resp.ready := true.B
 
-  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_mmio
+  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
   val toMisalignBufferValid =  s2_mis_align && !s2_frm_mabuf
   io.misalign_buf.valid := toMisalignBufferValid
