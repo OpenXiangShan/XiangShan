@@ -272,7 +272,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val PRVM = RegInit(PrivMode(1, 0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
   val debugMode = RegInit(false.B)
-
+  private val nextV = WireInit(VirtMode(0), VirtMode.Off)
+  V := nextV
   // dcsr stopcount 
   val debugModeStopCountNext = debugMode && dcsr.regOut.STOPCOUNT
   val debugModeStopTimeNext  = debugMode && dcsr.regOut.STOPTIME
@@ -649,6 +650,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.mHPM.instret := minstret.rdata
         // VS-Mode or VU-Mode
         m.v := privState.isVirtual
+        m.nextV := nextV.isOneOf(VirtMode.On)
         m.htimedelta := htimedelta.rdata
         m.mHPM.hpmcounters.zip(mhpmcounters).map{
           case(counter, mcounter) => counter := mcounter.rdata
@@ -836,7 +838,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   )
 
-  V := MuxCase(
+  nextV := MuxCase(
     V,
     events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
       x => x.out match {
