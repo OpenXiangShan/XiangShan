@@ -172,7 +172,7 @@ ifeq ($(MFC),1)
 endif
 
 $(SIM_TOP_SV): $(SIM_TOP_V)
-	mv $(SIM_TOP_V) $(SIM_TOP_SV)
+	cp $(SIM_TOP_V) $(SIM_TOP_SV)
 
 sim-verilog: $(SIM_TOP_SV)
 
