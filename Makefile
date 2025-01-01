@@ -26,6 +26,7 @@ SIMTOP  = top.SimTop
 TOP_V = $(RTL_DIR)/$(TOP).v
 TOP_SV = $(RTL_DIR)/$(TOP).sv
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).v
+SIM_TOP_SV = $(RTL_DIR)/$(SIM_TOP).sv
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
@@ -170,7 +171,10 @@ ifeq ($(MFC),1)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
 endif
 
-sim-verilog: $(SIM_TOP_V)
+$(SIM_TOP_SV): $(SIM_TOP_V)
+	mv $(SIM_TOP_V) $(SIM_TOP_SV)
+
+sim-verilog: $(SIM_TOP_SV)
 
 clean:
 	$(MAKE) -C ./difftest clean
