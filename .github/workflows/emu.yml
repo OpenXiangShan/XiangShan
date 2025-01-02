@@ -86,6 +86,21 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
+      - name: generate NOC XiangShan
+        run: |
+          make clean
+          make verilog PLDM=1 PLDM_ARGS="--difftest-config H" CONFIG=XSNoCTopConfig
+      - name: generate NOC Difftest
+        run: |
+          export NOOP_HOME=$GITHUB_WORKSPACE/difftest
+          cd difftest && make difftest_verilog PROFILE=../build/generated-src/difftest_profile.json NUM_CORES=2 CONFIG=ZESNH
+      - name: check interface between XSNoCDiffTop and Difftest
+        run: |
+          cd $GITHUB_WORKSPACE
+          python3 ./difftest/scripts/st_tools/interface.py ./difftest/build/rtl/GatewayEndpoint.sv
+          python3 ./difftest/scripts/st_tools/interface.py ./build/rtl/XSDiffTop.sv --core --filelist ./build/rtl/filelist.f --simtop ./build/rtl/SimTop.sv
+          cp -r -v ./difftest/build/* ./build/
+          verilator --lint-only -Wno-fatal --top-module XSDiffTopChecker build/XSDiffTopChecker.sv build/rtl/*sv build/rtl/*v -Ibuild/generated-src/ -LDFLAGS -"lreadline"
   emu-basics:
     runs-on: bosc
     needs: changes
