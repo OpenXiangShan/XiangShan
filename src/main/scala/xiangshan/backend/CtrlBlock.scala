@@ -191,18 +191,23 @@ class CtrlBlockImp(
   )
 
   private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
+    val hasCSR = x.bits.params.hasCSR
     val out = Wire(Valid(new Redirect()))
     out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred && !x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     out.bits := x.bits.redirect.get.bits
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
     // for fix timing, next cycle assgin
-    out.bits.cfiUpdate.backendIAF := false.B
-    out.bits.cfiUpdate.backendIPF := false.B
-    out.bits.cfiUpdate.backendIGPF := false.B
+    if (!hasCSR) {
+      out.bits.cfiUpdate.backendIAF := false.B
+      out.bits.cfiUpdate.backendIPF := false.B
+      out.bits.cfiUpdate.backendIGPF := false.B
+    }
     out
   }).toSeq
   private val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
+  private val CSROH = VecInit(io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.params.hasCSR.B))
+  private val oldestExuRedirectIsCSR = oldestOneHot === CSROH
   private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
   private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
@@ -310,6 +315,7 @@ class CtrlBlockImp(
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
   redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirectIsCSR := RegEnable(oldestExuRedirectIsCSR, oldestExuRedirect.valid)
   redirectGen.io.instrAddrTransType := RegNext(io.fromCSR.instrAddrTransType)
   redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
   redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
