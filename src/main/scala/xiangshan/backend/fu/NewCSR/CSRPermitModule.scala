@@ -113,30 +113,9 @@ class CSRPermitModule extends Module {
     BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
-  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
-    privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
-    accessTable
-  ).asBool
 
-  private val isDebugReg   = addr(11, 4) === "h7b".U
-  private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
 
-  private val rwIllegal = csrIsRO && wen
 
-  private val mnret_EX_II = mnret && !privState.isModeM
-  private val mnret_EX_VI = false.B
-  private val mnretIllegal = mnret_EX_VI || mnret_EX_II
-
-  private val mret_EX_II = mret && !privState.isModeM
-  private val mret_EX_VI = false.B
-  private val mretIllegal = mret_EX_II || mret_EX_VI
-
-  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
-  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
-  private val sretIllegal = sret_EX_II || sret_EX_VI
-
-  private val dret_EX_II = dret && !debugMode
-  private val dretIllegal = dret_EX_II
 
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
@@ -230,9 +209,23 @@ class CSRPermitModule extends Module {
    * Sm/Ssstateen end
    */
 
-  private val rwStimecmp_EX_II = csrAccess && !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
-  private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
-    wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
+  private val mnret_EX_II = mnret && !privState.isModeM
+  private val mnret_EX_VI = false.B
+  private val mnretIllegal = mnret_EX_VI || mnret_EX_II
+
+  private val mret_EX_II = mret && !privState.isModeM
+  private val mret_EX_VI = false.B
+  private val mretIllegal = mret_EX_II || mret_EX_VI
+
+  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
+  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
+  private val sretIllegal = sret_EX_II || sret_EX_VI
+
+  private val dret_EX_II = dret && !debugMode
+  private val dretIllegal = dret_EX_II
+
+  // s1
+  private val rwIllegal = csrIsRO && wen
 
   private val fsEffectiveOff = sFSIsOff && !privState.isVirtual || sOrVsFSIsOff && privState.isVirtual
   private val vsEffectiveOff = sVSIsOff && !privState.isVirtual || sOrVsVSIsOff && privState.isVirtual
@@ -242,11 +235,26 @@ class CSRPermitModule extends Module {
 
   private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
 
-  /**
-   * AIA begin
-   */
+  private val rwStimecmp_EX_II = csrAccess && !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
+
   private val rwStopei_EX_II = csrAccess && privState.isModeHS && mvienSEIE && addr === CSRs.stopei.U
 
+  // s2
+  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
+    privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
+    accessTable
+  ).asBool
+
+  private val isDebugReg   = addr(11, 4) === "h7b".U
+  private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
+
+  // s3
+  private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
+    wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
+  private val rwSip_Sie_EX_VI = csrAccess && privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
+
+
+  // s4
   private val rwMireg_EX_II = csrAccess && privState.isModeM && miselectIsIllegal && addr === CSRs.mireg.U
 
   private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
@@ -256,19 +264,37 @@ class CSRPermitModule extends Module {
 
   private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
 
-  private val rwSip_Sie_EX_VI = csrAccess && privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
 
-  /**
-   * AIA end
-   */
+  // s1 includes whether the CSR exists, whether it is read-only,
+  // and checks for access to lower-privilege CSRs controlled by M-level CSRs.
+  val s1_EX_II = rwIllegal || fpVec_EX_II || rwStimecmp_EX_II || xstateControlAccess_EX_II ||
+    accessHPM_EX_II || rwSatp_EX_II || rwStopei_EX_II
+  val s1_EX_VI = false.B
+  val s1_illegal = s1_EX_II || s1_EX_VI
 
-  // Todo: check correct
-  io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
-    rwIllegal || mnret_EX_II || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
-    rwStimecmp_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
-    rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
-  io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
-    mnret_EX_VI || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
+  // s2 is the privilege level check
+  val s2_EX_II = csrAccess && !privilegeLegal && (!privState.isVirtual || csrIsM)
+  val s2_EX_VI = csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM
+  val s2_illegal = s2_EX_II || s2_EX_VI
+
+  // s3 is the check for access to VS-level or H-level CSRs controlled by H-level CSRs.
+  val s3_EX_II = false.B
+  val s3_EX_VI = rwSip_Sie_EX_VI || rwStimecmp_EX_VI || xstateControlAccess_EX_VI ||
+    accessHPM_EX_VI || rwSatp_EX_VI
+  val s3_illegal = s3_EX_II || s3_EX_VI
+
+  // s4 is the access check for indirect CSRs.
+  val s4_EX_II = rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
+  val s4_EX_VI = rwSireg_EX_VI
+
+  val csrAccess_EX_II = s1_EX_II || (!s1_illegal && s2_EX_II) || (!(s1_illegal || s2_illegal) && s3_EX_II) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_II)
+  val Xret_EX_II = mnret_EX_II || mret_EX_II || sret_EX_II || dret_EX_II
+
+  val csrAccess_EX_VI = s1_EX_VI || (!s1_illegal && s2_EX_VI) || (!(s1_illegal || s2_illegal) && s3_EX_VI) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_VI)
+  val Xret_EX_VI = mnret_EX_VI || mret_EX_VI || sret_EX_VI
+
+  io.out.EX_II := csrAccess_EX_II || Xret_EX_II
+  io.out.EX_VI := !io.out.EX_II && (csrAccess_EX_VI || Xret_EX_VI)
 
   io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
   io.out.hasLegalMNret := mnret && !mnretIllegal
