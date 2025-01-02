@@ -280,7 +280,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val chi_openllc_opt = Option.when(enableCHI)(
       withClockAndReset(io.clock.asClock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
-          case OpenLLCParamKey => soc.OpenLLCParamsOpt.get
+          case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
+            hartIds = tiles.map(_.HartId),
+            FPGAPlatform = debugOpts.FPGAPlatform
+          )
         })))
       }
     )
@@ -345,6 +348,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
         chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
         chi_openllc_opt.get.io.nodeID := (NumCores * 2).U
+        chi_openllc_opt.foreach { l3 =>
+          l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        }
+        core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
+          tile.module.io.debugTopDown.l3MissMatch := l3Match
+        }
       }
     }
 
@@ -370,7 +379,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         }
         l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
         core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
-      case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+      case None =>
+    }
+
+    (chi_openllc_opt, l3cacheOpt) match {
+      case (None, None) => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+      case _ =>
     }
 
     core_with_l2.foreach { case tile =>
