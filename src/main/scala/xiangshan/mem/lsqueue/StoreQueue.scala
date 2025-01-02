@@ -26,6 +26,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.cache.{CMOReq, CMOResp}
 import xiangshan.backend._
@@ -33,6 +34,7 @@ import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.mem.prefetch.L2PrefetchReq
 import xiangshan.backend.fu.FuType
 import xiangshan.ExceptionNO._
 
@@ -56,6 +58,11 @@ class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
   val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
   val resp = Vec(LSQEnqWidth, Output(new SqPtr))
+}
+
+class AspPfIO(implicit p: Parameters) extends MemBlockBundle {
+  val tlb_req = new TlbRequestIO(nRespDups = 2)
+  val l2_pf_addr = ValidIO(new L2PrefetchReq())
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
@@ -184,6 +191,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val exceptionAddr = new ExceptionAddrIO
     val flushSbuffer = new SbufferFlushBundle
     val sqEmpty = Output(Bool())
+    val lqEmpty = Input(Bool())
     val stAddrReadySqPtr = Output(new SqPtr)
     val stAddrReadyVec = Output(Vec(StoreQueueSize, Bool()))
     val stDataReadySqPtr = Output(new SqPtr)
@@ -195,9 +203,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
+    val seqStoreDetected = Output(Bool())
+    val aspPfIO = new AspPfIO
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
+
+  // ASP prefetcher
+  val asp = Module(new ASP)
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new DynInst))
@@ -1244,6 +1257,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     XSDebug(RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq), "sbuffer "+i+" fire: ptr %d\n", ptr)
   }
+
+  asp.io.sbuffer.zipWithIndex.foreach {case (s, idx) => {
+    // Using SQ -> Sbuffer info to train store prefetcher which follows instruction order
+    s.valid := io.sbuffer(idx).fire && io.sbuffer(idx).bits.vecValid
+    s.bits  := io.sbuffer(idx).bits
+  }}
+  asp.io.sqEmpty := io.sqEmpty
+  asp.io.lqEmpty := io.lqEmpty
+  asp.io.enable  := EnableStorePrefetchASP.B
+  io.seqStoreDetected := asp.io.seqStoreDetected
+  io.aspPfIO <> asp.io.aspPfIO
 
   // All vector instruction uop normally dequeue, but the Uop after the exception is raised does not write to the 'sbuffer'.
   // Flags are used to record whether there are any exceptions when the queue is displayed.

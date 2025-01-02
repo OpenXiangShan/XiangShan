@@ -23,6 +23,9 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.cache._
+import xiangshan.cache.mmu._
+import freechips.rocketchip.util._
+import xiangshan.mem.prefetch.L2PrefetchReq
 
 trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // common
@@ -34,24 +37,39 @@ trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePar
   val ONLY_ON_MEMSET = false
   val SATURATE_COUNTER_BITS = 7
   val BURST_ENGINE_SIZE = 2
+  val SPB_GRANULARITY_BYTES = 4096
+  val SPB_GRANULARITY_BITS  = log2Up(SPB_GRANULARITY_BYTES)
   val SPB_N = 48
 
   // serializer parameters
   val SERIALIZER_SIZE = 12
+
+  // asp parameters
+  val LOCK_CYCLE = 2048
+  val LOCK_BITS  = log2Up(LOCK_CYCLE) + 1
+  val ASP_GRANULARITY_BYTES = 1024 // 1KB
+  val ASP_GRANULARITY_BITS  = log2Up(ASP_GRANULARITY_BYTES)
 
   def block_addr(x: UInt): UInt = {
     val offset = log2Up(dcacheParameters.blockBytes)
     x(x.getWidth - 1, offset)
   }
 
-  // filter logic (granularity: a page)
-  def same_page_addr(addr0: UInt, addr1: UInt): Bool = {
-    addr0(addr0.getWidth - 1, PAGEOFFSET) === addr1(addr1.getWidth - 1, PAGEOFFSET)
+  // filter logic (granularity specified in args)
+  def same_granularity_addr(addr0: UInt, addr1: UInt, granularity: Int): Bool = {
+    addr0(addr0.getWidth - 1, granularity) === addr1(addr1.getWidth - 1, granularity)
   }
 
-  def filter_by_page_addr(valid_vec: Vec[Bool], data_vec: Vec[UInt], incoming_vaddr: UInt) : Bool = {
+  def filter_by_addr(valid_vec: Vec[Bool], data_vec: Vec[UInt], incoming_vaddr: UInt, granularity: Int) : Bool = {
     val match_vec = (valid_vec zip data_vec).map{
-      case(v, e_vaddr) => v && same_page_addr(e_vaddr, incoming_vaddr)
+      case(v, e_vaddr) => v && same_granularity_addr(e_vaddr, incoming_vaddr, granularity)
+    }
+    VecInit(match_vec).asUInt.orR
+  }
+
+  def filter_by_addr(valid_vec: Vec[Bool], data_vec: Vec[UInt], lock_vec: Vec[Bool], incoming_vaddr: UInt, granularity: Int) : Bool = {
+    val match_vec = (valid_vec zip lock_vec zip data_vec).map{
+      case((v, l), e_vaddr) => (v || l) && same_granularity_addr(e_vaddr, incoming_vaddr, granularity)
     }
     VecInit(match_vec).asUInt.orR
   }
@@ -79,7 +97,7 @@ trait HasStorePrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePar
 // L1 Store prefetch component
 
 // an prefetch request generator used by spb to burst some prefetch request to L1 Dcache
-class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
+class PrefetchBurstGenerator(granularity: Int, is_store: Boolean)(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
   val io = IO(new DCacheBundle {
     val alloc = Input(Bool())
     val vaddr = Input(UInt(VAddrBits.W))
@@ -99,12 +117,12 @@ class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends 
   val enq_valids = ~(valids.asUInt)
   val full = !(enq_valids.orR)
   val enq_idx = PriorityEncoder(enq_valids)
-  val enq_filter = filter_by_page_addr(valids, datas, io.vaddr)
+  val enq_filter = filter_by_addr(valids, datas, io.vaddr, granularity)
 
   when(io.alloc && !full && !enq_filter) {
     valids(enq_idx) := true.B
     datas(enq_idx) := io.vaddr
-    pagebits(enq_idx) := io.vaddr(PAGEOFFSET)
+    pagebits(enq_idx) := io.vaddr(granularity)
   }
 
   XSPerfAccumulate("burst_generator_alloc_success", io.alloc && !full && !enq_filter)
@@ -127,21 +145,21 @@ class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends 
     out_decouple(0).valid := deq_valid
     out_decouple(0).bits := DontCare
     out_decouple(0).bits.vaddr := data
-    out_decouple(1).valid := deq_valid && data_next(PAGEOFFSET) === pg_bit && out_decouple(0).fire
+    out_decouple(1).valid := deq_valid && data_next(granularity) === pg_bit && out_decouple(0).fire
     out_decouple(1).bits := DontCare
     out_decouple(1).bits.vaddr := data_next
     out_decouple.drop(2).foreach { out => out.valid := false.B; out.bits := DontCare }
     when(out_decouple(1).fire) {
       // fired 2 prefetch reqs
       data := data_next_next
-      when(data_next_next(PAGEOFFSET) =/= pg_bit) {
+      when(data_next_next(granularity) =/= pg_bit) {
         // cross page, invalid this entry
         v := false.B
       }
     }.elsewhen(out_decouple(0).fire) {
       // fired 1 prefetch req
       data := data_next
-      when(data_next(PAGEOFFSET) =/= pg_bit) {
+      when(data_next(granularity) =/= pg_bit) {
         // cross page, invalid this entry
         v := false.B
       }
@@ -164,12 +182,14 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule with HasS
   })
   require(EnsbufferWidth == 2)
 
+  private val granularity = SPB_GRANULARITY_BITS
+
   // meta for SPB
   val N = SPB_N
   val last_st_block_addr = RegInit(0.U(VAddrBits.W))
   val saturate_counter = RegInit(0.S(SATURATE_COUNTER_BITS.W))
   val store_count = RegInit(0.U((log2Up(N) + 1).W))
-  val burst_engine = Module(new PrefetchBurstGenerator(is_store = true))
+  val burst_engine = Module(new PrefetchBurstGenerator(granularity, true))
 
   val sbuffer_fire = io.sbuffer_enq.valid
   val sbuffer_vaddr = io.sbuffer_enq.bits.vaddr
@@ -284,4 +304,268 @@ class StorePfWrapper()(implicit p: Parameters) extends DCacheModule with HasStor
 
   // fire a prefetch req
   io.prefetch_req <> spb.io.prefetch_req
+}
+
+// prefetch request generator used by asp to burst some prefetch request to L2 Cache
+// 1. translate io.vaddr to `paddr`
+// 2. Send the prefetch requests of the whole region
+//    starting from `paddr` to the end of the region(1KB/2KB/4KB, determined by the `ASP_GRANULARITY_BYTES` parameter)
+//    to L2Cache one by one in order
+class ASPBurstGenerator(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
+  val io = IO(new DCacheBundle {
+    val alloc = Input(Bool())
+    val vaddr = Input(UInt(VAddrBits.W))
+    val enable = Input(Bool())
+    val aspPfIO = new AspPfIO
+  })
+
+  private val granularity = ASP_GRANULARITY_BITS
+
+  val SIZE = BURST_ENGINE_SIZE
+
+  val valids = RegInit(VecInit(List.tabulate(SIZE){_ => false.B}))
+  val locks  = RegInit(VecInit(List.tabulate(SIZE){_ => false.B}))
+  val cnts   = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U(LOCK_BITS.W)}))
+  val vaddrs = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U.asTypeOf(io.vaddr)}))
+  val paddrs = RegInit(VecInit(List.tabulate(SIZE){_ => 0.U(PAddrBits.W)}))
+  val pa_vs  = RegInit(VecInit(List.tabulate(SIZE){_ => false.B}))
+  val tlb_sent  = RegInit(VecInit(List.tabulate(SIZE){_ => false.B}))
+
+  val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, SIZE))
+  val l2_pf_req_arb = Module(new RRArbiterInit(new L2PrefetchReq, SIZE))
+
+  // enq
+  val enq_valids = ~(valids.asUInt)
+  val full = !(enq_valids.orR)
+  val enq_idx = PriorityEncoder(enq_valids)
+  val enq_filter = filter_by_addr(valids, vaddrs, locks, io.vaddr, granularity)
+
+  for (i <- 0 until SIZE) {
+    when (!valids(i) && locks(i) && cnts(i).orR) {
+      cnts(i) := cnts(i) - 1.U
+    }
+
+    when (!valids(i) && locks(i) && !cnts(i).orR) {
+      locks(i) := false.B
+    }
+  }
+
+  when(io.alloc && !full && !enq_filter) {
+    valids(enq_idx) := true.B
+    locks(enq_idx) := false.B
+    cnts(enq_idx) := 0.U
+    vaddrs(enq_idx) := io.vaddr
+    pa_vs(enq_idx) := false.B
+    tlb_sent(enq_idx) := false.B
+  }
+
+  // tlb req
+  val s0_tlb_fire_vec = VecInit((0 until SIZE).map{case i => tlb_req_arb.io.in(i).fire})
+  for(i <- 0 until SIZE) {
+    tlb_req_arb.io.in(i).valid := valids(i) && !pa_vs(i) && !tlb_sent(i) && io.enable
+    tlb_req_arb.io.in(i).bits := 0.U.asTypeOf(new TlbReq)
+    tlb_req_arb.io.in(i).bits.vaddr := vaddrs(i)
+    tlb_req_arb.io.in(i).bits.cmd := TlbCmd.write
+    tlb_req_arb.io.in(i).bits.size := 3.U
+    tlb_req_arb.io.in(i).bits.kill := false.B
+    tlb_req_arb.io.in(i).bits.no_translate := false.B
+
+    when(tlb_req_arb.io.in(i).fire) {
+      tlb_sent(i) := true.B
+    }
+  }
+  assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
+
+  val s1_tlb_req_valid = RegInit(false.B)
+  val s1_tlb_req_bits = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.fire)
+  val s1_tlb_req_index = RegEnable(OHToUInt(s0_tlb_fire_vec.asUInt), tlb_req_arb.io.out.fire)
+  when(io.aspPfIO.tlb_req.req.fire) {
+    s1_tlb_req_valid := false.B
+  }
+  when(tlb_req_arb.io.out.fire) {
+    s1_tlb_req_valid := true.B
+  }
+  io.aspPfIO.tlb_req.req.valid := s1_tlb_req_valid
+  io.aspPfIO.tlb_req.req.bits := s1_tlb_req_bits
+  io.aspPfIO.tlb_req.req_kill := false.B
+  tlb_req_arb.io.out.ready := !s1_tlb_req_valid || io.aspPfIO.tlb_req.req.ready
+
+  // tlb resp
+  val s2_tlb_resp = io.aspPfIO.tlb_req.resp
+  val s2_tlb_update_index = RegEnable(s1_tlb_req_index, io.aspPfIO.tlb_req.req.fire)
+  when(s2_tlb_resp.valid) {
+    pa_vs(s2_tlb_update_index) := !s2_tlb_resp.bits.miss
+    tlb_sent(s2_tlb_update_index) := false.B
+
+    when(!s2_tlb_resp.bits.miss) {
+      paddrs(s2_tlb_update_index) := s2_tlb_resp.bits.paddr.head
+      when(s2_tlb_resp.bits.excp.head.pf.st || s2_tlb_resp.bits.excp.head.af.st) {
+        valids(s2_tlb_update_index) := false.B
+      }
+    }
+  }
+  s2_tlb_resp.ready := true.B
+
+  // next prefetch address
+  val paddrs_next = Wire(Vec(SIZE, chiselTypeOf(paddrs(0))))
+  paddrs_next := paddrs.map(_ + Cat(1.U(1.W), 0.U(BLOCKOFFSET.W)))
+
+  // pf to l2
+  val in_pmem = PmemRanges.map(range => io.aspPfIO.l2_pf_addr.bits.addr.inRange(range._1.U, range._2.U)).reduce(_ || _)
+  io.aspPfIO.l2_pf_addr.valid := l2_pf_req_arb.io.out.valid && in_pmem
+  io.aspPfIO.l2_pf_addr.bits := l2_pf_req_arb.io.out.bits
+
+  l2_pf_req_arb.io.out.ready := true.B
+  
+  for(i <- 0 until SIZE) {
+    l2_pf_req_arb.io.in(i).valid := valids(i) && pa_vs(i) && io.enable
+    l2_pf_req_arb.io.in(i).bits.addr := paddrs(i)
+    l2_pf_req_arb.io.in(i).bits.source := MemReqSource.Prefetch2L2Stream.id.U
+  }
+
+  when(l2_pf_req_arb.io.out.fire) {
+    val idx = l2_pf_req_arb.io.chosen
+    val cross_page = !same_granularity_addr(paddrs_next(idx), paddrs(idx), granularity)
+    when(cross_page) {
+      valids(idx) := false.B
+      locks(idx) := true.B
+      cnts(idx) := LOCK_CYCLE.U
+    }
+    paddrs(idx) := paddrs_next(idx)
+  }
+  
+  XSPerfAccumulate("burst_generator_alloc_success", io.alloc && !full && !enq_filter)
+  XSPerfAccumulate("burst_generator_alloc_fail", io.alloc && full && !enq_filter)
+  XSPerfAccumulate("burst_generator_full", full)
+
+  XSPerfAccumulate("burst_valid_num", PopCount(valids))
+  XSPerfAccumulate("prefetch_req_fire_by_generator", io.aspPfIO.l2_pf_addr.valid)
+}
+
+// an Accurate Store prefetcher
+class ASP(implicit p: Parameters) extends DCacheModule with HasStorePrefetchHelper {
+  val io = IO(new DCacheBundle {
+    val sbuffer = Vec(EnsbufferWidth, Flipped(ValidIO(new DCacheWordReqWithVaddrAndPfFlag)))
+    val sqEmpty = Input(Bool())
+    val lqEmpty = Input(Bool())
+    val enable  = Input(Bool())
+    val seqStoreDetected = Output(Bool())
+    val aspPfIO = new AspPfIO
+  })
+
+  private val granularity = ASP_GRANULARITY_BITS
+
+  // detecting sequential store pattern like:
+  //   store D, (A); store D, (A + K), store D, (A + 2K) ...
+  //   1. Data Hash(D) remains the same
+  //   2. Delta address(K) remains the same
+  //   3. Delta address(K) equals to the store size(sb/sh/sw/sd)
+  //
+  //   `seqPatternCnt` means how many stores match above pattern
+  //    sequential store pattern is found when `seqPatternCnt` > `SEQTHRESHOLD`
+  val DATAHASHBITS = 16
+  val SEQTHRESHOLD = 32
+  val seqStoreDetected = WireInit(false.B)
+  val prevCycleVaddr = RegInit(0.U(VAddrBits.W))
+  val prevCycleDataHash = RegInit(0.U(DATAHASHBITS.W))
+  val seqKStride = RegInit(0.U(6.W))
+  val seqPatternVec = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
+  val seqPatternCnt = RegInit(0.U((log2Up(SEQTHRESHOLD) + 1).W))
+  val sbufferFire = Cat(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire))).orR
+  val sbufferFireCnt = PopCount(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire)))
+  val validKStride = (seqKStride === 1.U || seqKStride === 2.U || seqKStride === 4.U || seqKStride === 8.U)
+
+  for (i <- 0 until EnsbufferWidth) {
+    when (io.sbuffer(i).fire) {
+      val thisCycleVaddr    = io.sbuffer(i).bits.vaddr
+      val thisCycleDataHash = io.sbuffer(i).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+      prevCycleVaddr    := thisCycleVaddr
+      prevCycleDataHash := thisCycleDataHash
+
+      if (i == 0) {
+        seqKStride := thisCycleVaddr - prevCycleVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - prevCycleVaddr) === seqKStride) &&
+                            (prevCycleDataHash === thisCycleDataHash) &&
+                            (PopCount(io.sbuffer(i).bits.mask) === seqKStride)
+      } else {
+        val lastLoopVaddr    = WireInit(prevCycleVaddr)
+        val lastLoopDataHash = WireInit(prevCycleDataHash)
+        for ( j <- 0 until i ) {
+          when (io.sbuffer(j).fire) {
+            lastLoopVaddr    := io.sbuffer(j).bits.vaddr
+            lastLoopDataHash := io.sbuffer(j).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+          }
+        }
+        seqKStride := thisCycleVaddr - lastLoopVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
+                            (lastLoopDataHash === thisCycleDataHash) &&
+                            (PopCount(io.sbuffer(i).bits.mask) === seqKStride)
+      }
+    } .otherwise {
+      seqPatternVec(i) := true.B
+    }
+  }
+
+  when (sbufferFire) {
+    when (Cat(seqPatternVec).andR) {
+      seqPatternCnt := Mux(seqPatternCnt >= SEQTHRESHOLD.U, seqPatternCnt, seqPatternCnt + sbufferFireCnt)
+    } .otherwise {
+      seqPatternCnt := 0.U
+    }
+  }
+  when (seqPatternCnt >= SEQTHRESHOLD.U && validKStride) {
+    seqStoreDetected := true.B
+  } .otherwise {
+    seqStoreDetected := false.B
+  }
+  when (io.sqEmpty) {
+    seqStoreDetected := false.B
+  }
+  io.seqStoreDetected := seqStoreDetected
+
+  // generator
+  val generator = Module(new ASPBurstGenerator)
+  
+  generator.io.alloc := false.B
+  generator.io.vaddr := 0.U
+  generator.io.enable := io.enable
+  generator.io.aspPfIO <> io.aspPfIO
+
+  // prefetch distance for memset using sw
+  val depthSW = Wire(UInt(10.W))
+  depthSW := Constantin.createRecord("ASP_DEPTH_SW" + p(XSCoreParamsKey).HartId.toString, initValue = 16)
+
+  // This is the dynamic distance mechanism of ASP:
+  //   The larger size of the store instruction, the larger bandwidth for SQ writing to Sbuffer has,
+  //   Causing the Sbuffer entry to be fully written faster, so a larger distance is needed.
+  val depth = LookupTreeDefault(seqKStride, depthSW, List(
+    1.U -> (depthSW >> 2), // memset using sb
+    2.U -> (depthSW >> 1), // memset using sh
+    4.U ->  depthSW,       // memset using sw
+    8.U -> (depthSW << 1)  // memset using sd
+  ))
+
+  val prefetchVaddr = (0 until EnsbufferWidth).map(i => get_block_addr(io.sbuffer(i).bits.vaddr) + Cat(depth, 0.U(log2Up(dcacheParameters.blockBytes).W)))
+  for (i <- 0 until EnsbufferWidth) {
+    when (io.enable) {
+      if (i == 0) {
+        when(io.sbuffer(i).fire) {
+          // alloc a burst generator when detecting MemSet
+          generator.io.alloc := seqStoreDetected && io.lqEmpty
+          generator.io.vaddr := prefetchVaddr(0)
+        }
+      } else {
+        when(io.sbuffer(i).fire) {
+          generator.io.alloc := seqStoreDetected && io.lqEmpty
+          // The burst generator has only one port. 
+          // If it has been applied and this request is also in the same area, discard this request.
+          when (!same_granularity_addr(prefetchVaddr(i), prefetchVaddr(i - 1), granularity)) {
+            generator.io.vaddr := prefetchVaddr(i)
+          }
+        }
+      }
+    }
+  }
+
+  XSPerfAccumulate("seqStoreDetected", seqStoreDetected)
 }

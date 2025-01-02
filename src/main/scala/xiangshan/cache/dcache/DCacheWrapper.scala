@@ -805,6 +805,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val pf_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
+  val seqStoreDetected = Input(Bool())
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
   val l2_hint = Input(Valid(new L2ToL1Hint()))
@@ -1008,6 +1009,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
+  missQueue.io.seqStoreDetected <> io.seqStoreDetected
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
   mainPipe.io.refill_info := missQueue.io.refill_info

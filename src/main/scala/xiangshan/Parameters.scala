@@ -258,6 +258,7 @@ case class XSCoreParameters
   EnableAtCommitMissTrigger: Boolean = true,
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
+  EnableStorePrefetchASP: Boolean = false,
   HasCMO: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
@@ -832,6 +833,7 @@ trait HasXSParameter {
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def EnableStorePrefetchASP = coreParams.EnableStorePrefetchASP
   def HasCMO = coreParams.HasCMO && p(EnableCHI)
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
