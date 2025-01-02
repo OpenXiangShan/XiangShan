@@ -18,7 +18,7 @@ src/main/scala/xiangshan/frontend/PreDecode.scala @ngc7331
 
 src/main/scala/xiangshan/cache/ @linjuanZ
 src/main/scala/xiangshan/cache/dcache/ @happy-lx @bosscharlie @linjuanZ
-src/main/scala/xiangshan/cache/mmu/ @good-circle @cebarobot @Lemover
+src/main/scala/xiangshan/cache/mmu/ @good-circle @cebarobot @linjuanZ
 src/main/scala/xiangshan/cache/wpu/ @Maxpicca-Li @bosscharlie @linjuanZ
 
 src/main/scala/xiangshan/mem/ @linjuanZ
