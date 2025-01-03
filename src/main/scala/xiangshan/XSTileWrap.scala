@@ -67,6 +67,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
+      val l3Miss = Input(Bool())
       val chi = EnableCHIAsyncBridge match {
         case Some(param) => new AsyncPortIO(param)
         case None => new PortIO
@@ -97,6 +98,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     io.hartIsInReset := tile.module.io.hartIsInReset
     io.traceCoreInterface <> tile.module.io.traceCoreInterface
     io.debugTopDown <> tile.module.io.debugTopDown
+    tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
 
     // CLINT Async Queue Sink
