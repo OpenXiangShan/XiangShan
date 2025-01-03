@@ -643,7 +643,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_pc             = Output(UInt(VAddrBits.W))
   // cycle 0: load has updated replacement before
   val replacementUpdated = Output(Bool())
-  val is128Req = Bool()
+  val is128Req = Output(Bool())
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
   // cycle0: load microop
@@ -665,6 +665,34 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val debug_s2_pred_way_num = Input(UInt(XLEN.W))
   val debug_s2_dm_way_num = Input(UInt(XLEN.W))
   val debug_s2_real_way_num = Input(UInt(XLEN.W))
+
+  def connectSameInPort(bundle: DCacheLoadRespIO) = {
+    bundle.s1_disable_fast_wakeup := this.s1_disable_fast_wakeup
+    bundle.s2_hit := this.s2_hit
+    bundle.s2_first_hit := this.s2_first_hit
+    bundle.s2_bank_conflict := this.s2_bank_conflict
+    bundle.s2_wpu_pred_fail := this.s2_wpu_pred_fail
+    bundle.s2_mq_nack := this.s2_mq_nack
+
+    bundle.debug_s1_hit_way := this.debug_s1_hit_way
+    bundle.debug_s2_pred_way_num := this.debug_s2_pred_way_num
+    bundle.debug_s2_dm_way_num := this.debug_s2_dm_way_num
+    bundle.debug_s2_real_way_num := this.debug_s2_real_way_num
+  }
+
+  def connectSameOutPort(bundle: DCacheLoadReqIO) = {
+    this.s1_kill_data_read := bundle.s1_kill_data_read
+    this.s1_kill := bundle.s1_kill
+    this.s2_kill := bundle.s2_kill
+    this.s0_pc := bundle.s0_pc
+    this.s1_pc := bundle.s1_pc
+    this.s2_pc := bundle.s2_pc
+    this.replacementUpdated := bundle.replacementUpdated
+    this.is128Req := bundle.is128Req
+    this.pf_source := bundle.pf_source
+    this.s1_paddr_dup_dcache := bundle.s1_paddr_dup_dcache
+    this.s1_paddr_dup_lsu := bundle.s1_paddr_dup_lsu
+  }
 }
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
