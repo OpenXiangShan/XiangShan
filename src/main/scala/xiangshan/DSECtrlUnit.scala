@@ -10,6 +10,7 @@ import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
 import freechips.rocketchip.util.{SimpleRegIO, UIntToOH1}
 import xiangshan.backend.regfile.Regfile
 import system._
+import utility._
 
 import javax.swing.SwingWorker
 
@@ -222,7 +223,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       coreResetReg := false.B
     }
 
-    when (RegNext(RegNext(core_rst_end))) {
+    when (RegNextN(core_rst_end, 3)) {
       resetVectorReg := 0.U
     }
 
