@@ -77,6 +77,11 @@ ifeq ($(IMSIC_USE_TL),1)
 COMMON_EXTRA_ARGS += --imsic-use-tl
 endif
 
+# IMSIC use TileLink rather than AXI4Lite
+ifeq ($(DFX),1)
+COMMON_EXTRA_ARGS += --enable-dfx
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
@@ -163,6 +168,10 @@ jar:
 
 test-jar:
 	mill -i xiangshan.test.assembly
+
+comp:
+	mill -i xiangshan.compile
+	mill -i xiangshan.test.compile
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)

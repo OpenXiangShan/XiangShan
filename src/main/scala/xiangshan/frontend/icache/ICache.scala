@@ -42,6 +42,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend._
+import utility.mbist.MbistPipeline
 
 case class ICacheParameters(
     nSets:               Int = 256,
@@ -271,7 +272,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true
+      withClockGate = true,
+      hasMbist = hasMbist
     ))
 
     // meta connection
@@ -297,6 +299,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
 
     tagArray
   }
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIcacheTag", hasMbist)
 
   private val read_set_idx_next = RegEnable(io.read.bits.vSetIdx, 0.U.asTypeOf(io.read.bits.vSetIdx), io.read.fire)
   private val valid_array       = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
@@ -423,7 +426,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
   }
 
   private val dataArrays = (0 until nWays).map { way =>
-    (0 until ICacheDataBanks).map { bank =>
+    val banks = (0 until ICacheDataBanks).map { bank =>
       val sramBank = Module(new SRAMTemplateWithFixedWidth(
         UInt(ICacheDataEntryBits.W),
         set = nSets,
@@ -431,7 +434,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
         shouldReset = true,
         holdRead = true,
         singlePort = true,
-        withClockGate = true
+        withClockGate = true,
+        hasMbist = hasMbist
       ))
 
       // read
@@ -449,6 +453,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
       )
       sramBank
     }
+    MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeIcacheDataWay${way}", hasMbist)
+    banks
   }
 
   /**
@@ -824,7 +830,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
     holdRead:      Boolean = false,
     singlePort:    Boolean = false,
     bypassWrite:   Boolean = false,
-    withClockGate: Boolean = false
+    withClockGate: Boolean = false,
+    hasMbist:      Boolean = false,
 ) extends Module {
 
   private val dataBits  = gen.getWidth
@@ -849,7 +856,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
       holdRead = holdRead,
       singlePort = singlePort,
       bypassWrite = bypassWrite,
-      withClockGate = withClockGate
+      withClockGate = withClockGate,
+      hasMbist = hasMbist
     ))
     // read req
     sramBank.io.r.req.valid       := io.r.req.valid

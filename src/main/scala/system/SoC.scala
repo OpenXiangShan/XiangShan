@@ -76,7 +76,8 @@ case class SoCParameters
   UseXSNoCTop: Boolean = false,
   IMSICUseTL: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  hasMbist: Boolean = false
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -125,6 +126,7 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
+  val hasMbist = soc.hasMbist
 }
 
 trait HasPeripheralRanges {

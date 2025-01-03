@@ -26,10 +26,11 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import device.MsiInfoBundle
 import system.HasSoCParameter
-import top.{BusPerfMonitor, ArgParser, Generator}
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
+import top.{ArgParser, BusPerfMonitor, Generator}
+import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
+import utility.sram.SramBroadcastBundle
 import xiangshan.backend.trace.TraceCoreInterface
 
 class XSTile()(implicit p: Parameters) extends LazyModule
@@ -113,6 +114,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
     })
 
     dontTouch(io.hartId)
@@ -139,6 +142,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
+    l2top.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
+    l2top.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
+
     if (enableL2) {
       // TODO: add ECC interface of L2
 

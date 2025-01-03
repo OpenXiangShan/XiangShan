@@ -44,12 +44,12 @@ import coupledL2._
 import coupledL2.prefetch._
 import xiangshan.frontend.icache.ICacheParameters
 
-class BaseConfig(n: Int) extends Config((site, here, up) => {
+class BaseConfig(n: Int, hasMbist:Boolean = false) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
-  case SoCParamsKey => SoCParameters()
+  case SoCParamsKey => SoCParameters(hasMbist = hasMbist)
   case PMParameKey => PMParameters()
-  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
+  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i, hasMbist = hasMbist) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey

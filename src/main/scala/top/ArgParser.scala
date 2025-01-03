@@ -47,6 +47,7 @@ object ArgParser {
       |--with-rollingdb
       |--disable-perf
       |--disable-alwaysdb
+      |--enable-dfx
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -183,6 +184,11 @@ object ArgParser {
                 L3CacheParamsOpt = newL3Param,
                 OpenLLCParamsOpt = openLLCParam
               )
+          }), tail)
+        case "--enable-dfx" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(hasMbist = true)
+            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = true))
           }), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip

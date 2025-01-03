@@ -24,8 +24,9 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
 import device.{IMSICAsync, MsiInfoBundle}
-import coupledL2.tl2chi.{PortIO, AsyncPortIO, CHIAsyncBridgeSource}
-import utility.{IntBuffer, ResetGen}
+import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
+import utility.sram.SramBroadcastBundle
+import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
 
 // This module is used for XSNoCTop for async time domain and divide different
@@ -76,11 +77,13 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
       }
+      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
     })
 
-    val reset_sync = withClockAndReset(clock, reset)(ResetGen())
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen()))
-    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen())
+    val reset_sync = withClockAndReset(clock, reset)(ResetGen(2, io.dft_reset))
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(2, io.dft_reset)))
+    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(2, io.dft_reset))
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
@@ -92,6 +95,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
+    tile.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
+    tile.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.hartIsInReset := tile.module.io.hartIsInReset
@@ -126,7 +131,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       // Modules are reset one by one
       // reset ----> SYNC --> XSTile
       val resetChain = Seq(Seq(tile.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, io.dft_reset)
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
