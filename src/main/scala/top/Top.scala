@@ -156,7 +156,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })
 
     val reset_sync = withClockAndReset(io.clock.asClock, io.reset.asBool.asAsyncReset) { ResetGen() }
-    val dse_reset_sync = withClockAndReset(io.clock.asClock, dseCtrl.module.io.core_reset.asAsyncReset) { ResetGen() }
+    val dse_core_reset = withClockAndReset(io.clock.asClock, dseCtrl.module.io.core_reset.asAsyncReset) { ResetGen() }
+    val dse_core_reset_delayed = withClock(io.clock.asClock) { RegNext(dseCtrl.module.io.core_reset) }
+    val dse_reset_sync = withClockAndReset(io.clock.asClock, dse_core_reset_delayed.asAsyncReset) { ResetGen() }
     val true_reset_sync = (reset_sync.asBool || dse_reset_sync.asBool).asAsyncReset
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
 
@@ -166,7 +168,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
-    io.dse_reset_valid := dse_reset_sync.asBool
+    io.dse_reset_valid := dse_core_reset.asBool
     io.dse_reset_vec := dseCtrl.module.io.reset_vector
     io.dse_max_epoch := dseCtrl.module.io.max_epoch
     io.dse_epoch := dseCtrl.module.io.epoch
