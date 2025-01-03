@@ -28,7 +28,7 @@ import coupledL2.{L2ParamKey, EnableCHI}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO, CHIIssue}
 import huancun.BankBitsKey
-import system.{HasSoCParameter, SoCParamsKey}
+import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -105,7 +105,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
-        PmemRanges = p(SoCParamsKey).PmemRanges,
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case EnableCHI => p(EnableCHI)
