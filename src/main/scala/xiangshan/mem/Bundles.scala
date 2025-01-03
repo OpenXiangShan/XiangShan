@@ -37,11 +37,25 @@ import math._
 
 
 object Bundles {
+
+  object Connection {
+    def connectValidIO[T <: Data](sink: ValidIO[T], source: DecoupledIO[T]) = {
+      sink.valid := source.valid
+      sink.bits := source.bits
+    }
+
+    def connectDecoupledIO[T <: Data](sink: DecoupledIO[T], source: DecoupledIO[T]) = {
+      sink.valid := source.valid
+      sink.bits := source.bits
+    }
+  }
+
   class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     with HasDCacheParameters
     with HasVLSUParameters
     with HasTlbConst {
     val uop                 = new DynInst
+    val iqIdx               = UInt(log2Up(MemIQSizeMax).W)
     val src                 = Vec(2, UInt(VLEN.W))
     val vaddr               = UInt(VAddrBits.W)
     val paddr               = UInt(PAddrBits.W)
@@ -92,7 +106,7 @@ object Bundles {
     val uopUnitStrideFof    = Bool()
     val usSecondInv         = Bool()
     val elemIdx             = UInt(elemIdxBits.W)
-    val alignedType         = UInt(alignTypeBits.W)
+    val alignType           = UInt(alignTypeBits.W)
     val mbIdx               = UInt(max(vlmBindexBits, vsmBindexBits).W)
     val regOffset           = UInt(vOffsetBits.W)
     val elemIdxInsideVd     = UInt(elemIdxBits.W)
@@ -116,7 +130,6 @@ object Bundles {
     val replacementUpdated  = Bool()
     val missDbUpdated       = Bool()
     val forwardTLDchannel   = Bool()
-    val dcacheRequireReplay = Bool()
     val schedIdx            = UInt(log2Up(LoadQueueReplaySize).W)
     val cause               = ReplayCauseNO()
 
@@ -134,12 +147,15 @@ object Bundles {
 
     def isPrefetch: Bool  = isHWPrefetch || isSWPrefetch
 
+    def checkFullVA: Bool = isVector || isIq
+
     def isLoad: Bool  = !isStore
 
     def needReplay: Bool  = ReplayCauseNO.needReplay(cause)
 
     def fromMemExuInputBundle(input: MemExuInput, isStore: Boolean = false) = {
       this          := 0.U.asTypeOf(this)
+      this.iqIdx    := input.iqIdx
       this.uop      := input.uop
       this.src(0)   := input.src(0)
       this.src(1)   := input.src(1)
@@ -152,6 +168,7 @@ object Bundles {
       val res = Wire(new MemExuInput)
       res         := 0.U.asTypeOf(res)
       res.uop     := this.uop
+      res.iqIdx   := this.iqIdx
       res.src(0)  := this.src(0)
       res.src(1)  := this.src(1)
       res.isFirstIssue := this.isFirstIssue
@@ -178,32 +195,31 @@ object Bundles {
       res.data            := this.data
       res.isFromLoadUnit  := this.isLoad
       res.debug.isMMIO    := this.mmio
+      res.debug.isNC      := this.isNoncacheable
       res.debug.vaddr     := this.vaddr
       res.debug.paddr     := this.paddr
       res.debug.isPerfCnt := false.B
       res
     }
 
-    def fromVecPipeBundle(input: VecPipeBundle, isStore: Boolean = false): LsPipelineBundle = {
-      val res = Wire(new LsPipelineBundle)
-      res                  := 0.U.asTypeOf(res)
-      res.uop              := input.uop
-      res.vaddr            := input.vaddr
-      res.vecBaseVaddr     := input.basevaddr
-      res.mask             := input.mask
-      res.isVector         := input.isvec
-      res.isStore          := isStore.B
-      res.uopUnitStrideFof := input.uop_unit_stride_fof
-      res.regOffset        := input.reg_offset
-      res.alignedType      := input.alignedType
-      res.vecActive        := input.vecActive
-      res.firstEle         := input.is_first_ele
-      res.isFirstIssue     := input.isFirstIssue
-      res.usSecondInv      := input.usSecondInv
-      res.mbIdx            := input.mBIndex
-      res.elemIdx          := input.elemIdx
-      res.elemIdxInsideVd  := input.elemIdxInsideVd
-      res
+    def fromVecPipeBundle(input: VecPipeBundle, isStore: Boolean = false) = {
+      this                  := 0.U.asTypeOf(this)
+      this.uop              := input.uop
+      this.vaddr            := input.vaddr
+      this.vecBaseVaddr     := input.basevaddr
+      this.mask             := input.mask
+      this.isVector         := input.isvec
+      this.isStore          := isStore.B
+      this.uopUnitStrideFof := input.uop_unit_stride_fof
+      this.regOffset        := input.reg_offset
+      this.alignType        := input.alignedType
+      this.vecActive        := input.vecActive
+      this.firstEle         := input.is_first_ele
+      this.isFirstIssue     := input.isFirstIssue
+      this.usSecondInv      := input.usSecondInv
+      this.mbIdx            := input.mBIndex
+      this.elemIdx          := input.elemIdx
+      this.elemIdxInsideVd  := input.elemIdxInsideVd
     }
 
     def toVecPipelineFeedbackBundle(isVStore: Boolean = false): VecPipelineFeedbackIO = {
@@ -220,7 +236,7 @@ object Bundles {
       res.usSecondInv     := this.usSecondInv
       res.vecFeedback     := this.feedbacked && this.isVector
       res.elemIdx         := this.elemIdx
-      res.alignedType     := this.alignedType
+      res.alignedType     := this.alignType
       res.mask            := this.mask
       res.vaddr           := this.vaddr
       res.vaNeedExt       := this.vaNeedExt
@@ -244,7 +260,7 @@ object Bundles {
       res.mmio          := this.mmio
       res.usSecondInv   := this.usSecondInv
       res.elemIdx       := this.elemIdx
-      res.alignedType   := this.alignedType
+      res.alignedType   := this.alignType
       res.mbIndex       := this.mbIdx
       res.mask          := this.mask
       res.vaddr         := this.vaddr
@@ -299,6 +315,7 @@ object Bundles {
       res.pc        := this.uop.pc
       res.sqIdx     := this.uop.sqIdx
       res.sqIdxMask := DontCare
+      res.isNoncacheable := this.isNoncacheable
       res
     }
 
@@ -306,6 +323,29 @@ object Bundles {
       val res = Wire(new MissQueueForwardReqBundle)
       res.paddr  := this.paddr
       res.mshrId := this.mshrId
+      res
+    }
+
+    def toRSFeedbackBundle(): RSFeedback = {
+      val res = Wire(new RSFeedback)
+      res             := 0.U.asTypeOf(res.cloneType)
+      res.flushState  := this.ptwBack
+      res.robIdx      := this.uop.robIdx
+      res.sqIdx       := this.uop.sqIdx
+      res.lqIdx       := this.uop.lqIdx
+      res
+    }
+
+    def toRedirectBundle(): Redirect = {
+      val res = Wire(new Redirect)
+      res                   := 0.U.asTypeOf(res.cloneType)
+      res.isRVC             := this.uop.preDecodeInfo.isRVC
+      res.robIdx            := this.uop.robIdx
+      res.ftqIdx            := this.uop.ftqPtr
+      res.ftqOffset         := this.uop.ftqOffset
+      res.level             := RedirectLevel.flush
+      res.cfiUpdate.target  := this.uop.pc
+      res.debug_runahead_checkpoint_id := this.uop.debugInfo.runahead_checkpoint_id
       res
     }
   }
@@ -379,13 +419,14 @@ object Bundles {
     val req  = Valid(new LoadForwardReqBundle)
     val resp = Input(new LoadForwardRespBundle)
   }
-  // Query load queue for ld-ld violation
-  //
-  // Req should be send in load_s1
-  // Resp will be generated 1 cycle later
-  //
-  // Note that query req may be !ready, as dcache is releasing a block
-  // If it happens, a replay from rs is needed.
+  /**
+   * Query load queue for ld-ld violation
+   * Req should be send in load_s1
+   * Resp will be generated 1 cycle later
+   *
+   * Note that query req may be !ready, as dcache is releasing a block
+   * If it happens, a replay from rs is needed.
+   */
   class LoadNukeQueryReqBundle(implicit p: Parameters) extends XSBundle {
     val uop          = new DynInst
     val mask         = UInt((VLEN/8).W)
@@ -424,13 +465,6 @@ object Bundles {
     val uop   = new DynInst()
     val sqPtr = new SqPtr
     val doDeq = Bool()
-  }
-
-  class StoreMaBufToSqCtrlIO(implicit p: Parameters) extends XSBundle {
-    // from storeMisalignBuffer to storeQueue, control it's sbuffer write
-    val control   = Output(new StoreMaBufToSqCtrlControlBundle)
-    // from storeQueue to storeMisalignBuffer, provide detail info of this store
-    val storeInfo = Input(new StoreMaBufToSqCtrlStoreInfoBundle)
   }
 
   class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
