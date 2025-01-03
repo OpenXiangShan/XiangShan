@@ -735,8 +735,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
   val pmp_check = pmp_checkers.map(_.io)
   for ((p,d) <- pmp_check zip dtlb_pmps) {
-    if(HasCVMExtension){
-      p.apply(tlbcsr.mcvm.CMODE.asBool, tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
+    if(HasBitmapCheck){
+      p.apply(tlbcsr.mbmc.CMODE.asBool, tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     }else{
       p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     }

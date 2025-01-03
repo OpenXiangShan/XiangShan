@@ -258,7 +258,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = if (HasCVMExtension) 2 *(l2tlbParams.llptwsize + 1 + 1) else (l2tlbParams.llptwsize + 1 + 1)
+  val MemReqWidth = if (HasBitmapCheck) 2 *(l2tlbParams.llptwsize + 1 + 1) else (l2tlbParams.llptwsize + 1 + 1)
   val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)

@@ -254,10 +254,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.hgatp.mode    := csrMod.io.tlb.hgatp.MODE.asUInt
   tlb.hgatp.vmid    := csrMod.io.tlb.hgatp.VMID.asUInt
   tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
-  tlb.mcvm.BME      := csrMod.io.tlb.mcvm.BME.asUInt
-  tlb.mcvm.CMODE    := csrMod.io.tlb.mcvm.CMODE.asUInt
-  tlb.mcvm.BCLEAR   := csrMod.io.tlb.mcvm.BCLEAR.asUInt
-  tlb.mcvm.BMA      := csrMod.io.tlb.mcvm.BMA.asUInt
+  tlb.mbmc.BME      := csrMod.io.tlb.mbmc.BME.asUInt
+  tlb.mbmc.CMODE    := csrMod.io.tlb.mbmc.CMODE.asUInt
+  tlb.mbmc.BCLEAR   := csrMod.io.tlb.mbmc.BCLEAR.asUInt
+  tlb.mbmc.BMA      := csrMod.io.tlb.mbmc.BMA.asUInt
 
   // expose several csr bits for tlb
   tlb.priv.mxr := csrMod.io.tlb.mxr

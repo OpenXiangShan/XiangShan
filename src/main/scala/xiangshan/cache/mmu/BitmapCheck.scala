@@ -73,7 +73,7 @@ class bitmapIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst{
 
   val wakeup = ValidIO(new Bundle{
     val setIndex = UInt(PtwL0SetIdxLen.W)
-    val tag = UInt(PtwL0TagLen.W)
+    val tag = UInt(SPTagLen.W)
     val isSp = Bool()
     val way_info = UInt(l2tlbParams.l0nWays.W)
     val pte_index = UInt(sectortlbwidth.W)
@@ -102,7 +102,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst{
   val csr = io.csr
   val sfence = io.sfence
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
-  val bitmap_base = csr.mcvm.BMA
+  val bitmap_base = csr.mbmc.BMA << 6
 
   val entries = Reg(Vec(l2tlbParams.llptwsize+2, new bitmapEntry()))
   //add pmp check
@@ -301,7 +301,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst{
 
   io.wakeup.valid := io.resp.valid
   io.wakeup.bits.setIndex := genPtwL0SetIdx(entries(mem_ptr).vpn)
-  io.wakeup.bits.tag := entries(mem_ptr).vpn(vpnLen - 1, vpnLen - PtwL0TagLen)
+  io.wakeup.bits.tag := entries(mem_ptr).vpn(vpnLen - 1, vpnLen - SPTagLen)
   io.wakeup.bits.isSp := entries(mem_ptr).level =/= 0.U
   io.wakeup.bits.way_info := entries(mem_ptr).way_info
   io.wakeup.bits.pte_index := entries(mem_ptr).vpn(sectortlbwidth - 1, 0)
@@ -356,7 +356,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst{
   val csr = io.csr
   val sfence = io.sfence
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
-  val bitmap_cache_clear = csr.mcvm.BCLEAR
+  val bitmap_cache_clear = csr.mbmc.BCLEAR
 
   val bitmapCachesize = 16
   val bitmapcache = Reg(Vec(bitmapCachesize,new bitmapCacheEntry()))

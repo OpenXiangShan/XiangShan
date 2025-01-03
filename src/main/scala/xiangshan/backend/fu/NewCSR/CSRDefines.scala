@@ -146,7 +146,7 @@ object CSRDefines {
 
   object BMAField extends CSREnum with WARLApply {
     val ResetBMA = Value(0.U)
-    val TestBMA = Value("h100000000".U)
+    val TestBMA = Value("h4000000".U)
   }
 
   object XLENField extends CSREnum with ROApply {

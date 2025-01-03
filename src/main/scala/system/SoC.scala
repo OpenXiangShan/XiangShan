@@ -51,10 +51,10 @@ case class SoCParameters
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   MEMENCRange: AddressSet = AddressSet(0x38030000L, 0xfff),
-  KeyIDBits: Option[Int] = Some(0),
+  KeyIDBits: Int = 0,
   MemencPipes: Int = 4,
-  HasMEMencryption: Option[Boolean] = Some(false),
-  HasDelayNoencryption: Option[Boolean] = Some(false), // Test specific
+  HasMEMencryption: Boolean = false,
+  HasDelayNoencryption: Boolean = false, // Test specific
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -131,7 +131,9 @@ trait HasSoCParameter {
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
 
-  def HasMEMencryption = soc.HasMEMencryption.getOrElse(false)
+  def HasMEMencryption = soc.HasMEMencryption
+  require((soc.HasMEMencryption && (soc.KeyIDBits > 0)) || (!soc.HasMEMencryption && (soc.KeyIDBits == 0)) ,
+  "HasMEMencryption most set with KeyIDBits > 0")
 }
 
 trait HasPeripheralRanges {

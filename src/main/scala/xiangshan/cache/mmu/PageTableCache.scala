@@ -187,7 +187,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val csr_dup = Vec(3, Input(new TlbCsrBundle()))
   val wakeup = Flipped(ValidIO(new Bundle {
     val setIndex = Input(UInt(PtwL0SetIdxLen.W))
-    val tag = Input(UInt(PtwL0TagLen.W))
+    val tag = Input(UInt(SPTagLen.W))
     val isSp = Input(Bool())
     val way_info = UInt(l2tlbParams.l0nWays.W)
     val pte_index = UInt(sectortlbwidth.W)
@@ -206,7 +206,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l0BitmapReg = RegInit(VecInit(Seq.fill(l2tlbParams.l0nSets)(VecInit(Seq.fill(l2tlbParams.l0nWays)(VecInit(Seq.fill(tlbcontiguous)(0.U(1.W))))))))
   val spBitmapReg = RegInit(VecInit(Seq.fill(l2tlbParams.spSize)(0.U(1.W))))
 
-  val bitmapEnable = io.csr_dup(0).mcvm.BME === 1.U && io.csr_dup(0).mcvm.CMODE === 0.U
+  val bitmapEnable = io.csr_dup(0).mbmc.BME === 1.U && io.csr_dup(0).mbmc.CMODE === 0.U
   // TODO: four caches make the codes dirty, think about how to deal with it
 
   val sfence_dup = io.sfence_dup
@@ -317,12 +317,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spvmids = sp.map(_.vmid)
   val sph = Reg(Vec(l2tlbParams.spSize, UInt(2.W)))
 
-  if(HasCVMExtension){
+  if(HasBitmapCheck){
     //wakeup corresponding entry
     when(io.wakeup.valid){
       when(io.wakeup.bits.isSp){
         for(i <- 0 until l2tlbParams.spSize){
-          when(sp(i).tag === io.wakeup.bits.tag(PtwL0TagLen-1,PtwL0TagLen-SPTagLen) && spv(i) === 1.U){
+          when(sp(i).tag === io.wakeup.bits.tag && spv(i) === 1.U){
             spBitmapReg(i) := io.wakeup.bits.check_success
           }
         }
@@ -548,7 +548,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hit = WireInit(false.B)
     val l0bitmapreg = RegEnable(RegNext(l0BitmapReg(ridx)),stageDelay(1).fire)
     //cause llptw will not trigger bitmapcheck
-    if(HasCVMExtension){
+    if(HasBitmapCheck){
       //add a coniditonal logic
       hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw) , ParallelOR(hitVec) &&  l0bitmapreg(hitWay)(pte_index) === 1.U , ParallelOR(hitVec))
       when(bitmapEnable && (s2x_info =/= allStage || ishptw) && ParallelOR(hitVec) && l0bitmapreg(hitWay)(pte_index) === 0.U){
@@ -601,7 +601,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val s2x_info = RegEnable(stageReq.bits.req_info.s2xlate, stageReq.fire)
     val jmp_bitmap_check  = WireInit(false.B)
     val hit = WireInit(false.B)
-    if(HasCVMExtension){
+    if(HasBitmapCheck){
       hit := Mux(bitmapEnable && (s2x_info =/= allStage || ishptw), ParallelOR(hitVec) &&  spBitmapReg(OHToUInt(hitVec)) === 1.U , ParallelOR(hitVec))
       when(bitmapEnable && (s2x_info =/= allStage || ishptw) && ParallelOR(hitVec) && spBitmapReg(OHToUInt(hitVec)) === 0.U){
         jmp_bitmap_check := true.B
@@ -676,7 +676,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l1.hit, resp_res.l1.ppn, Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l3.getOrElse(0.U.asTypeOf(new PageCachePerPespBundle)).ppn))
   io.resp.bits.toFsm.stage1Hit := stage1Hit
-  if(HasCVMExtension){
+  if(HasBitmapCheck){
     io.resp.bits.toFsm.jmp_bitmap_check := resp_res.l0.jmp_bitmap_check || resp_res.sp.jmp_bitmap_check
     io.resp.bits.toFsm.toLLPTW := resp_res.l0.jmp_bitmap_check && (stageResp.bits.req_info.s2xlate === noS2xlate || stageResp.bits.req_info.s2xlate === onlyStage1)
     io.resp.bits.toFsm.hitway := resp_res.l0.hitway
@@ -717,7 +717,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B
-  if(HasCVMExtension){
+  if(HasBitmapCheck){
     io.resp.bits.toHptw.jmp_bitmap_check := resp_res.l0.jmp_bitmap_check || resp_res.sp.jmp_bitmap_check
     io.resp.bits.toHptw.hitway := resp_res.l0.hitway
     io.resp.bits.toHptw.pte := resp_res.sp.pte
@@ -987,7 +987,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l0v := l0v | l0RfvOH
     l0g := l0g & ~l0RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, l0RfvOH, 0.U)
     l0h(l0RefillIdx)(l0VictimWay) := refill_h(0)
-    if(HasCVMExtension){updateL0BitmapReg(l0BitmapReg,Tran2D(~l0RfvOH))}
+    if(HasBitmapCheck){updateL0BitmapReg(l0BitmapReg,Tran2D(~l0RfvOH))}
 
     for (i <- 0 until l2tlbParams.l0nWays) {
       l0RefillPerf(i) := i.U === l0VictimWay
@@ -1021,7 +1021,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     spv := spv | spRfOH
     spg := spg & ~spRfOH | Mux(memPte(0).perm.g, spRfOH, 0.U)
     sph(spRefillIdx) := refill_h(0)
-    if(HasCVMExtension){updateSpBitmapReg(spBitmapReg,TranVec(~spRfOH))}
+    if(HasBitmapCheck){updateSpBitmapReg(spBitmapReg,TranVec(~spRfOH))}
 
     for (i <- 0 until l2tlbParams.spSize) {
       spRefillPerf(i) := i.U === spRefillIdx
