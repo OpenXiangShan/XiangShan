@@ -41,6 +41,8 @@ import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -54,7 +56,7 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
@@ -92,6 +94,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
+    val dft = if (hasMbist) Some(Input(new SramBroadcastBundle)) else None
+    val dft_reset = if (hasMbist) Some(Input(new DFTResetSignals)) else None
   })
 
   // decouped-frontend modules
@@ -433,4 +437,32 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
+
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeFrontend", hasMbist)
+  private val mbistIntf = if(hasMbist) {
+    val params = mbistPl.get.nodeParams
+    val intf = Some(Module(new MbistInterface(
+      params = Seq(params),
+      ids = Seq(mbistPl.get.childrenIds),
+      name = s"MbistIntfFrontend",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> mbistPl.get.mbist
+    mbistPl.get.registerCSV(intf.get.info, "MbistFrontend")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    //TODO: add mbist controller connections here
+    intf
+  } else {
+    None
+  }
+  private val sigFromSrams = if (hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val cg = ClockGate.genTeSrc
+  dontTouch(cg)
+  if (hasMbist) {
+    sigFromSrams.get := io.dft.get
+    cg.cgen := io.dft.get.cgen
+  } else {
+    cg.cgen := false.B
+  }
 }

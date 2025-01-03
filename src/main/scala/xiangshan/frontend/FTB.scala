@@ -21,6 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import utility._
+import utility.mbist.MbistPipeline
 import xiangshan._
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
@@ -498,8 +499,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       shouldReset = true,
       holdRead = false,
       singlePort = true,
-      withClockGate = true
+      withClockGate = true,
+      hasMbist = hasMbist
     ))
+    private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtb", hasMbist)
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata = HoldUnless(
