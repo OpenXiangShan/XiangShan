@@ -157,6 +157,16 @@ object ReplayCauseNO {
     priorities.slice(0, idx)
   }
 
+  def slice(seq: Seq[Bool], lower: Int, upper: Int): Seq[Bool] = {
+    seq.zipWithIndex.filter(x => x._2 >= lower && x._2 < upper).map(_._1)
+  }
+
+  def staCauses(): Seq[Int] = Seq(C_TM)
+
+  def ldCauses(): Seq[Int] = causes.map(_._1).toSeq
+
+  def hyCauses(): Seq[Int] = (staCauses() ++ ldCauses()).distinct
+
   def highestSelect(cause: UInt): Vec[Bool] = {
     VecInit(PriorityEncoderOH(cause.asUInt).asBools)
   }
