@@ -124,13 +124,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val vecWriteBack    = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
     val loadOutValid    = Input(Bool())
     val loadVecOutValid = Input(Bool())
-    val overwriteExpBuf = Output(new XSBundle {
-      val valid  = Bool()
-      val vaddr  = UInt(XLEN.W)
-      val isHyper = Bool()
-      val gpaddr = UInt(XLEN.W)
-      val isForVSnonLeafPTE = Bool()
-    })
+    val overwriteExpBuf = ValidIO(new ExceptionAddrIO)
     val flushLdExpBuff  = Output(Bool())
     val loadMisalignFull = Output(Bool())
   })
@@ -264,7 +258,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val alignedType = Mux(req.isVector, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isVector, req.alignType(1,0), req.uop.fuOpType(1, 0))
   val highAddress = LookupTree(alignedType, List(
     LB -> 0.U,
     LH -> 1.U,
@@ -492,7 +486,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)
   val reqIsHlvx = LSUOpType.isHlvx(req.uop.fuOpType)
   io.splitLoadReq.bits.uop.fuOpType := Mux(req.isVector, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitLoadReq.bits.alignedType  := Mux(req.isVector, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  io.splitLoadReq.bits.alignType  := Mux(req.isVector, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignType)
 
   when (io.splitLoadResp.valid) {
     val resp = io.splitLoadResp.bits
@@ -529,7 +523,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
         }
       }
     }
-    combinedData := Mux(req.isVector, rdataVecHelper(req.alignedType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
+    combinedData := Mux(req.isVector, rdataVecHelper(req.alignType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
 
   }
 
@@ -554,7 +548,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // vector output
   io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isVector
 
-  io.vecWriteBack.bits.alignedType          := req.alignedType
+  io.vecWriteBack.bits.alignedType          := req.alignType
   io.vecWriteBack.bits.vecFeedback          := true.B
   io.vecWriteBack.bits.vecdata.get          := combinedData
   io.vecWriteBack.bits.isvec                := req.isVector
@@ -607,10 +601,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   //TODO In theory, there is no need to overwrite, but for now, the signal is retained in the code in this way.
   // and the signal will be removed after sufficient verification.
   io.overwriteExpBuf.valid := false.B
-  io.overwriteExpBuf.vaddr := overwriteVaddr
-  io.overwriteExpBuf.isHyper := overwriteIsHyper
-  io.overwriteExpBuf.gpaddr := overwriteGpaddr
-  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
+  io.overwriteExpBuf.bits := 0.U.asTypeOf(new ExceptionAddrIO)
+  io.overwriteExpBuf.bits.vaddr := overwriteVaddr
+  io.overwriteExpBuf.bits.isHyper := overwriteIsHyper
+  io.overwriteExpBuf.bits.gpaddr := overwriteGpaddr
+  io.overwriteExpBuf.bits.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   // when no exception or mmio, flush loadExceptionBuffer at s_wb
   val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))

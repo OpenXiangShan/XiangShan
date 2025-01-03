@@ -510,7 +510,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.uopUnitStrideFof := s2_vecReplay.uop_unit_stride_fof
     replay_req(i).bits.usSecondInv  := s2_vecReplay.usSecondInv
     replay_req(i).bits.elemIdx      := s2_vecReplay.elemIdx
-    replay_req(i).bits.alignedType  := s2_vecReplay.alignedType
+    replay_req(i).bits.alignType    := s2_vecReplay.alignedType
     replay_req(i).bits.mbIdx        := s2_vecReplay.mbIndex
     replay_req(i).bits.elemIdxInsideVd := s2_vecReplay.elemIdxInsideVd
     replay_req(i).bits.regOffset    := s2_vecReplay.reg_offset
@@ -607,7 +607,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       vecReplay(enqIndex).uop_unit_stride_fof := enq.bits.uopUnitStrideFof
       vecReplay(enqIndex).usSecondInv := enq.bits.usSecondInv
       vecReplay(enqIndex).elemIdx := enq.bits.elemIdx
-      vecReplay(enqIndex).alignedType:= enq.bits.alignedType
+      vecReplay(enqIndex).alignedType:= enq.bits.alignType
       vecReplay(enqIndex).mbIndex := enq.bits.mbIdx
       vecReplay(enqIndex).elemIdxInsideVd := enq.bits.elemIdxInsideVd
       vecReplay(enqIndex).reg_offset := enq.bits.regOffset

@@ -104,13 +104,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val vecWriteBack    = Vec(VecStorePipelineWidth, Decoupled(new VecPipelineFeedbackIO(isVStore = true)))
     val storeOutValid    = Input(Bool())
     val storeVecOutValid = Input(Bool())
-    val overwriteExpBuf = Output(new XSBundle {
-      val valid = Bool()
-      val vaddr = UInt(XLEN.W)
-      val isHyper = Bool()
-      val gpaddr = UInt(XLEN.W)
-      val isForVSnonLeafPTE = Bool()
-    })
+    val overwriteExpBuf = ValidIO(new ExceptionAddrIO)
     val sqControl       = new StoreMaBufToSqControlIO
 
     val toVecStoreMergeBuffer = Vec(VecStorePipelineWidth, new StoreMaBufToVecStoreMergeBufferIO)
@@ -305,7 +299,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val alignedType = Mux(req.isVector, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isVector, req.alignType(1,0), req.uop.fuOpType(1, 0))
 
   val highAddress = LookupTree(alignedType, List(
     SB -> 0.U,
@@ -515,7 +509,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   // bit encoding: | hsv 1 | store 00 | size(2bit) |
   val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
   io.splitStoreReq.bits.uop.fuOpType := Mux(req.isVector, req.uop.fuOpType, Cat(reqIsHsv, 0.U(2.W), splitStoreReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitStoreReq.bits.alignedType  := Mux(req.isVector, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  io.splitStoreReq.bits.alignType  := Mux(req.isVector, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignType)
   io.splitStoreReq.bits.isFinalSplit := curPtr(0)
 
   when (io.splitStoreResp.valid) {
@@ -590,7 +584,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.usSecondInv       := req.usSecondInv
       wb.bits.vecFeedback       := true.B
       wb.bits.elemIdx           := req.elemIdx
-      wb.bits.alignedType       := req.alignedType
+      wb.bits.alignedType       := req.alignType
       wb.bits.mask              := req.mask
       wb.bits.vaddr             := req.vaddr
       wb.bits.vaNeedExt         := req.vaNeedExt
@@ -628,10 +622,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //TODO In theory, there is no need to overwrite, but for now, the signal is retained in the code in this way.
   // and the signal will be removed after sufficient verification.
   io.overwriteExpBuf.valid := false.B
-  io.overwriteExpBuf.vaddr := overwriteVaddr
-  io.overwriteExpBuf.isHyper := overwriteIsHyper
-  io.overwriteExpBuf.gpaddr := overwriteGpaddr
-  io.overwriteExpBuf.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
+  io.overwriteExpBuf.bits := 0.U.asTypeOf(new ExceptionAddrIO)
+  io.overwriteExpBuf.bits.vaddr := overwriteVaddr
+  io.overwriteExpBuf.bits.isHyper := overwriteIsHyper
+  io.overwriteExpBuf.bits.gpaddr := overwriteGpaddr
+  io.overwriteExpBuf.bits.isForVSnonLeafPTE := overwriteIsForVSnonLeafPTE
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)
   XSPerfAccumulate("flush",                  flush)
