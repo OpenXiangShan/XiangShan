@@ -446,6 +446,7 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val flushState = Bool()
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
+  val isLoad = Bool()
   val sqIdx = new SqPtr
   val lqIdx = new LqPtr
 }
