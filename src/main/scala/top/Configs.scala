@@ -268,7 +268,7 @@ class WithNKBL2
     ))
 })
 
-class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
+class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1, clockDiv2: Boolean = true) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val sets = n * 1024 / banks / ways / 64
     val tiles = site(XSTileKey)
@@ -293,7 +293,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           numCores = tiles.size
         )),
         reqField = Seq(utility.ReqSourceField()),
-        sramClkDivBy2 = true,
+        sramClkDivBy2 = clockDiv2,
         sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
@@ -354,7 +354,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(2 * 1024, inclusive = false, banks = 1, ways = 8)
+  new WithNKBL3(2 * 1024, inclusive = false, banks = 1, ways = 8, clockDiv2 = false)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
