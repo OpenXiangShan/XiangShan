@@ -66,7 +66,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   def get_lgc_br_idx(unhashed_idx: UInt, br_pidx: UInt) = get_unshuffle_bits(unhashed_idx) ^ br_pidx
 
   // Based on the statistical results of continuous unused counters using spec2k6 coverage 0.3, the threshold is obtained
-  def TABLES_CLOSE_THRESHOLD = Seq(300, 300, 300, 300)
+  def TABLES_CLOSE_THRESHOLD = TageTableCloseThresholds
 }
 
 trait HasFoldedHistory {
