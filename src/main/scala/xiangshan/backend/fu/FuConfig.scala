@@ -449,7 +449,7 @@ object FuConfig {
   val StdCfg: FuConfig = FuConfig (
     name = "std",
     fuType = FuType.stu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new Std(cfg)(p).suggestName("Std")),
+    fuGen = null, // todo
     srcData = Seq(
       Seq(IntData()),
       Seq(FpData()),
