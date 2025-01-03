@@ -126,6 +126,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromTop = Input(new Bundle {
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val l2FlushDone = Input(Bool())
       val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
@@ -725,6 +726,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.nmip := nmip.asUInt.orR
       case _ =>
     }
+    mod match {
+      case m: HasMachineFlushL2Bundle =>
+        m.l2FlushDone := io.fromTop.l2FlushDone
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -1249,6 +1255,10 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+
+  io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+
+  io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
