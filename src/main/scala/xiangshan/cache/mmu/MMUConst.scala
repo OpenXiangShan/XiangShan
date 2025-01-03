@@ -109,6 +109,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteResLen = 7
   val ptePbmtLen = 2
   val pteNLen = 1
+  val pteNapotBits = 4
   val ppnHignLen = ptePPNLen - ppnLen
   val gvpnLen = GPAddrBits - offLen
 
@@ -252,8 +253,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL0SetIdxLen = log2Up(PtwL0SetNum)
   val PtwL0TagLen = if (EnableSv48) vpnnLen * 4 - PtwL0IdxLen + extendVpnnBits else vpnnLen * 3 - PtwL0IdxLen + extendVpnnBits
 
-  // super page, including 1GB and 2MB page
-  val SPTagLen = if (EnableSv48) vpnnLen * 3 + extendVpnnBits else vpnnLen * 2 + extendVpnnBits
+  // super page, including 512GB, 1GB, 2MB page && Svnapot page
+  val SPTagLen = if (EnableSv48) vpnnLen * 4 + extendVpnnBits else vpnnLen * 3 + extendVpnnBits
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
