@@ -361,7 +361,8 @@ case class XSCoreParameters
   usePTWRepeater: Boolean = false,
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
-  softPTWDelay: Int = 1
+  softPTWDelay: Int = 1,
+  hasMbist:Boolean = false
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -911,4 +912,6 @@ trait HasXSParameter {
   def IretireWidthInPipe     = log2Up(RenameWidth * 2)
   def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
+
+  def hasMbist               = coreParams.hasMbist
 }
