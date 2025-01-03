@@ -47,7 +47,8 @@ import system.SoCParamsKey
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.ExceptionNO._
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -357,6 +358,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val fromL2Top = Input(new TopDownFromL2Top)
       val toBackend = Flipped(new TopDownInfo)
     }
+    val dft = if (hasMbist) Some(Input(new SramBroadcastBundle)) else None
+    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+    val dft_frnt = if (hasMbist) Some(Output(new SramBroadcastBundle)) else None
+    val dft_reset_frnt = if(hasMbist) Some(Output(new DFTResetSignals())) else None
+    val dft_bcknd = if (hasMbist) Some(Output(new SramBroadcastBundle)) else None
+    val dft_reset_bcknd = if(hasMbist) Some(Output(new DFTResetSignals())) else None
   })
 
   dontTouch(io.inner_hartId)
@@ -416,6 +423,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
       sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
+      val mbistSmsPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSms", hasMbist)
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
@@ -1948,8 +1956,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         CellNode(io.reset_backend)
       )
     )
-    ResetGen(leftResetTree, reset, sim = false)
-    ResetGen(rightResetTree, reset, sim = false)
+    ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
+    ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
   } else {
     io.reset_backend := DontCare
   }
@@ -2043,6 +2051,38 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
   val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
+
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeMemBlk", hasMbist)
+  private val mbistIntf = if(hasMbist) {
+    val params = mbistPl.get.nodeParams
+    val intf = Some(Module(new MbistInterface(
+      params = Seq(params),
+      ids = Seq(mbistPl.get.childrenIds),
+      name = s"MbistIntfMemBlk",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> mbistPl.get.mbist
+    mbistPl.get.registerCSV(intf.get.info, "MbistMemBlk")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    //TODO: add mbist controller connections here
+    intf
+  } else {
+    None
+  }
+  private val sigFromSrams = if (hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val cg = ClockGate.genTeSrc
+  dontTouch(cg)
+  if (hasMbist) {
+    sigFromSrams.get := io.dft.get
+    cg.cgen := io.dft.get.cgen
+    io.dft_frnt.get := io.dft.get
+    io.dft_reset_frnt.get := io.dft_reset.get
+    io.dft_bcknd.get := io.dft.get
+    io.dft_reset_bcknd.get := io.dft_reset.get
+  } else {
+    cg.cgen := false.B
+  }
 }
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
@@ -2061,6 +2101,6 @@ class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
   io_perf <> wrapper.inner.module.io_perf
 
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }

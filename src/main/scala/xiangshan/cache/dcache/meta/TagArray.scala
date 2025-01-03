@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{SRAMTemplate, XSPerfAccumulate, ClockGate}
-import xiangshan.cache.CacheInstrucion._
+import utility.mbist.MbistPipeline
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
@@ -70,8 +70,8 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true))
-
+    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true,
+    hasMbist = hasMbist))
   val wen = rst || io.write.valid
   io.write.ready := !rst
   tag_array.io.w.req.valid := wen
@@ -99,6 +99,7 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
+  val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeDcacheTag", hasMbist)
 
   def getECCFromEncTag(encTag: UInt) = {
     if (EnableDataEcc) {
