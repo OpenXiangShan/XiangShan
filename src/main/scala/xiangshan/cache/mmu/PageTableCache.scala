@@ -28,6 +28,7 @@ import utility._
 import coupledL2.utils.SplittedSRAM
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import utility.mbist.MbistPipeline
 
 /* ptw cache caches the page table of all the three layers
  * ptw cache resp at next cycle
@@ -275,8 +276,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     waySplit = 1,
     dataSplit = 4,
     singlePort = sramSinglePort,
-    readMCP2 = false
+    readMCP2 = false,
+    hasMbist = hasMbist
   ))
+  val mbistPlL1 = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipePtwL1", hasMbist)
   val l1v = RegInit(0.U((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
   val l1g = Reg(UInt((l2tlbParams.l1nSets * l2tlbParams.l1nWays).W))
   val l1h = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(2.W))))
@@ -302,8 +305,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     waySplit = 2,
     dataSplit = 4,
     singlePort = sramSinglePort,
-    readMCP2 = false
+    readMCP2 = false,
+    hasMbist = hasMbist
   ))
+  val mbistPlL0 = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipePtwL0", hasMbist)
   val l0v = RegInit(0.U((l2tlbParams.l0nSets * l2tlbParams.l0nWays).W))
   val l0g = Reg(UInt((l2tlbParams.l0nSets * l2tlbParams.l0nWays).W))
   val l0h = Reg(Vec(l2tlbParams.l0nSets, Vec(l2tlbParams.l0nWays, UInt(2.W))))
@@ -515,9 +520,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.pbmts(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError)
   }
-
-  val l0_masked_clock = ClockGate(false.B, stageReq.fire | (!flush_dup(0) && refill.levelOH.l0), clock)
-  val l1_masked_clock = ClockGate(false.B, stageReq.fire | (!flush_dup(1) && refill.levelOH.l1), clock)
+  val te = ClockGate.genTeSink
+  val l0_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush_dup(0) && refill.levelOH.l0) | mbistPlL0.map(_.mbist.req).getOrElse(false.B), clock)
+  val l1_masked_clock = ClockGate(te.cgen, stageReq.fire | (!flush_dup(1) && refill.levelOH.l1) | mbistPlL1.map(_.mbist.req).getOrElse(false.B), clock)
   l0.clock := l0_masked_clock
   l1.clock := l1_masked_clock
   // l0

@@ -328,6 +328,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
+      core.module.io.dft.foreach(_ := DontCare)
+      core.module.io.dft_reset.foreach(_ := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
