@@ -223,6 +223,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   val updatedUop = Wire(Vec(RenameWidth, new DynInst))
+  val toDqUop = Wire(Vec(RenameWidth, new DynInst))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire
@@ -269,6 +270,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
         ))
       }
     }
+  }
+  // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
+  for (i <- 0 until RenameWidth) {
+    toDqUop(i) := updatedUop(i)
+    toDqUop(i).ftqOffset := updatedUop(i).ftqLastOffset
+    toDqUop(i).ftqPtr := updatedUop(i).ftqPtr + updatedUop(i).crossFtq
   }
 
   // store set perf count
@@ -362,27 +369,27 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.toIntDq0.needAlloc(i) := io.fromRename(i).valid && isIntDq0(i) && !doesNotNeedExec && toIntDq0Valid(i)
     io.toIntDq0.req(i).valid := io.fromRename(i).valid && isIntDq0(i) && !doesNotNeedExec && toIntDq0Valid(i) &&
       canEnterDpq && dqCanAccept
-    io.toIntDq0.req(i).bits := updatedUop(i)
+    io.toIntDq0.req(i).bits := toDqUop(i)
 
     io.toIntDq1.needAlloc(i) := io.fromRename(i).valid && isIntDq1(i) && !doesNotNeedExec && toIntDq1Valid(i)
     io.toIntDq1.req(i).valid := io.fromRename(i).valid && isIntDq1(i) && !doesNotNeedExec && toIntDq1Valid(i) &&
       canEnterDpq && dqCanAccept
-    io.toIntDq1.req(i).bits := updatedUop(i)
+    io.toIntDq1.req(i).bits := toDqUop(i)
 
     io.toFpDq.needAlloc(i) := io.fromRename(i).valid && isFp(i)
     io.toFpDq.req(i).valid := io.fromRename(i).valid && isFp(i) &&
       canEnterDpq && dqCanAccept
-    io.toFpDq.req(i).bits := updatedUop(i)
+    io.toFpDq.req(i).bits := toDqUop(i)
 
     io.toVecDq.needAlloc(i)  := io.fromRename(i).valid && isVec(i)
     io.toVecDq.req(i).valid  := io.fromRename(i).valid && isVec(i) &&
                                canEnterDpq && dqCanAccept
-    io.toVecDq.req(i).bits   := updatedUop(i)
+    io.toVecDq.req(i).bits   := toDqUop(i)
 
     io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i)
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isMem(i) &&
                                canEnterDpq && dqCanAccept
-    io.toLsDq.req(i).bits   := updatedUop(i)
+    io.toLsDq.req(i).bits   := toDqUop(i)
 
     //delete trigger message from frontend
     io.toDq.map(dq => { dq.req(i).bits.trigger := TriggerAction.None })
