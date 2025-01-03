@@ -45,6 +45,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
+import xiangshan.mem._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.{max, min, pow}
@@ -511,6 +512,118 @@ case class XSCoreParameters
     )
   }
 
+  val memUnitParams = Seq(
+    MemUnitParams(name = "STD0", unitType = Std(), dataBits = 64,
+      issueParams = Seq(
+        MemIssueParams(name = "IQStd", issueType = MemIssueType.Std)
+      ),
+      wbParams = Seq(
+        MemWB("stdOut", MemIssueType.Std)
+      ),
+    ),
+    MemUnitParams(name = "STD1", unitType = Std(), dataBits = 64,
+      issueParams = Seq(
+        MemIssueParams(name = "IQStd", issueType = MemIssueType.Std)
+      ),
+      wbParams = Seq(
+        MemWB("stdOut", MemIssueType.Std)
+      ),
+    ),
+    MemUnitParams(name = "STA0", unitType = Sta(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.Mb,   trigger = true),
+        MemIssueParams(name = "Vector",      issueType = MemIssueType.Vst,  trigger = true),
+        MemIssueParams(name = "IQSta",       issueType = MemIssueType.Sta,  trigger = true),
+        MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Pf)
+      ),
+      wbParams = Seq(
+        MemWB("staOut", MemIssueType.Sta),
+        MemWB("vecOut", MemIssueType.Vst),
+      ),
+      exceptionOut = StaCfg.exceptionOut ++ VstuCfg.exceptionOut,
+      replayCauseOut = ReplayCauseNO.staCauses(),
+      hasPrefetch = true,
+    ),
+    MemUnitParams(name = "STA1", unitType = Sta(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "Vector",      issueType = MemIssueType.Vst,  trigger = true),
+        MemIssueParams(name = "IQSta",       issueType = MemIssueType.Sta,   trigger = true),
+        MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Pf)
+      ),
+      wbParams = Seq(
+        MemWB("staOut", MemIssueType.Sta),
+        MemWB("vecOut", MemIssueType.Vst),
+      ),
+      exceptionOut = StaCfg.exceptionOut ++ VstuCfg.exceptionOut,
+      replayCauseOut = ReplayCauseNO.staCauses(),
+      hasPrefetch = true,
+    ),
+    MemUnitParams(name = "LOAD0", unitType = Ldu(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "MisalignBuf", issueType = MemIssueType.Mb,   trigger = true),
+        MemIssueParams(name = "FastReplay",  issueType = MemIssueType.Fr,   trigger = true),
+        MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.Lqr,  trigger = true),
+        MemIssueParams(name = "Mmio",        issueType = MemIssueType.Mmio, trigger = false),
+        MemIssueParams(name = "NC",          issueType = MemIssueType.Nc,   trigger = false),
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.Ld,   trigger = true),
+        MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Pf),
+      ),
+      wbParams = Seq(
+        MemWB("ldOut", MemIssueType.Fr, MemIssueType.Lqr, MemIssueType.Mmio, MemIssueType.Nc, MemIssueType.Ld),
+        MemWB("vecOut", MemIssueType.Vld)
+      ),
+      exceptionOut = LduCfg.exceptionOut ++ VlduCfg.exceptionOut,
+      replayCauseOut = ReplayCauseNO.ldCauses(),
+      arbiter = "priority",
+      hasPrefetch = true
+    ),
+    MemUnitParams(name = "LOAD1", unitType = Ldu(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "FastReplay",  issueType = MemIssueType.Fr,   trigger = true),
+        MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.Lqr,  trigger = true),
+        MemIssueParams(name = "NC",          issueType = MemIssueType.Nc,   trigger = false),
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.Ld,   trigger = true),
+        MemIssueParams(name = "Vector",      issueType = MemIssueType.Vld,  trigger = true),
+        MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Pf),
+      ),
+      wbParams = Seq(
+        MemWB("ldOut", MemIssueType.Fr, MemIssueType.Lqr, MemIssueType.Nc, MemIssueType.Ld),
+        MemWB("vecOut", MemIssueType.Vld)
+      ),
+      exceptionOut = LduCfg.exceptionOut ++ VlduCfg.exceptionOut,
+      replayCauseOut = ReplayCauseNO.ldCauses(),
+      arbiter = "priority",
+      hasPrefetch = true
+    ),
+    MemUnitParams(name = "LOAD2", unitType = Ldu(), dataBits = 128,
+      issueParams = Seq(
+        MemIssueParams(name = "FastReplay",  issueType = MemIssueType.Fr,   trigger = true),
+        MemIssueParams(name = "LoadReplay",  issueType = MemIssueType.Lqr,  trigger = true),
+        MemIssueParams(name = "NC",          issueType = MemIssueType.Nc,   trigger = false),
+        MemIssueParams(name = "IQLoad",      issueType = MemIssueType.Ld,   trigger = true),
+        MemIssueParams(name = "Vector",      issueType = MemIssueType.Vld,  trigger = true),
+        MemIssueParams(name = "Prefetch",    issueType = MemIssueType.Pf),
+      ),
+      wbParams = Seq(
+        MemWB("ldOut", MemIssueType.Fr, MemIssueType.Lqr, MemIssueType.Nc, MemIssueType.Ld),
+        MemWB("vecOut", MemIssueType.Vld)
+      ),
+      exceptionOut = LduCfg.exceptionOut ++ VlduCfg.exceptionOut,
+      replayCauseOut = ReplayCauseNO.ldCauses(),
+      arbiter = "priority",
+      hasPrefetch = true
+    ),
+    MemUnitParams(name = "ATOMICS0", unitType = Amo(), dataBits = 64,
+      issueParams = Seq(
+        MemIssueParams(name = "IQ",          issueType = MemIssueType.Amo,      trigger = true)
+      ),
+      wbParams = Seq(
+        MemWB("amoOut", MemIssueType.Amo)
+      ),
+      exceptionOut = LduCfg.exceptionOut ++ StaCfg.exceptionOut,
+    ),
+  )
+
   def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
 
   def iqWakeUpParams = {
@@ -774,6 +887,7 @@ trait HasXSParameter {
   def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
   def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
+  def memUnitParams = coreParams.memUnitParams
   def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
