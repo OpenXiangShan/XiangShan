@@ -30,7 +30,7 @@ import chisel3._
 import utils._
 import utility._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import utility.mbist.MbistPipeline
 import xiangshan.mem.LqPtr
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
@@ -117,7 +117,8 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
     way = 1,
     shouldReset = false,
     holdRead = false,
-    singlePort = true
+    singlePort = true,
+    hasMbist = hasMbist
   ))
 
   data_sram.io.w.req.valid := io.w.en
@@ -184,7 +185,8 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
       shouldReset = false,
       holdRead = false,
       singlePort = true,
-      withClockGate = true
+      withClockGate = true,
+      hasMbist = hasMbist
     ))
   }
 
@@ -360,7 +362,11 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
 
-  val data_banks = List.tabulate(DCacheSetDiv)( k => List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new DataSRAM(i,j)))))
+  val data_banks = List.tabulate(DCacheSetDiv)( k => {
+    val banks = List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new DataSRAM(i,j))))
+    val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeDataSet$k", hasMbist)
+    banks
+  })
   data_banks.map(_.map(_.map(_.dump())))
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
@@ -649,7 +655,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
 
-  val data_banks = List.fill(DCacheSetDiv)(List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i))))
+  val data_banks = List.tabulate(DCacheSetDiv) { k =>
+    val banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i)))
+    val mbistPl = MbistPipeline.PlaceMbistPipeline(1, s"MbistPipeDcacheDataSet$k", hasMbist)
+    banks
+  }
   data_banks.map(_.map(_.dump()))
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
