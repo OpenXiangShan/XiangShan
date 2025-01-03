@@ -4,7 +4,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRRWField => RW}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{
+  CSRRWField => RW,
+  CSRROField => RO,
+}
 import xiangshan.HasXSParameter
 
 import scala.collection.immutable.SeqMap
@@ -31,12 +34,28 @@ trait CSRCustom { self: NewCSR =>
   val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
+  // Machine Level Custom Read/Write
+
+  // mcorepwr: Core Power Down Status Enable
+  val mcorepwr = Module(new CSRModule("Mcorepwr", new McorepwrBundle))
+    .setAddr(0xBC0)
+
+  // mflushpwr: Flush L2 Cache Enable
+  val mflushpwr = Module(new CSRModule("Mflushpwr", new MflushpwrBundle)
+    with HasMachineFlushL2Bundle
+  {
+    regOut.L2_FLUSH_DONE := l2FlushDone
+  })
+    .setAddr(0xBC1)
+
   val customCSRMods = Seq(
     sbpctl,
     spfctl,
     slvpredctl,
     smblockctl,
     srnctl,
+    mcorepwr,
+    mflushpwr,
   )
 
   val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
@@ -93,6 +112,15 @@ class SmblockctlBundle extends CSRBundle {
 class SrnctlBundle extends CSRBundle {
   val WFI_ENABLE     = RW(2).withReset(true.B)
   val FUSION_ENABLE  = RW(0).withReset(true.B)
+}
+
+class McorepwrBundle extends CSRBundle {
+  val POWER_DOWN_ENABLE = RW(0).withReset(false.B)
+}
+
+class MflushpwrBundle extends CSRBundle {
+  val FLUSH_L2_ENABLE = RW(0).withReset(false.B)
+  val L2_FLUSH_DONE   = RO(1).withReset(false.B)
 }
 
 object SbufferThreshold extends CSREnum with RWApply {
