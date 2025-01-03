@@ -63,7 +63,7 @@ class BackendImp(wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp
   val io = IO(new BackendIO()(p, wrapper.params))
   io <> wrapper.inner.module.io
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
@@ -851,6 +851,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.debugRolling := ctrlBlock.io.debugRolling
 
+  private val cg = ClockGate.genTeSrc
+  dontTouch(cg)
+  if(hasMbist) {
+    cg.cgen := io.cgen.get
+  } else {
+    cg.cgen := false.B
+  }
+
   if(backendParams.debugEn) {
     dontTouch(memScheduler.io)
     dontTouch(dataPath.io.toMemExu)
@@ -881,8 +889,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         // ))
       ))
     ))
-    ResetGen(leftResetTree, reset, sim = false)
-    ResetGen(rightResetTree, reset, sim = false)
+    ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
+    ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
   } else {
     io.frontendReset := DontCare
   }
@@ -1061,4 +1069,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
     val fromCore = new CoreDispatchTopDownIO
   }
   val debugRolling = new RobDebugRollingIO
+  val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals)) else None
+  val cgen = if(hasMbist) Some(Input(Bool())) else None
 }

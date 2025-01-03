@@ -35,6 +35,7 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import xiangshan._
+import utility.mbist.MbistPipeline
 
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)
@@ -164,7 +165,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       holdRead = true,
       bypassWrite = true,
       withClockGate = true,
-      avoidSameAddr = true
+      avoidSameAddr = true,
+      hasMbist = hasMbist
     )
   )
 
@@ -323,7 +325,8 @@ class TageTable(
     extraReset = true,
     holdRead = true,
     singlePort = true,
-    withClockGate = true
+    withClockGate = true,
+    hasMbist = hasMbist
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -336,7 +339,8 @@ class TageTable(
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true
+      withClockGate = true,
+      hasMbist = hasMbist
     ))
   )
 
@@ -620,7 +624,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val bt = Module(new TageBTable)
   bt.io.req.valid := io.s0_fire(1)
   bt.io.req.bits  := s0_pc_dup(1)
-
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeTage", hasMbist)
   val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit(((1 << TickWidth) - 1).U(TickWidth.W)))
   val bankTickCtrs              = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(

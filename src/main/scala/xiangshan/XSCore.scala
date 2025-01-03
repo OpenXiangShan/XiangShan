@@ -31,8 +31,8 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
-import xiangshan.mem.L1PrefetchFuzzer
-import scala.collection.mutable.ListBuffer
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.cache.mmu.TlbRequestIO
 
 abstract class XSModule(implicit val p: Parameters) extends Module
@@ -102,6 +102,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
     }
+    val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -258,5 +260,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   if (debugOpts.ResetGen) {
     backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
+  }
+
+  if (hasMbist) {
+    memBlock.io.dft_reset.get := io.dft_reset.get
+    memBlock.io.dft.get := io.dft.get
+    frontend.io.dft.get := memBlock.io.dft_frnt.get
+    frontend.io.dft_reset.get := memBlock.io.dft_reset_frnt.get
+    backend.io.cgen.get := memBlock.io.dft_bcknd.get.cgen
+    backend.io.dft_reset.get := memBlock.io.dft_reset_bcknd.get
   }
 }
