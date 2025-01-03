@@ -108,11 +108,11 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
 }
 
 object ExceptionType {
-  def none:  UInt = "b00".U
-  def pf:    UInt = "b01".U // instruction page fault
-  def gpf:   UInt = "b10".U // instruction guest page fault
-  def af:    UInt = "b11".U // instruction access fault
   def width: Int  = 2
+  def none:  UInt = "b00".U(width.W)
+  def pf:    UInt = "b01".U(width.W) // instruction page fault
+  def gpf:   UInt = "b10".U(width.W) // instruction guest page fault
+  def af:    UInt = "b11".U(width.W) // instruction access fault
 
   def hasException(e: UInt):             Bool = e =/= none
   def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
