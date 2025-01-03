@@ -35,13 +35,13 @@ trait Memconsts {
   val p:Parameters
   val soc = p(SoCParamsKey)
   val PAddrBits= soc.PAddrBits
-  val KeyIDBits= soc.KeyIDBits.getOrElse(0)
+  val KeyIDBits= soc.KeyIDBits
   val MemencPipes = soc.MemencPipes
   lazy val MemcedgeIn = p(MemcEdgeInKey)
   lazy val MemcedgeOut = p(MemcEdgeOutKey)
   require (isPow2(MemencPipes), s"AXI4MemEncrypt: MemencPipes must be a power of two, not $MemencPipes")
   require (PAddrBits > KeyIDBits, s"AXI4MemEncrypt: PAddrBits must be greater than KeyIDBits")
-  def HasDelayNoencryption = soc.HasDelayNoencryption.getOrElse(false)
+  def HasDelayNoencryption = soc.HasDelayNoencryption
 }
 
 

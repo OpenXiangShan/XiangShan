@@ -398,24 +398,24 @@ class WithFuzzer extends Config((site, here, up) => {
 
 class CVMCompile extends Config((site, here, up) => {
   case SoCParamsKey => up(SoCParamsKey).copy(
-    KeyIDBits = Some(5),
-    HasMEMencryption = Some(true),
-    HasDelayNoencryption = Some(false)
+    KeyIDBits = 5,
+    HasMEMencryption = true,
+    HasDelayNoencryption = false
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasCVMExtension = Some(true),
-    HasBitmapCheckDefault = Some(false)))
+    HasBitmapCheck = true,
+    HasBitmapCheckDefault = false))
 })
 
 class CVMTestCompile extends Config((site, here, up) => {
   case SoCParamsKey => up(SoCParamsKey).copy(
-    KeyIDBits = Some(5),
-    HasMEMencryption = Some(true),
-    HasDelayNoencryption = Some(true)
+    KeyIDBits = 5,
+    HasMEMencryption = true,
+    HasDelayNoencryption = true
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasCVMExtension = Some(true),
-    HasBitmapCheckDefault = Some(true)))
+    HasBitmapCheck =true,
+    HasBitmapCheckDefault = true))
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(

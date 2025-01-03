@@ -20,12 +20,12 @@ import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
-  val mcvm = if(HasCVMExtension) Some(Module(new CSRModule("Mcvm", new McvmBundle) {
-    val mcvm_lock = reg.BME.asBool
+  val mbmc = if(HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
+    val mbmc_lock = reg.BME.asBool
     if(!HasBitmapCheckDefault) {
-      reg.BME := Mux(wen && !mcvm_lock, wdata.BME, reg.BME)
+      reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
       reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-      reg.BMA := Mux(wen && !mcvm_lock, wdata.BMA, reg.BMA)
+      reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
     } else {
       reg.BME := 1.U
       reg.CMODE := 0.U
@@ -434,7 +434,7 @@ trait MachineLevel { self: NewCSR =>
     mncause,
     mnstatus,
     mnscratch,
-  ) ++ mhpmevents ++ mhpmcounters ++ (if(HasCVMExtension) Seq(mcvm.get) else Seq())
+  ) ++ mhpmevents ++ mhpmcounters ++ (if(HasBitmapCheck) Seq(mbmc.get) else Seq())
 
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
@@ -447,11 +447,11 @@ trait MachineLevel { self: NewCSR =>
 
 }
 
-class McvmBundle extends  CSRBundle {
-  val BME  = RW(63).withReset(0.U)
-  val CMODE  = RW(62).withReset(0.U)
-  val BCLEAR = RW(61).withReset(0.U)
-  val BMA  = BMAField(60,0,null).withReset(BMAField.ResetBMA)
+class MbmcBundle extends  CSRBundle {
+  val BMA  = BMAField(63,6,null).withReset(BMAField.ResetBMA)
+  val BME  = RW(2).withReset(0.U)
+  val BCLEAR = RW(1).withReset(0.U)
+  val CMODE  = RW(0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {

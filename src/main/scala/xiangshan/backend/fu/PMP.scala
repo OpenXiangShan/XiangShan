@@ -552,7 +552,7 @@ class PMPChecker
   val req = io.req.bits
 
   /* The KeyIDBits is used for memary encrypt, as part of address MSB,
-   * so (PMPKeyIDBits > 0) usually set with HasMEMencryption = Some(true).
+   * so (PMPKeyIDBits > 0) usually set with HasMEMencryption = true.
    *
    * Example:
    * PAddrBits=48 & PMPKeyIDBits=5

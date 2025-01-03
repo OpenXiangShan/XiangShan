@@ -102,7 +102,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst{
   val csr = io.csr
   val sfence = io.sfence
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
-  val bitmap_base = csr.mcvm.BMA
+  val bitmap_base = csr.mbmc.BMA << 6
 
   val entries = Reg(Vec(l2tlbParams.llptwsize+2, new bitmapEntry()))
   //add pmp check
@@ -356,7 +356,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst{
   val csr = io.csr
   val sfence = io.sfence
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
-  val bitmap_cache_clear = csr.mcvm.BCLEAR
+  val bitmap_cache_clear = csr.mbmc.BCLEAR
 
   val bitmapCachesize = 16
   val bitmapcache = Reg(Vec(bitmapCachesize,new bitmapCacheEntry()))

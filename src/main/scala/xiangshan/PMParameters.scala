@@ -46,7 +46,7 @@ trait HasPMParameters {
   def PMPPmemRanges = p(SoCParamsKey).PmemRanges
   def PMPPmemLowBounds = PMPPmemRanges.unzip._1
   def PMPPmemHighBounds = PMPPmemRanges.unzip._2
-  val PMPKeyIDBits = p(SoCParamsKey).KeyIDBits.getOrElse(0)
+  val PMPKeyIDBits = p(SoCParamsKey).KeyIDBits
   def PMXLEN = p(XLen)
   def pmParams = p(PMParameKey)
   def NumPMP = pmParams.NumPMP
