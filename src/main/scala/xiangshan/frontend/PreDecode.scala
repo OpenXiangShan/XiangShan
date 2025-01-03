@@ -331,8 +331,8 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   }
   // to Ftq write back port (stage 2)
   val stage2Out = new Bundle {
-    val fixedTarget   = Vec(PredictWidth, UInt(VAddrBits.W))
-    val jalTarget     = Vec(PredictWidth, UInt(VAddrBits.W))
+    val fixedTarget   = Vec(PredictWidth, PrunedAddr(VAddrBits))
+    val jalTarget     = Vec(PredictWidth, PrunedAddr(VAddrBits))
     val fixedMissPred = Vec(PredictWidth, Bool())
     val faultType     = Vec(PredictWidth, new CheckInfo)
   }
@@ -390,7 +390,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   })
 
   val jumpTargets = VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    (pc(i) + jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
+    (pc(i) + jumpOffset(i)).asTypeOf(PrunedAddr(VAddrBits))
   })
   val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U)))
 
@@ -451,7 +451,7 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
     val triggered       = Output(Vec(PredictWidth, TriggerAction()))
 
     val pds = Input(Vec(PredictWidth, new PreDecodeInfo))
-    val pc  = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
+    val pc  = Input(Vec(PredictWidth, PrunedAddr(VAddrBits)))
     val data = if (HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
     else Input(Vec(PredictWidth, UInt(32.W)))
   })
@@ -478,7 +478,13 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
   val triggerCanRaiseBpExp = io.frontendTrigger.triggerCanRaiseBpExp
   // val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
   val triggerHitVec = (0 until TriggerNum).map(j =>
-    TriggerCmpConsecutive(io.pc, tdataVec(j).tdata2, tdataVec(j).matchType, triggerEnableVec(j)).map(hit =>
+    TriggerCmpConsecutive(
+      // FIXME: TriggerCmpConsecutive is defined in backend. This should be written once backend uses PrunedAddr.
+      VecInit(io.pc.map(_.toUInt)),
+      tdataVec(j).tdata2,
+      tdataVec(j).matchType,
+      triggerEnableVec(j)
+    ).map(hit =>
       hit && !tdataVec(j).select && !debugMode
     )
   ).transpose
