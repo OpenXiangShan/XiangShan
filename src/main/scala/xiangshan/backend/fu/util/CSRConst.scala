@@ -18,9 +18,10 @@ package xiangshan.backend.fu.util
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 
 trait HasCSRConst {
-
+/* REMOVED CSR addresses as repeated code, please use freechips.rocketchip.rocket.CSRs
   // User Trap Setup
   val Ustatus       = 0x000
   val Uie           = 0x004
@@ -101,6 +102,7 @@ trait HasCSRConst {
 
   // Supervisor Protection and Translation
   val Satp          = 0x180
+*/
 
   // Supervisor Custom Read/Write
   val Sbpctl        = 0x5C0
@@ -111,6 +113,7 @@ trait HasCSRConst {
   /** 0x5C5-0x5E5 for cache instruction register*/
   val Scachebase    = 0x5C5
 
+/*
   // Hypervisor Trap Setup
   val Hstatus       = 0x600
   val Hedeleg       = 0x602
@@ -178,10 +181,11 @@ trait HasCSRConst {
   // TBD
   val PmpcfgBase    = 0x3A0
   val PmpaddrBase   = 0x3B0
-  // Machine level PMA
+*/
+  // Machine level PMA TODO: remove this
   val PmacfgBase    = 0x7C0
   val PmaaddrBase   = 0x7C8 // 64 entry at most
-
+/*
   // Machine Counter/Timers
   // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers
   // 0xB80 - 0x89F are also used as perfcnt csr
@@ -263,56 +267,7 @@ trait HasCSRConst {
   val Dpc           = 0x7B1
   val Dscratch0     = 0x7B2
   val Dscratch1     = 0x7B3
-
-  /**
-   * "Read only" CSRs that can be fully pipelined when read in CSRR instruction.
-   * Only read by csr instructions.
-   */
-  val roCsrrAddr = List(
-    Frm,
-    Vxrm,
-    Stvec,
-    Scounteren,
-    Senvcfg,
-    Sscratch,
-    Sepc,
-    Scause,
-    Stval,
-    Satp,
-    Vstvec,
-    Vsscratch,
-    Vsepc,
-    Vscause,
-    Vstval,
-    Vsatp,
-    Medeleg,
-    Mideleg,
-    Mtvec,
-    Mcounteren,
-    Menvcfg,
-    Mcountinhibit,
-    Mscratch,
-    Mepc,
-    Mcause,
-    Mtval,
-    Mtinst,
-    Mtval2,
-    Sbpctl,     // customized csr: sbpctl      S-mode Branch Prediction ConTroL
-    Spfctl,     // customized csr: spfctl      S-mode PreFetch ConTroL
-    Slvpredctl, // customized csr: slvpredctl  S-mode Load Violation PREDict ConTroL
-    Smblockctl, // customized csr: smblockctl  S-mode Memory BlockConTroL
-    Srnctl,     // customized csr: srnctl      S-mode ?
-    Hedeleg,
-    Hideleg,
-    Hcounteren,
-    Htval,
-    Hgatp,
-    Mvendorid,
-    Marchid,
-    Mimpid,
-    Mhartid,
-    Mconfigptr
-  )
+*/
 
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
