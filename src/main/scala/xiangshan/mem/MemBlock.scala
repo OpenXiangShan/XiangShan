@@ -640,11 +640,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   memExuBlock.io.debugLsInfo <> io.debugLS.debugLsInfo
 
   // writeback overwrite
-  toBackend.writebackStd.zip(memExuBlock.io.toBackend.writebackStd).foreach {x =>
-    x._1.valid := x._2.fire && !FuType.storeIsAMO(x._2.bits.uop.fuType)
-    x._1.bits  := x._2.bits
-    x._2.ready := x._1.ready
-  }
+  Connection.connect(
+    sinkSeq     = toBackend.writebackStd,
+    sourceSeq   = memExuBlock.io.toBackend.writebackStd,
+    connectFn   = Some((sink: DecoupledIO[MemExuOutput], source: DecoupledIO[MemExuOutput]) => {
+      sink.valid := source.fire && !FuType.storeIsAMO(source.bits.uop.fuType)
+      sink.bits := source.bits
+      source.ready := sink.ready
+    })
+    connectName = "MemExuBlock writeback to backend"
+  )
 
   // tlb requests: [[MemExuBlock]] -> [[MMU]]
   mmu.io.fromMemExuBlock.tlbReq.zip(memExuBlock.io.toTlb).zipWithIndex.foreach {
@@ -663,6 +668,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         sink <> source
       }
   }
+
   // tlb responses: [[MMU]] -> [[MemExuBlock]]
   memExuBlock.io.fromTlb.zip(mmu.io.toMemExuBlock.tlbResp).foreach {
     case (sink, source) =>
@@ -747,10 +753,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // TLD forward req: [[TL D channel]] -> [[MemExuBlock]]
-  memExuBlock.io.fromTL.zip(dcache.io.lsu.forward_D).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  Connect.connect(
+    sinkSeq = memExuBlock.io.fromTL,
+    sourceSeq = dcache.io.lsu.forward_D,
+    connectName = "MemExuBlock forward from TL"
+  )
 
   // Lsq nuke query: [[MemExuBlock]] -> [[Lsq]]
   lsq.io.ldu.stld_nuke_query.zip(memExuBlock.io.toLsq.rawNuke).foreach {
