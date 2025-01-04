@@ -430,7 +430,7 @@ case class BackendParams(
     }
 
     // check 1
-    // if some exus share the same wb port and rd ports, 
+    // if some exus share the same wb port and rd ports,
     // the exu with high priority at wb must also have high priority at rd.
     val wbTypes = Seq(IntWB(), FpWB(), VfWB())
     val rdTypes = Seq(IntRD(), FpRD(), VfRD())
