@@ -334,7 +334,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   s0_out.bits.tlbNoQuery := s0_tlbNoQuery
   s0_out.bits.is128bit := s0_selOut.bits.is128bit || exceptionGen.io.commonOut.s0_misalignWith16Bytes
   s0_out.bits.misalign := exceptionGen.io.commonOut.s0_misalign
-  s0_out.bits.misalignNeedWakeUp := exceptionGen.io.commonOut.s0_misalignNeedWakeUp
+  s0_out.bits.misalignNeedWakeUp := s0_selOut.bits.isMisalignBuf && s0_selOut.bits.misalignNeedWakeUp
   s0_out.bits.misalignWith16Bytes := exceptionGen.io.commonOut.s0_misalignWith16Bytes
   s0_out.bits.isFinalSplit := exceptionGen.io.commonOut.s0_isFinalSplit
 
@@ -1101,7 +1101,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // Modules conntion
   // Exception generator
   exceptionGen.io.fromCtrl.csr <> fromCtrl.csr
-  Connection.connectValidIO(exceptionGen.io.s0_in, s0_out)
+  Connection.connectValidIO(exceptionGen.io.s0_in, s0_selOut)
   exceptionGen.io.s0_in.bits.vaddr := s0_dcacheVAddr
   Connection.connectValidIO(exceptionGen.io.s1_in, s1_in)
   Connection.connectValidIO(exceptionGen.io.s2_in, s2_in)

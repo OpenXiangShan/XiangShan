@@ -53,7 +53,6 @@ class ExceptionGenIO(implicit p: Parameters) extends XSBundle {
   val commonOut = Output(new Bundle() {
     val s0_misalign = Bool()
     val s0_misalignWith16Bytes = Bool()
-    val s0_misalignNeedWakeUp = Bool()
     val s0_isFinalSplit = Bool()
     val s0_exceptionVecOut = ExceptionVec()
 
@@ -152,7 +151,6 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     */
   val s0_iqCross16Bytes = s0_checkVAddrUpLow(4) =/= s0_checkVAddrLow(4)
   val s0_misalignWith16Bytes = !s0_iqCross16Bytes && !s0_addrAligned && !s0_in.bits.isHWPrefetch
-  val s0_misalignNeedWakeup = s0_in.bits.isMisalignBuf && s0_in.bits.misalignNeedWakeUp
   val s0_isFinalSplit = s0_in.bits.isMisalignBuf && s0_in.bits.isFinalSplit
 
   /**
@@ -177,7 +175,6 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
   //
   commonOut.s0_misalign := s0_misalign
   commonOut.s0_misalignWith16Bytes := s0_misalignWith16Bytes
-  commonOut.s0_misalignNeedWakeUp := s0_misalignNeedWakeup
   commonOut.s0_isFinalSplit := s0_isFinalSplit
   commonOut.s0_exceptionVecOut := s0_exceptionVecOut
 
@@ -279,6 +276,18 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
       (s2_in.bits.isVector || s2_in.bits.isMisalignBuf) && s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch && !s2_in.bits.tlbMiss
     )
     catchException(s2_exceptionVecOut, loadAccessFault, s2_loadAccessFault)
+
+    // soft prefetch will not trigger any exception (but ecc error interrupt may
+    // be triggered)
+    val s2_tlbUnrelatedExceptions = s2_loadAccessFault || exceptionCatched(s2_exceptionVecIn, breakPoint)
+
+    // clean all exception if need
+    val s2_clearAllException = s2_in.bits.isLoad && !s2_in.bits.delayedError &&
+      (s2_in.bits.isPrefetch || s2_in.bits.tlbMiss && !s2_tlbUnrelatedExceptions)
+
+    when (s2_clearAllException) {
+      clearAllExceptions(s2_exceptionVecOut)
+    }
   }
 
   /**
@@ -296,28 +305,16 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
       *   3. The uop is a vector load or uses the misalignment buffer (isVector || isMisalignBuf),
       *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB (Translation Lookaside Buffer) miss.
       */
-    val s2_storeAccessFault = s2_in.bits.vecActive && (fromPmp.st || exceptionCatched(s2_exceptionVecIn, storeAccessFault) ||
-        ((s2_in.bits.isVector || s2_in.bits.isMisalignBuf) && s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch && !s2_in.bits.tlbMiss)
+    val s2_storeAccessFault = s2_in.bits.vecActive && (fromPmp.st ||
+        exceptionCatched(s2_exceptionVecIn, storeAccessFault) ||
+        ((s2_in.bits.isVector || s2_in.bits.isMisalignBuf) &&
+        s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch && !s2_in.bits.tlbMiss)
       )
     catchException(s2_exceptionVecOut, storeAccessFault, s2_storeAccessFault)
 
     // set store address misalign fault
     val s2_storeAddrMisaligned = s2_in.bits.mmio && s2_in.bits.misalign
     catchException(s2_exceptionVecOut, storeAddrMisaligned, s2_storeAddrMisaligned)
-  }
-
-  // soft prefetch will not trigger any exception (but ecc error interrupt may
-  // be triggered)
-  val s2_tlbUnrelatedExceptions = exceptionCatched(s2_exceptionVecOut, loadAddrMisaligned) ||
-    exceptionCatched(s2_exceptionVecOut, breakPoint)
-
-  // clean all exception if need
-  val s2_clearAllException = s2_in.bits.isLoad &&
-    !s2_in.bits.delayedError &&
-    (s2_in.bits.isPrefetch || s2_in.bits.tlbMiss && !s2_tlbUnrelatedExceptions)
-
-  when (s2_clearAllException) {
-    clearAllExceptions(s2_exceptionVecOut)
   }
 
   commonOut.s2_exceptionVecOut := s2_exceptionVecOut
