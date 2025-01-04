@@ -746,7 +746,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       forwardNetworkCommonOut.s2_forwardFromMissQueueOrTL
 
     val rawNuke = toLsq.rawNuke.get
-    Connection.connectDecoupledIO(rawNuke.req, rarNuke.req)
+    rawNuke.req.valid := rarNuke.req.valid
+    rawNuke.req.bits := rarNuke.req.bits
   }
 
   if (toLsq.excpUpdate.isDefined) {
@@ -1101,31 +1102,55 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // Modules conntion
   // Exception generator
   exceptionGen.io.fromCtrl.csr <> fromCtrl.csr
-  Connection.connectValidIO(exceptionGen.io.s0_in, s0_selOut)
-  exceptionGen.io.s0_in.bits.vaddr := s0_dcacheVAddr
-  Connection.connectValidIO(exceptionGen.io.s1_in, s1_in)
-  Connection.connectValidIO(exceptionGen.io.s2_in, s2_in)
-  Connection.connectValidIO(exceptionGen.io.s3_in, s3_in)
-  Connection.connectValidIO(exceptionGen.io.fromTlb, fromTlb.resp)
   exceptionGen.io.fromPmp <> fromPmp
   exceptionGen.io.fromDCache.error_delayed <> fromDCache.resp.bits.error_delayed
   exceptionGen.io.fromTrigger.breakPoint := s1_triggerBreakpoint
+  Connection.connect(
+    sink        = exceptionGen.io.s0_in,
+    source      = s0_selOut,
+    connectFn   = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink.valid := source.valid
+      sink.bits := source.bits
+      sink.bits.vaddr := s0_dcacheVAddr
+    }),
+    connectName = "exceptionGen s0"
+  )
+  Connection.connect(exceptionGen.io.s1_in, s1_in, None, "exceptionGen s1")
+  Connection.connect(exceptionGen.io.s2_in, s2_in, None, "exceptionGen s2")
+  Connection.connect(exceptionGen.io.s3_in, s3_in, None, "exceptionGen s3")
+  Connection.connect(exceptionGen.io.fromTlb, fromTlb.resp, None, "exceptionGen fromTlb")
 
   // Feedback generator
   feedbackGen.io.fromCtrl.redirect <> fromCtrl.redirect
   feedbackGen.io.fromCtrl.trigger := DontCare
   feedbackGen.io.fromCtrl.trigger.debugMode := s1_triggerDebugMode
-  Connection.connectValidIO(feedbackGen.io.s0_in, s0_out)
-  Connection.connectValidIO(feedbackGen.io.s1_in, s1_in)
-  Connection.connectValidIO(feedbackGen.io.s2_in, s2_in)
-  feedbackGen.io.s2_in.bits.misalign := s2_misalign
-  Connection.connectDecoupledIO(feedbackGen.io.s3_in, s3_in)
-  feedbackGen.io.s3_in.bits.data := 0.U
-  feedbackGen.io.s3_in.bits.cause := s3_misalignReplayCause
-  feedbackGen.io.s3_in.bits.uop.exceptionVec := exceptionGen.io.commonOut.s3_exceptionVecOut
-  Connection.connectValidIO(feedbackGen.io.fromTlb, fromTlb.resp)
   feedbackGen.io.fromPmp <> fromPmp
   feedbackGen.io.toBackend.writeback <> toBackend.writeback
+  Connection.connect(feedbackGen.io.fromTlb, fromTlb.resp, None, "feedbackGen fromTlb")
+  Connection.connect(feedbackGen.io.s0_in, s0_out, None,"feedbackGen s0")
+  Connection.connect(feedbackGen.io.s1_in, s1_in, None, "feedbackGen s1")
+  Connection.connect(
+    sink      = feedbackGen.io.s2_in,
+    source    = s2_in,
+    connectFn = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink.valid := source.valid
+      sink.bits := source.bits
+      sink.bits.misalign := s2_misalign
+    }),
+    connectName = "feedbackGen s2"
+  )
+  Connection.connect(
+    sink      = feedbackGen.io.s3_in,
+    source    = s3_in,
+    connectFn = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink.valid := source.valid
+      sink.bits := source.bits
+      sink.bits.data := 0.U
+      sink.bits.cause := s3_misalignReplayCause
+      sink.bits.uop.exceptionVec := exceptionGen.io.commonOut.s3_exceptionVecOut
+    }),
+    connectName = "feedbackGen s3"
+  )
 
   // common in ports
   feedbackGen.io.commonIn := DontCare
@@ -1146,10 +1171,10 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // Forward network
   forwardNetwork.foreach {
     case mod =>
-      Connection.connectValidIO(mod.io.s0_in, s0_out)
-      Connection.connectValidIO(mod.io.s1_in, s1_in)
-      Connection.connectValidIO(mod.io.s2_in, s2_in)
-      Connection.connectValidIO(mod.io.s3_in, s3_in)
+      Connection.connect(mod.io.s0_in, s0_out, None, "forwardNetwork s0")
+      Connection.connect(mod.io.s1_in, s1_in, None, "forwardNetwork s1")
+      Connection.connect(mod.io.s2_in, s2_in, None, "forwardNetwork s2")
+      Connection.connect(mod.io.s3_in, s3_in, None, "forwardNetwork s3")
 
       // data from DCache
       mod.io.fromDCache := 0.U.asTypeOf(mod.io.fromDCache.cloneType)
@@ -1195,14 +1220,30 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   // Replay cause generator
-  Connection.connectValidIO(replayCauseGen.io.s1_in, s1_in)
-  replayCauseGen.io.s1_in.bits.paddr := s1_paddrDupLsu
+  Connection.connect(
+    sink        = replayCauseGen.io.s1_in,
+    source      = s1_in,
+    connectFn   = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink.valid := source.valid
+      sink.bits := source.bits
+      sink.bits.paddr := s1_paddrDupLsu
+    }),
+    connectName = "replayCauseGen s1"
+  )
 
-  Connection.connectValidIO(replayCauseGen.io.s2_in, s2_in)
-  replayCauseGen.io.s2_in.bits.isNoncacheable := s2_actuallyUncache
+  Connection.connect(
+    sink        = replayCauseGen.io.s2_in,
+    source      = s2_in,
+    connectFn   = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink.valid := source.valid
+      sink.bits := source.bits
+      sink.bits.isNoncacheable := s2_actuallyUncache
+    }),
+    connectName = "replayCauseGen s2"
+  )
 
-  Connection.connectValidIO(replayCauseGen.io.s3_in, s3_in)
-  Connection.connectValidIO(replayCauseGen.io.fromTlb, fromTlb.resp)
+  Connection.connect(replayCauseGen.io.s3_in, s3_in, None, "replayCauseGen s3")
+  Connection.connect(replayCauseGen.io.fromTlb, fromTlb.resp, None, "replayCauseGen fromTlb")
   if (fromSta.isDefined) {
     replayCauseGen.io.fromSta <> fromSta.get
   } else {

@@ -39,14 +39,51 @@ import math._
 object Bundles {
 
   object Connection {
-    def connectValidIO[T <: Data](sink: ValidIO[T], source: DecoupledIO[T]) = {
-      sink.valid := source.valid
-      sink.bits := source.bits
+    def connect[S <: Bundle, T <: Bundle](
+      sink: S,
+      source: T,
+      connectFn: Option[(S, T) => Unit],
+      connectName: String,
+    ): Unit = {
+        connectFn match {
+          case Some(fn) => fn(sink, source)
+          case None =>
+            (sink, source) match {
+              // Handle DecoupledIO case
+              case (sink: DecoupledIO[_], source: DecoupledIO[_]) =>
+                sink <> source
+              // Handle ValidIO case
+              case (sink: ValidIO[_], source: ValidIO[_]) =>
+                sink <> source
+              // Handle ValidIO/DecoupledIO case
+              case (sink: ValidIO[_], source: DecoupledIO[_]) =>
+                sink.valid := source.valid
+                sink.bits := source.bits
+              // Handle DecoupledIO/ValidIO case
+              case (sink: DecoupledIO[_], source: ValidIO[_]) =>
+                sink.valid := source.valid
+                sink.bits := source.bits
+              case (sink: Bundle, source: Bundle) =>
+                sink := source
+              case _ =>
+                throw new IllegalStateException(s"Unsupported bundle type: ${sink.getClass}")
+            }
+      }
     }
 
-    def connectDecoupledIO[T <: Data](sink: DecoupledIO[T], source: DecoupledIO[T]) = {
-      sink.valid := source.valid
-      sink.bits := source.bits
+    def connect[S <: Bundle, T <: Bundle](
+      sinkSeq: Seq[S],
+      sourceSeq: Seq[T],
+      connectFn: Option[(S, T) => Unit] = None,
+      connectName: String = "Connection"
+    ): Unit = {
+      require(sinkSeq.length == sourceSeq.length,
+        s"${connectName}: length mismatch: sinkSeq length = ${sinkSeq.length}, sourceSeq length = ${sourceSeq.length}")
+
+      sinkSeq.zip(sourceSeq).foreach {
+        case (sink, source) =>
+          connect(sink, source, connectFn, connectName)
+      }
     }
   }
 

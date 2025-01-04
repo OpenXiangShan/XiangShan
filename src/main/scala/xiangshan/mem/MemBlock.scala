@@ -579,8 +579,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vecExuBlock.io.toBackend.writebackVldu <> toBackend.writebackVldu
   vecExuBlock.io.fromMemExuBlock <> memExuBlock.io.toVecExuBlock
   vecExuBlock.io.fromPmp := mmu.io.toMemExuBlock.pmpResp.head
-  Connection.connectDecoupledIO(vecExuBlock.io.fromTlb, mmu.io.toMemExuBlock.tlbResp.head)
   vecExuBlock.io.flushSbuffer.empty := stIsEmpty
+  Connection.connect(
+    sink        = vecExuBlock.io.fromTlb,
+    source      = mmu.io.toMemExuBlock.tlbResp.head,
+    connectFn   = None,
+    connectName = "vector execute block tlb request"
+  )
 
   val vSegmentFlag = vecExuBlock.io.vSegmentFlag
   val vSegmentException = RegInit(false.B)

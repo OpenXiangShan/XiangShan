@@ -326,561 +326,394 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   toLsq.sqControl <> storeMisalignBuffer.io.sqControl.toStoreQueue
   storeMisalignBuffer.io.sqControl.toStoreMisalignBuffer := fromLsq.maControl
 
-  // issue: [[Backend]] -> [[MemUnit]]
-  // std issue
-  val memUnitStdIssues = stdUnitImps.map(_.getStdIssues()).flatten
-  val numMemUnitStdIssues = memUnitStdIssues.length
-  val numBackendStdIssues = fromBackend.issueStd.length
-  require(numMemUnitStdIssues == numBackendStdIssues,
-    s"The number of std issues(${numMemUnitStdIssues}) should be match backend std issues(${numBackendStdIssues})!")
-
-  memUnitStdIssues.zip(fromBackend.issueStd).foreach {
-    case (sink, source) =>
+  // issue: `Backend` -> `MemUnit`
+  // std issue: `Backend` -> `StdUnits`
+  Connection.connect(
+    sinkSeq     = stdUnitImps.map(_.getStdIssues()).flatten,
+    sourceSeq   = fromBackend.issueStd,
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
-  }
+    }),
+    connectName = "StdUnits issues"
+  )
 
-  // sta issue
-  val backendStaIssues = fromBackend.issueHya ++ fromBackend.issueSta
-  val numBackendStaIssues = backendStaIssues.length
-  val memUnitStaIssues = totalStaUnits.map(_.getStaIssues()).flatten
-  val numMemUnitStaIssues = memUnitStaIssues.length
-  require(numBackendStaIssues == numMemUnitStaIssues,
-    s"The number of backend sta issue(${numBackendStaIssues}) should be match memunit sta issues(${numMemUnitStaIssues})!")
-
-  memUnitStaIssues.zip(backendStaIssues).foreach {
-    case (sink, source) =>
+  // sta issue: `Backend` -> `StaUnits`
+  Connection.connect(
+    sinkSeq     = totalStaUnits.map(_.getStaIssues()).flatten,
+    sourceSeq   = fromBackend.issueHya ++ fromBackend.issueSta,
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
-  }
+    }),
+    connectName = "StaUnits issues"
+  )
 
+  // raw nuke check: `StaUnits` -> `LdUnits/HyUnits`
   totalLdUnits.foreach {
     case ldu =>
       ldu.io.fromSta.foreach {
         case nukeQuery =>
-          nukeQuery.zip(totalStaUnits.map(_.io.toLdu.nukeQuery).filter(_.isDefined)).foreach {
-            case (sink, source) =>
-              sink <> source.get
-          }
+          Connection.connect(
+            sinkSeq     = nukeQuery,
+            sourceSeq   = totalStaUnits.map(_.io.toLdu.nukeQuery).filter(_.isDefined).flatten,
+            connectName = "nukeQuery"
+          )
       }
   }
 
-  // ldu issue
-  val backendLdIssues = fromBackend.issueLda ++ fromBackend.issueHya
-  val numBackendLdIssues = backendLdIssues.length
-  val memUnitLdIssues = totalLdUnits.map(_.getLdIssues()).flatten
-  val numMemUnitLdIssues = memUnitLdIssues.length
-  require(numBackendLdIssues == numMemUnitLdIssues,
-    s"The number of backend ldu issue(${numBackendLdIssues}) should be match memunit ldu issues(${numMemUnitLdIssues})!")
-
-  memUnitLdIssues.zip(backendLdIssues).foreach {
-    case (sink, source) =>
+  // ldu issue: `Backend` -> `LdUnits/HyUnits`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getLdIssues()).flatten,
+    sourceSeq   = fromBackend.issueLda ++ fromBackend.issueHya,
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits)
       sink.bits.isIq := true.B
-  }
+    }),
+    connectName = "LdUnits/HyUnits issues"
+  )
 
-  // prefetch issue: [[Prefetch]] -> [[MemUnit]]
-  val prefetchIssues = fromPrefetch
-  val numPrefetchIssue = fromPrefetch.length
-  val memUnitPrefetchIssues = totalMemUnits.map(_.getPrefetchIssues()).flatten
-  val numMemUnitPrefetchIssue = memUnitPrefetchIssues.length
-  require(numPrefetchIssue == numMemUnitPrefetchIssue,
-    s"The number of prefetch issue(${numPrefetchIssue}) should be match memunit prefetch issues(${numMemUnitPrefetchIssue})!")
+  // prefetch issue: `Prefetch` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalMemUnits.map(_.getPrefetchIssues()).flatten,
+    sourceSeq   = fromPrefetch,
+    connectName = "Prefetch issues"
+  )
 
-  memUnitPrefetchIssues.zip(prefetchIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // prefetch train: [[MemUnit]] -> [[Prefetch]]
+  // prefetch train: `MemUnit` -> `Prefetch`
   val memUnitPrefetchTrains = totalMemUnits.flatMap { memUnit =>
     // Convert to List if it is an Option or directly return the value if not
     memUnit.io.toPrefetch.train.toList
   }
-  val numMemUnitPrefetchTrain = memUnitPrefetchTrains.length
-  val prefetchTrains = toPrefetch.train
-  val numPrefetchTrain = prefetchTrains.length
-  require(numMemUnitPrefetchTrain == numPrefetchTrain,
-    s"The number of prefetch train(${numMemUnitPrefetchTrain}) should be match memunit prefetch" +
-      s"train(${numPrefetchTrain})!")
+  Connection.connect(
+    sinkSeq     = toPrefetch.train,
+    sourceSeq   = memUnitPrefetchTrains,
+    connectName = "Prefetch train"
+  )
 
-  prefetchTrains.zip(memUnitPrefetchTrains).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
+  // prefetch train l1: `MemUnit` -> `Prefetch`
   val memUnitPrefetchTrainL1s = totalMemUnits.flatMap { memUnit =>
     // Convert to List if it is an Option or directly return the value if not
     memUnit.io.toPrefetch.trainL1.toList
   }
-  val numMemUnitPrefetchTrainL1 = memUnitPrefetchTrainL1s.length
-  val prefetchTrainL1s = toPrefetch.trainL1
-  val numPrefetchTrainL1 = prefetchTrainL1s.length
-  require(numMemUnitPrefetchTrainL1 == numPrefetchTrainL1,
-    s"The number of prefetch train l1(${numMemUnitPrefetchTrainL1}) should be match memunit prefetch " +
-      s"train l1(${numPrefetchTrainL1})!")
+  Connection.connect(
+    sinkSeq     = toPrefetch.trainL1,
+    sourceSeq   = memUnitPrefetchTrainL1s,
+    connectName = "Prefetch train l1"
+  )
 
-  prefetchTrainL1s.zip(memUnitPrefetchTrainL1s).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // prefetch ifetch
+  Connection.connect(
+    sinkSeq     = toPrefetch.ifetch,
+    sourceSeq   = totalLdUnits.map(_.io.toPrefetch.ifetch.get),
+    connectName = "Prefetch ifetch"
+  )
 
-  val memUnitPrefetchIFetchs = totalLdUnits.map(_.io.toPrefetch.ifetch.get)
-  val numMemUnitPrefetchIFetch = memUnitPrefetchIFetchs.length
-  val prefetchTrainIFetchs = toPrefetch.ifetch
-  val numPrefetchTrainIFetch = prefetchTrainIFetchs.length
-  require(numMemUnitPrefetchIFetch == numPrefetchTrainIFetch,
-    s"The number of prefetch train ifetch(${numMemUnitPrefetchIFetch}) should be match memunit prefetch train ifetch(${numPrefetchTrainIFetch})!")
+  // misalign issue: `StoreMisalignBuffer` -> `StaUnits`
+  Connection.connect(
+    sinkSeq     = totalStaUnits.map(_.getMisalignIssues()).flatten,
+    sourceSeq   = Seq(storeMisalignBuffer.io.splitStoreReq),
+    connectName = "StoreMisalignBuffer issues"
+  )
 
-  prefetchTrainIFetchs.zip(memUnitPrefetchIFetchs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // misalign issue: `LoadMisalignBuffer` -> `LdaUnits`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getMisalignIssues()).flatten,
+    sourceSeq   = Seq(loadMisalignBuffer.io.splitLoadReq),
+    connectName = "LoadMisalignBuffer issues"
+  )
 
-  // misalign issue: [[StoreMisalignBuffer]] -> [[StaUnits]]
-  val storeMisalignBufIssues = Seq(storeMisalignBuffer.io.splitStoreReq)
-  val numStoreMisalignBufIssue = storeMisalignBufIssues.length
-  val staMisalignBufIssues = totalStaUnits.map(_.getMisalignIssues()).flatten
-  val numStaMisalignBufIssue = staMisalignBufIssues.length
-  require(numStoreMisalignBufIssue == numStaMisalignBufIssue,
-    s"The number of store misalign buf issue(${numStoreMisalignBufIssue}) should be match memunit store misalign issue(${numStaMisalignBufIssue})!")
+  // vector issue: `Vector` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalStaUnits.map(_.getVstIssues()).flatten,
+    sourceSeq   = fromVecExuBlock.vectorStoreIssues,
+    connectName = "Vector store issues"
+  )
 
-  staMisalignBufIssues.zip(storeMisalignBufIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getVldIssues()).flatten,
+    sourceSeq   = fromVecExuBlock.vectorLoadIssues,
+    connectName = "Vector load issues"
+  )
 
-  // misalign issue: [[LoadMisalignBuffer]] -> [[LdaUnits]]
-  val loadMisalignBufIssues = Seq(loadMisalignBuffer.io.splitLoadReq)
-  val numLoadMisalignBufIssue = loadMisalignBufIssues.length
-  val ldaMisalignBufIssues  = totalLdUnits.map(_.getMisalignIssues()).flatten
-  val numLdaMisalignBufIssue = ldaMisalignBufIssues.length
-  require(numLoadMisalignBufIssue == numLdaMisalignBufIssue,
-    s"The number of load misalign buf issue(${numLoadMisalignBufIssue}) should be match memunit load misalign issue(${numLdaMisalignBufIssue})!")
+  // fast replay reqs: `MemUnit` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getFastReplayIssues()).flatten,
+    sourceSeq   = totalLdUnits.map(_.io.toLdu.replay.get),
+    connectName = "Fast replay resp"
+  )
 
-  ldaMisalignBufIssues.zip(loadMisalignBufIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // vector issue: [[Vector]] -> [[MemUnit]]
-  val vectorStoreIssues = fromVecExuBlock.vectorStoreIssues
-  val numVectorStoreIssue = vectorStoreIssues.length
-  val memUnitVectorStoreIssues = totalStaUnits.map(_.getVstIssues()).flatten
-  val numMemUnitVectorStoreIssue = memUnitVectorStoreIssues.length
-  require(numVectorStoreIssue == numMemUnitVectorStoreIssue,
-    s"The number of vector store issue(${numVectorStoreIssue}) should be match memunit vector store issue(${numVectorStoreIssue})!")
-
-  memUnitVectorStoreIssues.zip(vectorStoreIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  val vectorLoadIssues = fromVecExuBlock.vectorLoadIssues
-  val numVectorLoadIssue = vectorLoadIssues.length
-  val memUnitVectorLoadIssues = totalLdUnits.map(_.getVldIssues()).flatten
-  val numMemUnitVectorLoadIssue = memUnitVectorLoadIssues.length
-  require(numVectorLoadIssue == numMemUnitVectorLoadIssue,
-    s"The number of vector load issue(${numVectorLoadIssue}) should be match memunit vector load issue(${numMemUnitVectorLoadIssue})!")
-
-  memUnitVectorLoadIssues.zip(vectorLoadIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // fast replay reqs: [[MemUnit]] -> [[MemUnit]]
-  val fastReplayReqs = totalLdUnits.map(_.io.toLdu.replay.get)
-  val numFastReplayReq = fastReplayReqs.length
-  val memUnitFastReplayReqs = totalLdUnits.map(_.getFastReplayIssues()).flatten
-  val numMemUnitFastReplayReq = memUnitFastReplayReqs.length
-  require(numFastReplayReq == numMemUnitFastReplayReq,
-    s"The number of fast replay req(${numFastReplayReq}) should be match memunit fast replay req(${numMemUnitFastReplayReq})!")
-
-  memUnitFastReplayReqs.zip(fastReplayReqs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // mmio reqs: [[Lsq]] -> [[MemUnit]]
-  val mmioIssues = Seq(fromLsq.mmioLdWriteback)
-  val numMmioIssue = mmioIssues.length
-  val memUnitMmioIssues = totalLdUnits.map(_.getMmioIssues()).flatten
-  val numMemUnitMmioIssues = memUnitMmioIssues.length
-  require(numMmioIssue == numMemUnitMmioIssues,
-    s"The number of mmio req(${numMmioIssue}) should be match memunit mmio req(${numMemUnitMmioIssues})!")
-
-  memUnitMmioIssues.zip(mmioIssues).foreach {
-    case (sink, source) =>
+  // mmio reqs: `Lsq` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getMmioIssues()).flatten,
+    sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuOutput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuOutputBundle(source.bits)
-  }
+    }),
+    connectName = "Mmio writeback"
+  )
 
-  // mmio load data: [[Lsq]] -> [[MemUnit]]
+  // mmio load data: `Lsq` -> `MemUnit`
   totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).foreach {
     case sink =>
-      Connection.connectValidIO(sink.get.mmioLdWriteback, fromLsq.mmioLdWriteback)
+      Connection.connect(
+        sinkSeq   = Seq(sink.get.mmioLdWriteback),
+        sourceSeq = Seq(fromLsq.mmioLdWriteback)
+      )
       sink.get.mmioLdData <> fromLsq.mmioLdData
   }
 
-  // nc reqs: [[Lsq]] -> [[MemUnit]]
-  val ncIssues = fromLsq.ncOut
-  val numNcIssue = ncIssues.length
-  val memUnitNcIssues = totalLdUnits.map(_.getUncacheIssues()).flatten
-  val numMemUnitNcIssues = memUnitNcIssues.length
-  require(numNcIssue == numMemUnitNcIssues,
-    s"The number of nc req(${numNcIssue}) should be match memunit nc req(${numMemUnitNcIssues})!")
+  // nc reqs: `Lsq` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getUncacheIssues()).flatten,
+    sourceSeq   = fromLsq.ncOut,
+    connectName = "Noncache issues"
+  )
 
-  memUnitNcIssues.zip(ncIssues).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // lsq replay reqs: `Lsq` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getReplayIssues()).flatten,
+    sourceSeq   = fromLsq.replay,
+    connectName = "Lsq replay"
+  )
 
-  // lsq replay reqs: [[Lsq]] -> [[MemUnit]]
-  val lsqReplayReqs = fromLsq.replay
-  val numLsqReplayReq = lsqReplayReqs.length
-  val memUnitLsqReplayReqs = totalLdUnits.map(_.getReplayIssues()).flatten
-  val numMemUnitLsqReplayReqs = memUnitLsqReplayReqs.length
-  require(numLsqReplayReq == numMemUnitLsqReplayReqs,
-    s"The number of lsq replay req(${numLsqReplayReq}) should be match memunit lsq replay " +
-      s"req(${numMemUnitLsqReplayReqs})!")
+  // feedback: `MemUnit` -> `Backend`
+  Connection.connect(
+    sinkSeq     = toBackend.hyuIqFeedback ++ toBackend.staIqFeedback,
+    sourceSeq   = totalStaUnits.map(_.io.toBackend.iqFeedback),
+    connectName = "StaUnit feedback"
+  )
 
-  memUnitLsqReplayReqs.zip(lsqReplayReqs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // sta issue feedback: `StaUnits` -> `Backend`
+  Connection.connect(
+    sinkSeq     = toBackend.stIssue,
+    sourceSeq   = totalStaUnits.map(_.io.toBackend.stIssue),
+    connectName = "StaUnit issue to backend"
+  )
 
-  // feedback: [[MemUnit]] -> [[Backend]]
-  val memUnitStaFeedbacks = totalStaUnits.map(_.io.toBackend.iqFeedback)
-  val numMemUnitStaFeedback = memUnitStaFeedbacks.length
-  val backendStaFeedbacks = toBackend.hyuIqFeedback ++ toBackend.staIqFeedback
-  val numBackendStaFeedback = backendStaFeedbacks.length
-  require(numMemUnitStaFeedback == numBackendStaFeedback,
-    s"The number of memunit sta feedback(${numMemUnitStaFeedback}) should be match backend sta" +
-      s"feedback(${numBackendStaFeedback})!")
+  // load feedback: `MemUnits` -> `Backend`
+  Connection.connect(
+    sinkSeq     = toBackend.ldaIqFeedback ++ toBackend.hyuIqFeedback,
+    sourceSeq   = totalLdUnits.map(_.io.toBackend.iqFeedback),
+    connectName = "LdUnits/HyUnits feedback"
+  )
 
-  backendStaFeedbacks.zip(memUnitStaFeedbacks).foreach {
-    case (sink, source) =>
-      sink.feedbackFast <> source.feedbackFast // FIXME: DontCare is right?
-      sink.feedbackSlow <> source.feedbackSlow
-  }
+  // misalign req: `StaUnits` -> `StoreMisalignBuffer`
+  Connection.connect(
+    sinkSeq     = storeMisalignBuffer.io.req,
+    sourceSeq   = totalStaUnits.map(_.io.toStoreMisalignBuf).filter(_.isDefined).map(_.get.enq),
+    connectName = "StoreMisalignBuffer enq"
+  )
 
-  // sta issue feedback: [[StaUnits]] -> [[Backend]]
-  val staIssueFeedbacks = totalStaUnits.map(_.io.toBackend.stIssue)
-  val numStaIssueFeedback = staIssueFeedbacks.length
-  val backendIssueFeedbacks = toBackend.stIssue
-  val numBackendIssueFeedback = backendIssueFeedbacks.length
-  require(numStaIssueFeedback == numBackendIssueFeedback,
-    s"The number of sta issue feedback(${numStaIssueFeedback}) should be match backend issue " +
-      s"feedback(${numBackendIssueFeedback})!")
-
-  backendIssueFeedbacks.zip(staIssueFeedbacks).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // load feedback: [[MemUnits]] -> [[Backend]]
-  val memUnitLdFeedbacks = totalLdUnits.map(_.io.toBackend.iqFeedback)
-  val numMemUnitLdFeedback = memUnitLdFeedbacks.length
-  val backendLdFeedbacks = toBackend.ldaIqFeedback ++ toBackend.hyuIqFeedback
-  val numBackendLdFeedback = backendLdFeedbacks.length
-  require(numMemUnitLdFeedback == numBackendLdFeedback,
-    s"The number of memunit ld feedback(${numMemUnitLdFeedback}) should be match backend ld" +
-      s"feedback(${numBackendLdFeedback})!")
-
-  backendLdFeedbacks.zip(memUnitLdFeedbacks).foreach {
-    case (sink, source) =>
-      sink.feedbackFast <> source.feedbackFast
-      sink.feedbackSlow <> source.feedbackSlow
-  }
-
-  // misalign out: [[StaUnits]] -> [[StoreMisalignBuffer]]
-  val staMisalignBufResps = totalStaUnits.map(_.io.toStoreMisalignBuf).filter(_.isDefined).map(_.get.out)
-    .flatten
-  val numStaMisalignBufResp = staMisalignBufResps.length
-  val storeMisalignBufResps = Seq(storeMisalignBuffer.io.splitStoreResp)
-  val numStoreMisalignBufResp = storeMisalignBufResps.length
-  require(numStaMisalignBufResp == numStoreMisalignBufResp,
-    s"The number of sta misalign buf resp(${numStaMisalignBufResp}) should be match store misalign buf " +
-      s"resp(${numStoreMisalignBufResp})!")
-
-  storeMisalignBufResps.zip(staMisalignBufResps).foreach {
-    case (sink, source) =>
+  // misalign out: `StaUnits` -> `StoreMisalignBuffer`
+  Connection.connect(
+    sinkSeq     = Seq(storeMisalignBuffer.io.splitStoreResp),
+    sourceSeq   = totalStaUnits.map(_.io.toStoreMisalignBuf).filter(_.isDefined).map(_.get.out).flatten,
+    connectFn   = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
       sink.valid := source.valid
       sink.bits := source.bits
       source.ready := true.B
-  }
+    }),
+    connectName = "StoreMisalignBuffer out"
+  )
 
-  // misalign req: [[StaUnits]] -> [[StoreMisalignBuffer]]
-  val staMisalignBufReqs = totalStaUnits.map(_.io.toStoreMisalignBuf).filter(_.isDefined).map(_.get.enq)
-  val numStaMisalignBufReq = staMisalignBufReqs.length
-  val storeMisalignBufReqs = storeMisalignBuffer.io.req
-  val numStoreMisalignBufReq = storeMisalignBufReqs.length
-  require(numStaMisalignBufReq == numStoreMisalignBufReq,
-    s"The number of sta misalign buf req(${numStaMisalignBufReq}) should be match store misalign buf " +
-      s"req(${numStoreMisalignBufReq})!")
-
-  storeMisalignBufReqs.zip(staMisalignBufReqs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // misalign writeback: [[LdaUnits]] -> [[LoadMisalignBuffer]]
-  val ldaMisalignBufResps = totalLdUnits.map(_.io.toLoadMisalignBuf).filter(_.isDefined).map(_.get.out)
-    .flatten
-  val numLdaMisalignBufResp = ldaMisalignBufResps.length
-  val loadMisalignBufResps = Seq(loadMisalignBuffer.io.splitLoadResp)
-  val numLoadMisalignBufResp = loadMisalignBufResps.length
-  require(numLdaMisalignBufResp == numLoadMisalignBufResp,
-    s"The number of ldu misalign buf resp(${numLdaMisalignBufResp}) should be match load misalign buf " +
-      s"resp(${numLoadMisalignBufResp})!")
-
-  loadMisalignBufResps.zip(ldaMisalignBufResps).foreach {
-    case (sink, source) =>
+  // misalign writeback: `LdaUnits` -> `LoadMisalignBuffer`
+  Connection.connect(
+    sinkSeq     = Seq(loadMisalignBuffer.io.splitLoadResp),
+    sourceSeq   = totalLdUnits.map(_.io.toLoadMisalignBuf).filter(_.isDefined).map(_.get.out).flatten,
+    connectFn   = Some((sink: ValidIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
       sink.valid := source.valid
       sink.bits := source.bits
       source.ready := true.B
-  }
+    }),
+    connectName = "LoadMisalignBuffer writeback"
+  )
 
-  // misalign req: [[LdaUnits]] -> [[LoadMisalignBuffer]]
-  val ldaMisalignBufReqs = totalLdUnits.map(_.io.toLoadMisalignBuf).filter(_.isDefined).map(_.get.enq)
-  val numLdaMisalignBufReq = ldaMisalignBufReqs.length
-  val loadMisalignBufReqs = loadMisalignBuffer.io.req
-  val numLoadMisalignBufReq = loadMisalignBufReqs.length
-  require(numLdaMisalignBufReq == numLoadMisalignBufReq,
-    s"The number of ldu misalign buf req(${numLdaMisalignBufReq}) should be match load misalign buf " +
-      s"req(${numLoadMisalignBufReq})!")
+  // misalign req: `LdaUnits` -> `LoadMisalignBuffer`
+  Connection.connect(
+    sinkSeq     = loadMisalignBuffer.io.req,
+    sourceSeq   = totalLdUnits.map(_.io.toLoadMisalignBuf).filter(_.isDefined).map(_.get.enq),
+    connectName = "LoadMisalignBuffer enq"
+  )
 
-  loadMisalignBufReqs.zip(ldaMisalignBufReqs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // tlb reqs: [[MemUnit]] -> [[TLB]]
-  val memUnitTlbReqs = totalMemUnits.map(_.io.toTlb)
-  val numMemUnitTlbReq = memUnitTlbReqs.length
-  val tlbReqs = io.toTlb
-  val numTlbReq = tlbReqs.length
-  require(numMemUnitTlbReq == numTlbReq,
-    s"The number of memunit tlb req(${numMemUnitTlbReq}) should be match tlb req(${numTlbReq})!")
-
-  tlbReqs.zip(memUnitTlbReqs).foreach {
+  // tlb reqs: `MemUnit` -> `TLB`
+  toTlb.zip(totalMemUnits.map(_.io.toTlb)).foreach {
     case (sink, source) =>
       sink.req <> source.req
       sink.req_kill := source.req_kill
   }
 
-  // tlb resps: [[TLB]] -> [[MemUnit]]
-  val tlbResps = io.fromTlb
-  val numTlbResp = tlbResps.length
-  val memUnitTlbResps = totalMemUnits.map(_.io.fromTlb)
-  val numMemUnitTlbResp = memUnitTlbResps.length
-  require(numTlbResp == numMemUnitTlbResp,
-    s"The number of tlb resp(${numTlbResp}) should be match memunit tlb resp(${numMemUnitTlbResp})!")
+  // tlb resps: `TLB` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalMemUnits.map(_.io.fromTlb.resp),
+    sourceSeq   = fromTlb.map(_.resp),
+    connectName = "TLB resp"
+  )
 
-  memUnitTlbResps.zip(tlbResps).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  Connection.connect(
+    sinkSeq     = totalMemUnits.map(_.io.fromTlb.hint),
+    sourceSeq   = fromTlb.map(_.hint),
+    connectName = "TLB resp"
+  )
 
-  // Pmp resps: [[PMP]] -> [[MemUnit]]
-  val pmpResps = io.fromPmp
-  val numPmpResp = pmpResps.length
-  val memUnitPmpResps = totalMemUnits.map(_.io.fromPmp)
-  val numMemUnitPmpResp = memUnitPmpResps.length
-  require(numPmpResp == numMemUnitPmpResp,
-    s"The number of pmp resp(${numPmpResp}) should be match memunit pmp resp(${numMemUnitPmpResp})!")
+  // Pmp resps: `PMP` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalMemUnits.map(_.io.fromPmp),
+    sourceSeq   = io.fromPmp,
+    connectName = "DCache req"
+  )
 
-  memUnitPmpResps.zip(pmpResps).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // DCache reqs: [[MemUnit]] -> [[DCache]]
+  // DCache reqs: `MemUnit` -> `DCache`
   toDCache.zip(totalMemUnits.map(_.io.toDCache)).foreach {
     case (sink, source) =>
       sink <> source
   }
 
-  // DCache resp: [[DCache]] -> [[MemUnit]]
+  // DCache resp: `DCache` -> `MemUnit`
   totalMemUnits.map(_.io.fromDCache).zip(fromDCache).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   // to Backend
-  totalLdUnits.map(_.io.toBackend.wakeup).zip(toBackend.wakeup).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-  totalLdUnits.map(_.io.toBackend.ldCancel).zip(toBackend.ldCancel).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-  totalLdUnits.map(_.io.toBackend.rollback).zip(toBackend.rollback).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  Connection.connect(
+    sinkSeq     = toBackend.wakeup,
+    sourceSeq   = totalLdUnits.map(_.io.toBackend.wakeup),
+    connectName = "LdUnits/HyUnits wakeup"
+  )
+
+  Connection.connect(
+    sinkSeq     = toBackend.ldCancel,
+    sourceSeq   = totalLdUnits.map(_.io.toBackend.ldCancel),
+    connectName = "LdUnits/HyUnits Cancel"
+  )
+
+  Connection.connect(
+    sinkSeq     = toBackend.rollback,
+    sourceSeq   = totalLdUnits.map(_.io.toBackend.rollback),
+    connectName = "LdUnits/HyUnits rollback"
+  )
 
   // to Lsq
-  toLsq.out.zip(totalLdUnits.map(_.io.toLsq.out).filter(_.isDefined)).foreach {
+  Connection.connect(
+    sinkSeq     = toLsq.out,
+    sourceSeq   = totalLdUnits.map(_.io.toLsq.out).filter(_.isDefined).map(_.get),
+    connectName = "LdUnits/HyUnits lsq out"
+  )
+
+  Connection.connect(
+    sinkSeq     = toLsq.forward,
+    sourceSeq   = totalLdUnits.map(_.io.toLsq.forward).filter(_.isDefined).map(_.get),
+    connectName = "LdUnits/HyUnits sq forward req"
+  )
+
+  toLsq.rarNuke.zip(totalLdUnits.map(_.io.toLsq.rarNuke).filter(_.isDefined).map(_.get)).foreach {
     case (sink, source) =>
-      sink <> source.get
+      sink <> source
   }
-  toLsq.forward.zip(totalLdUnits.map(_.io.toLsq.forward).filter(_.isDefined)).foreach {
+  toLsq.rawNuke.zip(totalLdUnits.map(_.io.toLsq.rawNuke).filter(_.isDefined).map(_.get)).foreach {
     case (sink, source) =>
-      sink <> source.get
+      sink <> source
   }
-  toLsq.rarNuke.zip(totalLdUnits.map(_.io.toLsq.rarNuke).filter(_.isDefined)).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
-  toLsq.rawNuke.zip(totalLdUnits.map(_.io.toLsq.rawNuke).filter(_.isDefined)).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
-  toLsq.addrUpdate.zip(totalStaUnits.map(_.io.toLsq.addrUpdate).filter(_.isDefined)).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
-  toLsq.excpUpdate.zip(totalStaUnits.map(_.io.toLsq.excpUpdate).filter(_.isDefined)).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
-  toLsq.maskOut.zip(totalStaUnits.map(_.io.toLsq.maskOut).filter(_.isDefined)).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
+
+  Connection.connect(
+    sinkSeq     = toLsq.addrUpdate,
+    sourceSeq   = totalStaUnits.map(_.io.toLsq.addrUpdate).filter(_.isDefined).map(_.get),
+    connectName = "StaUnits/HyUnits addr update"
+  )
+
+  Connection.connect(
+    sinkSeq     = toLsq.excpUpdate,
+    sourceSeq   = totalStaUnits.map(_.io.toLsq.excpUpdate).filter(_.isDefined).map(_.get),
+    connectName = "StaUnits/HyUnits excp update"
+  )
+
+  Connection.connect(
+    sinkSeq     = toLsq.maskOut,
+    sourceSeq   = totalStaUnits.map(_.io.toLsq.maskOut).filter(_.isDefined).map(_.get),
+    connectName = "StaUnits/HyUnits mask out"
+  )
 
   // from Lsq
-  totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).zip(fromLsq.forward).foreach {
-    case (sink, source) =>
-      sink.get.forward <> source
-  }
-  totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).zip(fromLsq.rarNuke).foreach {
-    case (sink, source) =>
-      sink.get.rarNuke <> source
-  }
-  totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).zip(fromLsq.rawNuke).foreach {
-    case (sink, source) =>
-      sink.get.rawNuke <> source
-  }
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.forward),
+    sourceSeq   = fromLsq.forward,
+    connectName = "LdUnits/HyUnits sq forward resp"
+  )
 
-  // uncache forward reqs: [[MemUnit]] -> [[Uncache]]
-  val memUnitUncacheForwardReqs = totalLdUnits.map(_.io.toUncache).filter(_.isDefined)
-  val numMemUnitUncacheForwardReq = memUnitUncacheForwardReqs.length
-  val uncacheForwardReqs = toUncache
-  val numUncacheForwardReq = uncacheForwardReqs.length
-  require(numMemUnitUncacheForwardReq == numUncacheForwardReq,
-    s"The number of memunit uncache forward req(${numMemUnitUncacheForwardReq}) should be match uncache forward " +
-      s"req(${numUncacheForwardReq})!")
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.rarNuke),
+    sourceSeq   = fromLsq.rarNuke,
+    connectName = "LdUnits/HyUnits rar nuke"
+  )
 
-  uncacheForwardReqs.zip(memUnitUncacheForwardReqs).foreach {
-    case (sink, source) =>
-      sink <> source.get
-  }
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.rawNuke),
+    sourceSeq   = fromLsq.rawNuke,
+    connectName = "LdUnits/HyUnits raw nuke"
+  )
 
-  // uncache forward resps: [[Uncache]] -> [[MemUnit]]
-  val uncacheForwardResps = fromUncache
-  val numUncacheForwardResp = uncacheForwardResps.length
-  val memUnitUncacheForwardResps = totalLdUnits.map(_.io.fromUncache).filter(_.isDefined)
-  val numMemUnitUncacheForwardResp = memUnitUncacheForwardResps.length
-  require(numUncacheForwardResp == numMemUnitUncacheForwardResp,
-    s"The number of uncache forward resp(${numUncacheForwardResp}) should be match memunit uncache forward " +
-      s"resp(${numMemUnitUncacheForwardResp})!")
+  // uncache forward reqs: `MemUnit` -> `Uncache`
+  Connection.connect(
+    sinkSeq     = toUncache,
+    sourceSeq   = totalLdUnits.map(_.io.toUncache).filter(_.isDefined).map(_.get),
+    connectName = "Uncache forward req"
+  )
 
-  memUnitUncacheForwardResps.zip(uncacheForwardResps).foreach {
-    case (sink, source) =>
-      sink.get <> source
-  }
+  // uncache forward resps: `Uncache` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromUncache).filter(_.isDefined).map(_.get),
+    sourceSeq   = fromUncache,
+    connectName = "Uncache forward resp"
+  )
 
-  // sbuffer forward reqs: [[MemUnit]] -> [[Sbuffer]]
-  val memUnitSbufferForwardReqs = totalLdUnits.map(_.io.toSBuffer).filter(_.isDefined)
-  val numMemUnitSbufferForwardReq = memUnitSbufferForwardReqs.length
-  val sbufferForwardReqs = toSBuffer
-  val numSbufferForwardReq = sbufferForwardReqs.length
-  require(numMemUnitSbufferForwardReq == numSbufferForwardReq,
-    s"The number of memunit sbuffer forward req(${numMemUnitSbufferForwardReq}) should be match sbuffer forward " +
-      s"req(${numSbufferForwardReq})!")
+  // sbuffer forward reqs: `MemUnit` -> `Sbuffer`
+  Connection.connect(
+    sinkSeq     = toSBuffer,
+    sourceSeq   = totalLdUnits.map(_.io.toSBuffer).filter(_.isDefined).map(_.get),
+    connectName = "Sbuffer forward req"
+  )
 
-  memUnitSbufferForwardReqs.zip(sbufferForwardReqs).foreach {
-    case (sink, source) =>
-      sink.get <> source
-  }
+  // sbuffer forward resps: `Sbuffer` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromSBuffer).filter(_.isDefined).map(_.get),
+    sourceSeq   = fromSBuffer,
+    connectName = "Sbuffer forward resp"
+  )
 
-  // sbuffer forward resps: [[Sbuffer]] -> [[MemUnit]]
-  val sbufferForwardResps = fromSBuffer
-  val numSbufferForwardResp = sbufferForwardResps.length
-  val memUnitSbufferForwardResps = totalLdUnits.map(_.io.fromSBuffer.get)
-  val numMemUnitSbufferForwardResp = memUnitSbufferForwardResps.length
-  require(numSbufferForwardResp == numMemUnitSbufferForwardResp,
-    s"The number of sbuffer forward resp(${numSbufferForwardResp}) should be match memunit sbuffer forward " +
-      s"resp(${numMemUnitSbufferForwardResp})!")
+  // MissQueue forward reqs: `MemUnit` -> `MissQueue`
+  Connection.connect(
+    sinkSeq     = toMissQueue,
+    sourceSeq   = totalLdUnits.map(_.io.toMissQueue).filter(_.isDefined).map(_.get),
+    connectName = "MissQueue forward req"
+  )
 
-  memUnitSbufferForwardResps.zip(sbufferForwardResps).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // MissQueue forward resps: `MissQueue` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.io.fromMissQueue).filter(_.isDefined).map(_.get),
+    sourceSeq   = fromMissQueue,
+    connectName = "MissQueue forward resp"
+  )
 
-  // MissQueue forward reqs: [[MemUnit]] -> [[MissQueue]]
-  val memUnitMissQueueForwardReqs = totalLdUnits.map(_.io.toMissQueue.get)
-  val numMemUnitMissQueueForwardReq = memUnitMissQueueForwardReqs.length
-  val missQueueForwardReqs = toMissQueue
-  val numMissQueueForwardReq = missQueueForwardReqs.length
-  require(numMemUnitMissQueueForwardReq == numMissQueueForwardReq,
-    s"The number of memunit missQueue forward req(${numMemUnitMissQueueForwardReq}) should be match missQueue forward " +
-      s"req(${numMissQueueForwardReq})!")
-
-  memUnitMissQueueForwardReqs.zip(missQueueForwardReqs).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // MissQueue forward resps: [[MissQueue]] -> [[MemUnit]]
-  val missQueueForwardResps = fromMissQueue
-  val numMissQueueForwardResp = missQueueForwardResps.length
-  val memUnitMissQueueForwardResps = totalLdUnits.map(_.io.fromMissQueue.get)
-  val numMemUnitMissQueueForwardResp = memUnitMissQueueForwardResps.length
-  require(numMissQueueForwardResp == numMemUnitMissQueueForwardResp,
-    s"The number of missQueue forward resp(${numMissQueueForwardResp}) should be match memunit missQueue forward " +
-      s"resp(${numMemUnitMissQueueForwardResp})!")
-
-  memUnitMissQueueForwardResps.zip(missQueueForwardResps).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // TL D channel forward: [[TL]] -> [[MemUnit]]
-  val tlDchannelForwardResps = fromTL
-  val numTLDchannelForwardResp = tlDchannelForwardResps.length
+  // TL D channel forward: `TL` -> `MemUnit`
   val memUnitTLDchannelResps = totalLdUnits.flatMap{ memUnit =>
     // Convert to List if it is an Option or directly return the value if not
     memUnit.io.fromTL.toList
   }
-  val numMemUnitTLDchannelResp = memUnitTLDchannelResps.length
-  require(numTLDchannelForwardResp == numMemUnitTLDchannelResp,
-    s"The number of tlDchannel forward resp(${numTLDchannelForwardResp}) should be match memunit tlDchannel forward " +
-      s"resp(${numMemUnitTLDchannelResp})!")
+  Connection.connect(
+    sinkSeq     = memUnitTLDchannelResps,
+    sourceSeq   = fromTL,
+    connectName = "TL D channel forward"
+  )
 
-  memUnitTLDchannelResps.zip(tlDchannelForwardResps).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // storePipeEmpty: [[MemUnit]] -> [[VecExuBlock]]
-  val staStorePipeEmpty = totalStaUnits.map(_.io.commonOut.storePipeEmpty)
-  val numStaStorePipeEmtpy = staStorePipeEmpty.length
-  val memUnitStorePipeEmpty = toVecExuBlock.storePipeEmpty
-  val numMemUnitStorePipeEmpty = memUnitStorePipeEmpty.length
-  require(numStaStorePipeEmtpy == numMemUnitStorePipeEmpty,
-    s"The number of sta storePipeEmpty(${numStaStorePipeEmtpy}) should be match memunit " +
-      s"storePipeEmpty(${numMemUnitStorePipeEmpty})!")
-
-  staStorePipeEmpty.zip(memUnitStorePipeEmpty).foreach {
+  // storePipeEmpty: `MemUnit` -> `VecExuBlock`
+  toVecExuBlock.storePipeEmpty.zip(totalStaUnits.map(_.io.commonOut.storePipeEmpty)).foreach {
     case (sink, source) =>
       sink <> source
   }
@@ -889,6 +722,9 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // as atomics insts (LR/SC/AMO) will block the pipeline
   val s_normal +: s_atomics = Enum(StAddrCnt + 1)
   val state = RegInit(s_normal)
+  val memUnitStaIssues = totalStaUnits.map(_.getStaIssues()).flatten
+  val memUnitStaFeedbacks = totalStaUnits.map(_.io.toBackend.iqFeedback)
+  val backendStaIssues = fromBackend.issueHya ++ fromBackend.issueSta
   val stAtomics = backendStaIssues.map(issue => issue.valid && FuType.storeIsAMO(issue.bits.uop.fuType))
   val stDataAtomics = stdUnitImps.map(_.getStdWritebacks()).flatten.map(issue =>
     issue.valid && FuType.storeIsAMO(issue.bits.uop.fuType)
@@ -903,15 +739,15 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       impl.io.fromTlb.resp.valid := false.B
       impl.io.fromTlb.resp.bits  := DontCare
       impl.io.fromTlb.hint := DontCare
-      impl.io.toTlb.req.ready := tlbReqs.head.req.ready
-      impl.io.fromPmp <> pmpResps.head
+      impl.io.toTlb.req.ready := toTlb.head.req.ready
+      impl.io.fromPmp <> fromPmp.head
 
       // DCache
       impl.io.fromDCache := DontCare
       impl.io.toDCache.req.ready := false.B
       impl.io.amoDCacheIO <> io.amoDCacheIO
 
-      // issue sta: [[Backend]] -> [[AtomicsUnit]]
+      // issue sta: `Backend` -> `AtomicsUnit`
       impl.io.fromBackend.issue.head.valid := stAtomics.reduce(_|_)
       impl.io.fromBackend.issue.head.bits.fromMemExuInputBundle(Mux1H(
         stAtomics.zip(backendStaIssues).map(x => x._1 -> x._2.bits)
@@ -919,7 +755,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       impl.io.fromBackend.issue.head.bits.isIq := true.B
       impl.io.fromBackend.issue.head.bits.isAtomic := true.B
 
-      // issue std: [[Backend]] -> [[AtomicsUnit]]
+      // issue std: `Backend` -> `AtomicsUnit`
       val stdWritebacks = stdUnitImps.map(_.getStdWritebacks()).flatten
       impl.io.storeDataIn.zipWithIndex.foreach {
         case (storeDataIn, wbIdx) =>
@@ -927,7 +763,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
           storeDataIn.bits := stdWritebacks(wbIdx).bits.toMemExuOutputBundle()
       }
 
-      // feedback: [[AtomicsUnit]] -> [[Backend]]
+      // feedback: `AtomicsUnit` -> `Backend`
       backendStaFeedback.zip(memUnitStaFeedbacks).zip(s_atomics).foreach {
         case ((sink, source), amoState) =>
           when(state === amoState) {
@@ -941,8 +777,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         // use store wb port instead of load
         amoLoad.getLdWritebacks().head.ready := false.B
         // use Load_0's TLB
-        impl.io.toTlb <> tlbReqs.head
-        impl.io.fromTlb <> tlbResps.head
+        impl.io.toTlb <> toTlb.head
+        impl.io.fromTlb <> fromTlb.head
         // hw prefetch should be disabled while executing atomic insts
         amoLoad.getPrefetchIssues().map(_.valid := false.B)
         // make sure there's no in-flight uops in load unit
@@ -970,10 +806,10 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         sink.valid := false.B
 
         state := amoState
-        XSError(stAtomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _), "atomics issue connect fail!")
       }
+      XSError(atomics && stAtomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _),
+        "atomics issue connect fail!")
   }
-
 
   val atomicsException = RegInit(false.B)
   when (DelayN(fromCtrl.redirect.valid, 10) && atomicsException) {
@@ -992,61 +828,34 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   )
 
 
-  // writeback: [[MemUnit]] -> [[Backend]]
-  val memUnitStdWritebacks = stdUnitImps.map(_.getStdWritebacks()).flatten
-  val numMemUnitStdWriteback = memUnitStdWritebacks.length
-  val backendStdWritebacks = toBackend.writebackStd
-  val numBackendStdWriteback = backendStdWritebacks.length
-  require(numMemUnitStdWriteback == numBackendStdWriteback,
-    s"The number of memunit std writeback(${numMemUnitStdWriteback}) should be match backend " +
-      s"std writeback(${numBackendStdWriteback})!")
-
-  backendStdWritebacks.zip(memUnitStdWritebacks).foreach {
-    case (sink, source) =>
+  // writeback: `MemUnit` -> `Backend`
+  Connection.connect(
+    sinkSeq     = toBackend.writebackStd,
+    sourceSeq   = stdUnitImps.map(_.getStdWritebacks()).flatten,
+    connectFn   = Some((sink: DecoupledIO[MemExuOutput], source: DecoupledIO[LsPipelineBundle]) => {
       sink.valid := source.valid
       sink.bits  := source.bits.toMemExuOutputBundle()
       sink.bits.mask.map(_ := 0.U)
       sink.bits.vdIdx.map(_ := 0.U)
       sink.bits.vdIdxInField.map(_ := 0.U)
       source.ready := sink.ready
-  }
+    }),
+    connectName = "StdUnits writeback"
+  )
 
   // vector load writeback
-  val memUnitVldWritebacks = totalLdUnits.map(_.getVldWritebacks()).flatten
-  val numMemUnitVldWriteback = memUnitVldWritebacks.length
-  val vecExuBlockVldWritebacks = toVecExuBlock.vldWriteback
-  val numVecExuBlockVldWriteback = vecExuBlockVldWritebacks.length
-  require(numMemUnitVldWriteback == numVecExuBlockVldWriteback,
-    s"The number of memunit vld writeback(${numMemUnitVldWriteback}) should be match vecExuBlock " +
-      s"vld writeback(${numVecExuBlockVldWriteback})!")
-
-  vecExuBlockVldWritebacks.zip(memUnitVldWritebacks).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  Connection.connect(
+    sinkSeq     = toVecExuBlock.vldWriteback,
+    sourceSeq   = totalLdUnits.map(_.getVldWritebacks()).flatten,
+    connectName = "VldUnits writeback to vector execute block"
+  )
 
   // vector store writebacks
-  val memUnitVstWritebacks = totalStaUnits.map(_.getVstWritebacks()).flatten
-  val numMemUnitVstWriteback = memUnitVstWritebacks.length
-  val vecExuBlockVstWritebacks = toVecExuBlock.vstWriteback
-  val numVecExuBlockVstWriteback = vecExuBlockVstWritebacks.length
-  require(numMemUnitVstWriteback == numVecExuBlockVstWriteback,
-    s"The number of memunit vst writeback(${numMemUnitVstWriteback}) should be match vecExuBlock " +
-      s"vst writeback(${numVecExuBlockVstWriteback})!")
-
-  vecExuBlockVstWritebacks.zip(memUnitVstWritebacks).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // sta writeback
-  val memUnitStaWritebacks = totalStaUnits.map(_.getStaWritebacks()).flatten
-  val numMemUnitStaWriteback = memUnitStaWritebacks.length
-  val backendStaWritebacks = toBackend.writebackHyuSta ++ toBackend.writebackSta
-  val numBackendStaWriteback = backendStaWritebacks.length
-  require(numMemUnitStaWriteback == numBackendStaWriteback,
-    s"The number of memunit sta writeback(${numMemUnitStaWriteback}) should be match backend " +
-      s"sta writeback(${numBackendStaWriteback})!")
+  Connection.connect(
+    sinkSeq     = toVecExuBlock.vstWriteback,
+    sourceSeq   = totalStaUnits.map(_.getVstWritebacks()).flatten,
+    connectName = "VstUnits writeback to vector execute block"
+  )
 
   // mmio store writeback will use store writeback port 0
   val mmioStWriteback = WireInit(0.U.asTypeOf(fromLsq.mmioStWriteback.cloneType))
@@ -1057,7 +866,17 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   )
   mmioStWriteback.ready := false.B
 
+  // sta writeback
+  val memUnitStaWritebacks = totalStaUnits.map(_.getStaWritebacks()).flatten
+  val numMemUnitStaWriteback = memUnitStaWritebacks.length
+  val backendStaWritebacks = toBackend.writebackHyuSta ++ toBackend.writebackSta
+  val numBackendStaWriteback = backendStaWritebacks.length
+  require(numMemUnitStaWriteback == numBackendStaWriteback,
+    s"The number of memunit sta writeback(${numMemUnitStaWriteback}) should be match backend " +
+      s"sta writeback(${numBackendStaWriteback})!")
+
   // store misalign buffer will overwrite store writeback port 0
+  val memUnitVstWritebacks = totalStaUnits.map(_.getVstWritebacks()).flatten
   val storeMisalignCanWriteBack = !mmioStWriteback.valid && !memUnitStaWritebacks.head.valid && !memUnitVstWritebacks.head.valid
   storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
   storeMisalignBuffer.io.storeOutValid := memUnitStaWritebacks.head.valid
@@ -1123,44 +942,25 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   ldaExeWbReqs(UncacheWBPort).bits := ldUncacheWriteback.bits.toMemExuOutputBundle()
   ldUncacheWriteback.ready := ldaExeWbReqs(UncacheWBPort).ready
 
-  val memUnitLdaWritebacks = ldaExeWbReqs
-  val numMemUnitLdaWriteback = memUnitLdaWritebacks.length
-  val backendLdaWritebacks = toBackend.writebackLda ++ toBackend.writebackHyuLda
-  val numBackendLdaWriteback = backendLdaWritebacks.length
-  require(numMemUnitLdaWriteback == numBackendLdaWriteback,
-    s"The number of memunit ldu writeback(${numMemUnitLdaWriteback}) should be match backend " +
-      s"ldu writeback(${numBackendLdaWriteback})!")
+  Connection.connect(
+    sinkSeq     = toBackend.writebackLda ++ toBackend.writebackHyuLda,
+    sourceSeq   = ldaExeWbReqs,
+    connectName = "LdUnits/HyUnits writeback"
+  )
 
-  backendLdaWritebacks.zip(memUnitLdaWritebacks).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // debugLsInfo: `MemUnit` -> `Backend`
+  Connection.connect(
+    sinkSeq     = io.debugLsInfo,
+    sourceSeq   = totalMemUnits.map(_.io.debugLsInfo),
+    connectName = "DebugLsInfo"
+  )
 
-  // debugLsInfo: [[MemUnit]] -> [[Backend]]
-  val memUnitDebugLsInfo = totalMemUnits.map(_.io.debugLsInfo)
-  val numMemUnitDebugLsInfo = memUnitDebugLsInfo.length
-  val backendDebugLsInfo = io.debugLsInfo
-  val numBackendDebugLsInfo = backendDebugLsInfo.length
-  require(numMemUnitDebugLsInfo == numBackendDebugLsInfo,
-    s"The number of memUnitDebugLsInfo should be match backendDebugLsInfo!")
-
-  backendDebugLsInfo.zip(memUnitDebugLsInfo).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
-
-  // Topdown: [[MemUnit]] -> [[Backend]]
-  val memUnitTopdownInfo = totalLdUnits.map(_.io.lsTopdownInfo)
-  val numMemUnitTopdownInfo = memUnitTopdownInfo.length
-  val backendTopdownInfo = io.lsTopdownInfo
-  val numBackendTopdownInfo = backendTopdownInfo.length
-  require(numMemUnitTopdownInfo == numBackendTopdownInfo,
-    "The number of memUnitTopdownInfo should be match backendTopdownInfo!")
-
-  backendTopdownInfo.zip(memUnitTopdownInfo).foreach {
-    case (sink, source) =>
-      sink <> source
-  }
+  // Topdown: `MemUnit` -> `Backend`
+  Connection.connect(
+    sinkSeq     = io.lsTopdownInfo,
+    sourceSeq   = totalLdUnits.map(_.io.lsTopdownInfo),
+    connectName = "Topdown"
+  )
 
   // performance events
   val perfEvents = totalMemUnits.map(_.asInstanceOf[MemUnitImp]).flatMap(_.getPerfEvents)

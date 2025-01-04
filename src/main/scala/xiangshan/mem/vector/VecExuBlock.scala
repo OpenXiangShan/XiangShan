@@ -253,7 +253,12 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
       vl.bits := writeback.bits.toVecPipelineFeedbackBundle()
       if (i == MisalignWBPort) {
         when (!writeback.valid) {
-          Connection.connectDecoupledIO(vl, fromMemExuBlock.loadMisalignBuffer.writeback)
+          Connection.connect(
+            sink        = vl,
+            source      = fromMemExuBlock.loadMisalignBuffer.writeback,
+            connectFn   = None,
+            connectName = "VecExuBlockConnectMisalignBuffer_"+i
+          )
         }
       }
   }
@@ -268,7 +273,12 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
           vs.valid := writeback.valid
           vs.bits := writeback.bits.toVecPipelineFeedbackBundle(isVStore = true)
         } .otherwise {
-          Connection.connectDecoupledIO(vs, fromMemExuBlock.storeMisalignBuffer.writeback(i))
+          Connection.connect(
+            sink        = vs,
+            source      = fromMemExuBlock.storeMisalignBuffer.writeback(i),
+            connectFn   = None,
+            connectName = "VecExuBlockConnectMisalignBuffer_"+i
+          )
         }
       }
   }
