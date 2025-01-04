@@ -122,8 +122,6 @@ trait HasMemBlockParameters extends HasXSParameter {
   val StreamDTLBPortIndex = TlbStartVec(ldIdx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(pfIdx)
   val L2toL1DLBPortIndex = TlbStartVec(pfIdx) + 1
-  val StreamPfReqIndex = LduCnt + HyuCnt + StaCnt + 1
-  val PrefetcherReqIndex = StreamPfReqIndex + 1
 }
 
 abstract class MemBlockBundle(implicit val p: Parameters) extends Bundle with HasMemBlockParameters
@@ -147,7 +145,6 @@ class BackendToMemBlockIO(implicit p: Parameters) extends MemBlockBundle {
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
 
-  val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetcher
   val storePc = Vec(StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetcher
   val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetcher
 
@@ -388,7 +385,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(RegNext(fromBackend.tlbCsr))
 
   // trigger
-  val memBlockTrigger = Wire(new CsrTriggerBundle)
+  val memTrigger = Wire(new CsrTriggerBundle)
   val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   tEnable := csrCtrl.mem_trigger.tEnableVec
@@ -397,14 +394,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
   val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
   val debugMode = csrCtrl.mem_trigger.debugMode
-  memBlockTrigger.tdataVec := tdata
-  memBlockTrigger.tEnableVec := tEnable
-  memBlockTrigger.debugMode := debugMode
-  memBlockTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
+  memTrigger.tdataVec := tdata
+  memTrigger.tEnableVec := tEnable
+  memTrigger.debugMode := debugMode
+  memTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
 
   XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
   for (j <- 0 until TriggerNum) {
     PrintTriggerInfo(tEnable(j), tdata(j))
+  }
+
+  // error
+  io.error <> DelayNWithValid(dcache.io.error, 2)
+  when(!csrCtrl.cache_error_enable){
+    io.error.bits.report_to_beu := false.B
+    io.error.valid := false.B
   }
 
   // mmu
@@ -419,21 +423,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   mmu.io.toBackend.l2TlbResp <> io.l2TlbReq.resp
   mmu.io.toBackend.l2PmpResp <> io.l2PmpResp
 
+  // prefetcher
+  val loadPc = RegNext(VecInit(fromBackend.issueLda.map(_.bits.uop.pc)))
+  prefetcher.io.fromCtrl.csr := csrCtrl
+  prefetcher.io.fromBackend.loadPc := loadPc
+  prefetcher.io.fromBackend.storePc := fromBackend.storePc
+  prefetcher.io.fromBackend.hybridPc := fromBackend.hybridPc
+  prefetcher.io.fromBackend.l2PfqBusy := io.l2PfqBusy
+  prefetcher.io.fromDCache.evict <> dcache.io.sms_agt_evict_req
+  prefetcher.io.fromDCache.pfCtrl <> dcache.io.pf_ctrl
+
    // dcache
   dcache.io.hartId := fromCtrl.hartId
   dcache.io.lqEmpty := lsq.io.lqEmpty
   dcache.io.l2_hint <> l2Hint
   dcache.io.lsu.tl_d_channel <> lsq.io.tl_d_channel
   dcache.io.force_write := lsq.io.force_write
-  dcache.io.sms_agt_evict_req <> prefetcher.io.fromDCache.evict
-  dcache.io.pf_ctrl <> prefetcher.io.fromDCache.pfCtrl
   dcache.io.l2_pf_store_only   := RegNext(fromCtrl.csr.l2_pf_store_only, false.B)
-
-  io.error <> DelayNWithValid(dcache.io.error, 2)
-  when(!csrCtrl.cache_error_enable){
-    io.error.bits.report_to_beu := false.B
-    io.error.valid := false.B
-  }
 
   // Uncache
   uncache.io.enableOutstanding := csrCtrl.uncache_write_outstanding_enable
@@ -523,6 +529,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := csrCtrl.uncache_write_outstanding_enable
   lsq.io.debugTopDown.robHeadMissInDTlb := mmu.io.robHeadMissInDTlb
   lsq.io.ldout.foreach { x => x.ready := false.B }
+  lsq.io.vecmmioStout.ready := false.B
+  lsq.io.loadMisalignFull <> memExuBlock.io.toLsq.loadMisalignFull
   toBackend.lsqio.lqCanAccept := lsq.io.lqCanAccept
   toBackend.lsqio.sqCanAccept := lsq.io.sqCanAccept
   toBackend.lsqio.mmio := lsq.io.rob.mmio
@@ -564,7 +572,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vecExuBlock.io.fromCtrl.hartId := fromCtrl.hartId
   vecExuBlock.io.fromCtrl.redirect <> redirect
   vecExuBlock.io.fromCtrl.csr := csrCtrl
-  vecExuBlock.io.fromCtrl.trigger := memBlockTrigger
+  vecExuBlock.io.fromCtrl.trigger := memTrigger
   vecExuBlock.io.fromBackend.issueVldu <> fromBackend.issueVldu
   vecExuBlock.io.toBackend.vstuIqFeedback <> toBackend.vstuIqFeedback
   vecExuBlock.io.toBackend.vlduIqFeedback <> toBackend.vlduIqFeedback
@@ -572,6 +580,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vecExuBlock.io.fromMemExuBlock <> memExuBlock.io.toVecExuBlock
   vecExuBlock.io.fromPmp := mmu.io.toMemExuBlock.pmpResp.head
   Connection.connectDecoupledIO(vecExuBlock.io.fromTlb, mmu.io.toMemExuBlock.tlbResp.head)
+  vecExuBlock.io.flushSbuffer.empty := stIsEmpty
 
   val vSegmentFlag = vecExuBlock.io.vSegmentFlag
   val vSegmentException = RegInit(false.B)
@@ -585,7 +594,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   memExuBlock.io.fromCtrl.hartId := fromCtrl.hartId
   memExuBlock.io.fromCtrl.redirect <> redirect
   memExuBlock.io.fromCtrl.csr := csrCtrl
-  memExuBlock.io.fromCtrl.trigger := memBlockTrigger
+  memExuBlock.io.fromCtrl.trigger := memTrigger
   memExuBlock.io.fromBackend.issueLda <> fromBackend.issueLda
   memExuBlock.io.fromBackend.issueSta <> fromBackend.issueSta
   memExuBlock.io.fromBackend.issueStd <> fromBackend.issueStd
@@ -600,12 +609,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   memExuBlock.io.fromLsq.mmioStWriteback <> lsq.io.mmioStout
   memExuBlock.io.fromLsq.ncOut <> lsq.io.ncOut
   memExuBlock.io.fromLsq.maControl <> lsq.io.maControl.toStoreMisalignBuffer
-  memExuBlock.io.fromUncache.zip(uncache.io.forward).foreach {case  x => x._1 <> x._2.resp }
-  memExuBlock.io.fromPmp <> VecInit(mmu.io.toMemExuBlock.pmpResp.take(MemAddrExtCnt))
+  memExuBlock.io.fromUncache.zip(uncache.io.forward.map(_.resp)).foreach {case  x => x._1 <> x._2 }
+  memExuBlock.io.fromPmp <> mmu.io.toMemExuBlock.pmpResp
   memExuBlock.io.toBackend.stIssue  <> toBackend.stIssue
   memExuBlock.io.toBackend.writebackLda <> toBackend.writebackLda
   memExuBlock.io.toBackend.writebackSta <> toBackend.writebackSta
-  memExuBlock.io.toBackend.writebackStd <> toBackend.writebackStd
   memExuBlock.io.toBackend.writebackHyuLda <> toBackend.writebackHyuLda
   memExuBlock.io.toBackend.writebackHyuSta <> toBackend.writebackHyuSta
   memExuBlock.io.toBackend.ldaIqFeedback <> toBackend.ldaIqFeedback
@@ -617,7 +625,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   memExuBlock.io.toLsq.addrUpdate <> lsq.io.sta.storeAddrIn
   memExuBlock.io.toLsq.excpUpdate <> lsq.io.sta.storeAddrInRe
   memExuBlock.io.toLsq.maskOut <> lsq.io.sta.storeMaskIn
-  memExuBlock.io.toUncache.zip(uncache.io.forward).foreach {case x => x._2.req <> x._1 }
+  memExuBlock.io.toUncache.zip(uncache.io.forward.map(_.req)).foreach {case x => x._2 <> x._1 }
   memExuBlock.io.toPrefetch.ifetch <> toFrontend.ifetchPrefetch
   memExuBlock.io.toPrefetch.train <> prefetcher.io.fromMemExuBlock.train
   memExuBlock.io.toPrefetch.trainL1 <> prefetcher.io.fromMemExuBlock.trainL1
@@ -628,8 +636,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // writeback overwrite
   toBackend.writebackStd.zip(memExuBlock.io.toBackend.writebackStd).foreach {x =>
+    x._1.valid := x._2.fire && !FuType.storeIsAMO(x._2.bits.uop.fuType)
     x._1.bits  := x._2.bits
-    x._1.valid := x._2.fire
+    x._2.ready := x._1.ready
   }
 
   // tlb requests: [[MemExuBlock]] -> [[MMU]]
@@ -643,6 +652,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
           source.req.valid -> source.req.bits
         ))
         sink.req_kill := source.req_kill // FIXME: req_kill is right?
+        source.req.ready := sink.req.ready && !vecExuTlbValid
         vecExuBlock.io.toTlb.req.ready := sink.req.ready
       } else {
         sink <> source
@@ -681,7 +691,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
           vecExuBlock.io.toDCache.req.valid -> vecExuBlock.io.toDCache.req.bits,
           source.req.valid -> source.req.bits
         ))
-        source.req.ready := sink.req.ready
+        vecExuBlock.io.toDCache.req.ready := sink.req.ready
 
         when (vSegmentFlag) {
           sink.connectSameOutPort(vecExuBlock.io.toDCache)
@@ -768,27 +778,25 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Lsq forward req: [[MemExuBlock]] -> [[Lsq]]
   lsq.io.forward.map(_.req).zip(memExuBlock.io.toLsq.forward).foreach {
     case (sink, source) =>
-      sink.valid := source.valid
-      connectSamePort(sink.bits, source.bits)
+      sink <> source
   }
 
   // Lsq forward resp: [[Lsq]] -> [[MemExuBlock]]
-  memExuBlock.io.fromLsq.forward.zip(lsq.io.forward).foreach {
+  memExuBlock.io.fromLsq.forward.zip(lsq.io.forward.map(_.resp)).foreach {
     case (sink, source) =>
-      connectSamePort(sink, source)
+      sink <> source
   }
 
   // SBuffer forward req: [[MemExuBlock]] -> [[SBuffer]]
   sbuffer.io.forward.map(_.req).zip(memExuBlock.io.toSBuffer).foreach {
     case (sink, source) =>
-      sink.valid := source.valid
-      connectSamePort(sink.bits, source.bits)
+      sink <> source
   }
 
   // SBuffer forward resp: [[SBuffer]] -> [[MemExuBlock]]
   memExuBlock.io.fromSBuffer.zip(sbuffer.io.forward.map(_.resp)).foreach {
     case (sink, source) =>
-      connectSamePort(sink, source)
+      sink <> source
   }
 
   // Lsq data in: [[MemExuBlock]] -> [[Lsq]]
@@ -811,6 +819,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // store prefetch
+  // LdExuCnt fix prefetch issue.
   val prefetchTrainReq = Seq.fill(LdExuCnt)(prefetcher.io.toMemExuBlock.trainReq) ++ sbuffer.io.store_prefetch
   memExuBlock.io.fromPrefetch.zip(prefetchTrainReq).foreach {
     case (sink, source) =>
@@ -818,7 +827,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         case load: L1PrefetchReq =>
           sink.valid := source.valid
           sink.bits.fromL1PrefetchReqBundle(load)
-          source.ready := sink.ready
         case store: StorePrefetchReq =>
           sink.valid := source.valid
           sink.bits.fromStorePrefetchReqBundle(store)
@@ -826,6 +834,33 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         case _ =>
       }
   }
+
+  /**
+    * NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+    * when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline.
+    */
+  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
+  LowConfPorts.map {case i => memExuBlock.io.fromPrefetch(i).bits.confidence := 0.U }
+  memExuBlock.io.fromPrefetch.drop(LduCnt).foreach {
+    case hyu => hyu.bits.confidence := 0.U
+  }
+
+  val canAcceptHighConfPrefetch = memExuBlock.io.toPrefetch.train.map(_.canAcceptHighConfPrefetch)
+  val canAcceptLowConfPrefetch = memExuBlock.io.toPrefetch.train.map(_.canAcceptLowConfPrefetch)
+  prefetcher.io.toMemExuBlock.trainReq.ready := (0 until LduCnt + HyuCnt).map {
+    case i => {
+      if (LowConfPorts.contains(i)) {
+        canAcceptLowConfPrefetch(i)
+      } else {
+        Mux(
+          prefetcher.io.toMemExuBlock.trainReq.bits.confidence === 1.U,
+          canAcceptHighConfPrefetch(i),
+          canAcceptLowConfPrefetch(i)
+        )
+      }
+    }
+  }.reduce(_ || _)
+
 
   // rollback: [[MemBlock]] -> [[Backend]]
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {

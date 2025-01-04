@@ -87,7 +87,7 @@ class HyuIO()(implicit p: Parameters, val params: MemUnitParams) extends MemUnit
   val toStoreMisalignBuf = OptionWrapper(params.hasStaExe, new MemUnitToMisalignBufferIO)
 
   //
-  val correctMissTrain = Input(Bool()) // TODO: remove it?
+  val correctMissTrain = OptionWrapper(params.hasLdExe, Input(Bool())) // TODO: remove it?
 
   // perf
   val debugLsInfo = Output(new DebugLsInfoBundle)
@@ -574,14 +574,14 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   val s2_pbmt = RegEnable(s1_pbmt, s1_out.fire)
 
   /**
-   * Determines whether the uop in s2 is actually uncacheable (`s2_actually_uncache`).
+   * Determines whether the uop in s2 is actually uncacheable (`s2_actuallyUncache`).
    * Conditions:
    * 1. The uop is a PMA (Physical Memory Attribute) uop according to the Pbmt (Page-based Memory Translation)
    *    and it is an MMIO uop (`Pbmt.isPMA(s2_pbmt) && fromPmp.mmio`).
    * 2. The uop is marked as non-cacheable (`s2_in.bits.isNoncacheable`).
    * 3. The uop is an MMIO (Memory-Mapped I/O) uop (`s2_in.bits.mmio`).
    */
-  val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && fromPmp.mmio || s2_in.bits.isNoncacheable || s2_in.bits.mmio
+  val s2_actuallyUncache = Pbmt.isPMA(s2_pbmt) && fromPmp.mmio || s2_in.bits.isNoncacheable || s2_in.bits.mmio
 
   /**
    * Determines whether the uop in s2 is a real MMIO uop (`s2_realMmio`).
@@ -601,7 +601,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // from dcache
   val s2_dcacheShouldResp = !(s2_in.bits.tlbMiss || s2_hasException || s2_in.bits.delayedError ||
-    s2_actually_uncache || s2_in.bits.isPrefetch)
+    s2_actuallyUncache || s2_in.bits.isPrefetch)
   XSError((s2_in.valid && s2_dcacheShouldResp && !fromDCache.resp.valid), "DCache response got lost")
 
   /**
@@ -707,7 +707,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   if (!env.FPGAPlatform) {
     toDCache.s2_pc := s2_in.bits.uop.pc
   }
-  toDCache.s2_kill := fromPmp.ld || fromPmp.st || s2_actually_uncache || s2_kill || s2_hasException
+  toDCache.s2_kill := fromPmp.ld || fromPmp.st || s2_actuallyUncache || s2_kill || s2_hasException
 
   // to Backend
   toBackend.iqFeedback <> feedbackGen.io.toBackend.iqFeedback
@@ -768,6 +768,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // to store misalign buffer
   feedbackGen.io.toStoreMisalignBuf.enq.ready := false.B
+  feedbackGen.io.toStoreMisalignBuf.out.map(_.ready := false.B)
   if (toStoreMisalignBuf.isDefined) {
     // enq
     toStoreMisalignBuf.get.enq <> feedbackGen.io.toStoreMisalignBuf.enq
@@ -1057,6 +1058,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // to load misalign buffer
   feedbackGen.io.toLoadMisalignBuf.enq.ready := false.B
+  feedbackGen.io.toLoadMisalignBuf.out.map(_.ready := false.B)
   if (toLoadMisalignBuf.isDefined) {
     // enq
     toLoadMisalignBuf.get.enq <> feedbackGen.io.toLoadMisalignBuf.enq
@@ -1072,7 +1074,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // to prefetch
   if (toPrefetch.train.isDefined) {
     val toPrfTrain = toPrefetch.train.get
-    val s2_pfTrainValid = s2_in.valid && !s2_actually_uncache && (!s2_in.bits.tlbMiss || s2_in.bits.isHWPrefetch)
+    val s2_pfTrainValid = s2_in.valid && !s2_actuallyUncache && (!s2_in.bits.tlbMiss || s2_in.bits.isHWPrefetch)
     toPrfTrain.req.valid := GatedValidRegNext(s2_pfTrainValid)
     toPrfTrain.req.bits.fromLsPipelineBundle(s2_in.bits, latch = true, enable = s2_pfTrainValid)
     toPrfTrain.req.bits.miss := RegEnable(fromDCache.resp.bits.miss, s2_pfTrainValid)
@@ -1082,7 +1084,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   if (toPrefetch.trainL1.isDefined) {
     val toPrfTrainL1 = toPrefetch.trainL1.get
-    val s2_pfTrainL1Valid = s2_in.valid && !s2_actually_uncache
+    val s2_pfTrainL1Valid = s2_in.valid && !s2_actuallyUncache
     toPrfTrainL1.req.valid := GatedValidRegNext(s2_pfTrainL1Valid)
     toPrfTrainL1.req.bits.fromLsPipelineBundle(s2_in.bits, latch = true, enable = s2_pfTrainL1Valid)
     toPrfTrainL1.req.bits.miss := RegEnable(fromDCache.resp.bits.miss, s2_pfTrainL1Valid)
@@ -1123,6 +1125,10 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   feedbackGen.io.s3_in.bits.uop.exceptionVec := exceptionGen.io.commonOut.s3_exceptionVecOut
   Connection.connectValidIO(feedbackGen.io.fromTlb, fromTlb.resp)
   feedbackGen.io.fromPmp <> fromPmp
+  feedbackGen.io.toBackend.writeback <> toBackend.writeback
+
+  // common in ports
+  feedbackGen.io.commonIn := DontCare
   feedbackGen.io.commonIn.s3_wbPort := Mux(s3_in.valid, s3_wbPort, s3_mmioWbPort)
   feedbackGen.io.commonIn.s3_canFastReplay := s3_canFastReplay
   feedbackGen.io.commonIn.s3_fastReplayCancelled := s3_fastReplayCanclled
@@ -1130,7 +1136,6 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   feedbackGen.io.commonIn.s3_flushPipe := s3_flushPipe
   feedbackGen.io.commonIn.s3_fromMisalignFlush := s3_fromMisalignFlush
   feedbackGen.io.commonIn.s3_hasException := s3_hasException
-  feedbackGen.io.toBackend.writeback <> toBackend.writeback
 
   if (fromLsq.isDefined) {
     feedbackGen.io.fromLsq.mmioLdWriteback <> fromLsq.get.mmioLdWriteback
@@ -1141,6 +1146,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // Forward network
   forwardNetwork.foreach {
     case mod =>
+      Connection.connectValidIO(mod.io.s0_in, s0_out)
       Connection.connectValidIO(mod.io.s1_in, s1_in)
       Connection.connectValidIO(mod.io.s2_in, s2_in)
       Connection.connectValidIO(mod.io.s3_in, s3_in)
@@ -1193,7 +1199,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   replayCauseGen.io.s1_in.bits.paddr := s1_paddrDupLsu
 
   Connection.connectValidIO(replayCauseGen.io.s2_in, s2_in)
-  replayCauseGen.io.s2_in.bits.isNoncacheable := s2_actually_uncache
+  replayCauseGen.io.s2_in.bits.isNoncacheable := s2_actuallyUncache
 
   Connection.connectValidIO(replayCauseGen.io.s3_in, s3_in)
   Connection.connectValidIO(replayCauseGen.io.fromTlb, fromTlb.resp)
@@ -1254,7 +1260,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Determine whether the RAW enqueue request can be accepted, default is false.
     */
   if (toLsq.rawNuke.isDefined) {
-    replayCauseGen.io.fromLsq.rarNack := toLsq.rawNuke.get.req.valid && !toLsq.rawNuke.get.req.ready
+    replayCauseGen.io.fromLsq.rawNack := toLsq.rawNuke.get.req.valid && !toLsq.rawNuke.get.req.ready
   } else {
     replayCauseGen.io.fromLsq.rawNack := false.B
   }

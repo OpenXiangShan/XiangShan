@@ -38,7 +38,7 @@ import xiangshan.cache.mmu._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 
-class FromMemExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockParameters {
+class MemExuBlockToVecExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockParameters {
   val vldWriteback = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
   val vstWriteback = Vec(StorePipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
   val loadMisalignBuffer = new Bundle() {
@@ -52,7 +52,7 @@ class FromMemExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBloc
   val storePipeEmpty = Input(Vec(HyuCnt + StaCnt, Bool()))
 }
 
-class ToMemExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockParameters {
+class VecExuBlockToMemExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockParameters {
   val vectorLoadIssues = Vec(VlduCnt, DecoupledIO(new LsPipelineBundle))
   val vectorStoreIssues = Vec(VstuCnt, DecoupledIO(new LsPipelineBundle))
 }
@@ -68,7 +68,7 @@ class VecExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockPar
   val fromBackend = new Bundle() {
     val issueVldu = MixedVec(Seq.fill(VlduCnt)(Flipped(DecoupledIO(new MemExuInput(isVector=true)))))
   }
-  val fromMemExuBlock = new FromMemExuBlockIO
+  val fromMemExuBlock = new MemExuBlockToVecExuBlockIO
   val fromDCache = new DCacheLoadRespIO
   val fromTlb = Flipped(DecoupledIO(new TlbResp(2)))
   val fromPmp = Flipped(new PMPRespBundle())
@@ -84,7 +84,7 @@ class VecExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockPar
     val stvecFeedback = Vec(VecStorePipelineWidth, ValidIO(new FeedbackToLsqIO))
     val vstd = Vec(VstuCnt, ValidIO(new MemExuOutput(isVector = true)))
   }
-  val toMemExuBlock = new ToMemExuBlockIO
+  val toMemExuBlock = new VecExuBlockToMemExuBlockIO
   val toDCache = new DCacheLoadReqIO
   val toTlb = new Bundle() {
     val req = DecoupledIO(new TlbReq)

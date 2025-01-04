@@ -146,7 +146,7 @@ class MemExuBlockIO(implicit p: Parameters) extends MemBlockBundle {
   }
 
   val fromBackend = new BackendToMemExuBlockIO
-  val fromVecExuBlock = Flipped(new ToMemExuBlockIO)
+  val fromVecExuBlock = Flipped(new VecExuBlockToMemExuBlockIO)
   val fromLsq = Flipped(new LsqToMemExuBlockIO)
   val fromTlb = Vec(MemAddrExtCnt, new Bundle() {
     val resp = Flipped(DecoupledIO(new TlbResp(2)))
@@ -154,7 +154,7 @@ class MemExuBlockIO(implicit p: Parameters) extends MemBlockBundle {
   })
   val fromUncache = Vec(LdExuCnt, Input(new LoadForwardRespBundle))
   val fromSBuffer = Vec(LdExuCnt, Input(new LoadForwardRespBundle))
-  val fromMissQueue  = Vec(LdExuCnt, Flipped(new MissQueueForwardRespBundle))
+  val fromMissQueue = Vec(LdExuCnt, Flipped(new MissQueueForwardRespBundle))
   val fromTL = Vec(LdExuCnt, Input(new DcacheToLduForwardIO))
   val fromDCache = Vec(MemAddrExtCnt, new DCacheLoadRespIO)
   val fromPmp = Vec(MemAddrExtCnt,  Flipped(new PMPRespBundle()))
@@ -162,7 +162,7 @@ class MemExuBlockIO(implicit p: Parameters) extends MemBlockBundle {
 
   // to
   val toBackend = new MemExuBlockToBackendIO
-  val toVecExuBlock = Flipped(new FromMemExuBlockIO)
+  val toVecExuBlock = Flipped(new MemExuBlockToVecExuBlockIO)
   val toLsq = new MemExuBlockToLsqIO
   val toUncache = Vec(LdExuCnt, ValidIO(new LoadForwardReqBundle))
   val toDCache = Vec(MemAddrExtCnt, new DCacheLoadReqIO)
@@ -258,7 +258,9 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       if (impl.io.fromCtrl.trigger.isDefined) {
         impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
       }
-      impl.io.correctMissTrain := correctMissTrain
+      if (impl.io.correctMissTrain.isDefined) {
+        impl.io.correctMissTrain.get := correctMissTrain
+      }
 
     case _ =>
   }
@@ -272,7 +274,9 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       if (impl.io.fromCtrl.trigger.isDefined) {
         impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
       }
-      impl.io.correctMissTrain := correctMissTrain
+      if (impl.io.correctMissTrain.isDefined) {
+        impl.io.correctMissTrain.get := correctMissTrain
+      }
 
     case _ =>
   }
@@ -350,6 +354,17 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
+  }
+
+  totalLdUnits.foreach {
+    case ldu =>
+      ldu.io.fromSta.foreach {
+        case nukeQuery =>
+          nukeQuery.zip(totalStaUnits.map(_.io.toLdu.nukeQuery).filter(_.isDefined)).foreach {
+            case (sink, source) =>
+              sink <> source.get
+          }
+      }
   }
 
   // ldu issue
@@ -879,13 +894,15 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     issue.valid && FuType.storeIsAMO(issue.bits.uop.fuType)
   )
   val backendStaFeedback = toBackend.hyuIqFeedback ++ toBackend.staIqFeedback
-  val atomicsExceptionInfo = WireInit(VecInit(Seq.fill(amoUnitImps.length)(0.U.asTypeOf(ValidIO(new ExceptionAddrIO)))))
+  val atomicsExceptionInfo = RegInit(VecInit(Seq.fill(amoUnitImps.length)(0.U.asTypeOf(ValidIO(new ExceptionAddrIO)))))
+  io.atomicsExceptionInfo := DontCare
 
   amoUnitImps.zipWithIndex.foreach {
     case (impl: AmoImp, i) =>
       // Tlb
       impl.io.fromTlb.resp.valid := false.B
       impl.io.fromTlb.resp.bits  := DontCare
+      impl.io.fromTlb.hint := DontCare
       impl.io.toTlb.req.ready := tlbReqs.head.req.ready
       impl.io.fromPmp <> pmpResps.head
 
@@ -914,7 +931,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       backendStaFeedback.zip(memUnitStaFeedbacks).zip(s_atomics).foreach {
         case ((sink, source), amoState) =>
           when(state === amoState) {
-            sink.feedbackFast <> impl.io.toBackend.iqFeedback.feedbackFast
+            sink.feedbackFast <> impl.io.toBackend.iqFeedback.feedbackSlow
             assert(!source.feedbackFast.valid && !source.feedbackFast.bits.isLoad)
           }
       }
@@ -943,7 +960,6 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         atomicsExceptionInfo(i).valid := true.B
         atomicsExceptionInfo(i).bits := impl.io.exceptionInfo.bits
       }
-      io.atomicsExceptionInfo := DontCare
       io.atomicsExceptionInfo := atomicsExceptionInfo(i)
   }
 
@@ -1056,6 +1072,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       if (i == 0) {
         when (mmioStWriteback.valid && !source.valid) {
           sink <> mmioStWriteback
+          mmioStWriteback.ready := true.B
         } .elsewhen (storeMisalignCanWriteBack) {
           sink <> storeMisalignBuffer.io.writeBack
         }

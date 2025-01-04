@@ -76,7 +76,8 @@ class MemMMUIO(implicit p: Parameters) extends XSBundle with HasMemBlockParamete
     val hint = Vec(MemAddrExtCnt, new TlbHintReq)
   }
   val toPrefetch = new Bundle() {
-    val tlbResp = Vec(MemAddrExtCnt, DecoupledIO(new TlbResp(2)))
+    val tlbResp = Vec(2, DecoupledIO(new TlbResp(2)))
+    val pmpResp = Vec(2, new PMPRespBundle())
   }
   val tlbHint = new TlbHintIO
   val robHeadVaddr = Input(Valid(UInt(VAddrBits.W)))
@@ -130,7 +131,7 @@ class MemMMU(implicit p: Parameters) extends LazyModule
 
     // tlb
     val tlbs = (ldTlb ++ stTlb ++ pfTlb).map(_.io)
-    val tlbReqs = tlbs.map(_.requestor).flatten
+    val tlbRequestors = tlbs.map(_.requestor).flatten
     tlbs.map(_.hartId := fromCtrl.hartId)
     tlbs.map(_.sfence := sfence)
     tlbs.map(_.csr := tlbcsr)
@@ -240,41 +241,27 @@ class MemMMU(implicit p: Parameters) extends LazyModule
     }
 
     // pmp
-    pmp.io.distribute_csr <> fromCtrl.csr.distribute_csr
     pmpCheckers.zip(tlbs.map(_.pmp).flatten).foreach {
       case (p, tlb) =>
         p.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, tlb)
         require(p.io.req.bits.size.getWidth == tlb.bits.size.getWidth)
     }
-
-    // l2 tlb request
-    tlbReqs(L2toL1DLBPortIndex).req <> fromBackend.l2TlbReq.req
-    tlbReqs(L2toL1DLBPortIndex).req_kill <> fromBackend.l2TlbReq.req_kill
-    toBackend.l2TlbResp <> tlbReqs(L2toL1DLBPortIndex).resp
-    toBackend.l2PmpResp <> pmpCheckers(L2toL1DLBPortIndex).io.resp
-    tlbReqs(L2toL1DLBPortIndex).resp.ready := true.B
-
-    // prefetch requests
-    tlbReqs(PrefetcherDTLBPortIndex).req <> fromPrefetch.tlbReq(0).req
-    tlbReqs(PrefetcherDTLBPortIndex).req_kill <> fromMemExuBlock.tlbReq(0).req_kill
-    toPrefetch.tlbResp(0) <> tlbReqs(PrefetcherDTLBPortIndex).resp
-
-    tlbReqs(StreamDTLBPortIndex).req <> fromMemExuBlock.tlbReq(1).req
-    tlbReqs(StreamDTLBPortIndex).req_kill <> fromMemExuBlock.tlbReq(1).req_kill
-    toPrefetch.tlbResp(1) <> tlbReqs(StreamDTLBPortIndex).resp
+    pmp.io.distribute_csr <> fromCtrl.csr.distribute_csr
 
     // mem execute block tlb requests
-    tlbReqs.zip(fromMemExuBlock.tlbReq).foreach {
+    tlbRequestors.patch(StreamDTLBPortIndex, Nil, 1).zip(fromMemExuBlock.tlbReq).foreach {
       case (sink, source) =>
         sink.req <> source.req
         sink.req_kill <> source.req_kill
     }
 
     // tlb responses
-    toMemExuBlock.tlbResp.zip(tlbReqs).foreach {
+    toMemExuBlock.tlbResp.zip(tlbRequestors.patch(StreamDTLBPortIndex, Nil, 1)).foreach {
       case (sink, source) =>
+        sink.valid := source.resp.valid
+        source.resp.ready := sink.ready
+
         if (source.resp.bits.paddr.length == 1) {
-          sink.valid := source.resp.valid
           sink.bits.paddr.foreach {
             case paddr => paddr := source.resp.bits.paddr(0)
           }
@@ -296,15 +283,34 @@ class MemMMU(implicit p: Parameters) extends LazyModule
           sink.bits.memidx := source.resp.bits.memidx
           sink.bits.debug := source.resp.bits.debug
         } else {
-          sink <> source.resp
+          sink.bits := source.resp.bits
         }
     }
 
     // pmp responses
-    toMemExuBlock.pmpResp.zip(pmpCheckers.map(_.io.resp)).foreach {
+    toMemExuBlock.pmpResp.zip(pmpCheckers.map(_.io.resp).patch(StreamDTLBPortIndex, Nil, 1)).foreach {
       case (sink, source) =>
         sink <> source
     }
+
+    // prefetch requests
+    tlbRequestors(PrefetcherDTLBPortIndex).req <> fromPrefetch.tlbReq(0).req
+    tlbRequestors(PrefetcherDTLBPortIndex).req_kill <> fromMemExuBlock.tlbReq(0).req_kill
+    toPrefetch.tlbResp(0) <> tlbRequestors(PrefetcherDTLBPortIndex).resp
+    toPrefetch.pmpResp(0) <> pmpCheckers(PrefetcherDTLBPortIndex).io.resp
+
+    // stream request
+    tlbRequestors(StreamDTLBPortIndex).req <> fromPrefetch.tlbReq(1).req
+    tlbRequestors(StreamDTLBPortIndex).req_kill <> fromPrefetch.tlbReq(1).req_kill
+    toPrefetch.tlbResp(1) <> tlbRequestors(StreamDTLBPortIndex).resp
+    toPrefetch.pmpResp(1) <> pmpCheckers(StreamDTLBPortIndex).io.resp
+
+    // l2 tlb request
+    tlbRequestors(L2toL1DLBPortIndex).req <> fromBackend.l2TlbReq.req
+    tlbRequestors(L2toL1DLBPortIndex).req_kill <> fromBackend.l2TlbReq.req_kill
+    toBackend.l2TlbResp <> tlbRequestors(L2toL1DLBPortIndex).resp
+    toBackend.l2PmpResp <> pmpCheckers(L2toL1DLBPortIndex).io.resp
+    tlbRequestors(L2toL1DLBPortIndex).resp.ready := true.B
 
     // topdown
     dtlbRepeater.io.debugTopDown.robHeadVaddr := io.robHeadVaddr
