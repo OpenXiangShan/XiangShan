@@ -167,8 +167,8 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     * requires vector to be active and not to involve a
     * misalignment within 16 bytes
     */
-  val s0_loadAddrMisaligned = s0_in.bits.isLoad && (!s0_addrAligned || s0_in.bits.uop.exceptionVec(loadAddrMisaligned)) &&
-    s0_in.bits.vecActive && !s0_misalignWith16Bytes
+  val s0_loadAddrMisaligned = (!s0_addrAligned || s0_in.bits.uop.exceptionVec(loadAddrMisaligned)) &&
+    s0_in.bits.vecActive && !s0_misalignWith16Bytes && s0_in.bits.isLoad
 
   catchException(s0_exceptionVecOut, loadAddrMisaligned, s0_loadAddrMisaligned)
 
@@ -270,10 +270,11 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
       *   1. PMP (Physical Memory Protection) load violation occurs (fromPmp.ld).
       *   2. The exception vector indicates a load access fault (exceptionCatched).
       *   3. The uop is a vector load or uses the misalignment buffer (isVector || isMisalignBuf),
-      *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB (Translation Lookaside Buffer) miss.
+      *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB miss.
       */
-    val s2_loadAccessFault = s2_in.bits.vecActive && (fromPmp.ld || exceptionCatched(s2_exceptionVecIn, loadAccessFault) ||
-      (s2_in.bits.isVector || s2_in.bits.isMisalignBuf) && s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch && !s2_in.bits.tlbMiss
+    val s2_loadAccessFault = (fromPmp.ld || exceptionCatched(s2_exceptionVecIn, loadAccessFault) ||
+      (s2_in.bits.isVector || s2_in.bits.isMisalignBuf) && s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch &&
+      !s2_in.bits.tlbMiss && s2_in.bits.vecActive
     )
     catchException(s2_exceptionVecOut, loadAccessFault, s2_loadAccessFault)
 
@@ -297,13 +298,14 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
   when (s2_in.bits.isStore) {
     /**
       * Determine if a store access fault occurred in s2.
-      * A store access fault can occur under specific conditions when vector operations or misaligned buffer operations are active.
+      * A store access fault can occur under specific conditions when vector operations or misaligned buffer operations
+      * are active.
       * Conditions for store access fault:
       * - The vector uop is active (s2_in.bits.vecActive), and one of the following is true:
       *   1. PMP (Physical Memory Protection) store violation occurs (fromPmp.st).
       *   2. The exception vector indicates a store access fault.
       *   3. The uop is a vector load or uses the misalignment buffer (isVector || isMisalignBuf),
-      *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB (Translation Lookaside Buffer) miss.
+      *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB miss.
       */
     val s2_storeAccessFault = s2_in.bits.vecActive && (fromPmp.st ||
         exceptionCatched(s2_exceptionVecIn, storeAccessFault) ||
@@ -328,7 +330,8 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
   val s3_exceptionVecOut = WireInit(s3_exceptionVecIn)
 
   // handle loadAccessFault
-  val s3_loadAccessFault = (s3_in.bits.delayedError || exceptionCatched(s3_exceptionVecIn, loadAccessFault)) && s3_in.bits.vecActive
+  val s3_loadAccessFault = (s3_in.bits.delayedError || exceptionCatched(s3_exceptionVecIn, loadAccessFault)) &&
+    s3_in.bits.vecActive
   catchException(s3_exceptionVecOut, loadAccessFault, s3_loadAccessFault)
 
   // handle hardwareError
