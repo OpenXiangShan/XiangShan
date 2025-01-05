@@ -21,12 +21,13 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
-import utils.{GTimer, FileRegisters}
+import utils.{FileRegisters, GTimer, HardenXSPerfAccumulate}
 import xiangshan.{DebugOptions, DebugOptionsKey}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import utils.HardenXSPerfAccumulate.generateCppParser
 import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
@@ -124,10 +125,13 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(io.perfInfo.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(io.perfInfo.dump) else WireDefault(false.B)
 
+  lazy val io_perf = HardenXSPerfAccumulate.reclaim()
+
   dontTouch(timer)
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
+  dontTouch(io_perf)
 }
 
 object SimTop extends App {
