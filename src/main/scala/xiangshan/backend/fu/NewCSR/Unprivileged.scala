@@ -153,7 +153,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
     // Update when rtc clock tick and not dcsr.STOPTIME
     // or virtual mode changed
-    when(mHPM.time.valid && !debugModeStopTime || this.nextV =/= this.v) {
+    // Note: we delay a cycle and use `v` for better timing
+    val virtModeChanged = RegNext(nextV =/= v, false.B)
+    when(mHPM.time.valid && !debugModeStopTime || virtModeChanged) {
       reg.time := Mux(v, vstimeTmp, stimeTmp)
     }.otherwise {
       reg := reg
