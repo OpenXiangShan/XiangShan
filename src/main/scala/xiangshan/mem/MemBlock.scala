@@ -647,7 +647,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sink.valid := source.fire && !FuType.storeIsAMO(source.bits.uop.fuType)
       sink.bits := source.bits
       source.ready := sink.ready
-    })
+    }),
     connectName = "MemExuBlock writeback to backend"
   )
 
@@ -753,9 +753,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // TLD forward req: [[TL D channel]] -> [[MemExuBlock]]
-  Connect.connect(
-    sinkSeq = memExuBlock.io.fromTL,
-    sourceSeq = dcache.io.lsu.forward_D,
+  Connection.connect(
+    sinkSeq     = memExuBlock.io.fromTL,
+    sourceSeq   = dcache.io.lsu.forward_D,
     connectName = "MemExuBlock forward from TL"
   )
 

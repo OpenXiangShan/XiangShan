@@ -335,6 +335,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
+      sink.bits.isIq := true.B
+      sink.bits.isFirstIssue := true.B
     }),
     connectName = "StdUnits issues"
   )
@@ -347,6 +349,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       sink.valid := source.valid
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
+      sink.bits.isIq := true.B
+      sink.bits.isFirstIssue := true.B
     }),
     connectName = "StaUnits issues"
   )
@@ -371,8 +375,9 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
-      sink.bits.fromMemExuInputBundle(source.bits)
+      sink.bits.fromMemExuInputBundle(source.bits, isStore = false)
       sink.bits.isIq := true.B
+      sink.bits.isFirstIssue := true.B
     }),
     connectName = "LdUnits/HyUnits issues"
   )
@@ -463,17 +468,40 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).foreach {
     case sink =>
       Connection.connect(
-        sinkSeq   = Seq(sink.get.mmioLdWriteback),
-        sourceSeq = Seq(fromLsq.mmioLdWriteback)
+        sinkSeq     = Seq(sink.get.mmioLdWriteback),
+        sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+        connectName = "MMIO writeback"
       )
       sink.get.mmioLdData <> fromLsq.mmioLdData
+    case _ =>
   }
+
+  // mmio reqs: `Lsq` -> `MemUnit`
+  Connection.connect(
+    sinkSeq     = totalLdUnits.map(_.getMmioIssues()).flatten,
+    sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuOutput]) => {
+      sink.valid := source.valid
+      source.ready := sink.ready
+      sink.bits.fromMemExuOutputBundle(source.bits)
+      sink.bits.clearIssueState()
+      sink.bits.mmio := true.B
+      sink.bits.isMmio := true.B
+    }),
+    connectName = "MMIO issue"
+  )
 
   // nc reqs: `Lsq` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getUncacheIssues()).flatten,
     sourceSeq   = fromLsq.ncOut,
-    connectName = "Noncache issues"
+    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
+      sink <> source
+      sink.bits.clearIssueState()
+      sink.bits.isNoncacheable := true.B
+      sink.bits.nc := true.B
+    }),
+    connectName = "Noncacheable issues"
   )
 
   // lsq replay reqs: `Lsq` -> `MemUnit`

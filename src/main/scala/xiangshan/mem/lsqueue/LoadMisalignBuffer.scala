@@ -478,9 +478,13 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitLoadReq.valid := req_valid && (bufferState === s_req || bufferState === s_comb_wakeup_rep && needWakeUpReqsWire && !req.isVector)
   io.splitLoadReq.bits  := splitLoadReqs(curPtr)
-  io.splitLoadReq.bits.isVector  := req.isVector
   io.splitLoadReq.bits.misalignNeedWakeUp  := needWakeUpReqsWire
   io.splitLoadReq.bits.isFinalSplit        := curPtr(0) && !needWakeUpReqsWire
+  io.splitLoadReq.bits.clearIssueState()
+  io.splitLoadReq.bits.isVector := req.isVector
+  io.splitLoadReq.bits.isStore := false.B
+  io.splitLoadReq.bits.isMisalignBuf := true.B
+
   // Restore the information of H extension load
   // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
   val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)

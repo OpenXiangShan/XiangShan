@@ -204,13 +204,13 @@ class FeedbackGen(implicit p: Parameters, params: MemUnitParams) extends XSModul
    * 3. The uop is not misaligned (`!s2_in.bits.misalign`).
    * 4. The uop is load (`s2_in.bits.isLoad`).
    * 5. The uop is either non-cacheable or explicitly marked as non-cacheable
-   *    (`!s2_in.bits.isNoncacheable || s2_in.bits.isNoncacheable`).
+   *    (`!s2_in.bits.nc || s2_in.bits.isNoncacheable`).
    * 6. The debug mode is triggered (`fromCtrl.triggerDebugMode`) or there is an exception
    *    present (`s2_in.bits.hasException`).
    * 7. The vector uop is active (`s2_in.bits.vecActive`).
    */
   val s2_safeWakeup = !s2_in.bits.needReplay && s2_in.bits.mmio && !s2_in.bits.misalign && s2_in.bits.isLoad
-    (!s2_in.bits.isNoncacheable || s2_in.bits.isNoncacheable) &&
+    (!s2_in.bits.nc || s2_in.bits.isNoncacheable) &&
     (fromCtrl.trigger.debugMode || s2_in.bits.hasException) && s2_in.bits.vecActive
 
   // Pipeline
@@ -249,6 +249,9 @@ class FeedbackGen(implicit p: Parameters, params: MemUnitParams) extends XSModul
   toLdu.replay.valid := s3_in.valid && s3_canFastReplay
   toLdu.replay.bits := s3_in.bits
   toLdu.replay.bits.delayedError := s3_in.bits.delayedError
+  toLdu.replay.bits.clearIssueState()
+  toLdu.replay.bits.isFastReplay := true.B
+  toLdu.replay.bits.isStore := false.B
 
   // to load misalign buffer enq
   /**

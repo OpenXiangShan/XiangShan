@@ -504,7 +504,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
     replay_req(i).bits.uop.exceptionVec(loadAddrMisaligned) := false.B
-    replay_req(i).bits.isVector     := s2_vecReplay.isvec
     replay_req(i).bits.lastElem     := s2_vecReplay.isLastElem
     replay_req(i).bits.is128bit     := s2_vecReplay.is128bit
     replay_req(i).bits.uopUnitStrideFof := s2_vecReplay.uop_unit_stride_fof
@@ -527,6 +526,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.forwardTLDchannel := s2_replayCauses(ReplayCauseNO.C_DM)
     replay_req(i).bits.schedIdx   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
+    replay_req(i).bits.clearIssueState()
+    replay_req(i).bits.isVector := s2_vecReplay.isvec
+    replay_req(i).bits.isStore := false.B
+    replay_req(i).bits.isLoadReplay := true.B
 
     XSError(replay_req(i).fire && !allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
   }

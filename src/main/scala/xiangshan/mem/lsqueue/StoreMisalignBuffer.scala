@@ -504,7 +504,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.splitStoreReq.valid := req_valid && (bufferState === s_req)
   io.splitStoreReq.bits  := splitStoreReqs(curPtr)
-  io.splitStoreReq.bits.isVector  := req.isVector
+  io.splitStoreReq.bits.clearIssueState()
+  io.splitStoreReq.bits.isVector := req.isVector
+  io.splitStoreReq.bits.isStore := true.B
+  io.splitStoreReq.bits.isMisalignBuf := true.B
+
   // Restore the information of H extension store
   // bit encoding: | hsv 1 | store 00 | size(2bit) |
   val reqIsHsv  = LSUOpType.isHsv(req.uop.fuOpType)
