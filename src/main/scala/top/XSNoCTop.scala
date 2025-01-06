@@ -111,6 +111,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
       val riscv_critical_error = Output(Bool())
+      val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
       val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
       val chi = new PortIO
@@ -163,6 +164,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
+    core_with_l2.module.io.hartResetReq := io.hartResetReq
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
     // trace Interface
