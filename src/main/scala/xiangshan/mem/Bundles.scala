@@ -106,6 +106,7 @@ object Bundles {
     val ptwBack             = Bool()
     val af                  = Bool()
     val mmio                = Bool()
+    val nc                  = Bool()
     val memBackTypeMM       = Bool() // 1: main memory, 0: IO
     val atomic              = Bool()
     val wlineflag           = Bool() // store write the whole cache line
@@ -189,6 +190,21 @@ object Bundles {
     def isLoad: Bool  = !isStore
 
     def needReplay: Bool  = ReplayCauseNO.needReplay(cause)
+
+    def clearIssueState() = {
+      this.isVector       := false.B
+      this.isStore        := false.B
+      this.isIq           := false.B
+      this.isMisalignBuf  := false.B
+      this.isHWPrefetch   := false.B
+      this.isLoadReplay   := false.B
+      this.isFastReplay   := false.B
+      this.isMmio         := false.B
+      this.isNoncacheable := false.B
+      this.isFastPath     := false.B
+      this.mmio           := false.B
+      this.nc             := false.B
+    }
 
     def fromMemExuInputBundle(input: MemExuInput, isStore: Boolean = false) = {
       this          := 0.U.asTypeOf(this)
@@ -325,6 +341,7 @@ object Bundles {
 
     def fromL1PrefetchReqBundle(input: L1PrefetchReq) = {
       this              := 0.U.asTypeOf(this)
+      this.clearIssueState()
       this.paddr        := input.paddr
       this.vaddr        := input.getVaddr()
       this.isStore      := input.is_store
