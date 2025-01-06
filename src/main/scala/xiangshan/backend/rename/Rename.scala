@@ -293,7 +293,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
      * Signal "isCsrr" contains not only "CSRR", but also other CSR instructions that do not require writing to CSR.
      */
     uops(i).waitForward := io.in(i).bits.waitForward && !isRoCsrr(i)
-    uops(i).blockBackward := io.in(i).bits.blockBackward && !isRoCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
