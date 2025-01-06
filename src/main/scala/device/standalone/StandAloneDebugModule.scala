@@ -65,7 +65,7 @@ class StandAloneDebugModule (
     withClockAndReset(io.clock.asClock, io.reset.asAsyncReset) {
       outer.debugModule.module.io.resetCtrl.hartIsInReset := AsyncResetSynchronizerShiftReg(io.resetCtrl.hartIsInReset, 3, 0)
       io.resetCtrl.hartResetReq.foreach(req =>
-        req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.get, 0.U.asTypeOf(req)))
+        req := RegNext(outer.debugModule.module.io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(req)), 0.U.asTypeOf(req)))
     }
   }
 
