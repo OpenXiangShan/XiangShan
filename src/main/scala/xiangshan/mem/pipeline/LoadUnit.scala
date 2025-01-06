@@ -292,8 +292,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // src 9: load try pointchaising when no issued or replayed load (io.fastpath)
   // src10: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // priority: high to low
-  val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.robIdx, io.ldin.bits.uop.robIdx) ||
-                               io.vecldin.valid && isAfter(io.replay.bits.uop.robIdx, io.vecldin.bits.uop.robIdx)
+  val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.uop.lqIdx) ||
+                               io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
   private val SRC_NUM = 11
   private val Seq(
     mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, nc_idx, lsq_rep_idx,
