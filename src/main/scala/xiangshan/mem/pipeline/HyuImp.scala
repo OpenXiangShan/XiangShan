@@ -337,6 +337,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   s0_out.bits.misalignNeedWakeUp := s0_selOut.bits.isMisalignBuf && s0_selOut.bits.misalignNeedWakeUp
   s0_out.bits.misalignWith16Bytes := exceptionGen.io.commonOut.s0_misalignWith16Bytes
   s0_out.bits.isFinalSplit := exceptionGen.io.commonOut.s0_isFinalSplit
+  s0_out.bits.nc := s0_selOut.bits.isNoncacheable || s0_selOut.bits.nc
 
   // Debug info
   when (s0_out.valid && s0_out.bits.isFirstIssue) {
@@ -479,7 +480,11 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * 3. The uop is a prefetch (`s1_in.bits.isPrefetch`).
    * 4. An exception is present in stage 1 (`s1_hasException`).
    */
-  val s1_noNeedForward = s1_out.bits.tlbMiss || s1_in.bits.isStore || s1_in.bits.isPrefetch || s1_hasException
+  val s1_noNeedForward = s1_out.bits.tlbMiss ||
+    s1_in.bits.isStore ||
+    s1_in.bits.isPrefetch ||
+    s1_out.bits.mmio ||
+    s1_hasException
 
   // to prefetch
   if (toPrefetch.train.isDefined) {
@@ -541,7 +546,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   s1_out.bits.ptwBack := s1_ptwBack
   s1_out.bits.delayedError := s1_delayedError
   s1_out.bits.misalign := exceptionGen.io.commonOut.s1_misalign
-  s1_out.bits.isNoncacheable := s1_in.bits.isNoncacheable || Pbmt.isNC(s1_pbmt)
+  s1_out.bits.nc := s1_in.bits.nc || Pbmt.isNC(s1_pbmt)
   s1_out.bits.mmio := LSUOpType.isCbo(s1_in.bits.uop.fuOpType) || Pbmt.isIO(s1_pbmt)
   s1_out.bits.atomic := LSUOpType.isCbo(s1_in.bits.uop.fuOpType) || Pbmt.isIO(s1_pbmt)
 
@@ -578,10 +583,10 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * Conditions:
    * 1. The uop is a PMA (Physical Memory Attribute) uop according to the Pbmt (Page-based Memory Translation)
    *    and it is an MMIO uop (`Pbmt.isPMA(s2_pbmt) && fromPmp.mmio`).
-   * 2. The uop is marked as non-cacheable (`s2_in.bits.isNoncacheable`).
+   * 2. The uop is marked as non-cacheable (`s2_in.bits.nc`).
    * 3. The uop is an MMIO (Memory-Mapped I/O) uop (`s2_in.bits.mmio`).
    */
-  val s2_actuallyUncache = Pbmt.isPMA(s2_pbmt) && fromPmp.mmio || s2_in.bits.isNoncacheable || s2_in.bits.mmio
+  val s2_actuallyUncache = Pbmt.isPMA(s2_pbmt) && fromPmp.mmio || s2_in.bits.nc || s2_in.bits.mmio
 
   /**
    * Determines whether the uop in s2 is a real MMIO uop (`s2_realMmio`).
@@ -608,9 +613,9 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Determine whether the cache-related cause should be cleared for s2.
     * The cache-related cause is cleared if:
     * - The uop is a store (`s2_in.bits.isStore`), OR
-    * - The uop is a real MMIO (memory-mapped I/O) or is non-cacheable (`s2_realMmio || s2_in.bits.isNoncacheable`).
+    * - The uop is a real MMIO (memory-mapped I/O) or is non-cacheable (`s2_realMmio || s2_in.bits.nc`).
     */
-  val s2_clearCacheRelatedCause = s2_in.bits.isStore || (s2_realMmio || s2_in.bits.isNoncacheable)
+  val s2_clearCacheRelatedCause = s2_in.bits.isStore || s2_realMmio || s2_in.bits.nc
 
   /**
     * Determine whether full forwarding is required in s2.
@@ -733,7 +738,14 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     rarNuke.req.bits.uop := s2_in.bits.uop
     rarNuke.req.bits.mask := s2_in.bits.mask
     rarNuke.req.bits.paddr := s2_in.bits.paddr
-    rarNuke.req.bits.isNoncacheable := s2_in.bits.isNoncacheable
+    rarNuke.req.bits.dataValid :=  Mux(
+      forwardNetworkCommonOut.s2_forwardFromMissQueueOrTL ||
+      forwardNetworkCommonOut.s2_fullForward ||
+      s2_in.bits.isNoncacheable,
+      true.B,
+      !s2_dcacheMiss
+    )
+    rarNuke.req.bits.isNoncacheable := s2_in.bits.nc
 
     /**
       * Determine whether the data is valid for the RAR nuke request
@@ -1284,7 +1296,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Assign data invalid signal
     * Determine whether data forwarding resulted in invalid data, considering whether forwarding is required.
     */
-  replayCauseGen.io.fromLsq.dataInvalid := forwardNetworkCommonOut.s2_dataInvalid && !s2_noNeedForward
+  replayCauseGen.io.fromLsq.dataInvalid := s2_forwardFail
 
   /**
     * Assign RAR (Read-After-Read) NACK signal
