@@ -851,6 +851,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.req.bits.debug.robIdx       := DontCare
   io.iTLBInter.req.bits.debug.isFirstIssue := DontCare
   io.iTLBInter.req.bits.pmp_addr           := DontCare
+  io.iTLBInter.req.bits.facA := DontCare
+  io.iTLBInter.req.bits.facB := DontCare
+  io.iTLBInter.req.bits.facC0 := DontCare
   // whats the difference between req_kill and req.bits.kill?
   io.iTLBInter.req_kill := false.B
   // wait for itlb response in m_tlbResp state

@@ -216,7 +216,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
-    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
+    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), req_in(i).bits.facA, req_in(i).bits.facB, req_in(i).bits.facC0, i, req_in_s2xlate(i))
     entries.io.w_apply(refill, ptw.resp.bits)
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)

@@ -612,6 +612,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
     tlb_req_arb.io.in(i).bits.hyperinst := DontCare
     tlb_req_arb.io.in(i).bits.pmp_addr  := DontCare
+    tlb_req_arb.io.in(i).bits.facA := DontCare
+    tlb_req_arb.io.in(i).bits.facB := DontCare
+    tlb_req_arb.io.in(i).bits.facC0 := DontCare
   }
 
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
@@ -650,7 +653,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     }.otherwise {
       val inner_index = s2_tlb_update_index - MLP_L1_SIZE.U
       l2_array(inner_index).is_vaddr := s2_tlb_resp.bits.miss
-  
+
       when(!s2_tlb_resp.bits.miss) {
         l2_array(inner_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
         when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.gpf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
@@ -808,7 +811,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   XSPerfAccumulate("l2_prefetche_queue_busby", io.l2PfqBusy)
   XSPerfHistogram("filter_active", PopCount(VecInit(
-    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++ 
+    l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v) } ++
     l2_array.zip(l2_valids).map{ case (e, v) => e.can_send_pf(v) }
     ).asUInt), true.B, 0, MLP_SIZE, 1)
   XSPerfHistogram("l1_filter_active", PopCount(VecInit(l1_array.zip(l1_valids).map{ case (e, v) => e.can_send_pf(v)}).asUInt), true.B, 0, MLP_L1_SIZE, 1)

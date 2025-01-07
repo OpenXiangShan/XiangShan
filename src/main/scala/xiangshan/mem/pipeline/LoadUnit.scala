@@ -109,6 +109,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 class LoadUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
+  with HasTlbConst
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasVLSUParameters
@@ -686,6 +687,28 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       int_vec_vaddr
     )
   )
+
+  io.tlb.req.bits.facA := Mux(
+    s0_src_valid_vec(mab_idx),
+    io.misalign_ldin.bits.vaddr(VAddrBits-1, sectorvpnOffLen),
+    Mux(
+      s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx),
+      io.replay.bits.vaddr(VAddrBits-1, sectorvpnOffLen),
+      io.ldin.bits.src(0)(VAddrBits-1, sectorvpnOffLen)
+    )
+  )
+  io.tlb.req.bits.facB := Mux(
+    !s0_src_valid_vec(mab_idx) && !(s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx)),
+    0.U,
+    SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)(VAddrBits-1, sectorvpnOffLen)
+  )
+  val s0_facC0 = io.ldin.bits.src(0)(sectorvpnOffLen - 1, 0) +& SignExt(io.ldin.bits.uop.imm(11, 0), sectorvpnOffLen)
+  io.tlb.req.bits.facC0 := Mux(
+    !s0_src_valid_vec(mab_idx) && !(s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx)),
+    false.B,
+    s0_facC0(s0_facC0.getWidth-1)
+  )
+
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.vaddr,
     Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(),
