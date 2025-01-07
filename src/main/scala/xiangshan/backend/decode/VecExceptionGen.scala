@@ -178,10 +178,13 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val villIllegal = io.vtype.illegal && isVArithMem && !notDependVtypeInst
 
   // 3. EEW Illegal
-  
+  private val doubleFpInst = Seq(
+    VFWCVT_F_X_V, VFWCVT_F_XU_V, VFNCVT_RTZ_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_X_F_W, VFNCVT_XU_F_W
+  ).map(_ === inst.ALL).reduce(_ || _)
+
   // funct3 of OPFVV is 001, funct3 of OPFVF is 101
   private val isFp = (inst.FUNCT3 === BitPat("b?01")) && (inst.OPCODE7Bit === OPCODE7Bit.VECTOR_ARITH)
-  private val fpEewIllegal = isFp && (SEW === 0.U)
+  private val fpEewIllegal = isFp && ((SEW === 0.U) && !doubleFpInst)
 
   private val intExtEewIllegal = intExt2 && SEW === 0.U ||
                                  intExt4 && SEW <= 1.U ||

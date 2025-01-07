@@ -468,7 +468,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_pmp = WireInit(io.pmp)
 
   val s2_exception = RegNext(s1_feedback.bits.hit) &&
-                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR)
+                    (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && s2_vecActive
   val s2_un_misalign_exception =  RegNext(s1_feedback.bits.hit) &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_out.uop.exceptionVec, StaCfg, Seq(storeAddrMisaligned)).asUInt.orR)
 
@@ -578,6 +578,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
   val s3_vecFeedback = RegEnable(s2_vecFeedback, s2_fire)
+  val s3_exception     = RegEnable(s2_exception, s2_fire)
 
   // store misalign will not writeback to rob now
   when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch && !s2_mis_align && !s2_frm_mabuf }
@@ -598,6 +599,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s3_out.debug.vaddr     := s3_in.vaddr
   s3_out.debug.isPerfCnt := false.B
 
+  XSError(s3_valid && s3_in.isvec && s3_in.vecActive && !s3_in.mask.orR, "In vecActive, mask complement should not be 0")
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage x
@@ -628,7 +630,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
-      sx_in_vec(i)         := s3_in.isvec
+      sx_in(i).hasException := s3_exception
+      sx_in_vec(i)         := s3_in.isvec          
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -665,6 +668,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.nc := sx_last_in.nc
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
+  io.vecstout.bits.hasException := sx_last_in.hasException
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
