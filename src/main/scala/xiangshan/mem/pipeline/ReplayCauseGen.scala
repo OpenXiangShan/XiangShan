@@ -83,30 +83,23 @@ class ReplayCauseGen(implicit p: Parameters, params: MemUnitParams) extends XSMo
     }
   }
 
-  val io = IO(new ReplayCauseGenIO)
-
-  private val fromTlb = io.fromTlb
-  private val fromDCache = io.fromDCache
-  private val fromLsq = io.fromLsq
-  private val fromSta = io.fromSta
-  private val commonOut = io.commonOut
+  val io = IO(new ReplayCauseGenIO).suggestName("io")
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 1
   // -------------------------------------------------------------------
-  val s1_in = io.s1_in
   val s1_replayCauses = WireInit(0.U.asTypeOf(ReplayCauseNO()))
 
-  val s1_nukeVec = Wire(Vec(fromSta.length, Bool()))
-  fromSta.zip(s1_nukeVec).foreach {
+  val s1_nukeVec = Wire(Vec(io.fromSta.length, Bool()))
+  io.fromSta.zip(s1_nukeVec).foreach {
     case (query, nuke) =>
       /**
         * Determine whether the store access is 128-bits aligned
         * either the line matches or the access is 128-bit vector
         */
       val match128Bit = query.bits.matchLine ||
-        ((s1_in.bits.isVector || s1_in.bits.misalignWith16Bytes) && s1_in.bits.is128bit)
+        ((io.s1_in.bits.isVector || io.s1_in.bits.misalignWith16Bytes) && io.s1_in.bits.is128bit)
 
       /**
         * Determine whether the physical address matches (with different bit
@@ -114,74 +107,73 @@ class ReplayCauseGen(implicit p: Parameters, params: MemUnitParams) extends XSMo
         */
       val nukePAddrMatch = Mux(
         match128Bit,
-        s1_in.bits.paddr(PAddrBits - 1, 4) === query.bits.paddr(PAddrBits - 1, 4),
-        s1_in.bits.paddr(PAddrBits - 1, 3) === query.bits.paddr(PAddrBits - 1, 3)
+        io.s1_in.bits.paddr(PAddrBits - 1, 4) === query.bits.paddr(PAddrBits - 1, 4),
+        io.s1_in.bits.paddr(PAddrBits - 1, 3) === query.bits.paddr(PAddrBits - 1, 3)
       )
 
       /**
         * Determine whether the data mask matches (i.e., the relevant bits are
         * set in both the store and the query)
         */
-      val nukeDataMaskMatch = (s1_in.bits.mask & query.bits.mask).orR
+      val nukeDataMaskMatch = (io.s1_in.bits.mask & query.bits.mask).orR
 
       /**
         * Determine whether the store operation is nuked by an older entry
         * (based on the ROB index)
         */
-      val nukedByOlder = isAfter(s1_in.bits.uop.robIdx, query.bits.robIdx)
+      val nukedByOlder = isAfter(io.s1_in.bits.uop.robIdx, query.bits.robIdx)
       nuke := query.valid && nukePAddrMatch && nukeDataMaskMatch && nukedByOlder
   }
 
-  catchCause(s1_replayCauses, ReplayCauseNO.C_NK, s1_in.bits.isLoad && s1_nukeVec.asUInt.orR && !s1_in.bits.tlbMiss)
+  catchCause(s1_replayCauses, ReplayCauseNO.C_NK, io.s1_in.bits.isLoad && s1_nukeVec.asUInt.orR && !io.s1_in.bits.tlbMiss)
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 2
   // -------------------------------------------------------------------
-  val s2_in = io.s2_in
-  val s2_replayCauseIn = RegEnable(s1_replayCauses, s1_in.valid)
+  val s2_replayCauseIn = RegEnable(s1_replayCauses, io.s1_in.valid)
   val s2_replayCauseOut = WireInit(s2_replayCauseIn)
 
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_MA, fromLsq.addrInvalid)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_TM, s2_in.bits.tlbMiss)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_FF, fromLsq.dataInvalid)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_DR, fromDCache.mqNack)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_DM, fromDCache.miss)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_BC, fromDCache.bankConflict)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_WPF, fromDCache.wayPredictFail)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_RARF, fromLsq.rarNack)
-  catchCause(s2_replayCauseOut, ReplayCauseNO.C_RAWF, fromLsq.rawNack)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_MA, io.fromLsq.addrInvalid)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_TM, io.s2_in.bits.tlbMiss)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_FF, io.fromLsq.dataInvalid)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_DR, io.fromDCache.mqNack)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_DM, io.fromDCache.miss)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_BC, io.fromDCache.bankConflict)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_WPF, io.fromDCache.wayPredictFail)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_RARF, io.fromLsq.rarNack)
+  catchCause(s2_replayCauseOut, ReplayCauseNO.C_RAWF, io.fromLsq.rawNack)
 
-  val s2_nukeVec = Wire(Vec(fromSta.length, Bool()))
-  fromSta.zip(s2_nukeVec).foreach {
+  val s2_nukeVec = Wire(Vec(io.fromSta.length, Bool()))
+  io.fromSta.zip(s2_nukeVec).foreach {
     case (query, nuke) =>
       /**
         * Determine whether the store access is 128-bits aligned
         * either the line matches or the access is 128-bit vector
         */
-      val match128Bit = query.bits.matchLine || (s2_in.bits.isVector && s2_in.bits.is128bit)
+      val match128Bit = query.bits.matchLine || (io.s2_in.bits.isVector && io.s2_in.bits.is128bit)
       /**
         * Determine whether the physical address matches (with different bit
         * ranges based on 128-bit alignment)
         */
       val nukePAddrMatch = Mux(
         match128Bit,
-        s2_in.bits.paddr(PAddrBits - 1, 4) === query.bits.paddr(PAddrBits - 1, 4),
-        s2_in.bits.paddr(PAddrBits - 1, 3) === query.bits.paddr(PAddrBits - 1, 3)
+        io.s2_in.bits.paddr(PAddrBits - 1, 4) === query.bits.paddr(PAddrBits - 1, 4),
+        io.s2_in.bits.paddr(PAddrBits - 1, 3) === query.bits.paddr(PAddrBits - 1, 3)
       )
       /**
         * Determine whether the data mask matches (i.e., the relevant bits are
         * set in both the store and the query)
         */
-      val nukeDataMaskMatch = (s2_in.bits.mask & query.bits.mask).orR
+      val nukeDataMaskMatch = (io.s2_in.bits.mask & query.bits.mask).orR
       /**
         * Determine whether the store operation is nuked by an older entry
         * (based on the ROB index)
         */
-      val nukedByOlder = isAfter(s2_in.bits.uop.robIdx, query.bits.robIdx)
+      val nukedByOlder = isAfter(io.s2_in.bits.uop.robIdx, query.bits.robIdx)
       nuke := query.valid && nukePAddrMatch && nukeDataMaskMatch && nukedByOlder
   }
-  val s2_nuke = s2_nukeVec.asUInt.orR && !s2_in.bits.tlbMiss || causeCatched(s2_in.bits.cause, ReplayCauseNO.C_NK)
+  val s2_nuke = s2_nukeVec.asUInt.orR && !io.s2_in.bits.tlbMiss || causeCatched(io.s2_in.bits.cause, ReplayCauseNO.C_NK)
   catchCause(s2_replayCauseOut, ReplayCauseNO.C_NK, s2_nuke)
 
   /**
@@ -216,21 +208,20 @@ class ReplayCauseGen(implicit p: Parameters, params: MemUnitParams) extends XSMo
     *   3. Misalign no need wakeup
     */
   val s2_canFastReplay = !ReplayCauseNO.slice(s2_replayCauseOut, ReplayCauseNO.C_MA, ReplayCauseNO.C_DR).reduce(_||_) &&
-    (s2_dcacheFastReplay || s2_nukeFastReplay) && !s2_in.bits.misalignNeedWakeUp
+    (s2_dcacheFastReplay || s2_nukeFastReplay) && !io.s2_in.bits.misalignNeedWakeUp
 
-  commonOut.s2_needReplay := Cat(s2_replayCauseOut).orR
-  commonOut.s2_canFastReplay := s2_canFastReplay
+  io.commonOut.s2_needReplay := Cat(s2_replayCauseOut).orR
+  io.commonOut.s2_canFastReplay := s2_canFastReplay
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 3
   // -------------------------------------------------------------------
-  val s3_in = io.s3_in
-  val s3_replayCauseIn = RegEnable(s2_replayCauseOut, s2_in.valid)
+  val s3_replayCauseIn = RegEnable(s2_replayCauseOut, io.s2_in.valid)
   val s3_replayCauseOut = WireInit(s3_replayCauseIn)
 
-  val s3_misalignBufferValid = s3_in.valid && s3_in.bits.misalign && !s3_in.bits.isMisalignBuf
-  catchCause(s3_replayCauseOut, ReplayCauseNO.C_MF, s3_misalignBufferValid && fromLsq.misalignBufNack)
+  val s3_misalignBufferValid = io.s3_in.valid && io.s3_in.bits.misalign && !io.s3_in.bits.isMisalignBuf
+  catchCause(s3_replayCauseOut, ReplayCauseNO.C_MF, s3_misalignBufferValid && io.fromLsq.misalignBufNack)
 
   io.replayCauseOut := s3_replayCauseOut
 }

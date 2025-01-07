@@ -38,6 +38,7 @@ import xiangshan.cache.mmu.{TlbReq, TlbResp, TlbCmd, TlbHintReq}
 import xiangshan.cache.{DCacheLoadReqIO, DCacheLoadRespIO}
 
 class MemExuBlock(implicit p: Parameters) extends LazyModule with HasXSParameter with HasMemBlockParameters {
+  override def shouldBeInlined: Boolean = false
   val stdUnits = memUnitParams.filter(_.isStd).map(
     params => LazyModule(new MemUnit(params)).suggestName(params.name)
   )
@@ -191,19 +192,6 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   with HasMemBlockParameters {
   val io = IO(new MemExuBlockIO)
 
-  private val fromCtrl = io.fromCtrl
-  private val fromTL = io.fromTL
-  private val fromPmp = io.fromPmp
-  private val (fromBackend, toBackend) = (io.fromBackend, io.toBackend)
-  private val (fromVecExuBlock, toVecExuBlock) = (io.fromVecExuBlock, io.toVecExuBlock)
-  private val (fromLsq, toLsq) = (io.fromLsq, io.toLsq)
-  private val (fromUncache, toUncache) = (io.fromUncache, io.toUncache)
-  private val (fromTlb, toTlb) = (io.fromTlb, io.toTlb)
-  private val (fromSBuffer, toSBuffer) = (io.fromSBuffer, io.toSBuffer)
-  private val (fromMissQueue, toMissQueue) = (io.fromMissQueue, io.toMissQueue)
-  private val (fromDCache, toDCache) = (io.fromDCache, io.toDCache)
-  private val (fromPrefetch, toPrefetch) = (io.fromPrefetch, io.toPrefetch)
-
   val stdUnitImps = wrapper.stdUnits.map(_.module)
   val staUnitImps = wrapper.staUnits.map(_.module.asInstanceOf[HyuImp])
   val ldUnitImps = wrapper.ldUnits.map(_.module.asInstanceOf[HyuImp])
@@ -224,9 +212,9 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // stdUnits
   stdUnitImps.zipWithIndex.foreach {
     case (impl: StdImp, i) =>
-      impl.io.fromCtrl.redirect <> fromCtrl.redirect
-      impl.io.fromCtrl.hartId <> fromCtrl.hartId
-      impl.io.fromCtrl.csr <> fromCtrl.csr
+      impl.io.fromCtrl.redirect <> io.fromCtrl.redirect
+      impl.io.fromCtrl.hartId <> io.fromCtrl.hartId
+      impl.io.fromCtrl.csr <> io.fromCtrl.csr
       impl.io.fromTlb := DontCare
       impl.io.fromDCache := DontCare
       impl.io.fromPmp := DontCare
@@ -239,11 +227,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // staUnits
   staUnitImps.zipWithIndex.foreach {
     case (impl: HyuImp, i) =>
-      impl.io.fromCtrl.redirect <> fromCtrl.redirect
-      impl.io.fromCtrl.hartId <> fromCtrl.hartId
-      impl.io.fromCtrl.csr  <> fromCtrl.csr
+      impl.io.fromCtrl.redirect <> io.fromCtrl.redirect
+      impl.io.fromCtrl.hartId <> io.fromCtrl.hartId
+      impl.io.fromCtrl.csr  <> io.fromCtrl.csr
       if (impl.io.fromCtrl.trigger.isDefined) {
-        impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
+        impl.io.fromCtrl.trigger.get <> io.fromCtrl.trigger
       }
 
     case _ =>
@@ -252,11 +240,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // ldUnits
   ldUnitImps.zipWithIndex.foreach {
     case (impl: HyuImp, i) =>
-      impl.io.fromCtrl.redirect <> fromCtrl.redirect
-      impl.io.fromCtrl.hartId <> fromCtrl.hartId
-      impl.io.fromCtrl.csr <> fromCtrl.csr
+      impl.io.fromCtrl.redirect <> io.fromCtrl.redirect
+      impl.io.fromCtrl.hartId <> io.fromCtrl.hartId
+      impl.io.fromCtrl.csr <> io.fromCtrl.csr
       if (impl.io.fromCtrl.trigger.isDefined) {
-        impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
+        impl.io.fromCtrl.trigger.get <> io.fromCtrl.trigger
       }
       if (impl.io.correctMissTrain.isDefined) {
         impl.io.correctMissTrain.get := correctMissTrain
@@ -268,11 +256,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // hyUnits
   hyUnitImps.zipWithIndex.foreach {
     case (impl: HyuImp, i) =>
-      impl.io.fromCtrl.redirect <> fromCtrl.redirect
-      impl.io.fromCtrl.hartId <> fromCtrl.hartId
-      impl.io.fromCtrl.csr <> fromCtrl.csr
+      impl.io.fromCtrl.redirect <> io.fromCtrl.redirect
+      impl.io.fromCtrl.hartId <> io.fromCtrl.hartId
+      impl.io.fromCtrl.csr <> io.fromCtrl.csr
       if (impl.io.fromCtrl.trigger.isDefined) {
-        impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
+        impl.io.fromCtrl.trigger.get <> io.fromCtrl.trigger
       }
       if (impl.io.correctMissTrain.isDefined) {
         impl.io.correctMissTrain.get := correctMissTrain
@@ -283,11 +271,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
 
   amoUnitImps.zipWithIndex.foreach {
     case (impl: AmoImp, i) =>
-      impl.io.fromCtrl.redirect <> fromCtrl.redirect
-      impl.io.fromCtrl.hartId <> fromCtrl.hartId
-      impl.io.fromCtrl.csr <> fromCtrl.csr
+      impl.io.fromCtrl.redirect <> io.fromCtrl.redirect
+      impl.io.fromCtrl.hartId <> io.fromCtrl.hartId
+      impl.io.fromCtrl.csr <> io.fromCtrl.csr
       if (impl.io.fromCtrl.trigger.isDefined) {
-        impl.io.fromCtrl.trigger.get <> fromCtrl.trigger
+        impl.io.fromCtrl.trigger.get <> io.fromCtrl.trigger
       }
       impl.io.flushSbuffer <> io.flushSbuffer
 
@@ -295,42 +283,42 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   }
 
  // misalignBuffer
-  loadMisalignBuffer.io.redirect <> fromCtrl.redirect
-  loadMisalignBuffer.io.rob.lcommit := fromBackend.robLsqIO.lcommit
-  loadMisalignBuffer.io.rob.scommit := fromBackend.robLsqIO.scommit
-  loadMisalignBuffer.io.rob.pendingMMIOld := fromBackend.robLsqIO.pendingMMIOld
-  loadMisalignBuffer.io.rob.pendingld := fromBackend.robLsqIO.pendingld
-  loadMisalignBuffer.io.rob.pendingst := fromBackend.robLsqIO.pendingst
-  loadMisalignBuffer.io.rob.pendingVst := fromBackend.robLsqIO.pendingVst
-  loadMisalignBuffer.io.rob.commit := fromBackend.robLsqIO.commit
-  loadMisalignBuffer.io.rob.pendingPtr := fromBackend.robLsqIO.pendingPtr
-  loadMisalignBuffer.io.rob.pendingPtrNext := fromBackend.robLsqIO.pendingPtrNext
-  loadMisalignBuffer.io.vecWriteBack <> toVecExuBlock.loadMisalignBuffer.writeback
-  toLsq.loadMisalignFull := loadMisalignBuffer.io.loadMisalignFull
+  loadMisalignBuffer.io.redirect <> io.fromCtrl.redirect
+  loadMisalignBuffer.io.rob.lcommit := io.fromBackend.robLsqIO.lcommit
+  loadMisalignBuffer.io.rob.scommit := io.fromBackend.robLsqIO.scommit
+  loadMisalignBuffer.io.rob.pendingMMIOld := io.fromBackend.robLsqIO.pendingMMIOld
+  loadMisalignBuffer.io.rob.pendingld := io.fromBackend.robLsqIO.pendingld
+  loadMisalignBuffer.io.rob.pendingst := io.fromBackend.robLsqIO.pendingst
+  loadMisalignBuffer.io.rob.pendingVst := io.fromBackend.robLsqIO.pendingVst
+  loadMisalignBuffer.io.rob.commit := io.fromBackend.robLsqIO.commit
+  loadMisalignBuffer.io.rob.pendingPtr := io.fromBackend.robLsqIO.pendingPtr
+  loadMisalignBuffer.io.rob.pendingPtrNext := io.fromBackend.robLsqIO.pendingPtrNext
+  loadMisalignBuffer.io.vecWriteBack <> io.toVecExuBlock.loadMisalignBuffer.writeback
+  io.toLsq.loadMisalignFull := loadMisalignBuffer.io.loadMisalignFull
 
   //
-  storeMisalignBuffer.io.redirect <> fromCtrl.redirect
-  storeMisalignBuffer.io.rob.lcommit := fromBackend.robLsqIO.lcommit
-  storeMisalignBuffer.io.rob.scommit := fromBackend.robLsqIO.scommit
-  storeMisalignBuffer.io.rob.pendingMMIOld := fromBackend.robLsqIO.pendingMMIOld
-  storeMisalignBuffer.io.rob.pendingld := fromBackend.robLsqIO.pendingld
-  storeMisalignBuffer.io.rob.pendingst := fromBackend.robLsqIO.pendingst
-  storeMisalignBuffer.io.rob.pendingVst := fromBackend.robLsqIO.pendingVst
-  storeMisalignBuffer.io.rob.commit := fromBackend.robLsqIO.commit
-  storeMisalignBuffer.io.rob.pendingPtr := fromBackend.robLsqIO.pendingPtr
-  storeMisalignBuffer.io.rob.pendingPtrNext := fromBackend.robLsqIO.pendingPtrNext
-  storeMisalignBuffer.io.toVecStoreMergeBuffer <> toVecExuBlock.storeMisalignBuffer.control
-  storeMisalignBuffer.io.vecWriteBack <> toVecExuBlock.storeMisalignBuffer.writeback
-  storeMisalignBuffer.io.full <> toVecExuBlock.storeMisalignBuffer.storeMisalignBufferFull
+  storeMisalignBuffer.io.redirect <> io.fromCtrl.redirect
+  storeMisalignBuffer.io.rob.lcommit := io.fromBackend.robLsqIO.lcommit
+  storeMisalignBuffer.io.rob.scommit := io.fromBackend.robLsqIO.scommit
+  storeMisalignBuffer.io.rob.pendingMMIOld := io.fromBackend.robLsqIO.pendingMMIOld
+  storeMisalignBuffer.io.rob.pendingld := io.fromBackend.robLsqIO.pendingld
+  storeMisalignBuffer.io.rob.pendingst := io.fromBackend.robLsqIO.pendingst
+  storeMisalignBuffer.io.rob.pendingVst := io.fromBackend.robLsqIO.pendingVst
+  storeMisalignBuffer.io.rob.commit := io.fromBackend.robLsqIO.commit
+  storeMisalignBuffer.io.rob.pendingPtr := io.fromBackend.robLsqIO.pendingPtr
+  storeMisalignBuffer.io.rob.pendingPtrNext := io.fromBackend.robLsqIO.pendingPtrNext
+  storeMisalignBuffer.io.toVecStoreMergeBuffer <> io.toVecExuBlock.storeMisalignBuffer.control
+  storeMisalignBuffer.io.vecWriteBack <> io.toVecExuBlock.storeMisalignBuffer.writeback
+  storeMisalignBuffer.io.full <> io.toVecExuBlock.storeMisalignBuffer.storeMisalignBufferFull
 
-  toLsq.sqControl <> storeMisalignBuffer.io.sqControl.toStoreQueue
-  storeMisalignBuffer.io.sqControl.toStoreMisalignBuffer := fromLsq.maControl
+  io.toLsq.sqControl <> storeMisalignBuffer.io.sqControl.toStoreQueue
+  storeMisalignBuffer.io.sqControl.toStoreMisalignBuffer := io.fromLsq.maControl
 
   // issue: `Backend` -> `MemUnit`
   // std issue: `Backend` -> `StdUnits`
   Connection.connect(
     sinkSeq     = stdUnitImps.map(_.getStdIssues()).flatten,
-    sourceSeq   = fromBackend.issueStd,
+    sourceSeq   = io.fromBackend.issueStd,
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
@@ -344,7 +332,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // sta issue: `Backend` -> `StaUnits`
   Connection.connect(
     sinkSeq     = totalStaUnits.map(_.getStaIssues()).flatten,
-    sourceSeq   = fromBackend.issueHya ++ fromBackend.issueSta,
+    sourceSeq   = io.fromBackend.issueHya ++ io.fromBackend.issueSta,
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
@@ -371,7 +359,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // ldu issue: `Backend` -> `LdUnits/HyUnits`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getLdIssues()).flatten,
-    sourceSeq   = fromBackend.issueLda ++ fromBackend.issueHya,
+    sourceSeq   = io.fromBackend.issueLda ++ io.fromBackend.issueHya,
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuInput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
@@ -385,7 +373,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // prefetch issue: `Prefetch` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalMemUnits.map(_.getPrefetchIssues()).flatten,
-    sourceSeq   = fromPrefetch,
+    sourceSeq   = io.fromPrefetch,
     connectName = "Prefetch issues"
   )
 
@@ -395,7 +383,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     memUnit.io.toPrefetch.train.toList
   }
   Connection.connect(
-    sinkSeq     = toPrefetch.train,
+    sinkSeq     = io.toPrefetch.train,
     sourceSeq   = memUnitPrefetchTrains,
     connectName = "Prefetch train"
   )
@@ -406,14 +394,14 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     memUnit.io.toPrefetch.trainL1.toList
   }
   Connection.connect(
-    sinkSeq     = toPrefetch.trainL1,
+    sinkSeq     = io.toPrefetch.trainL1,
     sourceSeq   = memUnitPrefetchTrainL1s,
     connectName = "Prefetch train l1"
   )
 
   // prefetch ifetch
   Connection.connect(
-    sinkSeq     = toPrefetch.ifetch,
+    sinkSeq     = io.toPrefetch.ifetch,
     sourceSeq   = totalLdUnits.map(_.io.toPrefetch.ifetch.get),
     connectName = "Prefetch ifetch"
   )
@@ -435,13 +423,13 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // vector issue: `Vector` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalStaUnits.map(_.getVstIssues()).flatten,
-    sourceSeq   = fromVecExuBlock.vectorStoreIssues,
+    sourceSeq   = io.fromVecExuBlock.vectorStoreIssues,
     connectName = "Vector store issues"
   )
 
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getVldIssues()).flatten,
-    sourceSeq   = fromVecExuBlock.vectorLoadIssues,
+    sourceSeq   = io.fromVecExuBlock.vectorLoadIssues,
     connectName = "Vector load issues"
   )
 
@@ -455,7 +443,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // mmio reqs: `Lsq` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getMmioIssues()).flatten,
-    sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+    sourceSeq   = Seq(io.fromLsq.mmioLdWriteback),
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuOutput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
@@ -469,17 +457,16 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     case sink =>
       Connection.connect(
         sinkSeq     = Seq(sink.get.mmioLdWriteback),
-        sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+        sourceSeq   = Seq(io.fromLsq.mmioLdWriteback),
         connectName = "MMIO writeback"
       )
-      sink.get.mmioLdData <> fromLsq.mmioLdData
-    case _ =>
+      sink.get.mmioLdData <> io.fromLsq.mmioLdData
   }
 
   // mmio reqs: `Lsq` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getMmioIssues()).flatten,
-    sourceSeq   = Seq(fromLsq.mmioLdWriteback),
+    sourceSeq   = Seq(io.fromLsq.mmioLdWriteback),
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuOutput]) => {
       sink.valid := source.valid
       source.ready := sink.ready
@@ -494,7 +481,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // nc reqs: `Lsq` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getUncacheIssues()).flatten,
-    sourceSeq   = fromLsq.ncOut,
+    sourceSeq   = io.fromLsq.ncOut,
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
       sink <> source
       sink.bits.clearIssueState()
@@ -507,27 +494,27 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // lsq replay reqs: `Lsq` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.getReplayIssues()).flatten,
-    sourceSeq   = fromLsq.replay,
+    sourceSeq   = io.fromLsq.replay,
     connectName = "Lsq replay"
   )
 
   // feedback: `MemUnit` -> `Backend`
   Connection.connect(
-    sinkSeq     = toBackend.hyuIqFeedback ++ toBackend.staIqFeedback,
+    sinkSeq     = io.toBackend.hyuIqFeedback ++ io.toBackend.staIqFeedback,
     sourceSeq   = totalStaUnits.map(_.io.toBackend.iqFeedback),
     connectName = "StaUnit feedback"
   )
 
   // sta issue feedback: `StaUnits` -> `Backend`
   Connection.connect(
-    sinkSeq     = toBackend.stIssue,
+    sinkSeq     = io.toBackend.stIssue,
     sourceSeq   = totalStaUnits.map(_.io.toBackend.stIssue),
     connectName = "StaUnit issue to backend"
   )
 
   // load feedback: `MemUnits` -> `Backend`
   Connection.connect(
-    sinkSeq     = toBackend.ldaIqFeedback ++ toBackend.hyuIqFeedback,
+    sinkSeq     = io.toBackend.ldaIqFeedback ++ io.toBackend.hyuIqFeedback,
     sourceSeq   = totalLdUnits.map(_.io.toBackend.iqFeedback),
     connectName = "LdUnits/HyUnits feedback"
   )
@@ -571,7 +558,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   )
 
   // tlb reqs: `MemUnit` -> `TLB`
-  toTlb.zip(totalMemUnits.map(_.io.toTlb)).foreach {
+  io.toTlb.zip(totalMemUnits.map(_.io.toTlb)).foreach {
     case (sink, source) =>
       sink.req <> source.req
       sink.req_kill := source.req_kill
@@ -580,13 +567,13 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // tlb resps: `TLB` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalMemUnits.map(_.io.fromTlb.resp),
-    sourceSeq   = fromTlb.map(_.resp),
+    sourceSeq   = io.fromTlb.map(_.resp),
     connectName = "TLB resp"
   )
 
   Connection.connect(
     sinkSeq     = totalMemUnits.map(_.io.fromTlb.hint),
-    sourceSeq   = fromTlb.map(_.hint),
+    sourceSeq   = io.fromTlb.map(_.hint),
     connectName = "TLB resp"
   )
 
@@ -598,72 +585,72 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   )
 
   // DCache reqs: `MemUnit` -> `DCache`
-  toDCache.zip(totalMemUnits.map(_.io.toDCache)).foreach {
+  io.toDCache.zip(totalMemUnits.map(_.io.toDCache)).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   // DCache resp: `DCache` -> `MemUnit`
-  totalMemUnits.map(_.io.fromDCache).zip(fromDCache).foreach {
+  totalMemUnits.map(_.io.fromDCache).zip(io.fromDCache).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   // to Backend
   Connection.connect(
-    sinkSeq     = toBackend.wakeup,
+    sinkSeq     = io.toBackend.wakeup,
     sourceSeq   = totalLdUnits.map(_.io.toBackend.wakeup),
     connectName = "LdUnits/HyUnits wakeup"
   )
 
   Connection.connect(
-    sinkSeq     = toBackend.ldCancel,
+    sinkSeq     = io.toBackend.ldCancel,
     sourceSeq   = totalLdUnits.map(_.io.toBackend.ldCancel),
     connectName = "LdUnits/HyUnits Cancel"
   )
 
   Connection.connect(
-    sinkSeq     = toBackend.rollback,
+    sinkSeq     = io.toBackend.rollback,
     sourceSeq   = totalLdUnits.map(_.io.toBackend.rollback),
     connectName = "LdUnits/HyUnits rollback"
   )
 
   // to Lsq
   Connection.connect(
-    sinkSeq     = toLsq.out,
+    sinkSeq     = io.toLsq.out,
     sourceSeq   = totalLdUnits.map(_.io.toLsq.out).filter(_.isDefined).map(_.get),
     connectName = "LdUnits/HyUnits lsq out"
   )
 
   Connection.connect(
-    sinkSeq     = toLsq.forward,
+    sinkSeq     = io.toLsq.forward,
     sourceSeq   = totalLdUnits.map(_.io.toLsq.forward).filter(_.isDefined).map(_.get),
     connectName = "LdUnits/HyUnits sq forward req"
   )
 
-  toLsq.rarNuke.zip(totalLdUnits.map(_.io.toLsq.rarNuke).filter(_.isDefined).map(_.get)).foreach {
+  io.toLsq.rarNuke.zip(totalLdUnits.map(_.io.toLsq.rarNuke).filter(_.isDefined).map(_.get)).foreach {
     case (sink, source) =>
       sink <> source
   }
-  toLsq.rawNuke.zip(totalLdUnits.map(_.io.toLsq.rawNuke).filter(_.isDefined).map(_.get)).foreach {
+  io.toLsq.rawNuke.zip(totalLdUnits.map(_.io.toLsq.rawNuke).filter(_.isDefined).map(_.get)).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   Connection.connect(
-    sinkSeq     = toLsq.addrUpdate,
+    sinkSeq     = io.toLsq.addrUpdate,
     sourceSeq   = totalStaUnits.map(_.io.toLsq.addrUpdate).filter(_.isDefined).map(_.get),
     connectName = "StaUnits/HyUnits addr update"
   )
 
   Connection.connect(
-    sinkSeq     = toLsq.excpUpdate,
+    sinkSeq     = io.toLsq.excpUpdate,
     sourceSeq   = totalStaUnits.map(_.io.toLsq.excpUpdate).filter(_.isDefined).map(_.get),
     connectName = "StaUnits/HyUnits excp update"
   )
 
   Connection.connect(
-    sinkSeq     = toLsq.maskOut,
+    sinkSeq     = io.toLsq.maskOut,
     sourceSeq   = totalStaUnits.map(_.io.toLsq.maskOut).filter(_.isDefined).map(_.get),
     connectName = "StaUnits/HyUnits mask out"
   )
@@ -671,25 +658,25 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // from Lsq
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.forward),
-    sourceSeq   = fromLsq.forward,
+    sourceSeq   = io.fromLsq.forward,
     connectName = "LdUnits/HyUnits sq forward resp"
   )
 
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.rarNuke),
-    sourceSeq   = fromLsq.rarNuke,
+    sourceSeq   = io.fromLsq.rarNuke,
     connectName = "LdUnits/HyUnits rar nuke"
   )
 
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).map(_.get.rawNuke),
-    sourceSeq   = fromLsq.rawNuke,
+    sourceSeq   = io.fromLsq.rawNuke,
     connectName = "LdUnits/HyUnits raw nuke"
   )
 
   // uncache forward reqs: `MemUnit` -> `Uncache`
   Connection.connect(
-    sinkSeq     = toUncache,
+    sinkSeq     = io.toUncache,
     sourceSeq   = totalLdUnits.map(_.io.toUncache).filter(_.isDefined).map(_.get),
     connectName = "Uncache forward req"
   )
@@ -697,13 +684,13 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // uncache forward resps: `Uncache` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromUncache).filter(_.isDefined).map(_.get),
-    sourceSeq   = fromUncache,
+    sourceSeq   = io.fromUncache,
     connectName = "Uncache forward resp"
   )
 
   // sbuffer forward reqs: `MemUnit` -> `Sbuffer`
   Connection.connect(
-    sinkSeq     = toSBuffer,
+    sinkSeq     = io.toSBuffer,
     sourceSeq   = totalLdUnits.map(_.io.toSBuffer).filter(_.isDefined).map(_.get),
     connectName = "Sbuffer forward req"
   )
@@ -711,13 +698,13 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // sbuffer forward resps: `Sbuffer` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromSBuffer).filter(_.isDefined).map(_.get),
-    sourceSeq   = fromSBuffer,
+    sourceSeq   = io.fromSBuffer,
     connectName = "Sbuffer forward resp"
   )
 
   // MissQueue forward reqs: `MemUnit` -> `MissQueue`
   Connection.connect(
-    sinkSeq     = toMissQueue,
+    sinkSeq     = io.toMissQueue,
     sourceSeq   = totalLdUnits.map(_.io.toMissQueue).filter(_.isDefined).map(_.get),
     connectName = "MissQueue forward req"
   )
@@ -725,7 +712,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // MissQueue forward resps: `MissQueue` -> `MemUnit`
   Connection.connect(
     sinkSeq     = totalLdUnits.map(_.io.fromMissQueue).filter(_.isDefined).map(_.get),
-    sourceSeq   = fromMissQueue,
+    sourceSeq   = io.fromMissQueue,
     connectName = "MissQueue forward resp"
   )
 
@@ -736,12 +723,12 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   }
   Connection.connect(
     sinkSeq     = memUnitTLDchannelResps,
-    sourceSeq   = fromTL,
+    sourceSeq   = io.fromTL,
     connectName = "TL D channel forward"
   )
 
   // storePipeEmpty: `MemUnit` -> `VecExuBlock`
-  toVecExuBlock.storePipeEmpty.zip(totalStaUnits.map(_.io.commonOut.storePipeEmpty)).foreach {
+  io.toVecExuBlock.storePipeEmpty.zip(totalStaUnits.map(_.io.commonOut.storePipeEmpty)).foreach {
     case (sink, source) =>
       sink <> source
   }
@@ -752,12 +739,12 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   val state = RegInit(s_normal)
   val memUnitStaIssues = totalStaUnits.map(_.getStaIssues()).flatten
   val memUnitStaFeedbacks = totalStaUnits.map(_.io.toBackend.iqFeedback)
-  val backendStaIssues = fromBackend.issueHya ++ fromBackend.issueSta
+  val backendStaIssues = io.fromBackend.issueHya ++ io.fromBackend.issueSta
   val stAtomics = backendStaIssues.map(issue => issue.valid && FuType.storeIsAMO(issue.bits.uop.fuType))
   val stDataAtomics = stdUnitImps.map(_.getStdWritebacks()).flatten.map(issue =>
     issue.valid && FuType.storeIsAMO(issue.bits.uop.fuType)
   )
-  val backendStaFeedback = toBackend.hyuIqFeedback ++ toBackend.staIqFeedback
+  val backendStaFeedback = io.toBackend.hyuIqFeedback ++ io.toBackend.staIqFeedback
   val atomicsExceptionInfo = RegInit(VecInit(Seq.fill(amoUnitImps.length)(0.U.asTypeOf(ValidIO(new ExceptionAddrIO)))))
   io.atomicsExceptionInfo := DontCare
 
@@ -767,8 +754,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       impl.io.fromTlb.resp.valid := false.B
       impl.io.fromTlb.resp.bits  := DontCare
       impl.io.fromTlb.hint := DontCare
-      impl.io.toTlb.req.ready := toTlb.head.req.ready
-      impl.io.fromPmp <> fromPmp.head
+      impl.io.toTlb.req.ready := io.toTlb.head.req.ready
+      impl.io.fromPmp <> io.fromPmp.head
 
       // DCache
       impl.io.fromDCache := DontCare
@@ -805,8 +792,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         // use store wb port instead of load
         amoLoad.getLdWritebacks().head.ready := false.B
         // use Load_0's TLB
-        impl.io.toTlb <> toTlb.head
-        impl.io.fromTlb <> fromTlb.head
+        impl.io.toTlb <> io.toTlb.head
+        impl.io.fromTlb <> io.fromTlb.head
         // hw prefetch should be disabled while executing atomic insts
         amoLoad.getPrefetchIssues().map(_.valid := false.B)
         // make sure there's no in-flight uops in load unit
@@ -818,7 +805,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         state := s_normal
       }
 
-      when (DelayN(fromCtrl.redirect.valid, 10) && atomicsExceptionInfo(i).valid) {
+      when (DelayN(io.fromCtrl.redirect.valid, 10) && atomicsExceptionInfo(i).valid) {
         atomicsExceptionInfo(i).valid := false.B
       } .elsewhen (impl.io.exceptionInfo.valid) {
         atomicsExceptionInfo(i).valid := true.B
@@ -840,7 +827,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   }
 
   val atomicsException = RegInit(false.B)
-  when (DelayN(fromCtrl.redirect.valid, 10) && atomicsException) {
+  when (DelayN(io.fromCtrl.redirect.valid, 10) && atomicsException) {
     atomicsException := false.B
   }.elsewhen (io.atomicsExceptionInfo.valid) {
     atomicsException := true.B
@@ -858,7 +845,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
 
   // writeback: `MemUnit` -> `Backend`
   Connection.connect(
-    sinkSeq     = toBackend.writebackStd,
+    sinkSeq     = io.toBackend.writebackStd,
     sourceSeq   = stdUnitImps.map(_.getStdWritebacks()).flatten,
     connectFn   = Some((sink: DecoupledIO[MemExuOutput], source: DecoupledIO[LsPipelineBundle]) => {
       sink.valid := source.valid
@@ -873,22 +860,22 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
 
   // vector load writeback
   Connection.connect(
-    sinkSeq     = toVecExuBlock.vldWriteback,
+    sinkSeq     = io.toVecExuBlock.vldWriteback,
     sourceSeq   = totalLdUnits.map(_.getVldWritebacks()).flatten,
     connectName = "VldUnits writeback to vector execute block"
   )
 
   // vector store writebacks
   Connection.connect(
-    sinkSeq     = toVecExuBlock.vstWriteback,
+    sinkSeq     = io.toVecExuBlock.vstWriteback,
     sourceSeq   = totalStaUnits.map(_.getVstWritebacks()).flatten,
     connectName = "VstUnits writeback to vector execute block"
   )
 
   // mmio store writeback will use store writeback port 0
-  val mmioStWriteback = WireInit(0.U.asTypeOf(fromLsq.mmioStWriteback.cloneType))
+  val mmioStWriteback = WireInit(0.U.asTypeOf(io.fromLsq.mmioStWriteback.cloneType))
   NewPipelineConnect(
-    fromLsq.mmioStWriteback, mmioStWriteback, mmioStWriteback.fire,
+    io.fromLsq.mmioStWriteback, mmioStWriteback, mmioStWriteback.fire,
     false.B,
     Option("mmioStWriteback Connect")
   )
@@ -897,7 +884,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   // sta writeback
   val memUnitStaWritebacks = totalStaUnits.map(_.getStaWritebacks()).flatten
   val numMemUnitStaWriteback = memUnitStaWritebacks.length
-  val backendStaWritebacks = toBackend.writebackHyuSta ++ toBackend.writebackSta
+  val backendStaWritebacks = io.toBackend.writebackHyuSta ++ io.toBackend.writebackSta
   val numBackendStaWriteback = backendStaWritebacks.length
   require(numMemUnitStaWriteback == numBackendStaWriteback,
     s"The number of memunit sta writeback(${numMemUnitStaWriteback}) should be match backend " +
@@ -971,7 +958,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
   ldUncacheWriteback.ready := ldaExeWbReqs(UncacheWBPort).ready
 
   Connection.connect(
-    sinkSeq     = toBackend.writebackLda ++ toBackend.writebackHyuLda,
+    sinkSeq     = io.toBackend.writebackLda ++ io.toBackend.writebackHyuLda,
     sourceSeq   = ldaExeWbReqs,
     connectName = "LdUnits/HyUnits writeback"
   )

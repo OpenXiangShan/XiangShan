@@ -28,7 +28,7 @@ class StdImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   extends MemUnitImp(wrapper)
 {
   s0_out.ready := false.B
-  toBackend.writeback.zip(s0_wbPort).map {
+  io.toBackend.writeback.zip(s0_wbPort).map {
     case (wb, chosen) =>
       wb.valid      := s0_out.valid && chosen
       wb.bits       := DontCare

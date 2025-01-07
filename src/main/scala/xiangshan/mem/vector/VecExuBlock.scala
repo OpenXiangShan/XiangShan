@@ -100,14 +100,6 @@ class VecExuBlockIO(implicit p: Parameters) extends XSBundle with HasMemBlockPar
 class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParameters {
   val io = IO(new VecExuBlockIO)
 
-  private val fromCtrl = io.fromCtrl
-  private val (fromBackend, toBackend) = (io.fromBackend, io.toBackend)
-  private val (fromMemExuBlock, toMemExuBlock) = (io.fromMemExuBlock, io.toMemExuBlock)
-  private val (fromDCache, toDCache) = (io.fromDCache, io.toDCache)
-  private val (fromTlb, toTlb) = (io.fromTlb, io.toTlb)
-  private val fromPmp = io.fromPmp
-  private val toLsq = io.toLsq
-
   // The number of vector load/store units is decoupled with the number of load/store units
   val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
   val vsSplit = Seq.fill(VstuCnt)(Module(new VSSplitImp))
@@ -119,20 +111,20 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   val vSegmentFlag = RegInit(false.B)
 
   // vector
-  val vldCanAccept = vlSplit.zip(fromBackend.issueVldu).map {
+  val vldCanAccept = vlSplit.zip(io.fromBackend.issueVldu).map {
     case (vl, issue) => vl.io.in.ready && VlduType.isVecLd(issue.bits.uop.fuOpType)
   }
-  val vstCanAccept = vsSplit.zip(fromBackend.issueVldu).map {
+  val vstCanAccept = vsSplit.zip(io.fromBackend.issueVldu).map {
     case (vs, issue) => vs.io.in.ready && VstuType.isVecSt(issue.bits.uop.fuOpType)
   }
 
-  fromBackend.issueVldu.zip(vldCanAccept.zip(vstCanAccept)).foreach {
+  io.fromBackend.issueVldu.zip(vldCanAccept.zip(vstCanAccept)).foreach {
     case (issue, (vldAccept, vstAccept)) =>
       issue.ready := vldAccept || vstAccept
   }
 
-  val isSegment = fromBackend.issueVldu.head.valid && FuType.isVsegls(fromBackend.issueVldu.head.bits.uop.fuType)
-  val isFixVlUop = fromBackend.issueVldu.map { x =>
+  val isSegment = io.fromBackend.issueVldu.head.valid && FuType.isVsegls(io.fromBackend.issueVldu.head.bits.uop.fuType)
+  val isFixVlUop = io.fromBackend.issueVldu.map { x =>
     x.bits.uop.vpu.isVleff && x.bits.uop.vpu.lastUop && x.valid
   }
 
@@ -143,11 +135,11 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
   io.vSegmentFlag := vSegmentFlag
 
-  vlMergeBuffer.io.redirect <> fromCtrl.redirect
-  vsMergeBuffer.map(_.io.redirect <> fromCtrl.redirect)
-  vSegmentUnit.io.redirect <> fromCtrl.redirect
-  vSegmentUnit.io.fromCsrTrigger <> fromCtrl.trigger
-  vfofBuffer.io.redirect <> fromCtrl.redirect
+  vlMergeBuffer.io.redirect <> io.fromCtrl.redirect
+  vsMergeBuffer.map(_.io.redirect <> io.fromCtrl.redirect)
+  vSegmentUnit.io.redirect <> io.fromCtrl.redirect
+  vSegmentUnit.io.fromCsrTrigger <> io.fromCtrl.trigger
+  vfofBuffer.io.redirect <> io.fromCtrl.redirect
 
 
   // init port
@@ -167,22 +159,22 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   (0 until VstuCnt).foreach { i =>
     vsMergeBuffer(i).io.fromPipeline := DontCare
     vsMergeBuffer(i).io.fromSplit := DontCare
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := fromMemExuBlock.storeMisalignBuffer.control(i).flush
-    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := fromMemExuBlock.storeMisalignBuffer.control(i).mbIndex
+    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := io.fromMemExuBlock.storeMisalignBuffer.control(i).flush
+    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := io.fromMemExuBlock.storeMisalignBuffer.control(i).mbIndex
   }
 
   // init vsSplit
   (0 until VstuCnt).foreach { i =>
-    vsSplit(i).io.redirect <> fromCtrl.redirect
-    vsSplit(i).io.in <> fromBackend.issueVldu(i)
+    vsSplit(i).io.redirect <> io.fromCtrl.redirect
+    vsSplit(i).io.in <> io.fromBackend.issueVldu(i)
     /**
       * Determine whether the validity of the input.
       * Conditions:
-      * 1. fromBackend.issueVldu(i) is valid
+      * 1. io.fromBackend.issueVldu(i) is valid
       * 2. vstCanAccept(i) is true (likely indicating if the vector store can accept a new value)
       * 3. isSegment is false (indicating that the store is not a segment store)
       */
-    vsSplit(i).io.in.valid := fromBackend.issueVldu(i).valid && vstCanAccept(i) && !isSegment
+    vsSplit(i).io.in.valid := io.fromBackend.issueVldu(i).valid && vstCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
 
     val vsSplitOut = Wire(Decoupled(new VecPipeBundle(isVStore = true)))
@@ -192,34 +184,34 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
       vsSplitOut.fire,
       Mux(
         vsSplit(i).io.out.fire,
-        vsSplit(i).io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect),
-        toMemExuBlock.vectorStoreIssues(i).bits.uop.robIdx.needFlush(fromCtrl.redirect)
+        vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect),
+        io.toMemExuBlock.vectorStoreIssues(i).bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
       ),
       Option("VsSplitConnectStu")
     )
-    toMemExuBlock.vectorStoreIssues(i).valid := vsSplitOut.valid
-    toMemExuBlock.vectorStoreIssues(i).bits.fromVecPipeBundle(vsSplitOut.bits, isStore = true)
-    vsSplitOut.ready := toMemExuBlock.vectorStoreIssues(i).ready
+    io.toMemExuBlock.vectorStoreIssues(i).valid := vsSplitOut.valid
+    io.toMemExuBlock.vectorStoreIssues(i).bits.fromVecPipeBundle(vsSplitOut.bits, isStore = true)
+    vsSplitOut.ready := io.toMemExuBlock.vectorStoreIssues(i).ready
 
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty :=
-      !fromMemExuBlock.storeMisalignBuffer.storeMisalignBufferFull
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !fromMemExuBlock.storePipeEmpty(i)
+      !io.fromMemExuBlock.storeMisalignBuffer.storeMisalignBufferFull
+    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !io.fromMemExuBlock.storePipeEmpty(i)
   }
 
   // init vlSplit
   (0 until VlduCnt).foreach { i =>
-    vlSplit(i).io.redirect <> fromCtrl.redirect
-    vlSplit(i).io.in <> fromBackend.issueVldu(i)
+    vlSplit(i).io.redirect <> io.fromCtrl.redirect
+    vlSplit(i).io.in <> io.fromBackend.issueVldu(i)
     /**
       * Determine whether the validity of the input for the vector load split:
       * Conditions:
-      * 1. fromBackend.issueVldu(i).valid must be true (i.e., the backend's issue vector load unit is valid).
+      * 1. io.fromBackend.issueVldu(i).valid must be true (i.e., the backend's issue vector load unit is valid).
       * 2. vldCanAccept(i) must be true, indicating that the vector load can accept a new input.
       * 3. isSegment must be false, meaning that the store is not a segment store.
       * 4. isFixVlUop(i) must be false, indicating that the vector load operation is not a fixed width operation (this condition is added to handle specific cases like fixed vector lengths).
       */
-    vlSplit(i).io.in.valid := fromBackend.issueVldu(i).valid && vldCanAccept(i) && !isSegment && !isFixVlUop(i)
+    vlSplit(i).io.in.valid := io.fromBackend.issueVldu(i).valid && vldCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
 
     val vlSplitOut = Wire(DecoupledIO(new VecPipeBundle()))
@@ -229,25 +221,25 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
       rightOutFire = vlSplitOut.fire,
       isFlush = Mux(
         vlSplit(i).io.out.fire,
-        vlSplit(i).io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect),
-        toMemExuBlock.vectorLoadIssues(i).bits.uop.robIdx.needFlush(fromCtrl.redirect)
+        vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect),
+        io.toMemExuBlock.vectorLoadIssues(i).bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
       ),
       moduleName = Option("VlSplitConnectLdu")
     )
-    vlSplitOut.valid := toMemExuBlock.vectorLoadIssues(i).valid
-    toMemExuBlock.vectorLoadIssues(i).bits.fromVecPipeBundle(vlSplitOut.bits)
-    vlSplitOut.ready <> toMemExuBlock.vectorLoadIssues(i).ready
+    vlSplitOut.valid := io.toMemExuBlock.vectorLoadIssues(i).valid
+    io.toMemExuBlock.vectorLoadIssues(i).bits.fromVecPipeBundle(vlSplitOut.bits)
+    vlSplitOut.ready <> io.toMemExuBlock.vectorLoadIssues(i).ready
 
     // Subsequent instrction will be blocked
-    vfofBuffer.io.in(i).valid := fromBackend.issueVldu(i).valid
-    vfofBuffer.io.in(i).bits  := fromBackend.issueVldu(i).bits
+    vfofBuffer.io.in(i).valid := io.fromBackend.issueVldu(i).valid
+    vfofBuffer.io.in(i).bits  := io.fromBackend.issueVldu(i).bits
   }
 
   //
-  vlMergeBuffer.io.fromPipeline.zip(fromMemExuBlock.vldWriteback).zipWithIndex.foreach {
+  vlMergeBuffer.io.fromPipeline.zip(io.fromMemExuBlock.vldWriteback).zipWithIndex.foreach {
     case ((vl, writeback), i) =>
       writeback.ready := vl.ready
-      fromMemExuBlock.loadMisalignBuffer.writeback.ready := true.B
+      io.fromMemExuBlock.loadMisalignBuffer.writeback.ready := true.B
 
       vl.valid := writeback.valid
       vl.bits := writeback.bits.toVecPipelineFeedbackBundle()
@@ -255,7 +247,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
         when (!writeback.valid) {
           Connection.connect(
             sink        = vl,
-            source      = fromMemExuBlock.loadMisalignBuffer.writeback,
+            source      = io.fromMemExuBlock.loadMisalignBuffer.writeback,
             connectFn   = None,
             connectName = "VecExuBlockConnectMisalignBuffer_"+i
           )
@@ -263,11 +255,11 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
       }
   }
 
-  vsMergeBuffer.map(_.io.fromPipeline.head).zip(fromMemExuBlock.vstWriteback).zipWithIndex.foreach {
+  vsMergeBuffer.map(_.io.fromPipeline.head).zip(io.fromMemExuBlock.vstWriteback).zipWithIndex.foreach {
     case ((vs, writeback), i) =>
       if (i < VstuCnt) {
         writeback.ready := true.B
-        fromMemExuBlock.storeMisalignBuffer.writeback(i).ready := vs.ready
+        io.fromMemExuBlock.storeMisalignBuffer.writeback(i).ready := vs.ready
 
         when (writeback.valid) {
           vs.valid := writeback.valid
@@ -275,7 +267,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
         } .otherwise {
           Connection.connect(
             sink        = vs,
-            source      = fromMemExuBlock.storeMisalignBuffer.writeback(i),
+            source      = io.fromMemExuBlock.storeMisalignBuffer.writeback(i),
             connectFn   = None,
             connectName = "VecExuBlockConnectMisalignBuffer_"+i
           )
@@ -284,12 +276,12 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vector store issue: [[Backend]] -> [[MemExuBlock]]
-  vsSplit.zip(toMemExuBlock.vectorStoreIssues).zipWithIndex.foreach {
+  vsSplit.zip(io.toMemExuBlock.vectorStoreIssues).zipWithIndex.foreach {
     case ((vs: VSSplitImp, stu), i) =>
-      vs.io.redirect <> fromCtrl.redirect
-      vs.io.in <> fromBackend.issueVldu(i)
-      vs.io.in.valid := fromBackend.issueVldu(i).valid &&
-        VstuType.isVecSt(fromBackend.issueVldu(i).bits.uop.fuOpType) && vstCanAccept(i) && !isSegment
+      vs.io.redirect <> io.fromCtrl.redirect
+      vs.io.in <> io.fromBackend.issueVldu(i)
+      vs.io.in.valid := io.fromBackend.issueVldu(i).valid &&
+        VstuType.isVecSt(io.fromBackend.issueVldu(i).bits.uop.fuOpType) && vstCanAccept(i) && !isSegment
       vs.io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
       vs.io.vstd.get := DontCare // TODO: Discuss how to pass vector store data
 
@@ -300,8 +292,8 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
 
       val flush = Mux(
         vs.io.out.fire,
-        vs.io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect),
-        vecStIn.bits.uop.robIdx.needFlush(fromCtrl.redirect)
+        vs.io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect),
+        vecStIn.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
       )
 
       NewPipelineConnect(
@@ -315,12 +307,12 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vector load issue: [[Backend]] -> [[MemExuBlock]]
-  vlSplit.zip(toMemExuBlock.vectorLoadIssues).zipWithIndex.foreach {
+  vlSplit.zip(io.toMemExuBlock.vectorLoadIssues).zipWithIndex.foreach {
     case ((vl: VLSplitImp, ldu), i) =>
-      vl.io.redirect <> fromCtrl.redirect
-      vl.io.in <> fromBackend.issueVldu(i)
-      vl.io.in.valid := fromBackend.issueVldu(i).valid && vldCanAccept(i) && !isSegment && !isFixVlUop(i) &&
-        VlduType.isVecLd(fromBackend.issueVldu(i).bits.uop.fuOpType)
+      vl.io.redirect <> io.fromCtrl.redirect
+      vl.io.in <> io.fromBackend.issueVldu(i)
+      vl.io.in.valid := io.fromBackend.issueVldu(i).valid && vldCanAccept(i) && !isSegment && !isFixVlUop(i) &&
+        VlduType.isVecLd(io.fromBackend.issueVldu(i).bits.uop.fuOpType)
 
       vl.io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
 
@@ -335,8 +327,8 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
         rightOutFire = vecLdIn.fire,
         isFlush = Mux(
           vl.io.out.fire,
-          vl.io.out.bits.uop.robIdx.needFlush(fromCtrl.redirect),
-          vecLdIn.bits.uop.robIdx.needFlush(fromCtrl.redirect)
+          vl.io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect),
+          vecLdIn.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
         ),
         moduleName = Option("VlSplitConnectLdu" + i)
       )
@@ -344,7 +336,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vl writeback: [[MemExuBlock]] -> [[vlMergeBuffer]]
-  vlMergeBuffer.io.fromPipeline.zip(fromMemExuBlock.vldWriteback).foreach {
+  vlMergeBuffer.io.fromPipeline.zip(io.fromMemExuBlock.vldWriteback).foreach {
     case (sink, source) =>
       sink.valid := source.valid
       sink.bits  := source.bits.toVecPipelineFeedbackBundle()
@@ -352,7 +344,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vs writeback: [[MemExuBlock]] -> [[vsMergeBuffer]]
-  vsMergeBuffer.map(_.io.fromPipeline.head).zip(fromMemExuBlock.vstWriteback).foreach {
+  vsMergeBuffer.map(_.io.fromPipeline.head).zip(io.fromMemExuBlock.vstWriteback).foreach {
     case (sink, source) =>
       sink.valid := source.valid
       sink.bits  := source.bits.toVecPipelineFeedbackBundle(isVStore = true)
@@ -360,19 +352,19 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vl feedback: [[vlMergeBuffer]] -> [[Lsq]]
-  toLsq.ldvecFeedback.zip(vlMergeBuffer.io.toLsq).foreach {
+  io.toLsq.ldvecFeedback.zip(vlMergeBuffer.io.toLsq).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   // vs feedback: [[vsMergeBuffer]] -> [[Lsq]]
-  toLsq.stvecFeedback.zip(vsMergeBuffer.map(_.io.toLsq.head)).foreach {
+  io.toLsq.stvecFeedback.zip(vsMergeBuffer.map(_.io.toLsq.head)).foreach {
     case (sink, source) =>
       sink <> source
   }
 
   // vstd: [[vsSplit]] -> [[Lsq]]
-  toLsq.vstd.zip(vsSplit).zipWithIndex.foreach {
+  io.toLsq.vstd.zip(vsSplit).zipWithIndex.foreach {
     case ((sink, source), i) =>
       if (source.io.vstd.isDefined) {
         sink <> source.io.vstd.get
@@ -382,14 +374,14 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // vldu feedback: [[vlMergeBuffer]] -> [[Backend]]
-  toBackend.vlduIqFeedback.zip(vlMergeBuffer.io.feedback).foreach {
+  io.toBackend.vlduIqFeedback.zip(vlMergeBuffer.io.feedback).foreach {
     case (sink, source) =>
       sink.feedbackFast := DontCare
       sink.feedbackSlow <> source
   }
 
   // vstu feedback: [[vsMergeBuffer]] -> [[Backend]]
-  toBackend.vstuIqFeedback.zip(vsMergeBuffer.map(_.io.feedback.head)).zipWithIndex.foreach {
+  io.toBackend.vstuIqFeedback.zip(vsMergeBuffer.map(_.io.feedback.head)).zipWithIndex.foreach {
     case ((sink, source), i) =>
       sink.feedbackFast := DontCare
       if (i == 0) {
@@ -404,42 +396,42 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   }
 
   // tlb: [[vSegmentUnit]] <-> [[Tlb]]
-  toTlb.req <> vSegmentUnit.io.dtlb.req
-  toTlb.req_kill := vSegmentUnit.io.dtlb.req_kill
-  vSegmentUnit.io.dtlb.resp <> fromTlb
+  io.toTlb.req <> vSegmentUnit.io.dtlb.req
+  io.toTlb.req_kill := vSegmentUnit.io.dtlb.req_kill
+  vSegmentUnit.io.dtlb.resp <> io.fromTlb
 
   // pmp: [[Pmp]] -> [[vSegmentUnit]]
-  vSegmentUnit.io.pmpResp <> fromPmp
+  vSegmentUnit.io.pmpResp <> io.fromPmp
 
   // vSegmentUnit issue: [[Backend]] -> [[vSegmentUnit]]
-  vSegmentUnit.io.in <> fromBackend.issueVldu.head
-  vSegmentUnit.io.in.valid := fromBackend.issueVldu.head.valid && isSegment
+  vSegmentUnit.io.in <> io.fromBackend.issueVldu.head
+  vSegmentUnit.io.in.valid := io.fromBackend.issueVldu.head.valid && isSegment
 
   // dcache: [[vSegmentUnit]] <-> [[DCache]]
-  toDCache.req <> vSegmentUnit.io.rdcache.req
-  toDCache.s1_kill := vSegmentUnit.io.rdcache.s1_kill
-  toDCache.s1_kill_data_read := vSegmentUnit.io.rdcache.s1_kill_data_read
-  toDCache.s2_kill := vSegmentUnit.io.rdcache.s2_kill
-  toDCache.s0_pc := vSegmentUnit.io.rdcache.s0_pc
-  toDCache.s1_pc := vSegmentUnit.io.rdcache.s1_pc
-  toDCache.s2_pc := vSegmentUnit.io.rdcache.s2_pc
-  toDCache.is128Req := vSegmentUnit.io.rdcache.is128Req
-  toDCache.pf_source := vSegmentUnit.io.rdcache.pf_source
-  toDCache.s1_paddr_dup_dcache := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
-  toDCache.s1_paddr_dup_lsu := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
-  toDCache.replacementUpdated := vSegmentUnit.io.rdcache.replacementUpdated
+  io.toDCache.req <> vSegmentUnit.io.rdcache.req
+  io.toDCache.s1_kill := vSegmentUnit.io.rdcache.s1_kill
+  io.toDCache.s1_kill_data_read := vSegmentUnit.io.rdcache.s1_kill_data_read
+  io.toDCache.s2_kill := vSegmentUnit.io.rdcache.s2_kill
+  io.toDCache.s0_pc := vSegmentUnit.io.rdcache.s0_pc
+  io.toDCache.s1_pc := vSegmentUnit.io.rdcache.s1_pc
+  io.toDCache.s2_pc := vSegmentUnit.io.rdcache.s2_pc
+  io.toDCache.is128Req := vSegmentUnit.io.rdcache.is128Req
+  io.toDCache.pf_source := vSegmentUnit.io.rdcache.pf_source
+  io.toDCache.s1_paddr_dup_dcache := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
+  io.toDCache.s1_paddr_dup_lsu := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
+  io.toDCache.replacementUpdated := vSegmentUnit.io.rdcache.replacementUpdated
 
-  vSegmentUnit.io.rdcache.resp <> fromDCache.resp
-  vSegmentUnit.io.rdcache.s1_disable_fast_wakeup := fromDCache.s1_disable_fast_wakeup
-  vSegmentUnit.io.rdcache.s2_hit := fromDCache.s2_hit
-  vSegmentUnit.io.rdcache.s2_first_hit := fromDCache.s2_first_hit
-  vSegmentUnit.io.rdcache.s2_bank_conflict := fromDCache.s2_bank_conflict
-  vSegmentUnit.io.rdcache.s2_wpu_pred_fail := fromDCache.s2_wpu_pred_fail
-  vSegmentUnit.io.rdcache.s2_mq_nack := fromDCache.s2_mq_nack
-  vSegmentUnit.io.rdcache.debug_s1_hit_way := fromDCache.debug_s1_hit_way
-  vSegmentUnit.io.rdcache.debug_s2_pred_way_num := fromDCache.debug_s2_pred_way_num
-  vSegmentUnit.io.rdcache.debug_s2_dm_way_num := fromDCache.debug_s2_dm_way_num
-  vSegmentUnit.io.rdcache.debug_s2_real_way_num := fromDCache.debug_s2_real_way_num
+  vSegmentUnit.io.rdcache.resp <> io.fromDCache.resp
+  vSegmentUnit.io.rdcache.s1_disable_fast_wakeup := io.fromDCache.s1_disable_fast_wakeup
+  vSegmentUnit.io.rdcache.s2_hit := io.fromDCache.s2_hit
+  vSegmentUnit.io.rdcache.s2_first_hit := io.fromDCache.s2_first_hit
+  vSegmentUnit.io.rdcache.s2_bank_conflict := io.fromDCache.s2_bank_conflict
+  vSegmentUnit.io.rdcache.s2_wpu_pred_fail := io.fromDCache.s2_wpu_pred_fail
+  vSegmentUnit.io.rdcache.s2_mq_nack := io.fromDCache.s2_mq_nack
+  vSegmentUnit.io.rdcache.debug_s1_hit_way := io.fromDCache.debug_s1_hit_way
+  vSegmentUnit.io.rdcache.debug_s2_pred_way_num := io.fromDCache.debug_s2_pred_way_num
+  vSegmentUnit.io.rdcache.debug_s2_dm_way_num := io.fromDCache.debug_s2_dm_way_num
+  vSegmentUnit.io.rdcache.debug_s2_real_way_num := io.fromDCache.debug_s2_real_way_num
 
   //
   io.exceptionInfo <> vSegmentUnit.io.exceptionInfo
@@ -452,7 +444,7 @@ class VecExuBlock(implicit p: Parameters) extends XSModule with HasMemBlockParam
   val vsMergeBufferWriteback = vsMergeBuffer.map(_.io.uopWriteback.head)
   val vfofBufferWriteback    = vfofBuffer.io.mergeUopWriteback
 
-  toBackend.writebackVldu.zip(vlMergeBufferWriteback.zip(vsMergeBufferWriteback).zip(vfofBufferWriteback)).
+  io.toBackend.writebackVldu.zip(vlMergeBufferWriteback.zip(vsMergeBufferWriteback).zip(vfofBufferWriteback)).
     zipWithIndex.foreach {
     case ((sink, ((vl, vs), vfof)), i) =>
       if (i == 0) {

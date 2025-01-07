@@ -107,18 +107,6 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   io.suggestName("none")
   override lazy val io = IO(new HyuIO).suggestName("io")
 
-  protected val (fromLsq, toLsq) = (io.fromLsq, io.toLsq)
-  protected val (fromSBuffer, toSBuffer) = (io.fromSBuffer, io.toSBuffer)
-  protected val (fromMissQueue, toMissQueue) = (io.fromMissQueue, io.toMissQueue)
-  protected val (fromUncache, toUncache) = (io.fromUncache, io.toUncache)
-  protected val fromTL = io.fromTL
-  protected val fromSta = io.fromSta
-  protected val toPrefetch = io.toPrefetch
-  protected val toLdu = io.toLdu
-  protected val toStoreMisalignBuf = io.toStoreMisalignBuf
-  protected val toLoadMisalignBuf = io.toLoadMisalignBuf
-  protected val commonOut = io.commonOut
-
   // Modules
   val forwardNetwork = OptionWrapper(params.hasLdExe, Module(new ForwardNetwork))
   val exceptionGen = Module(new ExceptionGen())
@@ -140,57 +128,60 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   val s0_tlbNoQuery = WireInit(false.B)
 
   // override select logic
-  s0_in.zip(s0_chosen).zip(zipIssueParams()).zipWithIndex.foreach {
-    case (((in, chosen), (issue, issueParam)), i) =>
-      // Generate virtual address
-      val vaddr = issueParam.issueType match {
-        case MemIssueType.Ld | MemIssueType.Sta  => AGen(issue.bits.src(0), issue.bits.uop.imm, VAddrBits)
-        case _ => issue.bits.vaddr
-      }
-
-      // Generate full virtual address
-      val fullva = issueParam.issueType match {
-        case MemIssueType.Ld | MemIssueType.Sta => AGen(issue.bits.src(0), issue.bits.uop.imm, XLEN)
-        case _ => issue.bits.fullva
-      }
-
-      // Generate physical address
-      val paddr = issueParam.issueType match {
-        case MemIssueType.Fr => issue.bits.paddr
-        case _ => 0.U
-      }
-
-      // Generate mask
-      val mask = issueParam.issueType match {
-        case MemIssueType.Ld | MemIssueType.Sta => genVWmask128(vaddr, issue.bits.uop.fuOpType(2, 0))
-        case _ => issue.bits.mask
-      }
-
-      // Connect input to issue
-      in.bits.vaddr := vaddr
-      in.bits.fullva := fullva
-      in.bits.paddr := paddr
-      in.bits.mask := mask
-
-      when (issue.valid && chosen) {
-        // Set s0_vaddr
-        if (MemIssueType.needVAddr(issueParam.issueType)) {
-          s0_vaddr := vaddr
+  io.fromBackend.issue.zip(params.issueParams).zipWithIndex.foreach {
+    case ((issue, param), i) =>
+        // Generate virtual address
+        val vaddr = param.issueType match {
+          case MemIssueType.Ld | MemIssueType.Sta  =>
+            AGen(issue.bits.src(0), issue.bits.uop.imm, VAddrBits)
+          case _ => issue.bits.vaddr
         }
-        // Set s0_tlbVAddr
-        if (MemIssueType.needTlbVAddr(issueParam.issueType)) {
-          s0_tlbVAddr := vaddr
-          s0_tlbFullVAddr := fullva
+
+        // Generate full virtual address
+        val fullva = param.issueType match {
+          case MemIssueType.Ld | MemIssueType.Sta =>
+            AGen(issue.bits.src(0), issue.bits.uop.imm, XLEN)
+          case _ => issue.bits.fullva
         }
-        // Set s0_dcacheVAddr
-        if (MemIssueType.needDCacheVAddr(issueParam.issueType)) {
-          s0_dcacheVAddr := vaddr
+
+        // Generate physical address
+        val paddr = param.issueType match {
+          case MemIssueType.Fr => issue.bits.paddr
+          case _ => 0.U
         }
-        // Set s0_paddr
-        if (MemIssueType.needPAddr(issueParam.issueType)) {
-          s0_paddr := paddr
+
+        // Generate mask
+        val mask = param.issueType match {
+          case MemIssueType.Ld | MemIssueType.Sta =>
+            genVWmask128(vaddr, issue.bits.uop.fuOpType(2, 0))
+          case _ => issue.bits.mask
         }
-      }
+
+        // Connect input to issue
+        arbiter.io.in(i).bits.vaddr := vaddr
+        arbiter.io.in(i).bits.fullva := fullva
+        arbiter.io.in(i).bits.paddr := paddr
+        arbiter.io.in(i).bits.mask := mask
+
+        when (issue.valid && arbiter.io.chosen(i)) {
+          // Set s0_vaddr
+          if (MemIssueType.needVAddr(param.issueType)) {
+            s0_vaddr := vaddr
+          }
+          // Set s0_tlbVAddr
+          if (MemIssueType.needTlbVAddr(param.issueType)) {
+            s0_tlbVAddr := vaddr
+            s0_tlbFullVAddr := fullva
+          }
+          // Set s0_dcacheVAddr
+          if (MemIssueType.needDCacheVAddr(param.issueType)) {
+            s0_dcacheVAddr := vaddr
+          }
+          // Set s0_paddr
+          if (MemIssueType.needPAddr(param.issueType)) {
+            s0_paddr := paddr
+          }
+        }
   }
 
   /**
@@ -199,7 +190,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * 2. If the instruction operates on non-cacheable memory
    * 3. If the data cache (DCache) is ready to accept a request
    */
-  val s0_canGo = s0_out.bits.isStore || s0_out.bits.isNoncacheable || toDCache.req.ready
+  val s0_canGo = s0_out.bits.isStore || s0_out.bits.isNoncacheable || io.toDCache.req.ready
 
   s0_selOut.ready := s0_canGo && s1_in.ready
   s0_out.valid := s0_selOut.valid && !s0_selOut.bits.isMmio
@@ -215,26 +206,26 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     s0_out.bits.isNoncacheable
 
   // to Tlb
-  toTlb.req.valid := s0_out.valid && s0_canGo
-  toTlb.req.bits.vaddr := s0_tlbVAddr
+  io.toTlb.req.valid := s0_out.valid && s0_canGo
+  io.toTlb.req.bits.vaddr := s0_tlbVAddr
 
   /**
     * Tlb query command:
     * 1. software prefetch write (prefetch_w) or store prefetch: TlbCmd.write
     * 2. otherwise: TlbCmd.read
     */
-  toTlb.req.bits.cmd := Mux(s0_out.bits.isSWPrefetchWrite || s0_out.bits.isStore, TlbCmd.write, TlbCmd.read)
+  io.toTlb.req.bits.cmd := Mux(s0_out.bits.isSWPrefetchWrite || s0_out.bits.isStore, TlbCmd.write, TlbCmd.read)
 
   /**
     * Tlb query size:
     * 1. vector: alignedType(2, 0)
     * 2. otherwise: fuOpType
     */
-  toTlb.req.bits.size := Mux(s0_out.bits.isVector, s0_out.bits.alignType(2, 0), s0_out.bits.uop.fuOpType)
+  io.toTlb.req.bits.size := Mux(s0_out.bits.isVector, s0_out.bits.alignType(2, 0), s0_out.bits.uop.fuOpType)
 
   // to DCache
-  toDCache.req.valid := s0_out.valid && !s0_out.bits.isPrefetchInst && !s0_out.bits.isNoncacheable
-  toDCache.req.bits.vaddr := s0_dcacheVAddr
+  io.toDCache.req.valid := s0_out.valid && !s0_out.bits.isPrefetchInst && !s0_out.bits.isNoncacheable
+  io.toDCache.req.bits.vaddr := s0_dcacheVAddr
 
   /**
     * DCache query command:
@@ -242,7 +233,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * 2. prefetch write or store prefetch: M_PFW
     * 3. load: M_XRD
     */
-  toDCache.req.bits.cmd := Mux(
+  io.toDCache.req.bits.cmd := Mux(
     s0_out.bits.isSWPrefetchRead,
     MemoryOpConstants.M_PFR,
     Mux(
@@ -258,7 +249,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * 2. store prefetch: STORE_SOURCE
     * 3. load: LOAD_SOURCE
     */
-  toDCache.req.bits.instrtype := Mux(
+  io.toDCache.req.bits.instrtype := Mux(
     s0_out.bits.isHWPrefetch,
     DCACHE_PREFETCH_SOURCE.U,
     Mux(
@@ -273,58 +264,58 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * 1. prefetch: pfSource.value
     * 2. otherwise: L1_HW_PREFETCH_NULL
     */
-  toDCache.pf_source := Mux(s0_out.bits.isHWPrefetch, s0_out.bits.pfSource.value, L1_HW_PREFETCH_NULL)
+  io.toDCache.pf_source := Mux(s0_out.bits.isHWPrefetch, s0_out.bits.pfSource.value, L1_HW_PREFETCH_NULL)
 
   // DCache query size
-  toDCache.is128Req := s0_out.bits.is128bit
+  io.toDCache.is128Req := s0_out.bits.is128bit
 
   // dcache replacement extra info
   // TODO: should prefetch load update replacement?
-  toDCache.replacementUpdated := Mux(s0_out.bits.isLoadReplay, s0_out.bits.replacementUpdated, false.B)
+  io.toDCache.replacementUpdated := Mux(s0_out.bits.isLoadReplay, s0_out.bits.replacementUpdated, false.B)
 
   if (!env.FPGAPlatform) {
-    toDCache.s0_pc := s0_out.bits.uop.pc
+    io.toDCache.s0_pc := s0_out.bits.uop.pc
   }
 
   // to Prefetch
   // prefetch related ctrl signal
-  if (toPrefetch.train.isDefined) {
+  if (io.toPrefetch.train.isDefined) {
     // Determine whether the current request is a high-confidence hardware prefetch
     val s0_highConfPrefetch = s0_out.bits.isHWPrefetch && s0_out.bits.confidence > 0.U
     // Accept high-confidence prefetch requests if valid and dcache is ready
-    toPrefetch.train.get.canAcceptHighConfPrefetch := s0_out.valid && s0_highConfPrefetch && toDCache.req.ready
+    io.toPrefetch.train.get.canAcceptHighConfPrefetch := s0_out.valid && s0_highConfPrefetch && io.toDCache.req.ready
 
     // Determine whether the current request is a low-confidence hardware prefetch
     val s0_lowConfPrefetch = s0_out.bits.isHWPrefetch && s0_out.bits.confidence === 0.U
     // Accept low-confidence prefetch requests if valid and dcache is ready
-    toPrefetch.train.get.canAcceptLowConfPrefetch := s0_out.valid && s0_lowConfPrefetch && toDCache.req.ready
+    io.toPrefetch.train.get.canAcceptLowConfPrefetch := s0_out.valid && s0_lowConfPrefetch && io.toDCache.req.ready
   }
 
-  if (toPrefetch.trainL1.isDefined) {
+  if (io.toPrefetch.trainL1.isDefined) {
     // no need to train l1
-    toPrefetch.trainL1.get.canAcceptHighConfPrefetch := DontCare
-    toPrefetch.trainL1.get.canAcceptLowConfPrefetch := DontCare
+    io.toPrefetch.trainL1.get.canAcceptHighConfPrefetch := DontCare
+    io.toPrefetch.trainL1.get.canAcceptLowConfPrefetch := DontCare
   }
 
   // prefetch.i(Zicbop)
-  if (toPrefetch.ifetch.isDefined) {
+  if (io.toPrefetch.ifetch.isDefined) {
     // Determine whether the current request is a prefetch_i (only issue from `IssueQueue`)
     val ifetchValid = s0_out.bits.isIq && s0_out.bits.isPrefetchInst
-    toPrefetch.ifetch.get.valid := RegNext(ifetchValid)
-    toPrefetch.ifetch.get.bits.vaddr := RegEnable(s0_out.bits.vaddr, 0.U, ifetchValid)
+    io.toPrefetch.ifetch.get.valid := RegNext(ifetchValid)
+    io.toPrefetch.ifetch.get.bits.vaddr := RegEnable(s0_out.bits.vaddr, 0.U, ifetchValid)
   }
 
   // to Backend
   if (params.hasLdExe) {
-    toBackend.wakeup <> feedbackGen.io.toBackend.wakeup
+    io.toBackend.wakeup <> feedbackGen.io.toBackend.wakeup
   }
 
   // to Lsq
-  if (toLsq.maskOut.isDefined) {
+  if (io.toLsq.maskOut.isDefined) {
     // store needs to update mask.
-    toLsq.maskOut.get.valid := s0_out.valid && s0_out.bits.isStore
-    toLsq.maskOut.get.bits.mask := s0_out.bits.mask
-    toLsq.maskOut.get.bits.sqIdx := s0_out.bits.uop.sqIdx
+    io.toLsq.maskOut.get.valid := s0_out.valid && s0_out.bits.isStore
+    io.toLsq.maskOut.get.bits.mask := s0_out.bits.mask
+    io.toLsq.maskOut.get.bits.sqIdx := s0_out.bits.uop.sqIdx
   }
 
   // assign s0_out
@@ -345,10 +336,10 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   // perf cnt
-  val perf_dcacheVAddr = toDCache.req.bits.vaddr
+  val perf_dcacheVAddr = io.toDCache.req.bits.vaddr
   val perf_vaddrHighMatch = perf_dcacheVAddr(VAddrBits - 1, 12) === s0_out.bits.src(0)
   val perf_isNotVector = !s0_out.bits.isVector
-  XSPerfAccumulate("s0_stallDCache", s0_out.valid && !toDCache.req.ready)
+  XSPerfAccumulate("s0_stallDCache", s0_out.valid && !io.toDCache.req.ready)
   XSPerfAccumulate("s0_addrSpecSuccess", s0_out.fire && perf_vaddrHighMatch && perf_isNotVector)
   XSPerfAccumulate("s0_addrSpecFailed", s0_out.fire && !perf_vaddrHighMatch && perf_isNotVector)
   XSPerfAccumulate("s0_addrSpecSuccessOnce", s0_out.fire  && perf_vaddrHighMatch && perf_isNotVector && s0_out.bits.isFirstIssue)
@@ -367,8 +358,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // -------------------------------------------------------------------
   // last cycle redirect
   val s1_redirect = Wire(Valid(new Redirect))
-  s1_redirect.valid := GatedValidRegNext(fromCtrl.redirect.valid)
-  s1_redirect.bits := RegEnable(fromCtrl.redirect.bits, fromCtrl.redirect.valid)
+  s1_redirect.valid := GatedValidRegNext(io.fromCtrl.redirect.valid)
+  s1_redirect.bits := RegEnable(io.fromCtrl.redirect.bits, io.fromCtrl.redirect.valid)
 
   // Checkif there is an exception in the current uop
   val s1_exceptionVec = exceptionGen.io.commonOut.s1_exceptionVecOut
@@ -378,44 +369,44 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   val s1_delayedError = s1_in.bits.delayedError && s1_in.bits.isFastReplay
 
   s1_kill := s1_delayedError ||
-    s1_in.bits.uop.robIdx.needFlush(fromCtrl.redirect) ||
+    s1_in.bits.uop.robIdx.needFlush(io.fromCtrl.redirect) ||
     s1_in.bits.uop.robIdx.needFlush(s1_redirect)
 
   // from tlb
   val s1_paddrDupLsu = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.paddr,
-    fromTlb.resp.bits.paddr(0)
+    io.fromTlb.resp.bits.paddr(0)
   )
   val s1_paddrDupDCache = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.paddr,
-    fromTlb.resp.bits.paddr(1)
+    io.fromTlb.resp.bits.paddr(1)
   )
   val s1_gpaddrDupLsu = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.gpaddr,
-    fromTlb.resp.bits.gpaddr(0)
+    io.fromTlb.resp.bits.gpaddr(0)
   )
   val s1_vaNeedExt = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.vaNeedExt,
-    fromTlb.resp.bits.excp(0).vaNeedExt
+    io.fromTlb.resp.bits.excp(0).vaNeedExt
   )
   val s1_isHyper = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.isHyper,
-    fromTlb.resp.bits.excp(0).isHyper
+    io.fromTlb.resp.bits.excp(0).isHyper
   )
   val s1_isForVSnonLeafPTE = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.isForVSnonLeafPTE,
-    fromTlb.resp.bits.isForVSnonLeafPTE
+    io.fromTlb.resp.bits.isForVSnonLeafPTE
   )
   val s1_ptwBack = Mux(
     s1_in.bits.tlbNoQuery,
     s1_in.bits.ptwBack,
-    fromTlb.resp.bits.ptwBack
+    io.fromTlb.resp.bits.ptwBack
   )
 
   /**
@@ -424,7 +415,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * 1. If TLB response is valid.
     * 1. If TLB response is miss.
     */
-  val s1_tlbMiss = fromTlb.resp.valid && fromTlb.resp.bits.miss
+  val s1_tlbMiss = io.fromTlb.resp.valid && io.fromTlb.resp.bits.miss
   val s1_tlbRealMiss = !s1_in.bits.tlbNoQuery && s1_tlbMiss
 
   /**
@@ -433,34 +424,34 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     *   assign a default value of 0.
     * 2. Otherwise, use the most significant bit of the pbmt field from the TLB response.
     */
-  s1_pbmt := Mux(s1_in.bits.tlbNoQuery || s1_tlbMiss, 0.U, fromTlb.resp.bits.pbmt.head)
+  s1_pbmt := Mux(s1_in.bits.tlbNoQuery || s1_tlbMiss, 0.U, io.fromTlb.resp.bits.pbmt.head)
 
   // to Tlb
-  toTlb.req_kill := s1_kill || s1_in.bits.tlbNoQuery
-  toTlb.req.bits.pmp_addr := s1_in.bits.paddr
+  io.toTlb.req_kill := s1_kill || s1_in.bits.tlbNoQuery
+  io.toTlb.req.bits.pmp_addr := s1_in.bits.paddr
 
   /**
-   * Determines whether the load/store request should be killed in s1 (`toDCache.s1_kill`).
+   * Determines whether the load/store request should be killed in s1 (`io.toDCache.s1_kill`).
    * Conditions:
    * 1. A kill signal is triggered in s1 (`s1_kill`).
    * 2. A real TLB miss is detected in s1 (`s1_tlbRealMiss`).
    * 3. An exception is present in s1 (`s1_hasException`).
    */
-  toDCache.s1_kill := s1_kill || s1_tlbRealMiss || s1_hasException
+  io.toDCache.s1_kill := s1_kill || s1_tlbRealMiss || s1_hasException
 
-  toDCache.s1_paddr_dup_lsu := s1_paddrDupLsu
-  toDCache.s1_paddr_dup_dcache := s1_paddrDupDCache
+  io.toDCache.s1_paddr_dup_lsu := s1_paddrDupLsu
+  io.toDCache.s1_paddr_dup_dcache := s1_paddrDupDCache
 
   /**
-   * Determines whether the data read request should be killed in s1 (`toDCache.s1_kill_data_read`).
-   * Conditions for `toDCache.s1_kill_data_read` to be true:
+   * Determines whether the data read request should be killed in s1 (`io.toDCache.s1_kill_data_read`).
+   * Conditions for `io.toDCache.s1_kill_data_read` to be true:
    * 1. A kill signal is triggered in s1 (`s1_kill`).
-   * 2. A fast TLB miss occurs, and the TLB response is valid (`fromTlb.resp.bits.fastMiss && fromTlb.resp.valid`).
+   * 2. A fast TLB miss occurs, and the TLB response is valid (`io.fromTlb.resp.bits.fastMiss && io.fromTlb.resp.valid`).
    */
-  toDCache.s1_kill_data_read := s1_kill || fromTlb.resp.bits.fastMiss && fromTlb.resp.valid
+  io.toDCache.s1_kill_data_read := s1_kill || io.fromTlb.resp.bits.fastMiss && io.fromTlb.resp.valid
 
   if (!env.FPGAPlatform) {
-    toDCache.s1_pc := s1_in.bits.uop.pc
+    io.toDCache.s1_pc := s1_in.bits.uop.pc
   }
 
   /**
@@ -469,7 +460,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * the response logic.
     */
   if (params.hasStaExe) {
-    toBackend.stIssue <> feedbackGen.io.toBackend.stIssue
+    io.toBackend.stIssue <> feedbackGen.io.toBackend.stIssue
   }
 
   /**
@@ -487,26 +478,26 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     s1_hasException
 
   // to prefetch
-  if (toPrefetch.train.isDefined) {
-    toPrefetch.train.get.s1_prefetchSpec := s1_out.fire
+  if (io.toPrefetch.train.isDefined) {
+    io.toPrefetch.train.get.s1_prefetchSpec := s1_out.fire
   }
 
-  if (toPrefetch.trainL1.isDefined) {
-    toPrefetch.trainL1.get.s1_prefetchSpec := s1_out.fire
+  if (io.toPrefetch.trainL1.isDefined) {
+    io.toPrefetch.trainL1.get.s1_prefetchSpec := s1_out.fire
   }
 
   // to Ldu st-ld violation query
-  if (toLdu.nukeQuery.isDefined) {
-    val nukeQuery = toLdu.nukeQuery.get
+  if (io.toLdu.nukeQuery.isDefined) {
+    val nukeQuery = io.toLdu.nukeQuery.get
     /**
      * Determines whether the nuke query in s1 (`s1_nukeQueryCanGo`).
      * Conditions:
-     * 1. The TLB response does not indicate a miss (`!fromTlb.resp.bits.miss`).
+     * 1. The TLB response does not indicate a miss (`!io.fromTlb.resp.bits.miss`).
      * 2. The uop is a store (`s1_in.bits.isStore`).
      * 3. The uop is not a hardware prefetch (`!s1_in.bits.isHWPrefetch`).
      * 4. The uop is not issued by misalignment buffer (`!s1_in.bits.isMisalignBuf`).
      */
-    val s1_nukeQueryCanGo = !fromTlb.resp.bits.miss && s1_in.bits.isStore &&
+    val s1_nukeQueryCanGo = !io.fromTlb.resp.bits.miss && s1_in.bits.isStore &&
       !s1_in.bits.isHWPrefetch && !s1_in.bits.isMisalignBuf
 
     nukeQuery.valid := s1_in.valid && s1_nukeQueryCanGo
@@ -517,8 +508,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   // to Lsq (only for store)
-  if (toLsq.addrUpdate.isDefined) {
-    val addrUpdate = toLsq.addrUpdate.get
+  if (io.toLsq.addrUpdate.isDefined) {
+    val addrUpdate = io.toLsq.addrUpdate.get
     val s1_addrUpdateCanGo = !s1_in.bits.isHWPrefetch && !s1_in.bits.isMisalignBuf
     addrUpdate.valid := s1_in.valid && s1_addrUpdateCanGo
     addrUpdate.bits := s1_out.bits
@@ -550,13 +541,13 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   s1_out.bits.mmio := LSUOpType.isCbo(s1_in.bits.uop.fuOpType) || Pbmt.isIO(s1_pbmt)
   s1_out.bits.atomic := LSUOpType.isCbo(s1_in.bits.uop.fuOpType) || Pbmt.isIO(s1_pbmt)
 
-  commonOut.storePipeEmpty := s0_out.valid || s1_out.valid
+  io.commonOut.storePipeEmpty := s0_out.valid || s1_out.valid
 
   XSError(s1_in.bits.isLoad && LSUOpType.isCbo(s1_in.bits.uop.fuOpType), "Load can not be setted Cbo type!")
 
   // Debug
   io.debugLsInfo.s1_robIdx := s1_in.bits.uop.robIdx.value
-  io.debugLsInfo.s1_isTlbFirstMiss := s1_out.fire && s1_tlbRealMiss && fromTlb.resp.bits.debug.isFirstIssue &&
+  io.debugLsInfo.s1_isTlbFirstMiss := s1_out.fire && s1_tlbRealMiss && io.fromTlb.resp.bits.debug.isFirstIssue &&
     !s1_in.bits.isHWPrefetch
   io.debugLsInfo.s1_isLoadToLoadForward := s1_in.bits.isFastPath
   io.lsTopdownInfo.s1.robIdx := s1_out.bits.uop.robIdx.value
@@ -582,32 +573,32 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * Determines whether the uop in s2 is actually uncacheable (`s2_actuallyUncache`).
    * Conditions:
    * 1. The uop is a PMA (Physical Memory Attribute) uop according to the Pbmt (Page-based Memory Translation)
-   *    and it is an MMIO uop (`Pbmt.isPMA(s2_pbmt) && fromPmp.mmio`).
+   *    and it is an MMIO uop (`Pbmt.isPMA(s2_pbmt) && io.fromPmp.mmio`).
    * 2. The uop is marked as non-cacheable (`s2_in.bits.nc`).
    * 3. The uop is an MMIO (Memory-Mapped I/O) uop (`s2_in.bits.mmio`).
    */
-  val s2_actuallyUncache = Pbmt.isPMA(s2_pbmt) && fromPmp.mmio || s2_in.bits.nc || s2_in.bits.mmio
+  val s2_actuallyUncache = Pbmt.isPMA(s2_pbmt) && io.fromPmp.mmio || s2_in.bits.nc || s2_in.bits.mmio
 
   /**
    * Determines whether the uop in s2 is a real MMIO uop (`s2_realMmio`).
    * Conditions:
    * 1. The uop is an MMIO uop (`s2_in.bits.mmio`).
-   * 2. The uop is flagged as MMIO by the PMP (Physical Memory Protection) (`fromPmp.mmio`).
+   * 2. The uop is flagged as MMIO by the PMP (Physical Memory Protection) (`io.fromPmp.mmio`).
    */
-  val s2_realMmio = s2_in.bits.mmio || fromPmp.mmio
+  val s2_realMmio = s2_in.bits.mmio || io.fromPmp.mmio
 
   s2_out.bits.mmio := s2_realMmio
-  s2_out.bits.atomic := s2_in.bits.atomic || fromPmp.atomic || s2_realMmio
-  s2_out.bits.memBackTypeMM := !fromPmp.mmio
+  s2_out.bits.atomic := s2_in.bits.atomic || io.fromPmp.atomic || s2_realMmio
+  s2_out.bits.memBackTypeMM := !io.fromPmp.mmio
 
   // from tlb
-  s2_out.bits.tlbHandled := !fromTlb.hint.full
-  s2_out.bits.tlbId := fromTlb.hint.id
+  s2_out.bits.tlbHandled := !io.fromTlb.hint.full
+  s2_out.bits.tlbId := io.fromTlb.hint.id
 
   // from dcache
   val s2_dcacheShouldResp = !(s2_in.bits.tlbMiss || s2_hasException || s2_in.bits.delayedError ||
     s2_actuallyUncache || s2_in.bits.isPrefetch)
-  XSError((s2_in.valid && s2_dcacheShouldResp && !fromDCache.resp.valid), "DCache response got lost")
+  XSError((s2_in.valid && s2_dcacheShouldResp && !io.fromDCache.resp.valid), "DCache response got lost")
 
   /**
     * Determine whether the cache-related cause should be cleared for s2.
@@ -665,44 +656,44 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
     /**
       * Determine whether there is a data cache miss for s2:
-      * - A miss occurs when the DCache response indicates a miss (fromDCache.resp.bits.miss)
+      * - A miss occurs when the DCache response indicates a miss (io.fromDCache.resp.bits.miss)
       *   and data from the DCache is required (s2_needDCacheData).
       */
-    s2_dcacheMiss := fromDCache.resp.bits.miss && s2_needDCacheData
+    s2_dcacheMiss := io.fromDCache.resp.bits.miss && s2_needDCacheData
 
     /**
       * Determine whether there is an MQ (Miss Queue) NACK for stage s2:
-      * - An MQ NACK occurs when the DCache signals a NACK (fromDCache.s2_mq_nack)
+      * - An MQ NACK occurs when the DCache signals a NACK (io.fromDCache.s2_mq_nack)
       *   and data from the DCache is required (s2_needDCacheData).
       */
-    s2_mqNack := fromDCache.s2_mq_nack && s2_needDCacheData
+    s2_mqNack := io.fromDCache.s2_mq_nack && s2_needDCacheData
 
     /**
       * Determine whether there is a bank conflict in the DCache for stage s2:
       * - A bank conflict occurs when the DCache signals a bank conflict
-      *   (fromDCache.s2_bank_conflict) and data from the DCache is required (s2_needDCacheData).
+      *   (io.fromDCache.s2_bank_conflict) and data from the DCache is required (s2_needDCacheData).
       */
-    s2_bankConflict := fromDCache.s2_bank_conflict && s2_needDCacheData
+    s2_bankConflict := io.fromDCache.s2_bank_conflict && s2_needDCacheData
 
      /**
        * Determine whether the way prediction failed for stage s2:
        * - A way prediction failure occurs when the DCache signals a way prediction
-       *   failure (fromDCache.s2_wpu_pred_fail) and data from the DCache is required (s2_needDCacheData).
+       *   failure (io.fromDCache.s2_wpu_pred_fail) and data from the DCache is required (s2_needDCacheData).
        */
-    s2_wayPredictFail := fromDCache.s2_wpu_pred_fail && s2_needDCacheData
+    s2_wayPredictFail := io.fromDCache.s2_wpu_pred_fail && s2_needDCacheData
 
     // miss queue nack
-    s2_out.bits.mshrHandled := fromDCache.resp.bits.handled
-    s2_out.bits.mshrId := fromDCache.resp.bits.mshr_id
+    s2_out.bits.mshrHandled := io.fromDCache.resp.bits.handled
+    s2_out.bits.mshrId := io.fromDCache.resp.bits.mshr_id
     s2_out.bits.lastBeat := s2_in.bits.paddr(log2Up(refillBytes))
 
     // dcache miss
     s2_out.bits.miss := s2_dcacheMiss
-    s2_out.bits.replayCarry := fromDCache.resp.bits.replayCarry
+    s2_out.bits.replayCarry := io.fromDCache.resp.bits.replayCarry
   }
 
-  if (fromLsq.isDefined) {
-    val forwardResp = fromLsq.get.forward
+  if (io.fromLsq.isDefined) {
+    val forwardResp = io.fromLsq.get.forward
     s2_out.bits.fullForward := s2_fullForward
     s2_out.bits.dataInvalidSqIdx := forwardResp.dataInvalidSqIdx
     s2_out.bits.addrInvalidSqIdx := forwardResp.addrInvalidSqIdx
@@ -710,16 +701,16 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // to DCache
   if (!env.FPGAPlatform) {
-    toDCache.s2_pc := s2_in.bits.uop.pc
+    io.toDCache.s2_pc := s2_in.bits.uop.pc
   }
-  toDCache.s2_kill := fromPmp.ld || fromPmp.st || s2_actuallyUncache || s2_kill || s2_hasException
+  io.toDCache.s2_kill := io.fromPmp.ld || io.fromPmp.st || s2_actuallyUncache || s2_kill || s2_hasException
 
   // to Backend
-  toBackend.iqFeedback <> feedbackGen.io.toBackend.iqFeedback
+  io.toBackend.iqFeedback <> feedbackGen.io.toBackend.iqFeedback
 
   // to lsq
-  if (toLsq.rarNuke.isDefined && toLsq.rawNuke.isDefined) {
-    val rarNuke = toLsq.rarNuke.get
+  if (io.toLsq.rarNuke.isDefined && io.toLsq.rawNuke.isDefined) {
+    val rarNuke = io.toLsq.rarNuke.get
 
     /**
       * Determine whether a query can be made in s2
@@ -754,19 +745,19 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       * 2. The forward network indicates forwarding from the miss queue or TL.
       * 3. The data cache (DCache) response indicates no miss.
       */
-    rarNuke.req.bits.dataValid := s2_fullForward || !fromDCache.resp.bits.miss ||
+    rarNuke.req.bits.dataValid := s2_fullForward || !io.fromDCache.resp.bits.miss ||
       forwardNetworkCommonOut.s2_forwardFromMissQueueOrTL
 
-    val rawNuke = toLsq.rawNuke.get
+    val rawNuke = io.toLsq.rawNuke.get
     rawNuke.req.valid := rarNuke.req.valid
     rawNuke.req.bits := rarNuke.req.bits
   }
 
-  if (toLsq.excpUpdate.isDefined) {
-    val excpUpdate = toLsq.excpUpdate.get
+  if (io.toLsq.excpUpdate.isDefined) {
+    val excpUpdate = io.toLsq.excpUpdate.get
     excpUpdate := s2_out.bits
     excpUpdate.af := exceptionGen.io.commonOut.s2_exceptionVecOut(storeAccessFault)
-    excpUpdate.miss := fromDCache.resp.fire && fromDCache.resp.bits.miss
+    excpUpdate.miss := io.fromDCache.resp.fire && io.fromDCache.resp.bits.miss
     excpUpdate.hasException := s2_hasException
 
     /**
@@ -782,19 +773,19 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // to store misalign buffer
   feedbackGen.io.toStoreMisalignBuf.enq.ready := false.B
   feedbackGen.io.toStoreMisalignBuf.out.map(_.ready := false.B)
-  if (toStoreMisalignBuf.isDefined) {
+  if (io.toStoreMisalignBuf.isDefined) {
     // enq
-    toStoreMisalignBuf.get.enq <> feedbackGen.io.toStoreMisalignBuf.enq
+    io.toStoreMisalignBuf.get.enq <> feedbackGen.io.toStoreMisalignBuf.enq
     // out
-    if (toStoreMisalignBuf.get.out.isDefined) {
-      toStoreMisalignBuf.get.out.get <> feedbackGen.io.toStoreMisalignBuf.out.get
-      toStoreMisalignBuf.get.out.get.bits.cause(ReplayCauseNO.C_TM) := s2_in.bits.tlbMiss
-      toStoreMisalignBuf.get.out.get.bits.uop.exceptionVec := s2_exceptionVec
+    if (io.toStoreMisalignBuf.get.out.isDefined) {
+      io.toStoreMisalignBuf.get.out.get <> feedbackGen.io.toStoreMisalignBuf.out.get
+      io.toStoreMisalignBuf.get.out.get.bits.cause(ReplayCauseNO.C_TM) := s2_in.bits.tlbMiss
+      io.toStoreMisalignBuf.get.out.get.bits.uop.exceptionVec := s2_exceptionVec
     }
   }
 
   // to prefetch
-  if (toPrefetch.train.isDefined) {
+  if (io.toPrefetch.train.isDefined) {
     /**
       * Determined the prefetch speculation signal (s2_prefetchSpec) for stage 2.
       * Conditions:
@@ -804,19 +795,19 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       *    - There is no TLB miss (`!s2_in.bits.tlbMiss`).
       *    - The uop is a hardware prefetch (`s2_in.bits.isHWPrefetch`).
       */
-    toPrefetch.train.get.s2_prefetchSpec := s2_in.valid && !s2_realMmio &&
+    io.toPrefetch.train.get.s2_prefetchSpec := s2_in.valid && !s2_realMmio &&
       (!s2_in.bits.tlbMiss || s2_in.bits.isHWPrefetch)
 
     // add performance counter
     XSPerfAccumulate("s2_prefetch", s2_out.fire && s2_out.bits.isPrefetch)
-    XSPerfAccumulate("s2_prefetchIgnored", s2_out.fire && s2_out.bits.isPrefetch && fromDCache.s2_mq_nack)
-    XSPerfAccumulate("s2_prefetchMiss", s2_out.fire && s2_out.bits.isPrefetch && fromDCache.resp.bits.miss)
-    XSPerfAccumulate("s2_prefetchHit",  s2_out.fire && s2_out.bits.isPrefetch && !fromDCache.resp.bits.miss)
-    XSPerfAccumulate("s2_prefetchAccept", s2_out.fire && s2_out.bits.isPrefetch && fromDCache.resp.bits.miss && !fromDCache.s2_mq_nack)
+    XSPerfAccumulate("s2_prefetchIgnored", s2_out.fire && s2_out.bits.isPrefetch && io.fromDCache.s2_mq_nack)
+    XSPerfAccumulate("s2_prefetchMiss", s2_out.fire && s2_out.bits.isPrefetch && io.fromDCache.resp.bits.miss)
+    XSPerfAccumulate("s2_prefetchHit",  s2_out.fire && s2_out.bits.isPrefetch && !io.fromDCache.resp.bits.miss)
+    XSPerfAccumulate("s2_prefetchAccept", s2_out.fire && s2_out.bits.isPrefetch && io.fromDCache.resp.bits.miss && !io.fromDCache.s2_mq_nack)
   }
 
-  if (toPrefetch.trainL1.isDefined) {
-    toPrefetch.trainL1.get.s2_prefetchSpec := s2_in.valid && !s2_realMmio
+  if (io.toPrefetch.trainL1.isDefined) {
+    io.toPrefetch.trainL1.get.s2_prefetchSpec := s2_in.valid && !s2_realMmio
   }
 
   // misalign exception check
@@ -844,7 +835,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       * 2. The misaligned store enable signal is active (`hd_misalign_st_enable`).
       */
     s2_misalignException := exceptionGen.io.commonOut.s2_exceptionVecOut(storeAddrMisaligned) &&
-      GatedValidRegNext(fromCtrl.csr.hd_misalign_st_enable)
+      GatedValidRegNext(io.fromCtrl.csr.hd_misalign_st_enable)
 
     /**
       * Determined  `s2_out.valid` signal in s2:
@@ -865,7 +856,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       * 2. The misaligned load enable signal is active (`hd_misalign_ld_enable`).
       */
     s2_misalignException := exceptionGen.io.commonOut.s2_exceptionVecOut(loadAddrMisaligned) &&
-      GatedValidRegNext(fromCtrl.csr.hd_misalign_ld_enable)
+      GatedValidRegNext(io.fromCtrl.csr.hd_misalign_ld_enable)
     s2_out.valid := s2_in.valid && !s2_in.bits.isHWPrefetch
   }
 
@@ -924,14 +915,14 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   io.lsTopdownInfo.s2.robIdx := s2_out.bits.uop.robIdx.value
   io.lsTopdownInfo.s2.paddr_valid := s2_out.fire && s2_out.bits.hasROBEntry && !s2_out.bits.tlbMiss
   io.lsTopdownInfo.s2.paddr_bits := s2_out.bits.paddr
-  io.lsTopdownInfo.s2.first_real_miss := fromDCache.resp.bits.miss
+  io.lsTopdownInfo.s2.first_real_miss := io.fromDCache.resp.bits.miss
   io.lsTopdownInfo.s2.cache_miss_en := s2_out.fire && s2_out.bits.hasROBEntry && !s2_out.bits.tlbMiss && !s2_out.bits.missDbUpdated
 
-  XSPerfAccumulate("s2_dcacheMiss", s2_out.fire && fromDCache.resp.bits.miss)
+  XSPerfAccumulate("s2_dcacheMiss", s2_out.fire && io.fromDCache.resp.bits.miss)
   XSPerfAccumulate("s2_dcacheFirstMiss", s2_out.fire && s2_out.bits.miss && s2_in.bits.isFirstIssue)
-  XSPerfAccumulate("s2_dcacheRealFirstMiss", s2_out.fire&& fromDCache.resp.bits.miss && s2_in.bits.isFirstIssue)
+  XSPerfAccumulate("s2_dcacheRealFirstMiss", s2_out.fire&& io.fromDCache.resp.bits.miss && s2_in.bits.isFirstIssue)
   XSPerfAccumulate("s2_fullForward", s2_out.fire && s2_fullForward)
-  XSPerfAccumulate("s2_fullForwardButDCacheMiss", s2_out.fire && fromDCache.resp.bits.miss && s2_fullForward)
+  XSPerfAccumulate("s2_fullForwardButDCacheMiss", s2_out.fire && io.fromDCache.resp.bits.miss && s2_fullForward)
 
   // Pipeline
   // -------------------------------------------------------------------
@@ -977,13 +968,13 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Conditions:
     *   1. Replay-related issues are cancelled (`s3_replayCancelled`).
     *   2. Misalign-related issues are cancelled (`s3_misalignCancelled`).
-    *   3. The DCache request is not ready (`!toDCache.req.ready`), which prevents fast replay.
+    *   3. The DCache request is not ready (`!io.toDCache.req.ready`), which prevents fast replay.
     */
-  val s3_fastReplayCanclled = s3_replayCancelled || s3_misalignCancelled || !toDCache.req.ready
+  val s3_fastReplayCanclled = s3_replayCancelled || s3_misalignCancelled || !io.toDCache.req.ready
 
   val s3_flushPipe = WireInit(false.B)
-  if (fromLsq.isDefined) {
-    val rarNuke = fromLsq.get.rarNuke
+  if (io.fromLsq.isDefined) {
+    val rarNuke = io.fromLsq.get.rarNuke
     /**
       * Determine whether a RAR (Read After Read) nuke is defined for s3.
       * The uop should flush pipeline if:
@@ -992,7 +983,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       * - The load violation check is enabled (controlled by `csr.ldld_vio_check_enable`).
       */
     s3_flushPipe := rarNuke.valid && rarNuke.bits.replayInst &&
-      GatedValidRegNext(fromCtrl.csr.ldld_vio_check_enable)
+      GatedValidRegNext(io.fromCtrl.csr.ldld_vio_check_enable)
   }
   val s3_replayInst = s3_vpMatchFail
 
@@ -1012,7 +1003,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
      s3_misalignReplayCause(ReplayCauseNO.C_MA) ||
      s3_misalignReplayCause(ReplayCauseNO.C_NK))
 
-  if (toLsq.out.isDefined) {
+  if (io.toLsq.out.isDefined) {
     /**
       * Determine whether the output cause to LSQ (Load-Store Queue) for s3.
       * The replay cause should be cleared if:
@@ -1025,38 +1016,38 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       */
 
     when (s3_hasException || s3_replayInst || s3_flushPipe || s3_in.bits.isMisalignBuf) {
-      toLsq.out.get.bits.cause := 0.U.asTypeOf(s3_out.bits.cause)
+      io.toLsq.out.get.bits.cause := 0.U.asTypeOf(s3_out.bits.cause)
     } .otherwise {
-      toLsq.out.get.bits.cause := s3_replayCause
+      io.toLsq.out.get.bits.cause := s3_replayCause
     }
   }
 
   // to Backend
   if (params.hasLdExe) {
-    toBackend.ldCancel <> feedbackGen.io.toBackend.ldCancel
+    io.toBackend.ldCancel <> feedbackGen.io.toBackend.ldCancel
   }
 
   // to fast replay
   feedbackGen.io.toLdu.replay.ready := false.B
-  if (toLdu.replay.isDefined) {
-    toLdu.replay.get <> feedbackGen.io.toLdu.replay
+  if (io.toLdu.replay.isDefined) {
+    io.toLdu.replay.get <> feedbackGen.io.toLdu.replay
   }
 
   // to lsq
   feedbackGen.io.toLsq.ready := true.B
-  if (toLsq.out.isDefined) {
-    toLsq.out.get <> feedbackGen.io.toLsq
+  if (io.toLsq.out.isDefined) {
+    io.toLsq.out.get <> feedbackGen.io.toLsq
 
-    val s3_revoke = (s3_hasException || toLsq.out.get.bits.needReplay && s3_in.bits.misalign) && s3_in.bits.isLoad
-    if (toLsq.rarNuke.isDefined) {
-      toLsq.rarNuke.get.revoke := s3_revoke
+    val s3_revoke = (s3_hasException || io.toLsq.out.get.bits.needReplay && s3_in.bits.misalign) && s3_in.bits.isLoad
+    if (io.toLsq.rarNuke.isDefined) {
+      io.toLsq.rarNuke.get.revoke := s3_revoke
     }
-    if (toLsq.rawNuke.isDefined) {
-      toLsq.rawNuke.get.revoke := s3_revoke
+    if (io.toLsq.rawNuke.isDefined) {
+      io.toLsq.rawNuke.get.revoke := s3_revoke
     }
 
-    io.debugLsInfo.s3_isReplay := toLsq.out.get.fire && toLsq.out.get.bits.needReplay && s3_in.bits.isLoad
-    io.debugLsInfo.replayCause := toLsq.out.get.bits.cause
+    io.debugLsInfo.s3_isReplay := io.toLsq.out.get.fire && io.toLsq.out.get.bits.needReplay && s3_in.bits.isLoad
+    io.debugLsInfo.replayCause := io.toLsq.out.get.bits.cause
     io.debugLsInfo.replayCnt := 1.U
   } else {
     io.debugLsInfo.s3_isReplay := false.B
@@ -1066,43 +1057,43 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // to Backend rollback
   if (params.hasLdExe) {
-    toBackend.rollback <> feedbackGen.io.toBackend.rollback
+    io.toBackend.rollback <> feedbackGen.io.toBackend.rollback
   }
 
   // to load misalign buffer
   feedbackGen.io.toLoadMisalignBuf.enq.ready := false.B
   feedbackGen.io.toLoadMisalignBuf.out.map(_.ready := false.B)
-  if (toLoadMisalignBuf.isDefined) {
+  if (io.toLoadMisalignBuf.isDefined) {
     // enq
-    toLoadMisalignBuf.get.enq <> feedbackGen.io.toLoadMisalignBuf.enq
+    io.toLoadMisalignBuf.get.enq <> feedbackGen.io.toLoadMisalignBuf.enq
     // data out
 
-    if (toLoadMisalignBuf.get.out.isDefined) {
-      toLoadMisalignBuf.get.out.get <> feedbackGen.io.toLoadMisalignBuf.out.get
-      toLoadMisalignBuf.get.out.get.bits.data := 0.U
-      toLoadMisalignBuf.get.out.get.bits.cause := s3_misalignReplayCause
+    if (io.toLoadMisalignBuf.get.out.isDefined) {
+      io.toLoadMisalignBuf.get.out.get <> feedbackGen.io.toLoadMisalignBuf.out.get
+      io.toLoadMisalignBuf.get.out.get.bits.data := 0.U
+      io.toLoadMisalignBuf.get.out.get.bits.cause := s3_misalignReplayCause
     }
   }
 
   // to prefetch
-  if (toPrefetch.train.isDefined) {
-    val toPrfTrain = toPrefetch.train.get
+  if (io.toPrefetch.train.isDefined) {
+    val toPrfTrain = io.toPrefetch.train.get
     val s2_pfTrainValid = s2_in.valid && !s2_actuallyUncache && (!s2_in.bits.tlbMiss || s2_in.bits.isHWPrefetch)
     toPrfTrain.req.valid := GatedValidRegNext(s2_pfTrainValid)
     toPrfTrain.req.bits.fromLsPipelineBundle(s2_in.bits, latch = true, enable = s2_pfTrainValid)
-    toPrfTrain.req.bits.miss := RegEnable(fromDCache.resp.bits.miss, s2_pfTrainValid)
-    toPrfTrain.req.bits.metaPrefetch := RegEnable(fromDCache.resp.bits.meta_prefetch, s2_pfTrainValid)
-    toPrfTrain.req.bits.metaAccess := RegEnable(fromDCache.resp.bits.meta_access, s2_pfTrainValid)
+    toPrfTrain.req.bits.miss := RegEnable(io.fromDCache.resp.bits.miss, s2_pfTrainValid)
+    toPrfTrain.req.bits.metaPrefetch := RegEnable(io.fromDCache.resp.bits.meta_prefetch, s2_pfTrainValid)
+    toPrfTrain.req.bits.metaAccess := RegEnable(io.fromDCache.resp.bits.meta_access, s2_pfTrainValid)
   }
 
-  if (toPrefetch.trainL1.isDefined) {
-    val toPrfTrainL1 = toPrefetch.trainL1.get
+  if (io.toPrefetch.trainL1.isDefined) {
+    val toPrfTrainL1 = io.toPrefetch.trainL1.get
     val s2_pfTrainL1Valid = s2_in.valid && !s2_actuallyUncache
     toPrfTrainL1.req.valid := GatedValidRegNext(s2_pfTrainL1Valid)
     toPrfTrainL1.req.bits.fromLsPipelineBundle(s2_in.bits, latch = true, enable = s2_pfTrainL1Valid)
-    toPrfTrainL1.req.bits.miss := RegEnable(fromDCache.resp.bits.miss, s2_pfTrainL1Valid)
-    toPrfTrainL1.req.bits.metaPrefetch := RegEnable(fromDCache.resp.bits.meta_prefetch, s2_pfTrainL1Valid)
-    toPrfTrainL1.req.bits.metaAccess := RegEnable(fromDCache.resp.bits.meta_access, s2_pfTrainL1Valid)
+    toPrfTrainL1.req.bits.miss := RegEnable(io.fromDCache.resp.bits.miss, s2_pfTrainL1Valid)
+    toPrfTrainL1.req.bits.metaPrefetch := RegEnable(io.fromDCache.resp.bits.meta_prefetch, s2_pfTrainL1Valid)
+    toPrfTrainL1.req.bits.metaAccess := RegEnable(io.fromDCache.resp.bits.meta_access, s2_pfTrainL1Valid)
   }
 
   // Debug
@@ -1113,9 +1104,9 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // Modules conntion
   // Exception generator
-  exceptionGen.io.fromCtrl.csr <> fromCtrl.csr
-  exceptionGen.io.fromPmp <> fromPmp
-  exceptionGen.io.fromDCache.error_delayed <> fromDCache.resp.bits.error_delayed
+  exceptionGen.io.fromCtrl.csr <> io.fromCtrl.csr
+  exceptionGen.io.fromPmp <> io.fromPmp
+  exceptionGen.io.fromDCache.error_delayed <> io.fromDCache.resp.bits.error_delayed
   exceptionGen.io.fromTrigger.breakPoint := s1_triggerBreakpoint
   Connection.connect(
     sink        = exceptionGen.io.s0_in,
@@ -1130,15 +1121,15 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   Connection.connect(exceptionGen.io.s1_in, s1_in, None, "exceptionGen s1")
   Connection.connect(exceptionGen.io.s2_in, s2_in, None, "exceptionGen s2")
   Connection.connect(exceptionGen.io.s3_in, s3_in, None, "exceptionGen s3")
-  Connection.connect(exceptionGen.io.fromTlb, fromTlb.resp, None, "exceptionGen fromTlb")
+  Connection.connect(exceptionGen.io.fromTlb, io.fromTlb.resp, None, "exceptionGen io.fromTlb")
 
   // Feedback generator
-  feedbackGen.io.fromCtrl.redirect <> fromCtrl.redirect
+  feedbackGen.io.fromCtrl.redirect <> io.fromCtrl.redirect
   feedbackGen.io.fromCtrl.trigger := DontCare
   feedbackGen.io.fromCtrl.trigger.debugMode := s1_triggerDebugMode
-  feedbackGen.io.fromPmp <> fromPmp
-  feedbackGen.io.toBackend.writeback <> toBackend.writeback
-  Connection.connect(feedbackGen.io.fromTlb, fromTlb.resp, None, "feedbackGen fromTlb")
+  feedbackGen.io.fromPmp <> io.fromPmp
+  feedbackGen.io.toBackend.writeback <> io.toBackend.writeback
+  Connection.connect(feedbackGen.io.fromTlb, io.fromTlb.resp, None, "feedbackGen io.fromTlb")
   Connection.connect(feedbackGen.io.s0_in, s0_out, None,"feedbackGen s0")
   Connection.connect(feedbackGen.io.s1_in, s1_in, None, "feedbackGen s1")
   Connection.connect(
@@ -1174,8 +1165,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   feedbackGen.io.commonIn.s3_fromMisalignFlush := s3_fromMisalignFlush
   feedbackGen.io.commonIn.s3_hasException := s3_hasException
 
-  if (fromLsq.isDefined) {
-    feedbackGen.io.fromLsq.mmioLdWriteback <> fromLsq.get.mmioLdWriteback
+  if (io.fromLsq.isDefined) {
+    feedbackGen.io.fromLsq.mmioLdWriteback <> io.fromLsq.get.mmioLdWriteback
   } else {
     feedbackGen.io.fromLsq.mmioLdWriteback := DontCare
   }
@@ -1191,38 +1182,38 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       // data from DCache
       mod.io.fromDCache := 0.U.asTypeOf(mod.io.fromDCache.cloneType)
       if (params.hasLdExe) {
-        mod.io.fromDCache := fromDCache.resp
+        mod.io.fromDCache := io.fromDCache.resp
       }
 
       // data from StoreQueue
       mod.io.fromLsq := 0.U.asTypeOf(mod.io.fromLsq.cloneType)
-      if (toLsq.forward.isDefined) {
-        toLsq.forward.get <> mod.io.toLsq
-        mod.io.fromLsq.forward <> fromLsq.get.forward
-        mod.io.fromLsq.mmioLdData := fromLsq.get.mmioLdData
+      if (io.toLsq.forward.isDefined) {
+        io.toLsq.forward.get <> mod.io.toLsq
+        mod.io.fromLsq.forward <> io.fromLsq.get.forward
+        mod.io.fromLsq.mmioLdData := io.fromLsq.get.mmioLdData
       }
       // data from SBuffer
       mod.io.fromSBuffer := 0.U.asTypeOf(mod.io.fromSBuffer.cloneType)
-      if (toSBuffer.isDefined) {
-        toSBuffer.get <> mod.io.toSBuffer
-        mod.io.fromSBuffer <> fromSBuffer.get
+      if (io.toSBuffer.isDefined) {
+        io.toSBuffer.get <> mod.io.toSBuffer
+        mod.io.fromSBuffer <> io.fromSBuffer.get
       }
       // data from Uncache buffer
       mod.io.fromUncache := 0.U.asTypeOf(mod.io.fromUncache.cloneType)
-      if (toUncache.isDefined) {
-        toUncache.get <> mod.io.toUncache
-        mod.io.fromUncache <> fromUncache.get
+      if (io.toUncache.isDefined) {
+        io.toUncache.get <> mod.io.toUncache
+        mod.io.fromUncache <> io.fromUncache.get
       }
       // data from MissQueue
       mod.io.fromMissQueue := 0.U.asTypeOf(mod.io.fromMissQueue.cloneType)
-      if (toMissQueue.isDefined) {
-        toMissQueue.get <> mod.io.toMissQueue
-        mod.io.fromMissQueue <> fromMissQueue.get
+      if (io.toMissQueue.isDefined) {
+        io.toMissQueue.get <> mod.io.toMissQueue
+        mod.io.fromMissQueue <> io.fromMissQueue.get
       }
       // data from TL D channel
       mod.io.fromTL := 0.U.asTypeOf(mod.io.fromTL.cloneType)
-      if (fromTL.isDefined) {
-        mod.io.fromTL <> fromTL.get
+      if (io.fromTL.isDefined) {
+        mod.io.fromTL <> io.fromTL.get
       }
 
       forwardNetworkCommonOut := mod.io.commonOut
@@ -1255,9 +1246,9 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   )
 
   Connection.connect(replayCauseGen.io.s3_in, s3_in, None, "replayCauseGen s3")
-  Connection.connect(replayCauseGen.io.fromTlb, fromTlb.resp, None, "replayCauseGen fromTlb")
-  if (fromSta.isDefined) {
-    replayCauseGen.io.fromSta <> fromSta.get
+  Connection.connect(replayCauseGen.io.fromTlb, io.fromTlb.resp, None, "replayCauseGen io.fromTlb")
+  if (io.fromSta.isDefined) {
+    replayCauseGen.io.fromSta <> io.fromSta.get
   } else {
     replayCauseGen.io.fromSta := DontCare
   }
@@ -1270,7 +1261,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   /**
    * Assign DCache miss signal
-   * Indicates a cache miss in the current uop (fromDCache.resp.miss), and whether DCache data is needed.
+   * Indicates a cache miss in the current uop (io.fromDCache.resp.miss), and whether DCache data is needed.
    */
   replayCauseGen.io.fromDCache.miss := s2_dcacheMiss
 
@@ -1302,8 +1293,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Assign RAR (Read-After-Read) NACK signal
     * Determine whether the RAR nuke enqueue request can be accepted, default is false.
     */
-  if (toLsq.rarNuke.isDefined) {
-    replayCauseGen.io.fromLsq.rarNack := toLsq.rarNuke.get.req.valid && !toLsq.rarNuke.get.req.ready
+  if (io.toLsq.rarNuke.isDefined) {
+    replayCauseGen.io.fromLsq.rarNack := io.toLsq.rarNuke.get.req.valid && !io.toLsq.rarNuke.get.req.ready
   } else {
     replayCauseGen.io.fromLsq.rarNack := false.B
   }
@@ -1312,8 +1303,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Assign RAW (Read-After-Write) NACK signal
     * Determine whether the RAW enqueue request can be accepted, default is false.
     */
-  if (toLsq.rawNuke.isDefined) {
-    replayCauseGen.io.fromLsq.rawNack := toLsq.rawNuke.get.req.valid && !toLsq.rawNuke.get.req.ready
+  if (io.toLsq.rawNuke.isDefined) {
+    replayCauseGen.io.fromLsq.rawNack := io.toLsq.rawNuke.get.req.valid && !io.toLsq.rawNuke.get.req.ready
   } else {
     replayCauseGen.io.fromLsq.rawNack := false.B
   }
@@ -1322,8 +1313,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     * Assign misalignment buffer NACK signal
     * Determine whether the load misalignment buffer enqueue request can be accepted, default is false.
     */
-  if (toStoreMisalignBuf.isDefined) {
-    replayCauseGen.io.fromLsq.misalignBufNack := toStoreMisalignBuf.get.enq.valid && !toStoreMisalignBuf.get.enq.ready
+  if (io.toStoreMisalignBuf.isDefined) {
+    replayCauseGen.io.fromLsq.misalignBufNack := io.toStoreMisalignBuf.get.enq.valid && !io.toStoreMisalignBuf.get.enq.ready
   } else {
     replayCauseGen.io.fromLsq.misalignBufNack := false.B
   }

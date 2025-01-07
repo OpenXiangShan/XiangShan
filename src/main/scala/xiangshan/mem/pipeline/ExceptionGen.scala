@@ -92,46 +92,38 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     }
   }
 
-  val io = IO(new ExceptionGenIO)
-
-  private val fromCtrl = io.fromCtrl
-  private val fromTlb = io.fromTlb
-  private val fromPmp = io.fromPmp
-  private val fromDCache = io.fromDCache
-  private val fromTrigger = io.fromTrigger
-  private val commonOut = io.commonOut
+  val io = IO(new ExceptionGenIO).suggestName("io")
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 0
   // -------------------------------------------------------------------
-  val s0_in = io.s0_in
-  val s0_exceptionVecOut = WireInit(s0_in.bits.uop.exceptionVec)
+  val s0_exceptionVecOut = WireInit(io.s0_in.bits.uop.exceptionVec)
 
   /**
     * Determine the alignment type based on whether the uop is
     * vector or scalar. If vector, use the `alignType` field; otherwise,
     * use the `fuOpType` field.
     */
-  val s0_alignType = Mux(s0_in.bits.isVector, s0_in.bits.alignType(1, 0), s0_in.bits.uop.fuOpType(1, 0))
+  val s0_alignType = Mux(io.s0_in.bits.isVector, io.s0_in.bits.alignType(1, 0), io.s0_in.bits.uop.fuOpType(1, 0))
 
   /**
     * Determine whether the address is aligned based on the determined alignment type.
     */
   val s0_addrAligned = LookupTree(s0_alignType, List(
     "b00".U   -> true.B,                        // b
-    "b01".U   -> (s0_in.bits.vaddr(0)    === 0.U), // h
-    "b10".U   -> (s0_in.bits.vaddr(1, 0) === 0.U), // w
-    "b11".U   -> (s0_in.bits.vaddr(2, 0) === 0.U)  // d
+    "b01".U   -> (io.s0_in.bits.vaddr(0)    === 0.U), // h
+    "b10".U   -> (io.s0_in.bits.vaddr(1, 0) === 0.U), // w
+    "b11".U   -> (io.s0_in.bits.vaddr(2, 0) === 0.U)  // d
   ))
-  XSError(s0_in.bits.isVector && s0_in.bits.vaddr(3, 0) =/= 0.U && s0_in.bits.alignType(2),
+  XSError(io.s0_in.bits.isVector && io.s0_in.bits.vaddr(3, 0) =/= 0.U && io.s0_in.bits.alignType(2),
     "unit-stride 128 bit element is not aligned!")
 
   /**
     * Extract the lower 5 bits of the virtual address for alignment
     * checks.
     */
-  val s0_checkVAddrLow = s0_in.bits.vaddr(4, 0)
+  val s0_checkVAddrLow = io.s0_in.bits.vaddr(4, 0)
 
   /**
     * Determine the upper alignment offset based on the alignment type.
@@ -150,16 +142,16 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     * which determined by comparing the 4th bit of the upper and lower addresses
     */
   val s0_iqCross16Bytes = s0_checkVAddrUpLow(4) =/= s0_checkVAddrLow(4)
-  val s0_misalignWith16Bytes = !s0_iqCross16Bytes && !s0_addrAligned && !s0_in.bits.isHWPrefetch
-  val s0_isFinalSplit = s0_in.bits.isMisalignBuf && s0_in.bits.isFinalSplit
+  val s0_misalignWith16Bytes = !s0_iqCross16Bytes && !s0_addrAligned && !io.s0_in.bits.isHWPrefetch
+  val s0_isFinalSplit = io.s0_in.bits.isMisalignBuf && io.s0_in.bits.isFinalSplit
 
   /**
     * General check for misalignment, which is true if the address is not aligned
     * or there is a load/store misalignment exception, and vector operations are active
     */
   val s0_misalign = (!s0_addrAligned ||
-    (s0_in.bits.uop.exceptionVec(loadAddrMisaligned) ||
-    s0_in.bits.uop.exceptionVec(storeAddrMisaligned)) && !s0_in.bits.misalignWith16Bytes) && s0_in.bits.vecActive
+    (io.s0_in.bits.uop.exceptionVec(loadAddrMisaligned) ||
+    io.s0_in.bits.uop.exceptionVec(storeAddrMisaligned)) && !io.s0_in.bits.misalignWith16Bytes) && io.s0_in.bits.vecActive
 
   /**
     * Specific check for load address misalignment, which is a load, the
@@ -167,47 +159,46 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     * requires vector to be active and not to involve a
     * misalignment within 16 bytes
     */
-  val s0_loadAddrMisaligned = (!s0_addrAligned || s0_in.bits.uop.exceptionVec(loadAddrMisaligned)) &&
-    s0_in.bits.vecActive && !s0_misalignWith16Bytes && s0_in.bits.isLoad
+  val s0_loadAddrMisaligned = (!s0_addrAligned || io.s0_in.bits.uop.exceptionVec(loadAddrMisaligned)) &&
+    io.s0_in.bits.vecActive && !s0_misalignWith16Bytes && io.s0_in.bits.isLoad
 
   catchException(s0_exceptionVecOut, loadAddrMisaligned, s0_loadAddrMisaligned)
 
   //
-  commonOut.s0_misalign := s0_misalign
-  commonOut.s0_misalignWith16Bytes := s0_misalignWith16Bytes
-  commonOut.s0_isFinalSplit := s0_isFinalSplit
-  commonOut.s0_exceptionVecOut := s0_exceptionVecOut
+  io.commonOut.s0_misalign := s0_misalign
+  io.commonOut.s0_misalignWith16Bytes := s0_misalignWith16Bytes
+  io.commonOut.s0_isFinalSplit := s0_isFinalSplit
+  io.commonOut.s0_exceptionVecOut := s0_exceptionVecOut
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 1
   // -------------------------------------------------------------------
-  val s1_in = io.s1_in
-  val s1_exceptionVecIn = RegEnable(s0_exceptionVecOut, 0.U.asTypeOf(s0_exceptionVecOut), s0_in.valid)
+  val s1_exceptionVecIn = RegEnable(s0_exceptionVecOut, 0.U.asTypeOf(s0_exceptionVecOut), io.s0_in.valid)
   val s1_exceptionVecOut = WireInit(s1_exceptionVecIn)
-  val s1_tlbRealHit = !s1_in.bits.tlbNoQuery && fromTlb.valid && !fromTlb.bits.miss
-  val s1_misalign = WireInit(s1_in.bits.misalign)
+  val s1_tlbRealHit = !io.s1_in.bits.tlbNoQuery && io.fromTlb.valid && !io.fromTlb.bits.miss
+  val s1_misalign = WireInit(io.s1_in.bits.misalign)
 
   // set load exception if need.
-  when (s1_in.bits.isLoad) {
-    when (!s1_in.bits.delayedError) {
+  when (io.s1_in.bits.isLoad) {
+    when (!io.s1_in.bits.delayedError) {
       // set load page fault
-      val s1_loadPageFault = fromTlb.bits.excp(0).pf.ld && s1_tlbRealHit && s1_in.bits.vecActive
+      val s1_loadPageFault = io.fromTlb.bits.excp(0).pf.ld && s1_tlbRealHit && io.s1_in.bits.vecActive
       catchException(s1_exceptionVecOut, loadPageFault, s1_loadPageFault)
 
       // set load guest page fault
-      val s1_loadGuestPageFault = fromTlb.bits.excp(0).gpf.ld && s1_tlbRealHit && s1_in.bits.vecActive
+      val s1_loadGuestPageFault = io.fromTlb.bits.excp(0).gpf.ld && s1_tlbRealHit && io.s1_in.bits.vecActive
       catchException(s1_exceptionVecOut, loadGuestPageFault, s1_loadGuestPageFault)
 
       // set load access fault
-      val s1_loadAccessFault = fromTlb.bits.excp(0).af.ld && s1_tlbRealHit && s1_in.bits.vecActive
+      val s1_loadAccessFault = io.fromTlb.bits.excp(0).af.ld && s1_tlbRealHit && io.s1_in.bits.vecActive
       catchException(s1_exceptionVecOut, loadAccessFault, s1_loadAccessFault)
 
       val s1_hasLoadFaultException = exceptionCatched(s1_exceptionVecOut, loadPageFault) ||
         exceptionCatched(s1_exceptionVecOut, loadGuestPageFault) ||
         exceptionCatched(s1_exceptionVecOut, loadAccessFault)
 
-      when (s1_in.bits.checkFullVA && s1_hasLoadFaultException) {
+      when (io.s1_in.bits.checkFullVA && s1_hasLoadFaultException) {
         clearException(s1_exceptionVecOut, loadAddrMisaligned)
         s1_misalign := false.B
       }
@@ -216,27 +207,27 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
       clearException(s1_exceptionVecOut, loadPageFault)
       clearException(s1_exceptionVecOut, loadGuestPageFault)
       clearException(s1_exceptionVecOut, hardwareError)
-      catchException(s1_exceptionVecOut, loadAccessFault, s1_in.bits.vecActive)
+      catchException(s1_exceptionVecOut, loadAccessFault, io.s1_in.bits.vecActive)
       s1_misalign := false.B
     }
   }
 
   // set store exception if need.
-  when (s1_in.bits.isStore) {
+  when (io.s1_in.bits.isStore) {
     // set store addr misalign
-    val s1_storeAddrMisaligned = s1_in.bits.mmio && s1_in.bits.misalign
+    val s1_storeAddrMisaligned = io.s1_in.bits.mmio && io.s1_in.bits.misalign
     catchException(s1_exceptionVecOut, storeAddrMisaligned, s1_storeAddrMisaligned)
 
     // set store page fault
-    val s1_storePageFault = fromTlb.bits.excp(0).pf.st && s1_in.bits.vecActive
+    val s1_storePageFault = io.fromTlb.bits.excp(0).pf.st && io.s1_in.bits.vecActive
     catchException(s1_exceptionVecOut, storeAddrMisaligned, s1_storeAddrMisaligned)
 
     // set store guest page fault
-    val s1_storeGuestPageFault = fromTlb.bits.excp(0).gpf.st && s1_in.bits.vecActive
+    val s1_storeGuestPageFault = io.fromTlb.bits.excp(0).gpf.st && io.s1_in.bits.vecActive
     catchException(s1_exceptionVecOut, storeGuestPageFault, s1_storeGuestPageFault)
 
     // set store access fault
-    val s1_storeAccessFault = fromTlb.bits.excp(0).af.st && s1_in.bits.vecActive
+    val s1_storeAccessFault = io.fromTlb.bits.excp(0).af.st && io.s1_in.bits.vecActive
     catchException(s1_exceptionVecOut, storeAccessFault, s1_storeAccessFault)
   } .otherwise {
     clearException(s1_exceptionVecOut, storeAddrMisaligned)
@@ -245,36 +236,35 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
   }
 
   // set breakpoint exception
-  catchException(s1_exceptionVecOut, breakPoint, fromTrigger.breakPoint)
+  catchException(s1_exceptionVecOut, breakPoint, io.fromTrigger.breakPoint)
 
-  commonOut.s1_exceptionVecOut := s1_exceptionVecOut
-  commonOut.s1_misalign := s1_misalign
+  io.commonOut.s1_exceptionVecOut := s1_exceptionVecOut
+  io.commonOut.s1_misalign := s1_misalign
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 2
   // -------------------------------------------------------------------
-  val s2_in = io.s2_in
-  val s2_exceptionVecIn = RegEnable(s1_exceptionVecOut, 0.U.asTypeOf(s1_exceptionVecOut), s1_in.valid)
+  val s2_exceptionVecIn = RegEnable(s1_exceptionVecOut, 0.U.asTypeOf(s1_exceptionVecOut), io.s1_in.valid)
   val s2_exceptionVecOut = WireInit(s2_exceptionVecIn)
 
   /**
     * Handle load-related exceptions in s2.
     * This block executes only if the current uop is a load and there is no delayed error.
     */
-  when (s2_in.bits.isLoad && !s2_in.bits.delayedError) {
+  when (io.s2_in.bits.isLoad && !io.s2_in.bits.delayedError) {
     /**
       * Determine if a load access fault occurred
       * Conditions for load access fault:
-      * - The vector uop is active (s2_in.bits.vecActive), and one of the following is true:
-      *   1. PMP (Physical Memory Protection) load violation occurs (fromPmp.ld).
+      * - The vector uop is active (io.s2_in.bits.vecActive), and one of the following is true:
+      *   1. PMP (Physical Memory Protection) load violation occurs (io.fromPmp.ld).
       *   2. The exception vector indicates a load access fault (exceptionCatched).
       *   3. The uop is a vector load or uses the misalignment buffer (isVector || isMisalignBuf),
       *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB miss.
       */
-    val s2_loadAccessFault = (fromPmp.ld || exceptionCatched(s2_exceptionVecIn, loadAccessFault) ||
-      (s2_in.bits.isVector || s2_in.bits.isMisalignBuf) && s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch &&
-      !s2_in.bits.tlbMiss && s2_in.bits.vecActive
+    val s2_loadAccessFault = (io.fromPmp.ld || exceptionCatched(s2_exceptionVecIn, loadAccessFault) ||
+      (io.s2_in.bits.isVector || io.s2_in.bits.isMisalignBuf) && io.s2_in.bits.isNoncacheable && !io.s2_in.bits.isPrefetch &&
+      !io.s2_in.bits.tlbMiss && io.s2_in.bits.vecActive
     )
     catchException(s2_exceptionVecOut, loadAccessFault, s2_loadAccessFault)
 
@@ -283,8 +273,8 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     val s2_tlbUnrelatedExceptions = s2_loadAccessFault || exceptionCatched(s2_exceptionVecIn, breakPoint)
 
     // clean all exception if need
-    val s2_clearAllException = s2_in.bits.isLoad && !s2_in.bits.delayedError &&
-      (s2_in.bits.isPrefetch || s2_in.bits.tlbMiss && !s2_tlbUnrelatedExceptions)
+    val s2_clearAllException = io.s2_in.bits.isLoad && !io.s2_in.bits.delayedError &&
+      (io.s2_in.bits.isPrefetch || io.s2_in.bits.tlbMiss && !s2_tlbUnrelatedExceptions)
 
     when (s2_clearAllException) {
       clearAllExceptions(s2_exceptionVecOut)
@@ -295,53 +285,52 @@ class ExceptionGen(implicit p: Parameters, params: MemUnitParams) extends XSModu
     * Handle store-related exceptions in s2.
     * This block executes only if the current uop is a load.
     */
-  when (s2_in.bits.isStore) {
+  when (io.s2_in.bits.isStore) {
     /**
       * Determine if a store access fault occurred in s2.
       * A store access fault can occur under specific conditions when vector operations or misaligned buffer operations
       * are active.
       * Conditions for store access fault:
-      * - The vector uop is active (s2_in.bits.vecActive), and one of the following is true:
-      *   1. PMP (Physical Memory Protection) store violation occurs (fromPmp.st).
+      * - The vector uop is active (io.s2_in.bits.vecActive), and one of the following is true:
+      *   1. PMP (Physical Memory Protection) store violation occurs (io.fromPmp.st).
       *   2. The exception vector indicates a store access fault.
       *   3. The uop is a vector load or uses the misalignment buffer (isVector || isMisalignBuf),
       *      and it is non-cacheable (isNoncacheable) but not a prefetch (isPrefetch) and without a TLB miss.
       */
-    val s2_storeAccessFault = s2_in.bits.vecActive && (fromPmp.st ||
+    val s2_storeAccessFault = io.s2_in.bits.vecActive && (io.fromPmp.st ||
         exceptionCatched(s2_exceptionVecIn, storeAccessFault) ||
-        ((s2_in.bits.isVector || s2_in.bits.isMisalignBuf) &&
-        s2_in.bits.isNoncacheable && !s2_in.bits.isPrefetch && !s2_in.bits.tlbMiss)
+        ((io.s2_in.bits.isVector || io.s2_in.bits.isMisalignBuf) &&
+        io.s2_in.bits.isNoncacheable && !io.s2_in.bits.isPrefetch && !io.s2_in.bits.tlbMiss)
       )
     catchException(s2_exceptionVecOut, storeAccessFault, s2_storeAccessFault)
 
     // set store address misalign fault
-    val s2_storeAddrMisaligned = s2_in.bits.mmio && s2_in.bits.misalign
+    val s2_storeAddrMisaligned = io.s2_in.bits.mmio && io.s2_in.bits.misalign
     catchException(s2_exceptionVecOut, storeAddrMisaligned, s2_storeAddrMisaligned)
   }
 
-  commonOut.s2_exceptionVecOut := s2_exceptionVecOut
+  io.commonOut.s2_exceptionVecOut := s2_exceptionVecOut
 
   // Pipeline
   // -------------------------------------------------------------------
   // stage 3
   // -------------------------------------------------------------------
-  val s3_in = io.s3_in
-  val s3_exceptionVecIn = RegEnable(s2_exceptionVecOut, 0.U.asTypeOf(s2_exceptionVecOut), s2_in.valid)
+  val s3_exceptionVecIn = RegEnable(s2_exceptionVecOut, 0.U.asTypeOf(s2_exceptionVecOut), io.s2_in.valid)
   val s3_exceptionVecOut = WireInit(s3_exceptionVecIn)
 
   // handle loadAccessFault
-  val s3_loadAccessFault = (s3_in.bits.delayedError || exceptionCatched(s3_exceptionVecIn, loadAccessFault)) &&
-    s3_in.bits.vecActive
+  val s3_loadAccessFault = (io.s3_in.bits.delayedError || exceptionCatched(s3_exceptionVecIn, loadAccessFault)) &&
+    io.s3_in.bits.vecActive
   catchException(s3_exceptionVecOut, loadAccessFault, s3_loadAccessFault)
 
   // handle hardwareError
   val s3_hardwareError =
     if (EnableAccurateLoadError) {
-      fromDCache.error_delayed && GatedValidRegNext(fromCtrl.csr.cache_error_enable)
+      io.fromDCache.error_delayed && GatedValidRegNext(io.fromCtrl.csr.cache_error_enable)
     } else {
       WireInit(false.B)
     }
-  catchException(s3_exceptionVecOut, hardwareError, s3_hardwareError && s3_in.bits.vecActive)
+  catchException(s3_exceptionVecOut, hardwareError, s3_hardwareError && io.s3_in.bits.vecActive)
 
-  commonOut.s3_exceptionVecOut := s3_exceptionVecOut
+  io.commonOut.s3_exceptionVecOut := s3_exceptionVecOut
 }

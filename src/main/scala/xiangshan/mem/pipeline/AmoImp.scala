@@ -52,7 +52,6 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   amoIn.valid := s0_out.valid
   amoIn.bits  := s0_out.bits.toMemExuInputBundle()
   s0_out.ready := amoIn.ready
-  private val amoDCacheIO = io.amoDCacheIO
 
   val s_invalid :: s_tlbAndFlushSbufferReq :: s_pm :: s_waitFlushSbufferResp :: s_cacheReq :: s_cacheResp :: s_cacheRespLatch :: s_finish :: s_finish2 :: Nil = Enum(9)
   val state = RegInit(s_invalid)
@@ -114,13 +113,13 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // assign default value to output signals
   amoIn.ready          := false.B
 
-  amoDCacheIO.req.valid  := false.B
-  amoDCacheIO.req.bits   := DontCare
+  io.amoDCacheIO.req.valid  := false.B
+  io.amoDCacheIO.req.bits   := DontCare
 
-  toTlb.req.valid    := false.B
-  toTlb.req.bits     := DontCare
-  toTlb.req_kill     := false.B
-  fromTlb.resp.ready   := true.B
+  io.toTlb.req.valid    := false.B
+  io.toTlb.req.bits     := DontCare
+  io.toTlb.req_kill     := false.B
+  io.fromTlb.resp.ready   := true.B
 
   io.flushSbuffer.valid := false.B
 
@@ -178,13 +177,13 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // atomic trigger
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
   val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  tEnableVec := fromCtrl.csr.mem_trigger.tEnableVec
-  when (fromCtrl.csr.mem_trigger.tUpdate.valid) {
-    tdata(fromCtrl.csr.mem_trigger.tUpdate.bits.addr) := fromCtrl.csr.mem_trigger.tUpdate.bits.tdata
+  tEnableVec := io.fromCtrl.csr.mem_trigger.tEnableVec
+  when (io.fromCtrl.csr.mem_trigger.tUpdate.valid) {
+    tdata(io.fromCtrl.csr.mem_trigger.tUpdate.bits.addr) := io.fromCtrl.csr.mem_trigger.tUpdate.bits.tdata
   }
 
-  val debugMode = fromCtrl.csr.mem_trigger.debugMode
-  val triggerCanRaiseBpExp = fromCtrl.csr.mem_trigger.triggerCanRaiseBpExp
+  val debugMode = io.fromCtrl.csr.mem_trigger.debugMode
+  val triggerCanRaiseBpExp = io.fromCtrl.csr.mem_trigger.triggerCanRaiseBpExp
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
@@ -229,11 +228,11 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     // when !haveSendFirstTlbReq, tlb resp may come from hw prefetch
     haveSendFirstTlbReq := true.B
 
-    when (fromTlb.resp.fire && haveSendFirstTlbReq) {
-      paddr   := fromTlb.resp.bits.paddr(0)
-      gpaddr  := fromTlb.resp.bits.gpaddr(0)
-      vaddr   := fromTlb.resp.bits.fullva
-      isForVSnonLeafPTE := fromTlb.resp.bits.isForVSnonLeafPTE
+    when (io.fromTlb.resp.fire && haveSendFirstTlbReq) {
+      paddr   := io.fromTlb.resp.bits.paddr(0)
+      gpaddr  := io.fromTlb.resp.bits.gpaddr(0)
+      vaddr   := io.fromTlb.resp.bits.fullva
+      isForVSnonLeafPTE := io.fromTlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(uop.fuOpType(1,0), List(
         "b10".U -> (vaddr(1,0) === 0.U), // W
@@ -242,19 +241,19 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       ))
       exceptionVec(loadAddrMisaligned)  := !addrAligned && isLr
       exceptionVec(storeAddrMisaligned) := !addrAligned && !isLr
-      exceptionVec(storePageFault)      := fromTlb.resp.bits.excp(0).pf.st
-      exceptionVec(loadPageFault)       := fromTlb.resp.bits.excp(0).pf.ld
-      exceptionVec(storeAccessFault)    := fromTlb.resp.bits.excp(0).af.st
-      exceptionVec(loadAccessFault)     := fromTlb.resp.bits.excp(0).af.ld
-      exceptionVec(storeGuestPageFault) := fromTlb.resp.bits.excp(0).gpf.st
-      exceptionVec(loadGuestPageFault)  := fromTlb.resp.bits.excp(0).gpf.ld
+      exceptionVec(storePageFault)      := io.fromTlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)       := io.fromTlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)    := io.fromTlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)     := io.fromTlb.resp.bits.excp(0).af.ld
+      exceptionVec(storeGuestPageFault) := io.fromTlb.resp.bits.excp(0).gpf.st
+      exceptionVec(loadGuestPageFault)  := io.fromTlb.resp.bits.excp(0).gpf.ld
 
       exceptionVec(breakPoint) := triggerBreakpoint
       trigger                  := triggerAction
 
-      when (!fromTlb.resp.bits.miss) {
-        isNc := Pbmt.isNC(fromTlb.resp.bits.pbmt(0))
-        toBackend.writeback.head.bits.uop.debugInfo.tlbRespTime := GTimer()
+      when (!io.fromTlb.resp.bits.miss) {
+        isNc := Pbmt.isNC(io.fromTlb.resp.bits.pbmt(0))
+        io.toBackend.writeback.head.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
           // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
@@ -269,9 +268,9 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     }
   }
 
-  val pbmtReg = RegEnable(fromTlb.resp.bits.pbmt(0), fromTlb.resp.fire && !fromTlb.resp.bits.miss)
+  val pbmtReg = RegEnable(io.fromTlb.resp.bits.pbmt(0), io.fromTlb.resp.fire && !io.fromTlb.resp.bits.miss)
   when (state === s_pm) {
-    val pmp = WireInit(fromPmp)
+    val pmp = WireInit(io.fromPmp)
     isMmio := Pbmt.isIO(pbmtReg) || (Pbmt.isPMA(pbmtReg) && pmp.mmio)
 
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
@@ -321,7 +320,7 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   when (state === s_cacheReq) {
-    when (amoDCacheIO.req.fire) {
+    when (io.amoDCacheIO.req.fire) {
       state := s_cacheResp
     }
   }
@@ -340,15 +339,15 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     // TODO: add assertions:
     // 1. add a replay delay counter?
     // 2. when req gets into MissQueue, it should not miss any more
-    when (amoDCacheIO.resp.fire) {
-      when (amoDCacheIO.resp.bits.miss) {
-        when (amoDCacheIO.resp.bits.replay) {
+    when (io.amoDCacheIO.resp.fire) {
+      when (io.amoDCacheIO.resp.bits.miss) {
+        when (io.amoDCacheIO.resp.bits.replay) {
           state := s_cacheReq
         }
       }.otherwise {
-        dcacheRespData := amoDCacheIO.resp.bits.data
-        dcacheRespId := amoDCacheIO.resp.bits.id
-        dcacheRespError := amoDCacheIO.resp.bits.error
+        dcacheRespData := io.amoDCacheIO.resp.bits.data
+        dcacheRespId := io.amoDCacheIO.resp.bits.id
+        dcacheRespError := io.amoDCacheIO.resp.bits.error
         state := s_cacheRespLatch
       }
     }
@@ -386,7 +385,7 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   when (state === s_finish) {
-    when (toBackend.writeback.head.fire) {
+    when (io.toBackend.writeback.head.fire) {
       when (LSUOpType.isAMOCASQ(uop.fuOpType)) {
         // enter `s_finish2` to write the 2nd uop back
         state := s_finish2
@@ -399,12 +398,12 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   }
 
   when (state === s_finish2) {
-    when (toBackend.writeback.head.fire) {
+    when (io.toBackend.writeback.head.fire) {
       resetFSM()
     }
   }
 
-  when (fromCtrl.redirect.valid) {
+  when (io.fromCtrl.redirect.valid) {
     atomOverrideXtval := false.B
   }
 
@@ -430,28 +429,28 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  toBackend.iqFeedback.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(amoIn.valid))
-  toBackend.iqFeedback.feedbackSlow.bits.hit    := true.B
-  toBackend.iqFeedback.feedbackSlow.bits.robIdx  := RegEnable(amoIn.bits.uop.robIdx, amoIn.valid)
-  toBackend.iqFeedback.feedbackSlow.bits.sqIdx   := RegEnable(amoIn.bits.uop.sqIdx, amoIn.valid)
-  toBackend.iqFeedback.feedbackSlow.bits.lqIdx   := RegEnable(amoIn.bits.uop.lqIdx, amoIn.valid)
-  toBackend.iqFeedback.feedbackSlow.bits.flushState := DontCare
-  toBackend.iqFeedback.feedbackSlow.bits.sourceType := DontCare
-  toBackend.iqFeedback.feedbackSlow.bits.dataInvalidSqIdx := DontCare
-  toBackend.iqFeedback.feedbackSlow.bits.isLoad := false.B
+  io.toBackend.iqFeedback.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(amoIn.valid))
+  io.toBackend.iqFeedback.feedbackSlow.bits.hit    := true.B
+  io.toBackend.iqFeedback.feedbackSlow.bits.robIdx  := RegEnable(amoIn.bits.uop.robIdx, amoIn.valid)
+  io.toBackend.iqFeedback.feedbackSlow.bits.sqIdx   := RegEnable(amoIn.bits.uop.sqIdx, amoIn.valid)
+  io.toBackend.iqFeedback.feedbackSlow.bits.lqIdx   := RegEnable(amoIn.bits.uop.lqIdx, amoIn.valid)
+  io.toBackend.iqFeedback.feedbackSlow.bits.flushState := DontCare
+  io.toBackend.iqFeedback.feedbackSlow.bits.sourceType := DontCare
+  io.toBackend.iqFeedback.feedbackSlow.bits.dataInvalidSqIdx := DontCare
+  io.toBackend.iqFeedback.feedbackSlow.bits.isLoad := false.B
 
   // send req to dtlb
   // keep firing until tlb hit
-  toTlb.req.valid       := state === s_tlbAndFlushSbufferReq
-  toTlb.req.bits.vaddr  := vaddr
-  toTlb.req.bits.fullva := vaddr
-  toTlb.req.bits.checkfullva := true.B
-  toTlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
-  toTlb.req.bits.debug.pc := uop.pc
-  toTlb.req.bits.debug.robIdx := uop.robIdx
-  toTlb.req.bits.debug.isFirstIssue := false.B
-  fromTlb.resp.ready      := true.B
-  toBackend.writeback.head.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
+  io.toTlb.req.valid       := state === s_tlbAndFlushSbufferReq
+  io.toTlb.req.bits.vaddr  := vaddr
+  io.toTlb.req.bits.fullva := vaddr
+  io.toTlb.req.bits.checkfullva := true.B
+  io.toTlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
+  io.toTlb.req.bits.debug.pc := uop.pc
+  io.toTlb.req.bits.debug.robIdx := uop.robIdx
+  io.toTlb.req.bits.debug.isFirstIssue := false.B
+  io.fromTlb.resp.ready      := true.B
+  io.toBackend.writeback.head.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
   // send req to sbuffer to flush it if it is not empty
   io.flushSbuffer.valid := !sbufferEmpty && state === s_tlbAndFlushSbufferReq
@@ -461,22 +460,22 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   // (2) For AMOCAS.Q, the second uop with the pdest of the higher bits of rd is not received yet
   amoIn.ready := state === s_invalid || LSUOpType.isAMOCASQ(uop.fuOpType) && (!pdest2Valid || !pdest1Valid)
 
-  toBackend.writeback.head.valid := outValid && Mux(state === s_finish2, pdest2Valid, pdest1Valid)
+  io.toBackend.writeback.head.valid := outValid && Mux(state === s_finish2, pdest2Valid, pdest1Valid)
   XSError((state === s_finish || state === s_finish2) =/= outValid, "outValid reg error\n")
-  toBackend.writeback.head.bits := DontCare
-  toBackend.writeback.head.bits.uop := uop
-  toBackend.writeback.head.bits.uop.fuType := FuType.mou.U
-  toBackend.writeback.head.bits.uop.pdest := Mux(state === s_finish2, pdest2, pdest1)
-  toBackend.writeback.head.bits.uop.exceptionVec := exceptionVec
-  toBackend.writeback.head.bits.uop.trigger := trigger
-  toBackend.writeback.head.bits.data := Mux(state === s_finish2, respData >> XLEN, respData)
+  io.toBackend.writeback.head.bits := DontCare
+  io.toBackend.writeback.head.bits.uop := uop
+  io.toBackend.writeback.head.bits.uop.fuType := FuType.mou.U
+  io.toBackend.writeback.head.bits.uop.pdest := Mux(state === s_finish2, pdest2, pdest1)
+  io.toBackend.writeback.head.bits.uop.exceptionVec := exceptionVec
+  io.toBackend.writeback.head.bits.uop.trigger := trigger
+  io.toBackend.writeback.head.bits.data := Mux(state === s_finish2, respData >> XLEN, respData)
 
-  amoDCacheIO.req.valid := Mux(
-    amoDCacheIO.req.bits.cmd === M_XLR,
-    !amoDCacheIO.block_lr, // block lr to survive in lr storm
+  io.amoDCacheIO.req.valid := Mux(
+    io.amoDCacheIO.req.bits.cmd === M_XLR,
+    !io.amoDCacheIO.block_lr, // block lr to survive in lr storm
     dataValid // wait until src(1) is ready
   ) && state === s_cacheReq
-  val pipeReq = amoDCacheIO.req.bits
+  val pipeReq = io.amoDCacheIO.req.bits
   pipeReq := DontCare
   pipeReq.cmd := LookupTree(uop.fuOpType, List(
     // TODO: optimize this
@@ -521,22 +520,22 @@ class AmoImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
-    val en = amoDCacheIO.req.fire
-    difftest.coreid := fromCtrl.hartId
+    val en = io.amoDCacheIO.req.fire
+    difftest.coreid := io.fromCtrl.hartId
     difftest.valid  := state === s_cacheRespLatch
     difftest.addr   := RegEnable(paddr, en)
-    difftest.data   := RegEnable(amoDCacheIO.req.bits.amo_data.asTypeOf(difftest.data), en)
-    difftest.mask   := RegEnable(amoDCacheIO.req.bits.amo_mask, en)
-    difftest.cmp    := RegEnable(amoDCacheIO.req.bits.amo_cmp.asTypeOf(difftest.cmp), en)
+    difftest.data   := RegEnable(io.amoDCacheIO.req.bits.amo_data.asTypeOf(difftest.data), en)
+    difftest.mask   := RegEnable(io.amoDCacheIO.req.bits.amo_mask, en)
+    difftest.cmp    := RegEnable(io.amoDCacheIO.req.bits.amo_cmp.asTypeOf(difftest.cmp), en)
     difftest.fuop   := RegEnable(uop.fuOpType, en)
     difftest.out    := respDataWire.asTypeOf(difftest.out)
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
-    val uop = toBackend.writeback.head.bits.uop
+    val uop = io.toBackend.writeback.head.bits.uop
     val difftest = DifftestModule(new DiffLrScEvent)
-    difftest.coreid := fromCtrl.hartId
-    difftest.valid := toBackend.writeback.head.fire && state === s_finish && isSc
+    difftest.coreid := io.fromCtrl.hartId
+    difftest.valid := io.toBackend.writeback.head.fire && state === s_finish && isSc
     difftest.success := success
   }
 }

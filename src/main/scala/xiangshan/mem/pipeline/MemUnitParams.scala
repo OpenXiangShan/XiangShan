@@ -85,7 +85,7 @@ case class MemUnitParams(
   }
 
   def genLsPipelineSinkDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[LsPipelineBundle]] = {
-    MixedVec(issueParams.map(x => Flipped(DecoupledIO(new LsPipelineBundle().suggestName(x.name)))))
+    MixedVec(issueParams.map(x => Flipped(DecoupledIO(new LsPipelineBundle())).suggestName(x.name)))
   }
 
   def getWritebackPortByType(issType: Int): Option[Int] = {
