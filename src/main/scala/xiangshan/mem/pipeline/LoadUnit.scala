@@ -1484,6 +1484,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_frm_mabuf       = s3_in.isFrmMisAlignBuf
+  val s3_ldout_valid = RegNext(s2_mmio_req.valid || s2_valid && !s2_out.isvec && !s2_out.isFrmMisAlignBuf)
   val s3_mmio_req     = RegNext(s2_mmio_req)
   val s3_pdest        = RegNext(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest))
   val s3_rfWen        = RegEnable(Mux(s2_valid, s2_out.uop.rfWen, s2_mmio_req.bits.uop.rfWen), s2_valid || s2_mmio_req.valid)
@@ -1749,7 +1750,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
   val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
-  io.ldout.valid       := s3_mmio_req.valid || s3_valid
+  io.ldout.valid       := s3_ldout_valid
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
   io.ldout.bits.uop.rfWen := !io.ldCancel.ld2Cancel && s3_rfWen
