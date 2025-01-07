@@ -204,7 +204,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val globalException = RegInit(false.B)
   val globalMMIO = RegInit(false.B)
 
-  val hasException = ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR && !io.splitStoreResp.bits.need_rep
+  val hasException = io.splitStoreResp.bits.vecActive && !io.splitStoreResp.bits.need_rep &&
+    ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR || TriggerAction.isDmode(io.splitStoreResp.bits.uop.trigger)
   val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.need_rep
 
   io.sqControl.toStoreQueue.crossPageWithHit := io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx && isCrossPage
@@ -586,6 +587,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.trigger           := TriggerAction.None
       wb.bits.mmio              := globalMMIO
       wb.bits.exceptionVec      := ExceptionNO.selectByFu(exceptionVec, VstuCfg)
+      wb.bits.hasException      := globalException
       wb.bits.usSecondInv       := req.usSecondInv
       wb.bits.vecFeedback       := true.B
       wb.bits.elemIdx           := req.elemIdx

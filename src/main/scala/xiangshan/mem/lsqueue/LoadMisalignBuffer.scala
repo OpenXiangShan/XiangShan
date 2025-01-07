@@ -182,7 +182,8 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val globalException = RegInit(false.B)
   val globalMMIO = RegInit(false.B)
 
-  val hasException = ExceptionNO.selectByFu(io.splitLoadResp.bits.uop.exceptionVec, LduCfg).asUInt.orR
+  val hasException = io.splitLoadResp.bits.vecActive &&
+    ExceptionNO.selectByFu(io.splitLoadResp.bits.uop.exceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(io.splitLoadResp.bits.uop.trigger)
   val isMMIO = io.splitLoadResp.bits.mmio
   needWakeUpReqsWire := false.B
   switch(bufferState) {
@@ -568,6 +569,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.vecWriteBack.bits.trigger              := TriggerAction.None
   io.vecWriteBack.bits.flushState           := DontCare
   io.vecWriteBack.bits.exceptionVec         := ExceptionNO.selectByFu(exceptionVec, VlduCfg)
+  io.vecWriteBack.bits.hasException         := globalException
   io.vecWriteBack.bits.vaddr                := req.fullva
   io.vecWriteBack.bits.vaNeedExt            := req.vaNeedExt
   io.vecWriteBack.bits.gpaddr               := req.gpaddr
