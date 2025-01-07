@@ -1484,7 +1484,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_frm_mabuf       = s3_in.isFrmMisAlignBuf
-  val s3_mmio_req         = RegEnable(s2_mmio_req, s2_fire)
+  val s3_mmio_req         = RegEnable(s2_mmio_req, s2_mmio_req.valid)
   val s3_pdest        = RegEnable(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest), s2_fire)
   val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
   val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
