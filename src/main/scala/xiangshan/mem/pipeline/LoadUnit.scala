@@ -1147,6 +1147,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_nc_with_data = RegNext(s1_nc_with_data)
+  val s2_mmio_req = Wire(Valid(new MemExuOutput))
+  s2_mmio_req.valid := RegNextN(io.lsq.uncache.fire, 2, Some(false.B))
+  s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits, 2)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1481,7 +1484,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_frm_mabuf       = s3_in.isFrmMisAlignBuf
-  val s3_mmio         = Wire(Valid(new MemExuOutput))
+  val s3_mmio_req         = RegEnable(s2_mmio_req, s2_fire)
+  val s3_pdest        = RegEnable(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest), s2_fire)
   val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
   val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
   val s3_hw_err   =
@@ -1502,8 +1506,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSError(s3_valid && s3_vec_mb_nack, "Merge buffer should always accept vector loads!")
 
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
-  s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
-  s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
+
 
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
@@ -1647,7 +1650,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TODO: vector wakeup?
   io.ldCancel.ld2Cancel := s3_valid && !s3_safe_wakeup && !s3_isvec && (!s3_frm_mabuf || s3_in.misalignNeedWakeUp)
 
-  val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
+  val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio_req.bits)
 
   // data from load queue refill
   val s3_ld_raw_data_frm_mmio = RegNextN(io.lsq.ld_raw_data, 3)
@@ -1744,15 +1747,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
   val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
+  io.ldout.valid       := s3_mmio_req.valid || s3_valid
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-
-  io.ldout.valid       := (s3_mmio.valid ||
-                          (s3_out.valid && !s3_vecout.isvec && !s3_frm_mabuf))
+  io.ldout.bits.uop.pdest := s3_pdest
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
   io.ldout.bits.isFromLoadUnit := true.B
   // TODO vector?
   io.ldout.bits.uop.rfWen := !io.ldCancel.ld2Cancel && s3_ld_wb_meta.uop.rfWen
+  io.ldout.bits.uop.fpWen := !io.ldCancel.ld2Cancel && s3_ld_wb_meta.uop.fpWen
   io.ldout.bits.uop.fuType := Mux(
                                   s3_valid && s3_isvec,
                                   FuType.vldu.U,
@@ -1766,7 +1769,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //   io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
   //  io.ldout.bits.data   := Mux(s3_out.valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
   //  io.ldout.valid       := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) ||
-  //                         s3_mmio.valid && !s3_mmio.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid
+  //                         s3_mmio_req.valid && !s3_mmio_req.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid
 
   // s3 load fast replay
   io.fast_rep_out.valid := s3_valid && s3_fast_rep
