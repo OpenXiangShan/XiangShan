@@ -1485,7 +1485,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_frm_mabuf       = s3_in.isFrmMisAlignBuf
   val s3_mmio_req     = RegNext(s2_mmio_req)
-  val s3_pdest        = RegEnable(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest), s2_fire)
+  val s3_pdest        = RegNext(Mux(s2_valid, s2_out.uop.pdest, s2_mmio_req.bits.uop.pdest))
+  val s3_rfWen        = RegEnable(Mux(s2_valid, s2_out.uop.rfWen, s2_mmio_req.bits.uop.rfWen), s2_valid || s2_mmio_req.valid)
+  val s3_fpWen        = RegEnable(Mux(s2_valid, s2_out.uop.fpWen, s2_mmio_req.bits.uop.fpWen), s2_valid || s2_mmio_req.valid)
   val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
   val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
   val s3_hw_err   =
@@ -1750,12 +1752,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.valid       := s3_mmio_req.valid || s3_valid
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
+  io.ldout.bits.uop.rfWen := !io.ldCancel.ld2Cancel && s3_rfWen
+  io.ldout.bits.uop.fpWen := !io.ldCancel.ld2Cancel && s3_fpWen
   io.ldout.bits.uop.pdest := s3_pdest
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
   io.ldout.bits.isFromLoadUnit := true.B
-  // TODO vector?
-  io.ldout.bits.uop.rfWen := !io.ldCancel.ld2Cancel && s3_ld_wb_meta.uop.rfWen
-  io.ldout.bits.uop.fpWen := !io.ldCancel.ld2Cancel && s3_ld_wb_meta.uop.fpWen
   io.ldout.bits.uop.fuType := Mux(
                                   s3_valid && s3_isvec,
                                   FuType.vldu.U,
