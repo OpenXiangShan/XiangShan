@@ -54,7 +54,7 @@ trait HypervisorLevel { self: NewCSR =>
   })
     .setAddr(CSRs.hie)
 
-  val htimedelta = Module(new CSRModule("Htimedelta"))
+  val htimedelta = Module(new CSRModule("Htimedelta", new Htimedelta))
     .setAddr(CSRs.htimedelta)
 
   val hcounteren = Module(new CSRModule("Hcounteren", new Counteren))
@@ -348,6 +348,8 @@ class HEnvCfg extends EnvCfg {
     this.DTE.setRW().withReset(0.U)
   }
 }
+
+class Htimedelta extends FieldInitBundle
 
 trait HypervisorBundle { self: CSRModule[_] =>
   val hstatus = IO(Input(new HstatusBundle))
