@@ -1558,6 +1558,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffAIAXtopeiEvent.mtopei := mtopei.rdata
     diffAIAXtopeiEvent.stopei := stopei.rdata
     diffAIAXtopeiEvent.vstopei := vstopei.rdata
+
+    val diffCustomMflushpwr = DifftestModule(new DiffSyncCustomMflushpwrEvent)
+    diffCustomMflushpwr.coreid := hartId
+    diffCustomMflushpwr.valid := RegNext(io.fromTop.l2FlushDone) =/= io.fromTop.l2FlushDone
+    diffCustomMflushpwr.l2FlushDone := io.fromTop.l2FlushDone
   }
 }
 
