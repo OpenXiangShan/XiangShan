@@ -18,23 +18,14 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import chisel3.util.{Valid, ValidIO}
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
-import freechips.rocketchip.tilelink._
-import coupledL2.{L2ParamKey, EnableCHI}
-import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO, CHIIssue}
-import huancun.BankBitsKey
-import system.HasSoCParameter
-import top.BusPerfMonitor
-import utility._
+import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.TLAdapterNode
 
-
-class FakeL3()(implicit p: Parameters) extends TLClientsMerger(debug = true) {
-  override val node = TLAdapterNode(
+// FakeL3 is only used to merge clients of [L2, DMA#0, DMA#1, Debug]
+// This file follows the implementation of Utility.TLClientsMerger
+class FakeL3()(implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode(
     clientFn = s => {
 
       println("TLClientsMerger: Merging clients:")
@@ -58,7 +49,15 @@ class FakeL3()(implicit p: Parameters) extends TLClientsMerger(debug = true) {
     }
   )
 
-
+  lazy val module = new LazyModuleImp(this){
+    require(node.in.size == 1)
+    // TODO: this is duplicated??
+    for((in, out) <- node.in.map(_._1).zip(node.out.map(_._1))){
+      out <> in
+    }
+    // TODO: we should handle b channel like in TLClientsMerger, but direct all Probes to L2
+    // However, no probes would come from downstream of L3, so we just skip it for now
+  }
 }
 
 object FakeL3 {
