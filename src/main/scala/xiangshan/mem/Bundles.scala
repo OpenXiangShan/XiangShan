@@ -45,29 +45,23 @@ object Bundles {
       connectFn: Option[(S, T) => Unit],
       connectName: String,
     ): Unit = {
-        connectFn match {
-          case Some(fn) => fn(sink, source)
-          case None =>
-            (sink, source) match {
-              // Handle DecoupledIO case
-              case (sink: DecoupledIO[_], source: DecoupledIO[_]) =>
-                sink <> source
-              // Handle ValidIO case
-              case (sink: ValidIO[_], source: ValidIO[_]) =>
-                sink <> source
-              // Handle ValidIO/DecoupledIO case
-              case (sink: ValidIO[_], source: DecoupledIO[_]) =>
-                sink.valid := source.valid
-                sink.bits := source.bits
-              // Handle DecoupledIO/ValidIO case
-              case (sink: DecoupledIO[_], source: ValidIO[_]) =>
-                sink.valid := source.valid
-                sink.bits := source.bits
-              case (sink: Bundle, source: Bundle) =>
-                sink := source
-              case _ =>
-                throw new IllegalStateException(s"Unsupported bundle type: ${sink.getClass}")
-            }
+      connectFn match {
+        case Some(fn) => fn(sink, source) // 自定义连接
+        case None =>
+          (sink, source) match {
+            case (sink: DecoupledIO[_], source: DecoupledIO[_]) => sink <> source
+            case (sink: ValidIO[_], source: ValidIO[_]) => sink <> source
+            case (sink: ValidIO[_], source: DecoupledIO[_]) =>
+              sink.valid := source.valid
+              sink.bits := source.bits
+            case (sink: DecoupledIO[_], source: ValidIO[_]) =>
+              sink.valid := source.valid
+              sink.bits := source.bits
+            case (sink: Bundle, source: Bundle) =>
+              sink := source
+            case _ =>
+              throw new IllegalStateException(s"Unsupported bundle type: ${sink.getClass}")
+          }
       }
     }
 
