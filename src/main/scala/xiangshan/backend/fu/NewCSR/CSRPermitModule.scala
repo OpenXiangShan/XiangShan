@@ -52,30 +52,28 @@ class CSRPermitModule extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  // s1 includes whether the CSR exists, whether it is read-only,
-  // and checks for access to lower-privilege CSRs controlled by M-level CSRs.
-  val s1_EX_II = csrAccess && mLevelPermitMod.io.out.mLevelPermit_EX_II
-  val s1_EX_VI = false.B
-  val s1_illegal = s1_EX_II || s1_EX_VI
+  val s1_EX_II = mLevelPermitMod.io.out.mLevelPermit_EX_II
 
-  // s2 is the privilege level check
-  val s2_EX_II = csrAccess && privilegePermitMod.io.out.privilege_EX_II
-  val s2_EX_VI = csrAccess && !privilegePermitMod.io.out.privilege_EX_VI
-  val s2_illegal = s2_EX_II || s2_EX_VI
+  val s2_EX_II = privilegePermitMod.io.out.privilege_EX_II
+  val s2_EX_VI = !privilegePermitMod.io.out.privilege_EX_VI
 
-  // s3 is the check for access to VS-level or H-level CSRs controlled by H-level CSRs.
-  val s3_EX_II = false.B
-  val s3_EX_VI = csrAccess && hLevelPermitMod.io.out.privilege_EX_VI
-  val s3_illegal = s3_EX_II || s3_EX_VI
+  val s3_EX_VI = hLevelPermitMod.io.out.privilege_EX_VI
 
-  // s4 is the access check for indirect CSRs.
-  val s4_EX_II = csrAccess && indirectCSRPermitMod.io.out.indirectCSR_EX_II
-  val s4_EX_VI = csrAccess && indirectCSRPermitMod.io.out.indirectCSR_EX_VI
+  val s4_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
+  val s4_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
-  val csrAccess_EX_II = s1_EX_II || (!s1_illegal && s2_EX_II) || (!(s1_illegal || s2_illegal) && s3_EX_II) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_II)
+  val s123_illegal = s1_EX_II || s2_EX_II || s2_EX_VI || s3_EX_VI
+
+  val csrAccess_EX_II = csrAccess && (
+    (s1_EX_II || s2_EX_II) ||
+    (!s123_illegal && s4_EX_II)
+  )
+  val csrAccess_EX_VI = csrAccess && (
+    (s2_EX_VI || s3_EX_VI) ||
+    (!s123_illegal && s4_EX_VI)
+  )
+
   val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II
-
-  val csrAccess_EX_VI = s1_EX_VI || (!s1_illegal && s2_EX_VI) || (!(s1_illegal || s2_illegal) && s3_EX_VI) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_VI)
   val Xret_EX_VI = xRetPermitMod.io.out.Xret_EX_VI
 
   io.out.EX_II := csrAccess_EX_II || Xret_EX_II
