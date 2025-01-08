@@ -11,10 +11,16 @@ class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
 
   val xRetPermitMod = Module(new XRetPermitModule)
+  val privilegePermitMod = Module(new PrivilegePermitModule)
+
   xRetPermitMod.io.in.privState := io.in.privState
   xRetPermitMod.io.in.debugMode := io.in.debugMode
   xRetPermitMod.io.in.xRet := io.in.xRet
   xRetPermitMod.io.in.status := io.in.status
+
+  privilegePermitMod.io.in.csrAccess := io.in.csrAccess
+  privilegePermitMod.io.in.privState := io.in.privState
+  privilegePermitMod.io.in.debugMode := io.in.debugMode
 
 
   private val (ren, wen, addr, privState, debugMode) = (
@@ -26,13 +32,6 @@ class CSRPermitModule extends Module {
   )
 
   private val csrAccess = WireInit(ren || wen)
-
-  private val (mnret, mret, sret, dret) = (
-    io.in.xRet.mnret,
-    io.in.xRet.mret,
-    io.in.xRet.sret,
-    io.in.xRet.dret,
-  )
 
   private val (tsr, vtsr) = (
     io.in.status.tsr,
@@ -95,28 +94,13 @@ class CSRPermitModule extends Module {
   )
 
   private val csrIsRO = addr(11, 10) === "b11".U
-  private val csrIsUnpriv = addr(9, 8) === "b00".U
-  private val csrIsM = addr(9, 8) === "b11".U
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
   private val csrIsFp = Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
   private val csrIsVec = Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr, CSRs.vtype).map(_.U === addr).reduce(_ || _)
   private val csrIsWritableVec = Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
   private val counterAddr = addr(4, 0) // 32 counters
 
-  private val accessTable = TruthTable(Seq(
-    //       V PRVM ADDR
-    BitPat("b0__00___00") -> BitPat.Y(), // HU access U
-    BitPat("b1__00___00") -> BitPat.Y(), // VU access U
-    BitPat("b0__01___00") -> BitPat.Y(), // HS access U
-    BitPat("b0__01___01") -> BitPat.Y(), // HS access S
-    BitPat("b0__01___10") -> BitPat.Y(), // HS access H
-    BitPat("b1__01___00") -> BitPat.Y(), // VS access U
-    BitPat("b1__01___01") -> BitPat.Y(), // VS access S
-    BitPat("b0__11___00") -> BitPat.Y(), // M  access HU
-    BitPat("b0__11___01") -> BitPat.Y(), // M  access HS
-    BitPat("b0__11___10") -> BitPat.Y(), // M  access H
-    BitPat("b0__11___11") -> BitPat.Y(), // M  access M
-  ), BitPat.N())
+
 
 
 
@@ -231,15 +215,6 @@ class CSRPermitModule extends Module {
 
   private val rwStopei_EX_II = csrAccess && privState.isModeHS && mvienSEIE && addr === CSRs.stopei.U
 
-  // s2
-  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
-    privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
-    accessTable
-  ).asBool
-
-  private val isDebugReg   = addr(11, 4) === "h7b".U
-  private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
-
   // s3
   private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
     wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
@@ -265,8 +240,8 @@ class CSRPermitModule extends Module {
   val s1_illegal = s1_EX_II || s1_EX_VI
 
   // s2 is the privilege level check
-  val s2_EX_II = csrAccess && !privilegeLegal && (!privState.isVirtual || csrIsM)
-  val s2_EX_VI = csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM
+  val s2_EX_II = csrAccess && privilegePermitMod.io.out.privilege_EX_II
+  val s2_EX_VI = csrAccess && !privilegePermitMod.io.out.privilege_EX_VI
   val s2_illegal = s2_EX_II || s2_EX_VI
 
   // s3 is the check for access to VS-level or H-level CSRs controlled by H-level CSRs.
@@ -353,6 +328,53 @@ class XRetPermitModule extends Module {
   io.out.hasLegalMret  := mret  && !mretIllegal
   io.out.hasLegalSret  := sret  && !sretIllegal
   io.out.hasLegalDret  := dret  && !dretIllegal
+}
+
+class PrivilegePermitModule extends Module {
+  val io = IO(new Bundle() {
+    val in = Input(new Bundle {
+      val csrAccess = new csrAccessIO
+      val privState = new PrivState
+      val debugMode = Bool()
+    })
+    val out = Output(new Bundle {
+      val privilege_EX_II = Bool()
+      val privilege_EX_VI = Bool()
+    })
+  })
+
+  private val (addr, privState, debugMode) = (
+    io.in.csrAccess.addr,
+    io.in.privState,
+    io.in.debugMode
+  )
+
+  private val accessTable = TruthTable(Seq(
+    //       V PRVM ADDR
+    BitPat("b0__00___00") -> BitPat.Y(), // HU access U
+    BitPat("b1__00___00") -> BitPat.Y(), // VU access U
+    BitPat("b0__01___00") -> BitPat.Y(), // HS access U
+    BitPat("b0__01___01") -> BitPat.Y(), // HS access S
+    BitPat("b0__01___10") -> BitPat.Y(), // HS access H
+    BitPat("b1__01___00") -> BitPat.Y(), // VS access U
+    BitPat("b1__01___01") -> BitPat.Y(), // VS access S
+    BitPat("b0__11___00") -> BitPat.Y(), // M  access HU
+    BitPat("b0__11___01") -> BitPat.Y(), // M  access HS
+    BitPat("b0__11___10") -> BitPat.Y(), // M  access H
+    BitPat("b0__11___11") -> BitPat.Y(), // M  access M
+  ), BitPat.N())
+
+  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
+    privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
+    accessTable
+  ).asBool
+
+  private val csrIsM = addr(9, 8) === "b11".U
+  private val isDebugReg   = addr(11, 4) === "h7b".U
+  private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
+
+  io.out.privilege_EX_II := !privilegeLegal && (!privState.isVirtual || csrIsM)
+  io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
 class csrAccessIO extends Bundle {
