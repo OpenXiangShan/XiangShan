@@ -177,7 +177,7 @@ object difftest extends HasChisel {
 
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources = T.sources {
-      super.sources() ++ Seq(PathRef(millSourcePath / "src" / "generator" / "chisel"))
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
     }
   }
 
@@ -270,6 +270,7 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
+    ivy"org.yaml:snakeyaml:2.3"
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
@@ -344,7 +345,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     override def forkArgs = forkArgsTask()
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
-      defaultVersions("chiseltest")
+      defaultVersions("chiseltest"),
+      ivy"org.yaml:snakeyaml:2.3"
     )
 
     override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")

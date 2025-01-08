@@ -184,6 +184,8 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
+        case "--yaml-config" :: yamlFile :: tail =>
+          nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
