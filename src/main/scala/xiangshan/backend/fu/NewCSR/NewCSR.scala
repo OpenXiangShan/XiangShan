@@ -457,11 +457,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
 
-  permitMod.io.in.mnret := io.in.bits.mnret && valid
-  permitMod.io.in.mret  := io.in.bits.mret  && valid
-  permitMod.io.in.sret  := io.in.bits.sret  && valid
-  permitMod.io.in.dret  := io.in.bits.dret  && valid
-  permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
+  permitMod.io.in.xRet.mnret := io.in.bits.mnret && valid
+  permitMod.io.in.xRet.mret  := io.in.bits.mret  && valid
+  permitMod.io.in.xRet.sret  := io.in.bits.sret  && valid
+  permitMod.io.in.xRet.dret  := io.in.bits.dret  && valid
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.regOut.VTSR.asBool
@@ -469,16 +468,16 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
 
-  permitMod.io.in.status.mcounteren := mcounteren.rdata
-  permitMod.io.in.status.hcounteren := hcounteren.rdata
-  permitMod.io.in.status.scounteren := scounteren.rdata
+  permitMod.io.in.xcounteren.mcounteren := mcounteren.rdata
+  permitMod.io.in.xcounteren.hcounteren := hcounteren.rdata
+  permitMod.io.in.xcounteren.scounteren := scounteren.rdata
 
-  permitMod.io.in.status.mstateen0 := mstateen0.rdata
-  permitMod.io.in.status.hstateen0 := hstateen0.rdata
-  permitMod.io.in.status.sstateen0 := sstateen0.rdata
+  permitMod.io.in.xstateen.mstateen0 := mstateen0.rdata
+  permitMod.io.in.xstateen.hstateen0 := hstateen0.rdata
+  permitMod.io.in.xstateen.sstateen0 := sstateen0.rdata
 
-  permitMod.io.in.status.menvcfg := menvcfg.rdata
-  permitMod.io.in.status.henvcfg := henvcfg.rdata
+  permitMod.io.in.xenvcfg.menvcfg := menvcfg.rdata
+  permitMod.io.in.xenvcfg.henvcfg := henvcfg.rdata
 
   permitMod.io.in.status.mstatusFSOff  :=  mstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.mstatusVSOff  :=  mstatus.regOut.VS === ContextStatus.Off

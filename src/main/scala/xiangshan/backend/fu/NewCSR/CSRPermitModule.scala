@@ -21,10 +21,10 @@ class CSRPermitModule extends Module {
   private val csrAccess = WireInit(ren || wen)
 
   private val (mnret, mret, sret, dret) = (
-    io.in.mnret,
-    io.in.mret,
-    io.in.sret,
-    io.in.dret,
+    io.in.xRet.mnret,
+    io.in.xRet.mret,
+    io.in.xRet.sret,
+    io.in.xRet.dret,
   )
 
   private val (tsr, vtsr) = (
@@ -37,18 +37,16 @@ class CSRPermitModule extends Module {
     io.in.status.vtvm,
   )
 
-  private val csrIsCustom = io.in.csrIsCustom
-
   private val (mcounteren, hcounteren, scounteren) = (
-    io.in.status.mcounteren,
-    io.in.status.hcounteren,
-    io.in.status.scounteren,
+    io.in.xcounteren.mcounteren,
+    io.in.xcounteren.hcounteren,
+    io.in.xcounteren.scounteren,
   )
 
   private val (mstateen0, hstateen0, sstateen0) = (
-    io.in.status.mstateen0,
-    io.in.status.hstateen0,
-    io.in.status.sstateen0,
+    io.in.xstateen.mstateen0,
+    io.in.xstateen.hstateen0,
+    io.in.xstateen.sstateen0,
   )
 
   private val (mcounterenTM, hcounterenTM) = (
@@ -57,8 +55,8 @@ class CSRPermitModule extends Module {
   )
 
   private val (menvcfg, henvcfg) = (
-    io.in.status.menvcfg,
-    io.in.status.henvcfg,
+    io.in.xenvcfg.menvcfg,
+    io.in.xenvcfg.henvcfg,
   )
 
   private val (menvcfgSTCE, henvcfgSTCE) = (
@@ -308,63 +306,83 @@ class CSRPermitModule extends Module {
   dontTouch(regularPrivilegeLegal)
 }
 
+class csrAccessIO extends Bundle {
+  val ren   = Bool()
+  val wen   = Bool()
+  val addr  = UInt(12.W)
+}
+
+class xRetIO extends Bundle {
+  val mnret = Bool()
+  val mret = Bool()
+  val sret = Bool()
+  val dret = Bool()
+}
+
+class statusIO extends Bundle {
+  // Trap SRET
+  val tsr = Bool()
+  // Virtual Trap SRET
+  val vtsr = Bool()
+  // Trap Virtual Memory
+  val tvm = Bool()
+  // Virtual Trap Virtual Memory
+  val vtvm = Bool()
+  val mstatusFSOff = Bool()
+  val vsstatusFSOff = Bool()
+  val mstatusVSOff = Bool()
+  val vsstatusVSOff = Bool()
+}
+
+class xcounterenIO extends Bundle {
+  // Machine level counter enable, access PMC from the level less than M will trap EX_II
+  val mcounteren = UInt(32.W)
+  // Hypervisor level counter enable.
+  // Accessing PMC from VS/VU level will trap EX_VI, if m[x]=1 && h[x]=0
+  val hcounteren = UInt(32.W)
+  // Supervisor level counter enable.
+  // Accessing PMC from **HU level** will trap EX_II, if s[x]=0
+  // Accessing PMC from **VU level** will trap EX_VI, if m[x]=1 && h[x]=1 && s[x]=0
+  val scounteren = UInt(32.W)
+}
+
+class xenvcfgIO extends Bundle {
+  // Machine environment configuration register.
+  // Accessing stimecmp or vstimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
+  val menvcfg = UInt(64.W)
+  // Hypervisor environment configuration register.
+  // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
+  val henvcfg = UInt(64.W)
+}
+
+class xstateenIO extends Bundle {
+  // Sm/Ssstateen: to control state access
+  val mstateen0 = new MstateenBundle0
+  val hstateen0 = new HstateenBundle0
+  val sstateen0 = new SstateenBundle0
+}
+
+class aiaIO extends Bundle {
+  val miselectIsIllegal = Bool()
+  val siselectIsIllegal = Bool()
+  val vsiselectIsIllegal = Bool()
+  val siselect = UInt(64.W)
+  val vsiselect = UInt(64.W)
+  val mvienSEIE = Bool()
+  val hvictlVTI = Bool()
+}
+
 class CSRPermitIO extends Bundle {
   val in = Input(new Bundle {
-    val csrAccess = new Bundle {
-      val ren = Bool()
-      val wen = Bool()
-      val addr = UInt(12.W)
-    }
+    val csrAccess = new csrAccessIO
     val privState = new PrivState
     val debugMode = Bool()
-    val mnret = Bool()
-    val mret = Bool()
-    val sret = Bool()
-    val dret = Bool()
-    val csrIsCustom = Bool()
-    val status = new Bundle {
-      // Trap SRET
-      val tsr = Bool()
-      // Virtual Trap SRET
-      val vtsr = Bool()
-      // Trap Virtual Memory
-      val tvm = Bool()
-      // Virtual Trap Virtual Memory
-      val vtvm = Bool()
-      // Machine level counter enable, access PMC from the level less than M will trap EX_II
-      val mcounteren = UInt(32.W)
-      // Hypervisor level counter enable.
-      // Accessing PMC from VS/VU level will trap EX_VI, if m[x]=1 && h[x]=0
-      val hcounteren = UInt(32.W)
-      // Supervisor level counter enable.
-      // Accessing PMC from **HU level** will trap EX_II, if s[x]=0
-      // Accessing PMC from **VU level** will trap EX_VI, if m[x]=1 && h[x]=1 && s[x]=0
-      val scounteren = UInt(32.W)
-      // Machine environment configuration register.
-      // Accessing stimecmp or vstimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
-      val menvcfg = UInt(64.W)
-      // Hypervisor environment configuration register.
-      // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
-      val henvcfg = UInt(64.W)
-
-      val mstatusFSOff = Bool()
-      val vsstatusFSOff = Bool()
-      val mstatusVSOff = Bool()
-      val vsstatusVSOff = Bool()
-      // Sm/Ssstateen: to control state access
-      val mstateen0 = new MstateenBundle0
-      val hstateen0 = new HstateenBundle0
-      val sstateen0 = new SstateenBundle0
-    }
-    val aia = new Bundle {
-      val miselectIsIllegal = Bool()
-      val siselectIsIllegal = Bool()
-      val vsiselectIsIllegal = Bool()
-      val siselect = UInt(64.W)
-      val vsiselect = UInt(64.W)
-      val mvienSEIE = Bool()
-      val hvictlVTI = Bool()
-    }
+    val xRet = new xRetIO
+    val status = new statusIO
+    val xcounteren = new xcounterenIO
+    val xenvcfg = new xenvcfgIO
+    val xstateen = new xstateenIO
+    val aia = new aiaIO
   })
 
   val out = Output(new Bundle {
