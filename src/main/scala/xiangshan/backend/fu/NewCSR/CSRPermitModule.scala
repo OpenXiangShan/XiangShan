@@ -45,14 +45,9 @@ class CSRPermitModule extends Module {
   indirectCSRPermitMod.io.in.privState := io.in.privState
   indirectCSRPermitMod.io.in.aia       := io.in.aia
 
-
-
-  private val (ren, wen, addr, privState, debugMode) = (
+  private val (ren, wen) = (
     io.in.csrAccess.ren,
     io.in.csrAccess.wen,
-    io.in.csrAccess.addr,
-    io.in.privState,
-    io.in.debugMode
   )
 
   private val csrAccess = WireInit(ren || wen)
