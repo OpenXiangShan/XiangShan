@@ -13,6 +13,7 @@ class CSRPermitModule extends Module {
   val xRetPermitMod = Module(new XRetPermitModule)
   val privilegePermitMod = Module(new PrivilegePermitModule)
   val hLevelPermitMod = Module(new HLevelPermitModule)
+  val indirectCSRPermitMod = Module(new IndirectCSRPermitModule)
 
   xRetPermitMod.io.in.privState := io.in.privState
   xRetPermitMod.io.in.debugMode := io.in.debugMode
@@ -30,6 +31,10 @@ class CSRPermitModule extends Module {
   hLevelPermitMod.io.in.xenvcfg     := io.in.xenvcfg
   hLevelPermitMod.io.in.xstateen    := io.in.xstateen
   hLevelPermitMod.io.in.aia         := io.in.aia
+
+  indirectCSRPermitMod.io.in.csrAccess := io.in.csrAccess
+  indirectCSRPermitMod.io.in.privState := io.in.privState
+  indirectCSRPermitMod.io.in.aia       := io.in.aia
 
   private val (ren, wen, addr, privState, debugMode) = (
     io.in.csrAccess.ren,
@@ -218,19 +223,6 @@ class CSRPermitModule extends Module {
 
   private val rwStopei_EX_II = csrAccess && privState.isModeHS && mvienSEIE && addr === CSRs.stopei.U
 
-  // s3
-
-
-
-  // s4
-  private val rwMireg_EX_II = csrAccess && privState.isModeM && miselectIsIllegal && addr === CSRs.mireg.U
-
-  private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
-    ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-    (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))) && addr === CSRs.sireg.U
-  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U)) && addr === CSRs.sireg.U
-
-  private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
 
 
   // s1 includes whether the CSR exists, whether it is read-only,
@@ -251,8 +243,8 @@ class CSRPermitModule extends Module {
   val s3_illegal = s3_EX_II || s3_EX_VI
 
   // s4 is the access check for indirect CSRs.
-  val s4_EX_II = rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
-  val s4_EX_VI = rwSireg_EX_VI
+  val s4_EX_II = csrAccess && indirectCSRPermitMod.io.out.indirectCSR_EX_II
+  val s4_EX_VI = csrAccess && indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
   val csrAccess_EX_II = s1_EX_II || (!s1_illegal && s2_EX_II) || (!(s1_illegal || s2_illegal) && s3_EX_II) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_II)
   val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II
@@ -476,6 +468,53 @@ class HLevelPermitModule extends Module {
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
   io.out.privilege_EX_VI := rwSatp_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
+}
+
+class IndirectCSRPermitModule extends Module {
+  val io = IO(new Bundle() {
+    val in = Input(new Bundle {
+      val csrAccess = new csrAccessIO
+      val privState = new PrivState
+      val aia = new aiaIO
+    })
+    val out = Output(new Bundle {
+      val indirectCSR_EX_II = Bool()
+      val indirectCSR_EX_VI = Bool()
+    })
+  })
+
+  private val (addr, privState) = (
+    io.in.csrAccess.addr,
+    io.in.privState,
+  )
+
+  private val (miselectIsIllegal, siselectIsIllegal, vsiselectIsIllegal) = (
+    io.in.aia.miselectIsIllegal,
+    io.in.aia.siselectIsIllegal,
+    io.in.aia.vsiselectIsIllegal,
+  )
+
+  private val (siselect, vsiselect) = (
+    io.in.aia.siselect,
+    io.in.aia.vsiselect,
+  )
+
+  private val mvienSEIE = io.in.aia.mvienSEIE
+
+  private val rwMireg_EX_II = miselectIsIllegal && addr === CSRs.mireg.U
+
+  private val rwSireg_EX_II = (
+      (privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
+      ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
+      (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))
+    ) && addr === CSRs.sireg.U
+
+  private val rwSireg_EX_VI = privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) && addr === CSRs.sireg.U
+
+  private val rwVSireg_EX_II = vsiselectIsIllegal && addr === CSRs.vsireg.U
+
+  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
+  io.out.indirectCSR_EX_VI := rwSireg_EX_VI
 }
 
 class csrAccessIO extends Bundle {
