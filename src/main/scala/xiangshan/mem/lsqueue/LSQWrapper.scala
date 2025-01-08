@@ -271,7 +271,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.uncache.req.ready := false.B
   storeQueue.io.uncache.req.ready := false.B
   loadQueue.io.uncache.resp.valid := false.B
+  loadQueue.io.uncache.idResp.valid := false.B
   storeQueue.io.uncache.resp.valid := false.B
+  storeQueue.io.uncache.idResp.valid := false.B
   when(pendingstate === s_idle){
     when(loadQueue.io.uncache.req.valid){
       io.uncache.req <> loadQueue.io.uncache.req
@@ -287,11 +289,17 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   } .otherwise {
     io.uncache.resp <> storeQueue.io.uncache.resp
   }
+  when(io.uncache.idResp.bits.is2lq) {
+    loadQueue.io.uncache.idResp <> io.uncache.idResp
+  }.otherwise {
+    storeQueue.io.uncache.idResp <> io.uncache.idResp
+  }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
   loadQueue.io.noUopsIssed := io.noUopsIssued
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
+  assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.uncache.idResp.valid))
   when (!io.uncacheOutstanding) {
     assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
   }

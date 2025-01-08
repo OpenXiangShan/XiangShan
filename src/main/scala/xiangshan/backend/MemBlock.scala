@@ -1366,6 +1366,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)
   val uncacheState = RegInit(s_idle)
   val uncacheReq = Wire(Decoupled(new UncacheWordReq))
+  val uncacheIdResp = uncache.io.lsq.idResp
   val uncacheResp = Wire(Decoupled(new UncacheWordResp))
 
   uncacheReq.bits := DontCare
@@ -1375,6 +1376,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   uncacheResp.valid := false.B
   uncacheResp.ready := false.B
   lsq.io.uncache.req.ready := false.B
+  lsq.io.uncache.idResp.valid := false.B
+  lsq.io.uncache.idResp.bits := DontCare
   lsq.io.uncache.resp.valid := false.B
   lsq.io.uncache.resp.bits := DontCare
 
@@ -1412,9 +1415,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
   when (io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
     uncacheResp <> lsq.io.uncache.resp
+    uncacheIdResp <> lsq.io.uncache.idResp
   }.otherwise {
     when (uncacheState === s_scalar_uncache) {
       uncacheResp <> lsq.io.uncache.resp
+      uncacheIdResp <> lsq.io.uncache.idResp
     }
   }
   // delay dcache refill for 1 cycle for better timing

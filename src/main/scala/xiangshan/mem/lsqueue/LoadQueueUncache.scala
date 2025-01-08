@@ -43,6 +43,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     val rob = Flipped(new RobLsqIO)
     // mmio select
     val mmioSelect = Output(Bool())
+    // slaveId
+    val slaveId = Output(UInt(UncacheBufferIndexWidth.W))
 
     /* transaction */
     // from ldu
@@ -59,8 +61,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   })
 
   val req_valid = RegInit(false.B)
-  val isNC = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
+  val slaveId = Reg(UInt(UncacheBufferIndexWidth.W))
 
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
@@ -68,6 +70,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val nderr = RegInit(false.B)
   
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
+  val slaveAck = req_valid && io.uncache.idResp.valid && io.uncache.idResp.bits.mid === entryIndex.U
 
   /**
     * Flush
@@ -90,7 +93,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   } .elsewhen (io.req.valid) {
     req_valid := true.B
     req := io.req.bits
+    slaveId := 0.U
     nderr := false.B
+  } .elsewhen(slaveAck) {
+    slaveId := io.uncache.idResp.bits.sid
   } .elsewhen (writeback) {
     req_valid := false.B
   }
@@ -143,6 +149,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
+  io.slaveId := slaveId
 
   /* uncahce req */
   io.uncache.req.valid     := uncacheState === s_req
@@ -298,6 +305,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
       e.io.req.valid := false.B
       e.io.req.bits := DontCare
       e.io.uncache.req.ready := false.B
+      e.io.uncache.idResp.valid := false.B
+      e.io.uncache.idResp.bits := DontCare
       e.io.uncache.resp.valid := false.B
       e.io.uncache.resp.bits := DontCare
       e.io.ncOut.ready := false.B
@@ -445,8 +454,13 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
       }
 
+      // uncache idResp
+      when(i.U === io.uncache.idResp.bits.mid) {
+        e.io.uncache.idResp <> io.uncache.idResp
+      }
+
       // uncache resp
-      when (i.U === io.uncache.resp.bits.id) {
+      when (e.io.slaveId === io.uncache.resp.bits.id) {
         e.io.uncache.resp <> io.uncache.resp
       }
 
