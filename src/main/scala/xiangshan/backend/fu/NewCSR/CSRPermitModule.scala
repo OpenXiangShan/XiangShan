@@ -10,6 +10,10 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
 
+  val xRetPermitMod = Module(new XRetPermitModule)
+  xRetPermitMod.io.in <> io.in
+
+
   private val (ren, wen, addr, privState, debugMode) = (
     io.in.csrAccess.ren,
     io.in.csrAccess.wen,
@@ -207,20 +211,7 @@ class CSRPermitModule extends Module {
    * Sm/Ssstateen end
    */
 
-  private val mnret_EX_II = mnret && !privState.isModeM
-  private val mnret_EX_VI = false.B
-  private val mnretIllegal = mnret_EX_VI || mnret_EX_II
 
-  private val mret_EX_II = mret && !privState.isModeM
-  private val mret_EX_VI = false.B
-  private val mretIllegal = mret_EX_II || mret_EX_VI
-
-  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
-  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
-  private val sretIllegal = sret_EX_II || sret_EX_VI
-
-  private val dret_EX_II = dret && !debugMode
-  private val dretIllegal = dret_EX_II
 
   // s1
   private val rwIllegal = csrIsRO && wen
@@ -286,24 +277,79 @@ class CSRPermitModule extends Module {
   val s4_EX_VI = rwSireg_EX_VI
 
   val csrAccess_EX_II = s1_EX_II || (!s1_illegal && s2_EX_II) || (!(s1_illegal || s2_illegal) && s3_EX_II) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_II)
-  val Xret_EX_II = mnret_EX_II || mret_EX_II || sret_EX_II || dret_EX_II
+  val Xret_EX_II = xRetPermitMod.io.out.Xret_EX_II
 
   val csrAccess_EX_VI = s1_EX_VI || (!s1_illegal && s2_EX_VI) || (!(s1_illegal || s2_illegal) && s3_EX_VI) || (!(s1_illegal || s2_illegal ||s3_illegal) && s4_EX_VI)
-  val Xret_EX_VI = mnret_EX_VI || mret_EX_VI || sret_EX_VI
+  val Xret_EX_VI = xRetPermitMod.io.out.Xret_EX_VI
 
   io.out.EX_II := csrAccess_EX_II || Xret_EX_II
   io.out.EX_VI := !io.out.EX_II && (csrAccess_EX_VI || Xret_EX_VI)
 
   io.out.hasLegalWen   := wen   && !(io.out.EX_II || io.out.EX_VI)
-  io.out.hasLegalMNret := mnret && !mnretIllegal
-  io.out.hasLegalMret  := mret  && !mretIllegal
-  io.out.hasLegalSret  := sret  && !sretIllegal
-  io.out.hasLegalDret  := dret  && !dretIllegal
+  io.out.hasLegalMNret := xRetPermitMod.io.out.hasLegalMNret
+  io.out.hasLegalMret  := xRetPermitMod.io.out.hasLegalMret
+  io.out.hasLegalSret  := xRetPermitMod.io.out.hasLegalSret
+  io.out.hasLegalDret  := xRetPermitMod.io.out.hasLegalDret
 
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
 
-  dontTouch(regularPrivilegeLegal)
+}
+
+class XRetPermitModule extends Module {
+  val io = IO(new Bundle() {
+    val in = Input(new Bundle {
+      val privState = new PrivState
+      val debugMode = Bool()
+      val xRet = new xRetIO
+      val status = new statusIO
+    })
+    val out = Output(new Bundle {
+      val Xret_EX_II = Bool()
+      val Xret_EX_VI = Bool()
+      val hasLegalMNret = Bool()
+      val hasLegalMret  = Bool()
+      val hasLegalSret  = Bool()
+      val hasLegalDret  = Bool()
+    })
+  })
+
+  private val (privState, debugMode) = (
+    io.in.privState,
+    io.in.debugMode,
+  )
+
+  private val (mnret, mret, sret, dret) = (
+    io.in.xRet.mnret,
+    io.in.xRet.mret,
+    io.in.xRet.sret,
+    io.in.xRet.dret,
+  )
+
+  private val (tsr, vtsr) = (
+    io.in.status.tsr,
+    io.in.status.vtsr,
+  )
+
+  private val mnret_EX_II = mnret && !privState.isModeM
+  private val mnretIllegal =  mnret_EX_II
+
+  private val mret_EX_II = mret && !privState.isModeM
+  private val mretIllegal = mret_EX_II
+
+  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
+  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
+  private val sretIllegal = sret_EX_II || sret_EX_VI
+
+  private val dret_EX_II = dret && !debugMode
+  private val dretIllegal = dret_EX_II
+
+  io.out.Xret_EX_II := mnret_EX_II || mret_EX_II || sret_EX_II || dret_EX_II
+  io.out.Xret_EX_VI := sret_EX_VI
+  io.out.hasLegalMNret := mnret && !mnretIllegal
+  io.out.hasLegalMret  := mret  && !mretIllegal
+  io.out.hasLegalSret  := sret  && !sretIllegal
+  io.out.hasLegalDret  := dret  && !dretIllegal
 }
 
 class csrAccessIO extends Bundle {
