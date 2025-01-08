@@ -12,3 +12,6 @@ PMAConfigs:
   - { base_addr: 0x20000000, a: 1, x: true, w: true, r: true }
   - { base_addr: 0x10000000, a: 1, w: true, r: true }
   - { base_addr: 0 }
+
+CHIAsyncBridge:
+  { depth: 16, sync: 3, safe: false }

@@ -23,6 +23,7 @@ import scala.jdk.CollectionConverters._
 import scala.annotation.tailrec
 import system.SoCParamsKey
 import xiangshan.backend.fu.PMAConfigEntry
+import freechips.rocketchip.util.AsyncQueueParams
 
 object YamlParser {
   def parseYaml(config: Parameters, yamlFile: String): Parameters = {
@@ -76,6 +77,18 @@ object YamlParser {
           }.toSeq
           nextConfig(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = param)
+          }), tail)
+        case ("CHIAsyncBridge", chiAsyncBridge) :: tail =>
+          val paramCHIAsyncBridge = chiAsyncBridge.asInstanceOf[java.util.Map[String, Any]].asScala
+          require(paramCHIAsyncBridge.contains("depth"), "depth is required in CHIAsyncBridge")
+          val depth = paramCHIAsyncBridge("depth").asInstanceOf[Int]
+          val param = if (depth != 0) {
+            val sync = paramCHIAsyncBridge.withDefaultValue(3)("sync").asInstanceOf[Int]
+            val safe = paramCHIAsyncBridge.withDefaultValue(false)("safe").asInstanceOf[Boolean]
+            Some(AsyncQueueParams(depth, sync, safe))
+          } else None
+          nextConfig(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(EnableCHIAsyncBridge = param)
           }), tail)
         case (s, _) :: tail =>
           println(s"Warning: $s is not supported in Yaml Config")
