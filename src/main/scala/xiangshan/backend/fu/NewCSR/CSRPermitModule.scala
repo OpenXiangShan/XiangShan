@@ -11,7 +11,10 @@ class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
 
   val xRetPermitMod = Module(new XRetPermitModule)
-  xRetPermitMod.io.in <> io.in
+  xRetPermitMod.io.in.privState := io.in.privState
+  xRetPermitMod.io.in.debugMode := io.in.debugMode
+  xRetPermitMod.io.in.xRet := io.in.xRet
+  xRetPermitMod.io.in.status := io.in.status
 
 
   private val (ren, wen, addr, privState, debugMode) = (
