@@ -40,7 +40,6 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
   val vaddr = UInt(VAddrBits.W)
   val data = UInt(XLEN.W)
   val mask = UInt(DataBytes.W)
-  val id = UInt(uncacheIdxBits.W)
   val nc = Bool()
   val atomic = Bool()
   val memBackTypeMM = Bool()
@@ -57,7 +56,6 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     vaddr := x.vaddr
     data := x.data
     mask := x.mask
-    id := x.id
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
     atomic := x.atomic
@@ -78,7 +76,7 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
   //   fwd_mask := forwardMask
   // }
 
-  def toUncacheWordResp(): UncacheWordResp = {
+  def toUncacheWordResp(eid: UInt): UncacheWordResp = {
     // val resp_fwd_data = VecInit((0 until DataBytes).map(j =>
     //   Mux(fwd_mask(j), fwd_data(8*(j+1)-1, 8*j), data(8*(j+1)-1, 8*j))
     // )).asUInt
@@ -86,7 +84,7 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     val r = Wire(new UncacheWordResp)
     r := DontCare
     r.data := resp_fwd_data
-    r.id := id
+    r.id := eid
     r.nderr := resp_nderr
     r.nc := nc
     r.is2lq := cmd === MemoryOpConstants.M_XRD
@@ -257,7 +255,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    *    e1 alloc
    *
    *  Version 1 (better performance)
-   *    solved in one cycle for achieving the original performance.
+   *    e0: solved in one cycle for achieving the original performance.
+   *    e1: return idResp to set sid for handshake
    ******************************************************************/
 
   /**
@@ -302,6 +301,12 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   }
 
+  /* e1: return accept */
+  io.lsq.idResp.valid := RegNext(e0_alloc)
+  io.lsq.idResp.bits.mid := RegEnable(e0_req.id, e0_alloc)
+  io.lsq.idResp.bits.sid := RegEnable(e0_allocIdx, e0_alloc)
+  io.lsq.idResp.bits.is2lq := RegEnable(!isStore(e0_req.cmd), e0_alloc)
+  io.lsq.idResp.bits.nc := RegEnable(e0_req.nc, e0_alloc)
 
   /******************************************************************
    * Uncache Req
@@ -394,7 +399,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val r0_canSentVec = sizeMap(i => states(i).can2Lsq())
   val (r0_canSentIdx, r0_canSent) = PriorityEncoderWithFlag(r0_canSentVec)
   resp.valid := r0_canSent
-  resp.bits := entries(r0_canSentIdx).toUncacheWordResp()
+  resp.bits := entries(r0_canSentIdx).toUncacheWordResp(r0_canSentIdx)
   when(resp.fire){
     states(r0_canSentIdx).updateReturn()
   }
