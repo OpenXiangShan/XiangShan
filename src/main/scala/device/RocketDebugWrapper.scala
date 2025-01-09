@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2021-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -96,21 +97,6 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
   }
 
   lazy val module = new DebugModuleImp(this)
-}
-
-object XSDebugModuleParams {
-
-  def apply(xlen:Int /*TODO , val configStringAddr: Int*/): DebugModuleParams = {
-    new DebugModuleParams().copy(
-      nAbstractDataWords   = (if (xlen == 32) 1 else if (xlen == 64) 2 else 4),
-      maxSupportedSBAccess = xlen,
-      hasBusMaster = true,
-      baseAddress = BigInt(0x38020000),
-      nScratch = 2,
-      crossingHasSafeReset = false,
-      hasHartResets = true,
-    )
-  }
 }
 
 case object EnableJtag extends Field[Bool]
