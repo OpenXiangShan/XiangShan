@@ -55,7 +55,7 @@ class CSRPermitModule extends Module {
   val s1_EX_II = mLevelPermitMod.io.out.mLevelPermit_EX_II
 
   val s2_EX_II = privilegePermitMod.io.out.privilege_EX_II
-  val s2_EX_VI = !privilegePermitMod.io.out.privilege_EX_VI
+  val s2_EX_VI = privilegePermitMod.io.out.privilege_EX_VI
 
   val s3_EX_VI = hLevelPermitMod.io.out.privilege_EX_VI
 
