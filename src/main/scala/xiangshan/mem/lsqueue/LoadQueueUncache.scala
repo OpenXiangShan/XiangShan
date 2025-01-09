@@ -44,7 +44,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     // mmio select
     val mmioSelect = Output(Bool())
     // slaveId
-    val slaveId = Output(UInt(UncacheBufferIndexWidth.W))
+    val slaveId = ValidIO(UInt(UncacheBufferIndexWidth.W))
 
     /* transaction */
     // from ldu
@@ -62,6 +62,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
+  val slaveAccept = RegInit(false.B)
   val slaveId = Reg(UInt(UncacheBufferIndexWidth.W))
 
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
@@ -90,15 +91,18 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   /* enter req */
   when (flush) {
     req_valid := false.B
+    slaveAccept := false.B
   } .elsewhen (io.req.valid) {
     req_valid := true.B
+    slaveAccept := false.B
     req := io.req.bits
-    slaveId := 0.U
     nderr := false.B
   } .elsewhen(slaveAck) {
+    slaveAccept := true.B
     slaveId := io.uncache.idResp.bits.sid
   } .elsewhen (writeback) {
     req_valid := false.B
+    slaveAccept := false.B
   }
   XSError(!flush && io.req.valid && req_valid, p"LoadQueueUncache: You can not write an valid entry: $entryIndex")
 
@@ -149,7 +153,8 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
-  io.slaveId := slaveId
+  io.slaveId.valid := slaveAccept
+  io.slaveId.bits := slaveId
 
   /* uncahce req */
   io.uncache.req.valid     := uncacheState === s_req
@@ -460,7 +465,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
       }
 
       // uncache resp
-      when (e.io.slaveId === io.uncache.resp.bits.id) {
+      when (e.io.slaveId.valid && e.io.slaveId.bits === io.uncache.resp.bits.id) {
         e.io.uncache.resp <> io.uncache.resp
       }
 
