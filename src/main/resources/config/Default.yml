@@ -13,5 +13,10 @@ PMAConfigs:
   - { base_addr: 0x10000000, a: 1, w: true, r: true }
   - { base_addr: 0 }
 
-CHIAsyncBridge:
-  { depth: 16, sync: 3, safe: false }
+CHIAsyncBridge: { depth: 16, sync: 3, safe: false }
+
+L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true }
+
+L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
+
+DebugModuleBaseAddr: 0x38020000
