@@ -239,7 +239,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
-      val clock = Input(Bool())
+      val clock = Input(Clock())
       val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
@@ -275,10 +275,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       })
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
     val chi_openllc_opt = Option.when(enableCHI)(
-      withClockAndReset(io.clock.asClock, io.reset) {
+      withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
             hartIds = tiles.map(_.HartId),
@@ -289,7 +289,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     )
 
     // override LazyRawModuleImp's clock and reset
-    childClock := io.clock.asClock
+    childClock := io.clock
     childReset := reset_sync
 
     // output
@@ -328,7 +328,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
-    withClockAndReset(io.clock.asClock, io.reset) {
+    withClockAndReset(io.clock, io.reset) {
       Option.when(enableCHI)(true.B).foreach { _ =>
         for ((core, i) <- core_with_l2.zipWithIndex) {
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
@@ -399,7 +399,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.debug_module_io.reset := reset_sync
 
     misc.module.debug_module_io.debugIO.reset := misc.module.reset
-    misc.module.debug_module_io.debugIO.clock := io.clock.asClock
+    misc.module.debug_module_io.debugIO.clock := io.clock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
@@ -411,7 +411,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, reset_sync) {
+    withClockAndReset(io.clock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
