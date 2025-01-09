@@ -14,7 +14,7 @@ class CSRPermitModule extends Module {
   val mLevelPermitMod = Module(new MLevelPermitModule)
   val sLevelPermitMod = Module(new SLevelPermitModule)
   val privilegePermitMod = Module(new PrivilegePermitModule)
-  val hLevelPermitMod = Module(new HLevelPermitModule)
+  val virtualLevelPermitMod = Module(new VirtualLevelPermitModule)
   val indirectCSRPermitMod = Module(new IndirectCSRPermitModule)
 
   xRetPermitMod.io.in.privState := io.in.privState
@@ -39,13 +39,13 @@ class CSRPermitModule extends Module {
   privilegePermitMod.io.in.privState := io.in.privState
   privilegePermitMod.io.in.debugMode := io.in.debugMode
 
-  hLevelPermitMod.io.in.csrAccess   := io.in.csrAccess
-  hLevelPermitMod.io.in.privState   := io.in.privState
-  hLevelPermitMod.io.in.status      := io.in.status
-  hLevelPermitMod.io.in.xcounteren  := io.in.xcounteren
-  hLevelPermitMod.io.in.xenvcfg     := io.in.xenvcfg
-  hLevelPermitMod.io.in.xstateen    := io.in.xstateen
-  hLevelPermitMod.io.in.aia         := io.in.aia
+  virtualLevelPermitMod.io.in.csrAccess   := io.in.csrAccess
+  virtualLevelPermitMod.io.in.privState   := io.in.privState
+  virtualLevelPermitMod.io.in.status      := io.in.status
+  virtualLevelPermitMod.io.in.xcounteren  := io.in.xcounteren
+  virtualLevelPermitMod.io.in.xenvcfg     := io.in.xenvcfg
+  virtualLevelPermitMod.io.in.xstateen    := io.in.xstateen
+  virtualLevelPermitMod.io.in.aia         := io.in.aia
 
   indirectCSRPermitMod.io.in.csrAccess := io.in.csrAccess
   indirectCSRPermitMod.io.in.privState := io.in.privState
@@ -65,19 +65,19 @@ class CSRPermitModule extends Module {
   val pPermit_EX_II = privilegePermitMod.io.out.privilege_EX_II
   val pPermit_EX_VI = privilegePermitMod.io.out.privilege_EX_VI
 
-  val hPermit_EX_VI = hLevelPermitMod.io.out.privilege_EX_VI
+  val vPermit_EX_VI = virtualLevelPermitMod.io.out.virtualLevelPermit_EX_VI
 
   val indirectPermit_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
   val indirectPermit_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
-  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || hPermit_EX_VI
+  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_VI
 
   val csrAccess_EX_II = csrAccess && (
     (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II) ||
     (!directPermit_illegal && indirectPermit_EX_II)
   )
   val csrAccess_EX_VI = csrAccess && (
-    (pPermit_EX_VI || hPermit_EX_VI) ||
+    (pPermit_EX_VI || vPermit_EX_VI) ||
     (!directPermit_illegal && indirectPermit_EX_VI)
   )
 
@@ -368,7 +368,7 @@ class PrivilegePermitModule extends Module {
   io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
-class HLevelPermitModule extends Module {
+class VirtualLevelPermitModule extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO
@@ -380,7 +380,7 @@ class HLevelPermitModule extends Module {
       val aia = new aiaIO
     })
     val out = Output(new Bundle {
-      val privilege_EX_VI = Bool()
+      val virtualLevelPermit_EX_VI = Bool()
     })
   })
 
@@ -466,7 +466,7 @@ class HLevelPermitModule extends Module {
   private val xstateControlAccess_EX_VI = accessStateen0_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
-  io.out.privilege_EX_VI := rwSatp_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
+  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
 }
 
 class IndirectCSRPermitModule extends Module {
