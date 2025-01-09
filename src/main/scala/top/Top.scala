@@ -387,9 +387,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       case _ =>
     }
 
-    core_with_l2.foreach { case tile =>
+    core_with_l2.zipWithIndex.foreach { case (tile, i) =>
       tile.module.io.nodeID.foreach { case nodeID =>
-        nodeID := DontCare
+        nodeID := i.U
         dontTouch(nodeID)
       }
     }
