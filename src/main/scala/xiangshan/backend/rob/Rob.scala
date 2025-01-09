@@ -932,11 +932,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val commitCond = io.commits.isCommit && io.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
-    val needFlush = redirectValidReg && Mux(
-      (redirectEnd > redirectBegin) && !redirectAll,
+    val needFlush = redirectValidReg && (Mux(
+      redirectEnd > redirectBegin,
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
-    )
+    ) || redirectAll)
     when(commitCond) {
       robEntries(i).valid := false.B
     }.elsewhen(enqOH.asUInt.orR && !io.redirect.valid) {
