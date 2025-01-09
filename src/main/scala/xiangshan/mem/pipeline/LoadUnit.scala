@@ -1266,8 +1266,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                            !s2_dcache_miss &&
                            !s2_bank_conflict &&
                            !s2_wpu_pred_fail &&
-                           !s2_rar_nack &&
-                           !s2_raw_nack &&
                            s2_nuke
 
   val s2_fast_rep = !s2_in.isFastReplay &&
@@ -1283,6 +1281,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                      !s2_tlb_miss &&
                      !s2_fwd_fail &&
                      !s2_frm_mabuf &&
+                     !s2_fast_rep &&
                      s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && s2_full_fwd
