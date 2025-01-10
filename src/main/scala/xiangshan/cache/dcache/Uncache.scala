@@ -254,7 +254,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   def canMergePrimary(x: UncacheWordReq, e: UncacheEntry): Bool = {
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) && 
-      x.cmd === e.cmd && x.nc === e.nc &&
+      x.cmd === e.cmd && x.nc && e.nc &&
       x.memBackTypeMM === e.memBackTypeMM && x.atomic === e.atomic
   }
 
