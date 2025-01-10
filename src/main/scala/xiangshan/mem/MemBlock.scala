@@ -349,20 +349,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val io = IO(new MemBlockInlinedIO)
 
-  private val fromCtrl = io.fromCtrl
-  private val (fromBackend, toBackend) = (io.fromBackend, io.toBackend)
-  private val (fromFrontend, toFrontend) = (io.fromFrontend, io.toFrontend)
-  private val bypass = io.bypass
 
-  dontTouch(bypass.innerHartId)
-  dontTouch(bypass.innerResetVector)
-  dontTouch(bypass.outerResetVector)
-  dontTouch(bypass.outerCpuHalt)
-  dontTouch(bypass.outerCpuCriticalError)
-  dontTouch(bypass.innerBeuErrorsICache)
-  dontTouch(bypass.outerBeuErrorsICache)
-  dontTouch(bypass.innerL2PfEnable)
-  dontTouch(bypass.outerL2PfEnable)
+  dontTouch(io.bypass.innerHartId)
+  dontTouch(io.bypass.innerResetVector)
+  dontTouch(io.bypass.outerResetVector)
+  dontTouch(io.bypass.outerCpuHalt)
+  dontTouch(io.bypass.outerCpuCriticalError)
+  dontTouch(io.bypass.innerBeuErrorsICache)
+  dontTouch(io.bypass.outerBeuErrorsICache)
+  dontTouch(io.bypass.innerL2PfEnable)
+  dontTouch(io.bypass.outerL2PfEnable)
 
   private val dcache = outer.dcache.module
   private val uncache = outer.uncache.module
@@ -378,11 +374,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   private val l1dToL2Buffer = outer.l1dToL2Buffer.module
 
   // init
-  val redirect = RegNextWithEnable(fromCtrl.redirect)
-  val csrCtrl = DelayN(fromCtrl.csr, 2)
+  val redirect = RegNextWithEnable(io.fromCtrl.redirect)
+  val csrCtrl = DelayN(io.fromCtrl.csr, 2)
   val l2Hint = RegNext(io.l2Hint)
-  val sfence = RegNext(RegNext(fromBackend.sfence))
-  val tlbcsr = RegNext(RegNext(fromBackend.tlbCsr))
+  val sfence = RegNext(RegNext(io.fromBackend.sfence))
+  val tlbcsr = RegNext(RegNext(io.fromBackend.tlbCsr))
 
   // trigger
   val memTrigger = Wire(new CsrTriggerBundle)
@@ -412,10 +408,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // mmu
-  mmu.io.fromCtrl.hartId <> fromCtrl.hartId
+  mmu.io.fromCtrl.hartId <> io.fromCtrl.hartId
   mmu.io.fromCtrl.csr <> csrCtrl
   mmu.io.fromCtrl.redirect <> redirect
-  mmu.io.fromFrontend <> fromFrontend
+  mmu.io.fromFrontend <> io.fromFrontend
   mmu.io.fromBackend.sfence <> sfence
   mmu.io.fromBackend.tlbCsr <> tlbcsr
   mmu.io.fromBackend.l2TlbReq.req <> io.l2TlbReq.req
@@ -424,26 +420,26 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   mmu.io.toBackend.l2PmpResp <> io.l2PmpResp
 
   // prefetcher
-  val loadPc = RegNext(VecInit(fromBackend.issueLda.map(_.bits.uop.pc)))
+  val loadPc = RegNext(VecInit(io.fromBackend.issueLda.map(_.bits.uop.pc)))
   prefetcher.io.fromCtrl.csr := csrCtrl
   prefetcher.io.fromBackend.loadPc := loadPc
-  prefetcher.io.fromBackend.storePc := fromBackend.storePc
-  prefetcher.io.fromBackend.hybridPc := fromBackend.hybridPc
+  prefetcher.io.fromBackend.storePc := io.fromBackend.storePc
+  prefetcher.io.fromBackend.hybridPc := io.fromBackend.hybridPc
   prefetcher.io.fromBackend.l2PfqBusy := io.l2PfqBusy
   prefetcher.io.fromDCache.evict <> dcache.io.sms_agt_evict_req
   prefetcher.io.fromDCache.pfCtrl <> dcache.io.pf_ctrl
 
    // dcache
-  dcache.io.hartId := fromCtrl.hartId
+  dcache.io.hartId := io.fromCtrl.hartId
   dcache.io.lqEmpty := lsq.io.lqEmpty
   dcache.io.l2_hint <> l2Hint
   dcache.io.lsu.tl_d_channel <> lsq.io.tl_d_channel
   dcache.io.force_write := lsq.io.force_write
-  dcache.io.l2_pf_store_only   := RegNext(fromCtrl.csr.l2_pf_store_only, false.B)
+  dcache.io.l2_pf_store_only   := RegNext(io.fromCtrl.csr.l2_pf_store_only, false.B)
 
   // Uncache
   uncache.io.enableOutstanding := csrCtrl.uncache_write_outstanding_enable
-  uncache.io.hartId := fromCtrl.hartId
+  uncache.io.hartId := io.fromCtrl.hartId
 
   val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)
   val uncacheState = RegInit(s_idle)
@@ -506,21 +502,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   AddPipelineReg(uncache.io.lsq.resp, uncacheResp, false.B)
 
   // Lsq
-  lsq.io.hartId := fromCtrl.hartId
+  lsq.io.hartId := io.fromCtrl.hartId
   lsq.io.release := dcache.io.lsu.release
   lsq.io.brqRedirect <> redirect
-  lsq.io.enq <> fromBackend.enqLsq
-  lsq.io.lqCancelCnt <> toBackend.lqCancelCnt
-  lsq.io.sqCancelCnt <> toBackend.sqCancelCnt
-  lsq.io.lqDeq <> toBackend.lqDeq
-  lsq.io.sqDeq <> toBackend.sqDeq
-  lsq.io.lqDeqPtr <> toBackend.lqDeqPtr
-  lsq.io.sqDeqPtr <> toBackend.sqDeqPtr
+  lsq.io.enq <> io.fromBackend.enqLsq
+  lsq.io.lqCancelCnt <> io.toBackend.lqCancelCnt
+  lsq.io.sqCancelCnt <> io.toBackend.sqCancelCnt
+  lsq.io.lqDeq <> io.toBackend.lqDeq
+  lsq.io.sqDeq <> io.toBackend.sqDeq
+  lsq.io.lqDeqPtr <> io.toBackend.lqDeqPtr
+  lsq.io.sqDeqPtr <> io.toBackend.sqDeqPtr
   lsq.io.ldvecFeedback <> vecExuBlock.io.toLsq.ldvecFeedback
   lsq.io.stvecFeedback <> vecExuBlock.io.toLsq.stvecFeedback
   lsq.io.flushSbuffer.empty := sbuffer.io.sbempty
-  lsq.io.exceptionAddr.isStore := fromBackend.isStoreException
-  lsq.io.issuePtrExt <> toBackend.stIssuePtr
+  lsq.io.exceptionAddr.isStore := io.fromBackend.isStoreException
+  lsq.io.issuePtrExt <> io.toBackend.stIssuePtr
   lsq.io.l2_hint.valid := l2Hint.valid
   lsq.io.l2_hint.bits.sourceId := l2Hint.bits.sourceId
   lsq.io.l2_hint.bits.isKeyword := l2Hint.bits.isKeyword
@@ -531,18 +527,18 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.ldout.foreach { x => x.ready := false.B }
   lsq.io.vecmmioStout.ready := false.B
   lsq.io.loadMisalignFull <> memExuBlock.io.toLsq.loadMisalignFull
-  toBackend.lsqio.lqCanAccept := lsq.io.lqCanAccept
-  toBackend.lsqio.sqCanAccept := lsq.io.sqCanAccept
-  toBackend.lsqio.mmio := lsq.io.rob.mmio
-  toBackend.lsqio.uop := lsq.io.rob.uop
-  connectSamePort(lsq.io.rob, fromBackend.robLsqIO)
+  io.toBackend.lsqio.lqCanAccept := lsq.io.lqCanAccept
+  io.toBackend.lsqio.sqCanAccept := lsq.io.sqCanAccept
+  io.toBackend.lsqio.mmio := lsq.io.rob.mmio
+  io.toBackend.lsqio.uop := lsq.io.rob.uop
+  connectSamePort(lsq.io.rob, io.fromBackend.robLsqIO)
 
   // lsq to l2 CMO
   lsq.io.cmoOpReq <> dcache.io.cmoOpReq
   lsq.io.cmoOpResp <> dcache.io.cmoOpResp
 
   // SBuffer
-  sbuffer.io.hartId := fromCtrl.hartId
+  sbuffer.io.hartId := io.fromCtrl.hartId
   sbuffer.io.csrCtrl := csrCtrl
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write := lsq.io.force_write
@@ -557,10 +553,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   sbuffer.io.dcache <> dcache.io.lsu.store
   // flush sbuffer
   val cmoFlush = lsq.io.flushSbuffer.valid
-  val fenceFlush = fromBackend.flushSb
+  val fenceFlush = io.fromBackend.flushSb
   val atomicsFlush = memExuBlock.io.flushSbuffer.valid || vecExuBlock.io.flushSbuffer.valid
   val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
-  toBackend.sbIsEmpty := RegNext(stIsEmpty)
+  io.toBackend.sbIsEmpty := RegNext(stIsEmpty)
 
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
@@ -569,14 +565,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // Vector Execution Block
-  vecExuBlock.io.fromCtrl.hartId := fromCtrl.hartId
+  vecExuBlock.io.fromCtrl.hartId := io.fromCtrl.hartId
   vecExuBlock.io.fromCtrl.redirect <> redirect
   vecExuBlock.io.fromCtrl.csr := csrCtrl
   vecExuBlock.io.fromCtrl.trigger := memTrigger
-  vecExuBlock.io.fromBackend.issueVldu <> fromBackend.issueVldu
-  vecExuBlock.io.toBackend.vstuIqFeedback <> toBackend.vstuIqFeedback
-  vecExuBlock.io.toBackend.vlduIqFeedback <> toBackend.vlduIqFeedback
-  vecExuBlock.io.toBackend.writebackVldu <> toBackend.writebackVldu
+  vecExuBlock.io.fromBackend.issueVldu <> io.fromBackend.issueVldu
+  vecExuBlock.io.toBackend.vstuIqFeedback <> io.toBackend.vstuIqFeedback
+  vecExuBlock.io.toBackend.vlduIqFeedback <> io.toBackend.vlduIqFeedback
+  vecExuBlock.io.toBackend.writebackVldu <> io.toBackend.writebackVldu
   vecExuBlock.io.fromMemExuBlock <> memExuBlock.io.toVecExuBlock
   vecExuBlock.io.fromPmp := mmu.io.toMemExuBlock.pmpResp.head
   vecExuBlock.io.flushSbuffer.empty := stIsEmpty
@@ -596,52 +592,52 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // Mem Execution Block
-  memExuBlock.io.fromCtrl.hartId := fromCtrl.hartId
+  memExuBlock.io.fromCtrl.hartId := io.fromCtrl.hartId
   memExuBlock.io.fromCtrl.redirect <> redirect
   memExuBlock.io.fromCtrl.csr := csrCtrl
   memExuBlock.io.fromCtrl.trigger := memTrigger
-  memExuBlock.io.fromBackend.issueLda <> fromBackend.issueLda
-  memExuBlock.io.fromBackend.issueSta <> fromBackend.issueSta
-  memExuBlock.io.fromBackend.issueStd <> fromBackend.issueStd
-  memExuBlock.io.fromBackend.issueHya <> fromBackend.issueHya
-  memExuBlock.io.fromBackend.robLsqIO <> fromBackend.robLsqIO
+  memExuBlock.io.fromBackend.issueLda <> io.fromBackend.issueLda
+  memExuBlock.io.fromBackend.issueSta <> io.fromBackend.issueSta
+  memExuBlock.io.fromBackend.issueStd <> io.fromBackend.issueStd
+  memExuBlock.io.fromBackend.issueHya <> io.fromBackend.issueHya
+  memExuBlock.io.fromBackend.robLsqIO <> io.fromBackend.robLsqIO
   memExuBlock.io.fromVecExuBlock <> vecExuBlock.io.toMemExuBlock
   memExuBlock.io.fromLsq.rarNuke <> VecInit(lsq.io.ldu.ldld_nuke_query.map(_.resp))
   memExuBlock.io.fromLsq.rawNuke <> VecInit(lsq.io.ldu.stld_nuke_query.map(_.resp))
   memExuBlock.io.fromLsq.replay <> lsq.io.replay
-  memExuBlock.io.fromLsq.mmioLdWriteback <> lsq.io.ldout.head
-  memExuBlock.io.fromLsq.mmioLdData <> lsq.io.ld_raw_data.head
+  memExuBlock.io.fromLsq.mmioLdWriteback <> lsq.io.ldout(UncacheWBPort)
+  memExuBlock.io.fromLsq.mmioLdData <> lsq.io.ld_raw_data(UncacheWBPort)
   memExuBlock.io.fromLsq.mmioStWriteback <> lsq.io.mmioStout
   memExuBlock.io.fromLsq.ncOut <> lsq.io.ncOut
   memExuBlock.io.fromLsq.maControl <> lsq.io.maControl.toStoreMisalignBuffer
   memExuBlock.io.fromUncache.zip(uncache.io.forward.map(_.resp)).foreach {case  x => x._1 <> x._2 }
   memExuBlock.io.fromPmp <> mmu.io.toMemExuBlock.pmpResp
-  memExuBlock.io.toBackend.stIssue  <> toBackend.stIssue
-  memExuBlock.io.toBackend.writebackLda <> toBackend.writebackLda
-  memExuBlock.io.toBackend.writebackSta <> toBackend.writebackSta
-  memExuBlock.io.toBackend.writebackHyuLda <> toBackend.writebackHyuLda
-  memExuBlock.io.toBackend.writebackHyuSta <> toBackend.writebackHyuSta
-  memExuBlock.io.toBackend.ldaIqFeedback <> toBackend.ldaIqFeedback
-  memExuBlock.io.toBackend.staIqFeedback <> toBackend.staIqFeedback
-  memExuBlock.io.toBackend.hyuIqFeedback <> toBackend.hyuIqFeedback
-  memExuBlock.io.toBackend.ldCancel <> toBackend.ldCancel
-  memExuBlock.io.toBackend.wakeup <> toBackend.wakeup
+  memExuBlock.io.toBackend.stIssue  <> io.toBackend.stIssue
+  memExuBlock.io.toBackend.writebackLda <> io.toBackend.writebackLda
+  memExuBlock.io.toBackend.writebackSta <> io.toBackend.writebackSta
+  memExuBlock.io.toBackend.writebackHyuLda <> io.toBackend.writebackHyuLda
+  memExuBlock.io.toBackend.writebackHyuSta <> io.toBackend.writebackHyuSta
+  memExuBlock.io.toBackend.ldaIqFeedback <> io.toBackend.ldaIqFeedback
+  memExuBlock.io.toBackend.staIqFeedback <> io.toBackend.staIqFeedback
+  memExuBlock.io.toBackend.hyuIqFeedback <> io.toBackend.hyuIqFeedback
+  memExuBlock.io.toBackend.ldCancel <> io.toBackend.ldCancel
+  memExuBlock.io.toBackend.wakeup <> io.toBackend.wakeup
   memExuBlock.io.toLsq.out <> lsq.io.ldu.ldin
   memExuBlock.io.toLsq.addrUpdate <> lsq.io.sta.storeAddrIn
   memExuBlock.io.toLsq.excpUpdate <> lsq.io.sta.storeAddrInRe
   memExuBlock.io.toLsq.maskOut <> lsq.io.sta.storeMaskIn
   memExuBlock.io.toUncache.zip(uncache.io.forward.map(_.req)).foreach {case x => x._2 <> x._1 }
-  memExuBlock.io.toPrefetch.ifetch <> toFrontend.ifetchPrefetch
+  memExuBlock.io.toPrefetch.ifetch <> io.toFrontend.ifetchPrefetch
   memExuBlock.io.toPrefetch.train <> prefetcher.io.fromMemExuBlock.train
   memExuBlock.io.toPrefetch.trainL1 <> prefetcher.io.fromMemExuBlock.trainL1
   memExuBlock.io.amoDCacheIO <> dcache.io.lsu.atomics
   memExuBlock.io.flushSbuffer.empty := stIsEmpty
-  memExuBlock.io.lsTopdownInfo <> toBackend.lsTopdownInfo
+  memExuBlock.io.lsTopdownInfo <> io.toBackend.lsTopdownInfo
   memExuBlock.io.debugLsInfo <> io.debugLS.debugLsInfo
 
   // writeback overwrite
   Connection.connect(
-    sinkSeq     = toBackend.writebackStd,
+    sinkSeq     = io.toBackend.writebackStd,
     sourceSeq   = memExuBlock.io.toBackend.writebackStd,
     connectFn   = Some((sink: DecoupledIO[MemExuOutput], source: DecoupledIO[MemExuOutput]) => {
       sink.valid := source.fire && !FuType.storeIsAMO(source.bits.uop.fuType)
@@ -839,6 +835,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         case load: L1PrefetchReq =>
           sink.valid := source.valid
           sink.bits.fromL1PrefetchReqBundle(load)
+          source.ready := sink.ready
         case store: StorePrefetchReq =>
           sink.valid := source.valid
           sink.bits.fromStorePrefetchReqBundle(store)
@@ -891,7 +888,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   oldestRedirect.bits.cfiUpdate.backendIAF := false.B
   oldestRedirect.bits.cfiUpdate.backendIPF := false.B
   oldestRedirect.bits.cfiUpdate.backendIGPF := false.B
-  toBackend.memoryViolation := oldestRedirect
+  io.toBackend.memoryViolation := oldestRedirect
 
   // exception generate
   val atomicsExceptionInfo = RegEnable(memExuBlock.io.atomicsExceptionInfo, memExuBlock.io.atomicsExceptionInfo.valid)
@@ -951,12 +948,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   exceptionGen.io.redirect <> redirect
   exceptionGen.io.tlbCsr  <> tlbcsr
   exceptionGen.io.in <> exceptionReqs
-  connectSamePort(toBackend.lsqio, exceptionGen.io.out.bits)
+  connectSamePort(io.toBackend.lsqio, exceptionGen.io.out.bits)
 
   // to backend
-  toBackend.otherFastWakeup := DontCare // not support
-  toBackend.topToBackendBypass match { case x =>
-    x.hartId := fromCtrl.hartId
+  io.toBackend.otherFastWakeup := DontCare // not support
+  io.toBackend.topToBackendBypass match { case x =>
+    x.hartId := io.fromCtrl.hartId
     x.externalInterrupt.msip  := outer.clintIntSink.in.head._1(0)
     x.externalInterrupt.mtip  := outer.clintIntSink.in.head._1(1)
     x.externalInterrupt.meip  := outer.plicIntSink.in.head._1(0)
@@ -964,8 +961,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.debug := outer.debugIntSink.in.head._1(0)
     x.externalInterrupt.nmi.nmi_31 := outer.nmiIntSink.in.head._1(0)
     x.externalInterrupt.nmi.nmi_43 := outer.nmiIntSink.in.head._1(1)
-    x.msiInfo   := DelayNWithValid(bypass.fromTopToBackend.msiInfo, 1)
-    x.clintTime := DelayNWithValid(bypass.fromTopToBackend.clintTime, 1)
+    x.msiInfo   := DelayNWithValid(io.bypass.fromTopToBackend.msiInfo, 1)
+    x.clintTime := DelayNWithValid(io.bypass.fromTopToBackend.clintTime, 1)
   }
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
@@ -973,13 +970,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
   // bypass
-  bypass.innerHartId <> fromCtrl.hartId
-  bypass.innerResetVector <> RegNext(bypass.outerResetVector)
-  bypass.outerCpuHalt <> bypass.fromBackendToTop.cpuHalted
-  bypass.outerCpuCriticalError <> bypass.fromBackendToTop.cpuCriticalError
-  bypass.outerBeuErrorsICache <> RegNext(bypass.innerBeuErrorsICache)
-  bypass.outerL2PfEnable <> bypass.innerL2PfEnable
-  bypass.outerHcPerfEvents <> bypass.innerHcPerfEvents
+  io.bypass.innerHartId <> io.fromCtrl.hartId
+  io.bypass.innerResetVector <> RegNext(io.bypass.outerResetVector)
+  io.bypass.outerCpuHalt <> io.bypass.fromBackendToTop.cpuHalted
+  io.bypass.outerCpuCriticalError <> io.bypass.fromBackendToTop.cpuCriticalError
+  io.bypass.outerBeuErrorsICache <> RegNext(io.bypass.innerBeuErrorsICache)
+  io.bypass.outerL2PfEnable <> io.bypass.innerL2PfEnable
+  io.bypass.outerHcPerfEvents <> io.bypass.innerHcPerfEvents
 
   // Initialize when unenabled difftest.
   sbuffer.io.vecDifftestInfo := DontCare
@@ -1010,8 +1007,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // trace interface
-  val traceToL2Top = bypass.traceCoreInterfaceBypass.toL2Top
-  val traceFromBackend = bypass.traceCoreInterfaceBypass.fromBackend
+  val traceToL2Top = io.bypass.traceCoreInterfaceBypass.toL2Top
+  val traceFromBackend = io.bypass.traceCoreInterfaceBypass.fromBackend
   traceFromBackend.fromEncoder := RegNext(traceToL2Top.fromEncoder)
   traceToL2Top.toEncoder.trap  := RegEnable(
     traceFromBackend.toEncoder.trap,
@@ -1038,12 +1035,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     ) << instOffsetBits)
   }
 
-  toBackend.storeDebugInfo := DontCare
+  io.toBackend.storeDebugInfo := DontCare
   // store event difftest information
   if (env.EnableDifftest) {
     (0 until EnsbufferWidth).foreach{i =>
-        toBackend.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.robIdx
-        sbuffer.io.vecDifftestInfo(i).bits.pc := toBackend.storeDebugInfo(i).pc
+        io.toBackend.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.robIdx
+        sbuffer.io.vecDifftestInfo(i).bits.pc := io.toBackend.storeDebugInfo(i).pc
     }
   }
 
@@ -1061,15 +1058,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(sbuffer),
         ModuleNode(dcache),
         ModuleNode(l1dToL2Buffer),
-        CellNode(bypass.resetBackend)
+        CellNode(io.bypass.resetBackend)
       )
     )
     ResetGen(leftResetTree, reset, sim = false)
     ResetGen(rightResetTree, reset, sim = false)
   } else {
-    bypass.resetBackend := DontCare
+    io.bypass.resetBackend := DontCare
   }
-  bypass.resetInFrontendBypass.toL2Top := bypass.resetInFrontendBypass.fromFrontend
+  io.bypass.resetInFrontendBypass.toL2Top := io.bypass.resetInFrontendBypass.fromFrontend
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
@@ -1083,10 +1080,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
 
-  val hyLdDeqCount = PopCount(fromBackend.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
-  val hyStDeqCount = PopCount(fromBackend.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
-  val ldDeqCount = PopCount(fromBackend.issueLda.map(_.valid)) +& hyLdDeqCount
-  val stDeqCount = PopCount(fromBackend.issueSta.take(StaCnt).map(_.valid)) +& hyStDeqCount
+  val hyLdDeqCount = PopCount(io.fromBackend.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
+  val hyStDeqCount = PopCount(io.fromBackend.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
+  val ldDeqCount = PopCount(io.fromBackend.issueLda.map(_.valid)) +& hyLdDeqCount
+  val stDeqCount = PopCount(io.fromBackend.issueSta.take(StaCnt).map(_.valid)) +& hyStDeqCount
   val iqDeqCount = ldDeqCount +& stDeqCount
   XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
   XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LdExuCnt + 1)
