@@ -497,10 +497,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   sstcIRGen.i.stime.bits  := time.stime
   sstcIRGen.i.vstime.valid := time.updated
   sstcIRGen.i.vstime.bits  := time.vstime
-  sstcIRGen.i.stimecmp := stimecmp.rdata
-  sstcIRGen.i.vstimecmp := vstimecmp.rdata
-  sstcIRGen.i.menvcfgSTCE := menvcfg.regOut.STCE.asBool
-  sstcIRGen.i.henvcfgSTCE := henvcfg.regOut.STCE.asBool
+  sstcIRGen.i.stimecmp.wen := GatedValidRegNext(stimecmp.w.wen)
+  sstcIRGen.i.stimecmp.rdata  := stimecmp.rdata
+  sstcIRGen.i.vstimecmp.wen   := GatedValidRegNext(vstimecmp.w.wen)
+  sstcIRGen.i.vstimecmp.rdata := vstimecmp.rdata
+  sstcIRGen.i.menvcfg.wen   := GatedValidRegNext(menvcfg.w.wen)
+  sstcIRGen.i.menvcfg.STCE  := menvcfg.regOut.STCE.asBool
+  sstcIRGen.i.henvcfg.wen   := GatedValidRegNext(henvcfg.w.wen)
+  sstcIRGen.i.henvcfg.STCE  := henvcfg.regOut.STCE.asBool
+  sstcIRGen.i.htimedeltaWen := GatedValidRegNext(htimedelta.w.wen)
 
   miregiprios.foreach { mod =>
     mod.w.wen := mireg.w.wen && (miselect.regOut.ALL.asUInt === mod.addr.U)
