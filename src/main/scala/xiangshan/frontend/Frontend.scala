@@ -181,7 +181,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr_pf_enable := RegNext(csrCtrl.l1I_pf_enable)
+  icache.io.csr_pf_enable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
 
   icache.io.fencei := RegNext(io.fencei)
 

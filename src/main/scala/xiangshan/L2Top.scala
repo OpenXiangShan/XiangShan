@@ -24,9 +24,9 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
-import coupledL2.{L2ParamKey, EnableCHI}
+import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO, CHIIssue}
+import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -190,6 +190,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
@@ -247,6 +248,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module
+      l2.io.pfCtrlFromCore := io.pfCtrlFromCore
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile

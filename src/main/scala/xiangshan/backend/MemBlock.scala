@@ -338,8 +338,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_cpu_critical_error = Output(Bool())
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
-    val inner_l2_pf_enable = Input(Bool())
-    val outer_l2_pf_enable = Output(Bool())
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
 
@@ -370,8 +368,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.outer_cpu_critical_error)
   dontTouch(io.inner_beu_errors_icache)
   dontTouch(io.outer_beu_errors_icache)
-  dontTouch(io.inner_l2_pf_enable)
-  dontTouch(io.outer_l2_pf_enable)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
@@ -383,7 +379,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   //val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
-  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
+  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
   io.error <> DelayNWithValid(dcache.io.error, 2)
   when(!csrCtrl.cache_error_enable){
     io.error.bits.report_to_beu := false.B
@@ -414,10 +410,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
+      sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
       sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
       sms
@@ -466,7 +462,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
   }
-  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
+  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -599,9 +595,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
       outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
       outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
-      outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
+      outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 2, Some(true.B))
 
-      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
@@ -612,7 +608,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
       outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := l1_pf_to_l3.valid)
       outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := l1_pf_to_l3.bits)
-      outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B)))
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 4, Some(true.B)))
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.map(_.out.head._1.addr).getOrElse(0.U)
@@ -1907,7 +1903,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
-  io.outer_l2_pf_enable := io.inner_l2_pf_enable
   io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
   // vector segmentUnit
