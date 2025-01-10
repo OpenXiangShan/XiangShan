@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2021-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -23,26 +24,19 @@ import utils._
 import utility._
 import system._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
-import system._
-import utility._
-import utils._
-import huancun._
-import openLLC.{OpenLLCParam}
+import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
-import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import device.{EnableJtag, XSDebugModuleParams}
+import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
-import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -51,7 +45,15 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
-  case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
+  case DebugModuleKey => Some(DebugModuleParams(
+    nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
+    maxSupportedSBAccess = site(XLen),
+    hasBusMaster = true,
+    baseAddress = BigInt(0x38020000),
+    nScratch = 2,
+    crossingHasSafeReset = false,
+    hasHartResets = true
+  ))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B

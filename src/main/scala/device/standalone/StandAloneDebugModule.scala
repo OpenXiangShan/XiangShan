@@ -1,6 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
+* Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2024-2025 Institute of Computing Technology, Chinese Academy of Sciences
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -24,7 +24,6 @@ import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
-import device.XSDebugModuleParams
 import system.SoCParamsKey
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
