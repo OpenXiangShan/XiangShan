@@ -55,10 +55,10 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
   val lower   = UInt(offsetLen.W)
   val tarStat = UInt(TAR_STAT_SZ.W)
 
-  def setLowerStatByTarget(pc: UInt, target: UInt, isShare: Boolean) = {
+  def setLowerStatByTarget(pc: PrunedAddr, target: PrunedAddr, isShare: Boolean): Unit = {
     def getTargetStatByHigher(pc_higher: UInt, target_higher: UInt) =
       Mux(target_higher > pc_higher, TAR_OVF, Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT))
-    def getLowerByTarget(target: UInt, offsetLen: Int) = target(offsetLen, 1)
+    def getLowerByTarget(target: PrunedAddr, offsetLen: Int) = target(offsetLen, 1)
     val offLen        = if (isShare) this.subOffsetLen.get else this.offsetLen
     val pc_higher     = pc(VAddrBits - 1, offLen + 1)
     val target_higher = target(VAddrBits - 1, offLen + 1)
@@ -69,8 +69,13 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
     this.sharing := isShare.B
   }
 
-  def getTarget(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
-    def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+  def getTarget(pc: PrunedAddr, last_stage: Option[(UInt, Bool)] = None): PrunedAddr = {
+    def getTarget(offLen: Int)(
+        pc:         PrunedAddr,
+        lower:      UInt,
+        stat:       UInt,
+        last_stage: Option[(UInt, Bool)] = None
+    ): PrunedAddr = {
       val h                = pc(VAddrBits - 1, offLen + 1)
       val higher           = Wire(UInt((VAddrBits - offLen - 1).W))
       val higher_plus_one  = Wire(UInt((VAddrBits - offLen - 1).W))
@@ -90,28 +95,28 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
         higher_plus_one  := h + 1.U
         higher_minus_one := h - 1.U
       }
-      val target =
-        Cat(
-          Mux1H(Seq(
-            (stat === TAR_OVF, higher_plus_one),
-            (stat === TAR_UDF, higher_minus_one),
-            (stat === TAR_FIT, higher)
-          )),
-          lower(offLen - 1, 0),
-          0.U(1.W)
-        )
-      require(target.getWidth == VAddrBits)
+      val target = PrunedAddrInit(Cat(
+        Mux1H(Seq(
+          (stat === TAR_OVF, higher_plus_one),
+          (stat === TAR_UDF, higher_minus_one),
+          (stat === TAR_FIT, higher)
+        )),
+        lower(offLen - 1, 0),
+        0.U(1.W)
+      ))
+      require(target.length == VAddrBits)
       require(offLen != 0)
       target
     }
-    if (subOffsetLen.isDefined)
+    if (subOffsetLen.isDefined) {
       Mux(
         sharing,
         getTarget(subOffsetLen.get)(pc, lower, tarStat, last_stage),
         getTarget(offsetLen)(pc, lower, tarStat, last_stage)
       )
-    else
+    } else {
       getTarget(offsetLen)(pc, lower, tarStat, last_stage)
+    }
   }
   def fromAnotherSlot(that: FtbSlot) = {
     require(
@@ -200,14 +205,14 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
   }
   def allSlotsForBr =
     (0 until numBr).map(getSlotForBr(_))
-  def setByBrTarget(brIdx: Int, pc: UInt, target: UInt) = {
+  def setByBrTarget(brIdx: Int, pc: PrunedAddr, target: PrunedAddr): Unit = {
     val slot = getSlotForBr(brIdx)
     slot.setLowerStatByTarget(pc, target, brIdx == numBr - 1)
   }
-  def setByJmpTarget(pc: UInt, target: UInt) =
-    this.tailSlot.setLowerStatByTarget(pc, target, false)
+  def setByJmpTarget(pc: PrunedAddr, target: PrunedAddr): Unit =
+    this.tailSlot.setLowerStatByTarget(pc, target, isShare = false)
 
-  def getTargetVec(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+  def getTargetVec(pc: PrunedAddr, last_stage: Option[Tuple2[PrunedAddr, Bool]] = None): Vec[PrunedAddr] = {
     /*
     Previous design: Use the getTarget function of FTBSlot to calculate three sets of targets separately;
     During this process, nine sets of registers will be generated to register the values of the higher plus one minus one
@@ -260,7 +265,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
       higher_minus_one_tail := h_tail - 1.U
     }
     val br_slots_targets = VecInit(brSlots.map(s =>
-      Cat(
+      PrunedAddrInit(Cat(
         Mux1H(Seq(
           (s.tarStat === TAR_OVF, higher_plus_one_br),
           (s.tarStat === TAR_UDF, higher_minus_one_br),
@@ -268,9 +273,9 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
         )),
         s.lower(s.offsetLen - 1, 0),
         0.U(1.W)
-      )
+      ))
     ))
-    val tail_target = Wire(UInt(VAddrBits.W))
+    val tail_target = Wire(PrunedAddr(VAddrBits))
     if (tailSlot.subOffsetLen.isDefined) {
       tail_target := Mux(
         tailSlot.sharing,
@@ -305,14 +310,14 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
       )
     }
 
-    br_slots_targets.map(t => require(t.getWidth == VAddrBits))
-    require(tail_target.getWidth == VAddrBits)
+    br_slots_targets.map(t => require(t.length == VAddrBits))
+    require(tail_target.length == VAddrBits)
     val targets = VecInit(br_slots_targets :+ tail_target)
     targets
   }
 
   def getOffsetVec = VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
-  def getFallThrough(pc: UInt, last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None) =
+  def getFallThrough(pc: PrunedAddr, last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None): PrunedAddr =
     if (last_stage_entry.isDefined) {
       var stashed_carry = RegEnable(last_stage_entry.get._1.carry, last_stage_entry.get._2)
       getFallThroughAddr(pc, stashed_carry, pftAddr)
@@ -437,7 +442,7 @@ object FTBMeta {
 }
 
 // class UpdateQueueEntry(implicit p: Parameters) extends XSBundle with FTBParams {
-//   val pc = UInt(VAddrBits.W)
+//   val pc = PrunedAddr(VAddrBits)
 //   val ftb_entry = new FTBEntry
 //   val hit = Bool()
 //   val hit_way = UInt(log2Ceil(numWays).W)
@@ -456,8 +461,9 @@ object FTBMeta {
 
 class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implicit p: Parameters) extends XSBundle {
   val addr = new TableAddr(idxBits, banks)
-  def getIdx(x: UInt) = addr.getIdx(x) ^ Cat(addr.getTag(x), addr.getIdx(x))(idxBits + skewedBits - 1, skewedBits)
-  def getTag(x: UInt) = addr.getTag(x)
+  def getIdx(x: PrunedAddr): UInt =
+    addr.getIdx(x) ^ Cat(addr.getTag(x), addr.getIdx(x))(idxBits + skewedBits - 1, skewedBits)
+  def getTag(x: PrunedAddr): UInt = addr.getTag(x)
 }
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
@@ -473,18 +479,18 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       // when ftb hit, read_hits.valid is true, and read_hits.bits is OH of hit way
       // when ftb not hit, read_hits.valid is false, and read_hits is OH of allocWay
       // val read_hits = Valid(Vec(numWays, Bool()))
-      val req_pc    = Flipped(DecoupledIO(UInt(VAddrBits.W)))
+      val req_pc    = Flipped(DecoupledIO(PrunedAddr(VAddrBits)))
       val read_resp = Output(new FTBEntry)
       val read_hits = Valid(UInt(log2Ceil(numWays).W))
 
       val read_multi_entry = Output(new FTBEntry)
       val read_multi_hits  = Valid(UInt(log2Ceil(numWays).W))
 
-      val u_req_pc      = Flipped(DecoupledIO(UInt(VAddrBits.W)))
+      val u_req_pc      = Flipped(DecoupledIO(PrunedAddr(VAddrBits)))
       val update_hits   = Valid(UInt(log2Ceil(numWays).W))
       val update_access = Input(Bool())
 
-      val update_pc          = Input(UInt(VAddrBits.W))
+      val update_pc          = Input(PrunedAddr(VAddrBits))
       val update_write_data  = Flipped(Valid(new FTBEntryWithTag))
       val update_write_way   = Input(UInt(log2Ceil(numWays).W))
       val update_write_alloc = Input(Bool())
@@ -689,7 +695,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_entry, e), f)
   }
   val real_s2_ftb_entry         = Mux(s2_multi_hit_enable, s2_multi_hit_entry, s2_ftb_entry_dup(0))
-  val real_s2_pc                = s2_pc_dup(0).getAddr()
+  val real_s2_pc                = s2_pc_dup(0)
   val real_s2_startLower        = Cat(0.U(1.W), real_s2_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
   val real_s2_endLowerwithCarry = Cat(real_s2_ftb_entry.carry, real_s2_ftb_entry.pftAddr)
   val real_s2_fallThroughErr =
@@ -783,7 +789,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ) {
     full_pred.fromFtbEntry(
       s2_ftb_entry,
-      s2_pc.getAddr(),
+      s2_pc,
       // Previous stage meta for better timing
       Some(s1_pc, s1_fire),
       Some(s1_read_resp, s1_fire)
@@ -796,7 +802,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
       io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire
   )
-    full_pred.fromFtbEntry(s3_ftb_entry, s3_pc.getAddr(), Some((s2_pc.getAddr(), s2_fire)))
+    full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, s2_fire)))
 
   // Overwrite the fallThroughErr value
   io.out.s3.full_pred.zipWithIndex.map { case (fp, i) => fp.fallThroughErr := real_s3_fallThroughErr_dup(i) }
@@ -823,7 +829,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       out_fp.br_taken_mask(i) := in_fp.br_taken_mask(i) || s3_hit && s3_ftb_entry.strong_bias(i)
   }
 
-  val s3_pc_diff       = s3_pc_dup(0).getAddr()
+  val s3_pc_diff       = s3_pc_dup(0)
   val s3_pc_startLower = Cat(0.U(1.W), s3_pc_diff(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
   val s3_ftb_entry_endLowerwithCarry = Cat(s3_ftb_entry_dup(0).carry, s3_ftb_entry_dup(0).pftAddr)
   val fallThroughErr =
@@ -876,14 +882,19 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     assert(write_pc + (FetchWidth * 4).U >= ftb_write_fallThrough, s"FTB write_entry fallThrough address error!")
   }
 
-  XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire(0), s0_pc_dup(0), ftbBank.io.req_pc.ready)
+  XSDebug(
+    "req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n",
+    io.s0_fire(0),
+    s0_pc_dup(0).toUInt,
+    ftbBank.io.req_pc.ready
+  )
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit_dup(0), writeWay.asUInt)
   XSDebug(
     "s2_br_taken_mask=%b, s2_real_taken_mask=%b\n",
     io.in.bits.resp_in(0).s2.full_pred(0).br_taken_mask.asUInt,
     io.out.s2.full_pred(0).real_slot_taken_mask().asUInt
   )
-  XSDebug("s2_target=%x\n", io.out.s2.getTarget(0))
+  XSDebug("s2_target=%x\n", io.out.s2.getTarget(0).toUInt)
 
   s2_ftb_entry_dup(0).display(true.B)
 

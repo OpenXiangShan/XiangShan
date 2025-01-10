@@ -46,7 +46,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
 
   val USE_ALT_ON_NA_WIDTH = 4
   val NUM_USE_ALT_ON_NA   = 128
-  def use_alt_idx(pc: UInt) = (pc >> instOffsetBits)(log2Ceil(NUM_USE_ALT_ON_NA) - 1, 0)
+  def use_alt_idx(pc: PrunedAddr) = (pc >> instOffsetBits)(log2Ceil(NUM_USE_ALT_ON_NA) - 1, 0)
 
   val TotalBits = TageTableInfos.map {
     case (s, h, t) => {
@@ -85,7 +85,7 @@ abstract class TageModule(implicit p: Parameters)
     extends XSModule with TageParams with BPUUtils {}
 
 class TageReq(implicit p: Parameters) extends TageBundle {
-  val pc          = UInt(VAddrBits.W)
+  val pc          = PrunedAddr(VAddrBits)
   val ghist       = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
 }
@@ -100,7 +100,7 @@ class TageResp(implicit p: Parameters) extends TageResp_meta {
 }
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
-  val pc    = UInt(VAddrBits.W)
+  val pc    = PrunedAddr(VAddrBits)
   val ghist = UInt(HistoryLength.W)
   // update tag and ctr
   val mask    = Vec(numBr, Bool())
@@ -139,10 +139,10 @@ trait TBTParams extends HasXSParameter with TageParams {
 
 class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val io = IO(new Bundle {
-    val req           = Flipped(DecoupledIO(UInt(VAddrBits.W))) // s0_pc
+    val req           = Flipped(DecoupledIO(PrunedAddr(VAddrBits))) // s0_pc
     val s1_cnt        = Output(Vec(numBr, UInt(2.W)))
     val update_mask   = Input(Vec(TageBanks, Bool()))
-    val update_pc     = Input(UInt(VAddrBits.W))
+    val update_pc     = Input(PrunedAddr(VAddrBits))
     val update_cnt    = Input(Vec(numBr, UInt(2.W)))
     val update_takens = Input(Vec(TageBanks, Bool()))
     // val update  = Input(new TageUpdate)
@@ -309,7 +309,7 @@ class TageTable(
   }
   // pc is start address of basic block, most 2 branch inst in block
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
-  def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
+  def getUnhashedIdx(pc: PrunedAddr): UInt = pc >> instOffsetBits
 
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
@@ -561,7 +561,7 @@ class TageTable(
   val ub = PriorityEncoder(u.uMask)
   XSDebug(
     io.req.fire,
-    p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+    p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc.toUInt)}, " +
       p"idx=$s0_idx, tag=$s0_tag\n"
   )
   for (i <- 0 until numBr) {
@@ -572,7 +572,7 @@ class TageTable(
     )
     XSDebug(
       io.update.mask(i),
-      p"update Table_br_$i: pc:${Hexadecimal(u.pc)}}, " +
+      p"update Table_br_$i: pc:${Hexadecimal(u.pc.toUInt)}}, " +
         p"taken:${u.takens(i)}, alloc:${u.alloc(i)}, oldCtrs:${u.oldCtrs(i)}\n"
     )
     val bank = OHToUInt(update_req_bank_1h.asUInt, nBanks)
@@ -1015,7 +1015,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       updateValids(b),
       "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
       b.U,
-      update_pc,
+      update_pc.toUInt,
       0.U,
       update.br_taken_mask(b),
       update.mispred_mask(b),
@@ -1029,12 +1029,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     )
   }
   val s2_resps = RegEnable(s1_resps, io.s1_fire(1))
-  XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(1), s0_pc_dup(1))
-  XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(1), debug_pc_s1)
+  XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(1), s0_pc_dup(1).toUInt)
+  XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(1), debug_pc_s1.toUInt)
   XSDebug(
     "s2_fireOnLastCycle: resp: pc=%x, target=%x, hits=%b, takens=%b\n",
-    debug_pc_s2,
-    io.out.s2.getTarget(1),
+    debug_pc_s2.toUInt,
+    io.out.s2.getTarget(1).toUInt,
     s2_provideds.asUInt,
     s2_tageTakens_dup(0).asUInt
   )

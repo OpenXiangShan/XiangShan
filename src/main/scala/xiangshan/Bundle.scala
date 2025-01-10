@@ -94,6 +94,7 @@ class PredictorAnswer(implicit p: Parameters) extends XSBundle {
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
+  //TODO: This should be PrunedAddr. It remains UInt now because modifications are needed in backend.
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
@@ -133,7 +134,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.TOSW := entry.TOSW
     this.TOSR := entry.TOSR
     this.NOS := entry.NOS
-    this.topAddr := entry.topAddr
+    this.topAddr := entry.topAddr.toUInt
     this
   }
 
