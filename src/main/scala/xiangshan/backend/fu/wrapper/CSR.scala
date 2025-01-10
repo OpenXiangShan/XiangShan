@@ -324,16 +324,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.customCtrl match {
     case custom =>
-      custom.l1I_pf_enable            := csrMod.io.status.custom.l1I_pf_enable
-      custom.l2_pf_enable             := csrMod.io.status.custom.l2_pf_enable
-      custom.l1D_pf_enable            := csrMod.io.status.custom.l1D_pf_enable
-      custom.l1D_pf_train_on_hit      := csrMod.io.status.custom.l1D_pf_train_on_hit
-      custom.l1D_pf_enable_agt        := csrMod.io.status.custom.l1D_pf_enable_agt
-      custom.l1D_pf_enable_pht        := csrMod.io.status.custom.l1D_pf_enable_pht
-      custom.l1D_pf_active_threshold  := csrMod.io.status.custom.l1D_pf_active_threshold
-      custom.l1D_pf_active_stride     := csrMod.io.status.custom.l1D_pf_active_stride
-      custom.l1D_pf_enable_stride     := csrMod.io.status.custom.l1D_pf_enable_stride
-      custom.l2_pf_store_only         := csrMod.io.status.custom.l2_pf_store_only
+      custom.pf_ctrl                  := csrMod.io.status.custom.pf_ctrl
       // Load violation predictor
       custom.lvpred_disable           := csrMod.io.status.custom.lvpred_disable
       custom.no_spec_load             := csrMod.io.status.custom.no_spec_load
