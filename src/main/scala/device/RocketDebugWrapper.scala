@@ -52,15 +52,15 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
   class DebugModuleIO extends Bundle {
     val resetCtrl = new ResetCtrlIO(numCores)(p)
     val debugIO = new DebugIO()(p)
-    val clock = Input(Bool())
+    val clock = Input(Clock())
     val reset = Input(Reset())
   }
 
   class DebugModuleImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val io = IO(new DebugModuleIO)
     debug.module.io.tl_reset := io.reset // this should be TL reset
-    debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
-    withClock(io.clock.asClock) {
+    debug.module.io.tl_clock := io.clock // this should be TL clock
+    withClock(io.clock) {
       debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
     }
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
