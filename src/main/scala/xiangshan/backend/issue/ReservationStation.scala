@@ -31,6 +31,7 @@ import scala.math.max
 
 case class RSParams
 (
+  var id: Int = 0,
   var numEntries: Int = 0,
   var numEnq: Int = 0,
   var numDeq: Int = 0,
@@ -72,8 +73,9 @@ case class RSParams
 class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val params = new RSParams
 
-  def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {
+  def addIssuePort(cfg: ExuConfig, deq: Int, id: Int): Unit = {
     require(params.numEnq == 0, "issue ports should be added before dispatch ports")
+    params.id = id
     params.dataBits = XLEN
     params.dataIdBits = PhyRegIdxWidth
     params.numEntries += IssQueSize * deq
@@ -342,6 +344,21 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
 
+  val readyTimeVec_r = RegInit(VecInit(Seq.fill(params.numEntries)(0.U(XLEN.W))))
+  val readyTimeVec = WireInit(VecInit(Seq.fill(params.numEntries)(0.U(XLEN.W))))
+  val canIssueLatch = RegNext(statusArray.io.canIssue)
+  readyTimeVec := readyTimeVec_r
+  for (i <- 0 until params.numEntries) {
+    when(!canIssueLatch(i) && statusArray.io.canIssue(i)) {
+      readyTimeVec_r(i) := GTimer()
+      readyTimeVec(i) := GTimer()
+    }
+    when(canIssueLatch(i) && !statusArray.io.canIssue(i)) {
+      readyTimeVec_r(i) := 0.U
+      readyTimeVec(i) := 0.U
+    }
+  }
+
   // Option 2: select the oldest
   val enqVec = VecInit(s0_doEnqueue.zip(s0_allocatePtrOH).map{ case (d, b) => RegNext(Mux(d, b, 0.U)) })
   val s1_oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -507,6 +524,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
     s1_out(i).bits.uop := Mux(s1_issue_oldest(i), payloadArray.io.read.last.data,
       Mux(s1_in_selectPtrValid(i), payloadArray.io.read(i).data, s1_dispatchUops_dup.head(i).bits))
+
+    s1_out(i).bits.uop.debugInfo.readyIssueTime := Mux(s1_issue_oldest(i) || s1_in_selectPtrValid(i),
+      readyTimeVec(OHToUInt(s1_issuePtrOH(i).bits)), GTimer()-1.U)
+
     s1_is_first_issue(i) := Mux(s1_issue_oldest(i), statusArray.io.isFirstIssue.last,
       Mux(s1_in_selectPtrValid(i), statusArray.io.isFirstIssue(params.numEnq + i),
         statusArray.io.update(i).data.isFirstIssue))
@@ -520,6 +541,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   for (i <- 0 until params.numDeq) {
     s1_out(i).valid := s1_issuePtrOH(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect)
+    s1_out(i).bits.uop.debugInfo.rsIdx := OHToUInt(s1_issuePtrOH(i).bits)
     if (io.feedback.isDefined) {
       // feedbackSlow
       statusArray.io.deqResp(2*i).valid := io.feedback.get(i).feedbackSlow.valid
@@ -595,6 +617,17 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // By default, we use the default victim index set in parameters.
     oldestSelection_dup.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
     val s1_issue_oldest_dup = oldestSelection_dup.io.isOverrided
+
+    val readyTimeVec_dup = RegInit(VecInit(Seq.fill(params.numEntries)(0.U(XLEN.W))))
+    val canIssueLatch_dup = RegNext(statusArray.io.canIssueNext)
+    for (i <- 0 until params.numEntries) {
+      when(!canIssueLatch_dup(i) && statusArray.io.canIssueNext(i)) {
+        readyTimeVec_dup(i) := GTimer()
+      }
+      when(canIssueLatch_dup(i) && !statusArray.io.canIssueNext(i)) {
+        readyTimeVec_dup(i) := 0.U
+      }
+    }
     for (i <- 0 until params.numDeq) {
       val uop = s1_dispatchUops_dup.last(i)
       val is_ready = (0 until 2).map(j => uop.bits.srcIsReady(j) || s1_enqWakeup(i)(j).asUInt.orR || s1_fastWakeup(i)(j).asUInt.orR)
@@ -602,7 +635,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       io.fastWakeup.get(i).valid := s1_issue_oldest_dup(i) || select_ptr_dup(i).valid || canBypass
       io.fastWakeup.get(i).bits := Mux(s1_issue_oldest_dup(i), oldest_uop_dup,
         Mux(select_ptr_dup(i).valid, select_uop_dup(i), uop.bits))
+      io.fastWakeup.get(i).bits.debugInfo.selectTime := GTimer()
       io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer() + 1.U
+      io.fastWakeup.get(i).bits.debugInfo.readyIssueTime := Mux(s1_issue_oldest_dup(i), readyTimeVec_dup(OHToUInt(oldest_sel_ptr_dup.bits)),
+        Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U))
+      io.fastWakeup.get(i).bits.debugInfo.rsIdx := Mux(s1_issue_oldest_dup(i), OHToUInt(oldest_sel_ptr_dup.bits),
+        Mux(select_ptr_dup(i).valid, OHToUInt(select_ptr_dup(i).bits), OHToUInt(s1_allocatePtrOH_dup.last(i))))
     }
   }
 
@@ -774,6 +812,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     io.deq(i).valid := s2_deq(i).valid
     io.deq(i).bits := s2_deq(i).bits
     io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
+    io.deq(i).bits.uop.debugInfo.fuIdx := (params.id * 2 + i).U
 
     // data: send to bypass network
     // TODO: these should be done outside RS

@@ -414,10 +414,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       // store uop in data module and debug_microOp Vec
       debug_microOp(enqIndex) := enqUop
       debug_microOp(enqIndex).debugInfo.dispatchTime := timer
-      debug_microOp(enqIndex).debugInfo.enqRsTime := timer
-      debug_microOp(enqIndex).debugInfo.selectTime := timer
-      debug_microOp(enqIndex).debugInfo.issueTime := timer
-      debug_microOp(enqIndex).debugInfo.writebackTime := timer
+      debug_microOp(enqIndex).debugInfo.enqRsTime := 0.U
+      debug_microOp(enqIndex).debugInfo.selectTime := 0.U
+      debug_microOp(enqIndex).debugInfo.issueTime := 0.U
+      debug_microOp(enqIndex).debugInfo.writebackTime := 0.U
       when (enqUop.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -460,9 +460,17 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_exuData(wbIdx) := wb.bits.data
       debug_exuDebug(wbIdx) := wb.bits.debug
       debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.uop.debugInfo.enqRsTime
+      debug_microOp(wbIdx).debugInfo.readyIssueTime := wb.bits.uop.debugInfo.readyIssueTime
       debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.uop.debugInfo.selectTime
       debug_microOp(wbIdx).debugInfo.issueTime := wb.bits.uop.debugInfo.issueTime
       debug_microOp(wbIdx).debugInfo.writebackTime := wb.bits.uop.debugInfo.writebackTime
+      debug_microOp(wbIdx).debugInfo.block_from_lq := wb.bits.uop.debugInfo.block_from_lq
+      debug_microOp(wbIdx).debugInfo.block_from_sq := wb.bits.uop.debugInfo.block_from_sq
+      debug_microOp(wbIdx).debugInfo.fuIdx := wb.bits.uop.debugInfo.fuIdx
+      debug_microOp(wbIdx).debugInfo.rsIdx := wb.bits.uop.debugInfo.rsIdx
+
+      debug_microOp(wbIdx).lqIdx := wb.bits.uop.lqIdx
+      debug_microOp(wbIdx).sqIdx := wb.bits.uop.sqIdx
 
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
@@ -1014,6 +1022,43 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val idx = deqPtrVec(i).value
     wdata(i) := debug_exuData(idx)
     wpc(i) := SignExt(commitDebugUop(i).cf.pc, XLEN)
+  }
+
+  io.commits.commitValid.zip(commitDebugUop).zipWithIndex.map{
+    case ((v, uop), i) =>
+      when(v && io.commits.isCommit) {
+        val srcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
+        uop.ctrl.srcType.zip(uop.ctrl.lsrc).zip(srcValid.zipWithIndex).foreach{
+          case ((srctype, lsrc), (svalid, i)) =>
+            svalid := Mux(FuType.isFpExu(uop.ctrl.fuType), srctype === SrcType.fp,
+              srctype === SrcType.reg && lsrc =/= 0.U && i.U =/= 2.U)
+        }
+        printf(cf"${GTimer()}: system.switch_cpus: T0 : 0x${uop.cf.pc}%x : 0x${Hexadecimal(uop.cf.instr)}" +
+          p" : ${uop.ctrl.fuType}_${uop.ctrl.fuOpType}_${uop.ctrl.fpu.asUInt} : _" +
+          p" : FetchCacheLine=${uop.debugInfo.fetchCacheTime} : ProcessCacheCompletion=${uop.debugInfo.cacheCompTime}" +
+
+          p" : Fetch=${uop.debugInfo.fetchTime}" +
+          p" : Decode=${uop.debugInfo.decodeTime} : Rename=${uop.debugInfo.renameTime}" +
+
+          p" : BlockFromROB=${uop.debugInfo.block_from_rob.asUInt}" +
+          p" : BlockFromDPQ=${uop.debugInfo.block_from_dpq.asUInt}" +
+          p" : BlockFromSerial=${uop.debugInfo.block_from_serial.asUInt}" +
+          p" : BlockFromRF=${uop.debugInfo.block_from_intrf.asUInt | uop.debugInfo.block_from_fprf.asUInt}" +
+          p" : BlockFromLQ=${uop.debugInfo.block_from_lq.asUInt} : BlockFromSQ=${uop.debugInfo.block_from_sq.asUInt}" +
+
+          p" : EliminatedMove=${uop.debugInfo.eliminatedMove}" +
+          p" : Dispatch=${uop.debugInfo.dispatchTime} : EnqRS=${uop.debugInfo.enqRsTime}" +
+          p" : InsertReadyList=${uop.debugInfo.readyIssueTime}" +
+          p" : Select=${uop.debugInfo.selectTime} : Issue=${uop.debugInfo.issueTime}" +
+          p" : Complete=${uop.debugInfo.writebackTime} : Commit=${GTimer()}" +
+
+          p" : ROB=${uop.robIdx.value} : LQ=${uop.lqIdx.value} : SQ=${uop.sqIdx.value}" +
+          p" : RS=${uop.debugInfo.rsIdx} : FU=${uop.debugInfo.fuIdx}" +
+          p" : SRC=${uop.psrc(0)},${uop.psrc(1)},${uop.psrc(2)} : DST=${uop.pdest}" +
+          p" : SRCTYPE=${srcValid(0)},${srcValid(1)},${srcValid(2)}" +
+          "\n"
+        )
+      }
   }
 
   if (env.EnableDifftest) {
