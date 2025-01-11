@@ -640,6 +640,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   cf_ctrl.ctrl := cs
+  cf_ctrl.debugInfo := DontCare
 
   io.deq.cf_ctrl := cf_ctrl
 

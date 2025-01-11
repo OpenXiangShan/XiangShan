@@ -138,6 +138,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.nextlineStart))
   val f0_fire                              = fromFtq.req.fire
 
+  val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
+
+  val f0_fetch_cache_time = Wire(UInt(XLEN.W))
+  val f0_fetch_cache_time_r = RegInit(0.U(XLEN.W))
+  f0_fetch_cache_time := f0_fetch_cache_time_r
+  val ready_for_icache = fromFtq.req.valid && f1_ready
+    when (ready_for_icache && !RegNext(ready_for_icache, false.B)) {
+    f0_fetch_cache_time_r := GTimer()
+    f0_fetch_cache_time := GTimer()
+  }
+
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
   val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
 
@@ -152,8 +163,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f2_flush := backend_redirect || mmio_redirect || wb_redirect
   f1_flush := f2_flush || from_bpu_f1_flush
   f0_flush := f1_flush || from_bpu_f0_flush
-
-  val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
   fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
 
@@ -181,6 +190,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // val f1_situation  = RegEnable(f0_situation,  f0_fire)
   val f1_doubleLine = RegEnable(f0_doubleLine, f0_fire)
   val f1_vSetIdx    = RegEnable(f0_vSetIdx,    f0_fire)
+  val f1_fetch_cache_time = RegEnable(f0_fetch_cache_time, f0_fire)
   val f1_fire       = f1_valid && f2_ready
 
   f1_ready := f1_fire || !f1_valid
@@ -215,6 +225,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // val f2_situation  = RegEnable(f1_situation,  f1_fire)
   val f2_doubleLine = RegEnable(f1_doubleLine, f1_fire)
   val f2_vSetIdx    = RegEnable(f1_vSetIdx,    f1_fire)
+  val f2_fetch_cache_time = RegEnable(f1_fetch_cache_time, f1_fire)
   val f2_fire       = f2_valid && f3_ready && icacheRespAllValid
 
   f2_ready := f2_fire || !f2_valid
@@ -223,6 +234,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_icache_all_resp_reg        = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
+  val f2_cache_comp_time_reg = RegEnable(GTimer(), f2_valid && f2_icache_all_resp_wire)
+  val f2_cache_comp_time = Mux(f2_valid && f2_icache_all_resp_wire, GTimer(), f2_cache_comp_time_reg)
 
   io.icacheStop := !f3_ready
 
@@ -342,6 +355,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_req        = RegEnable(f2_ftq_req, f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  enable=f2_fire)
   val f3_doubleLine     = RegEnable(f2_doubleLine, f2_fire)
+  val f3_fetch_cache_time = RegEnable(f2_fetch_cache_time, f2_fire)
+  val f3_cache_comp_time = RegEnable(f2_cache_comp_time, f2_fire)
   val f3_fire           = io.toIbuffer.fire
 
   f3_ready := f3_fire || !f3_valid
@@ -601,6 +616,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.acf         := f3_af_vec
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPageFault
   io.toIbuffer.bits.triggered   := f3_triggered
+  io.toIbuffer.bits.fetch_cache_time := f3_fetch_cache_time
+  io.toIbuffer.bits.cache_comp_time := f3_cache_comp_time
 
   when(f3_lastHalf.valid){
     io.toIbuffer.bits.enqEnable := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt & f3_lastHalf_mask
