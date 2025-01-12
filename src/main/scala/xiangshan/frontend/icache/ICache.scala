@@ -108,9 +108,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     math.ceil(ICacheDataBits / DataCodeUnit).toInt // split data to segments for ECC checking
   def ICacheDataCodeBits: Int =
     ICacheDataCodeSegs * 1 // FIXME: unportable: maybe use cacheParams.dataCode.somemethod to get width
-  def ICacheDataEntryBits: Int = ICacheDataBits + ICacheDataCodeBits
-  def ICacheBankVisitNum:  Int = 32 * 8 / ICacheDataBits + 1
-  def highestIdxBit:       Int = log2Ceil(nSets) - 1
+  def ICacheDataEntryBits:  Int = ICacheDataBits + ICacheDataCodeBits
+  def ICacheBankVisitBytes: Int = 56
+  def ICacheBankVisitNum:   Int = ICacheBankVisitBytes * 8 / ICacheDataBits + 1
+  def highestIdxBit:        Int = log2Ceil(nSets) - 1
 
   require((ICacheDataBanks >= 2) && isPow2(ICacheDataBanks))
   require(ICacheDataSRAMWidth >= ICacheDataEntryBits)
@@ -149,9 +150,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def InitQueue[T <: Data](entry: T, size: Int): Vec[T] =
     RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
 
+  // determine which banks will be used
   def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[UInt] = {
     val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
+    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 56.U) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
     val bankSel     = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
     assert(
       !valid || PopCount(bankSel) === ICacheBankVisitNum.U,
@@ -437,6 +439,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
       // read
       sramBank.io.r.req.valid := io.read(bank % 4).valid && masks(way)(bank)
       sramBank.io.r.req.bits.apply(setIdx =
+        // select whether to cross the bank index
         Mux(lineSel(bank), io.read(bank % 4).bits.vSetIdx(1), io.read(bank % 4).bits.vSetIdx(0))
       )
       // write

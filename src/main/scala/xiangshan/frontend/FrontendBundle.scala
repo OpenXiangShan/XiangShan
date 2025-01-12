@@ -66,10 +66,11 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 }
 
 class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val startAddr      = UInt(VAddrBits.W)
-  val nextlineStart  = UInt(VAddrBits.W)
-  val ftqIdx         = new FtqPtr
-  def crossCacheline = startAddr(blockOffBits - 1) === 1.U
+  val startAddr     = UInt(VAddrBits.W)
+  val nextlineStart = UInt(VAddrBits.W)
+  val ftqIdx        = new FtqPtr
+  // Determine cross-line based on the first address. 8 + 56 = 64
+  def crossCacheline = startAddr(blockOffBits - 1, 0) > 6.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr

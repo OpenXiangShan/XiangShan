@@ -76,7 +76,7 @@ case class XSCoreParameters
   HasFPU: Boolean = true,
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
-  FetchWidth: Int = 8,
+  FetchWidth: Int = 14,     // The idea number of bytes to fetch is equal to fetchWidth * 4.
   AsidLength: Int = 16,
   VmidLength: Int = 14,
   EnableBPU: Boolean = true,

@@ -367,13 +367,17 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   val remaskFault = VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || retFaultVec(i)))
   val remaskIdx   = ParallelPriorityEncoder(remaskFault.asUInt)
   val needRemask  = ParallelOR(remaskFault)
-  val fixedRange  = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
+  // val fixedRange  = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
+  val fixedRange = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(
+    PredictWidth,
+    1.U(1.W)
+  ) >> ((PredictWidth - 1).U - remaskIdx))
 
-  require(
-    isPow2(PredictWidth),
-    "If PredictWidth does not satisfy the power of 2," +
-      "expression: Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
-  )
+  // require(
+  //   isPow2(PredictWidth),
+  //   "If PredictWidth does not satisfy the power of 2," +
+  //     "expression: Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
+  // )
 
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
 

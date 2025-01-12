@@ -104,8 +104,10 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     def carryPos(addr: UInt) = addr(instOffsetBits + log2Ceil(PredictWidth) + 1)
-    this.startAddr    := resp.pc(3)
-    this.nextLineAddr := resp.pc(3) + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.startAddr := resp.pc(3)
+    this.nextLineAddr := resp.pc(
+      3
+    ) + icacheParameters.blockBytes.U
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
       (resp.pc(3)(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool
     ))
@@ -304,14 +306,13 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     init_entry.strong_bias(numBr - 1) := new_jmp_is_jalr // set strong bias for the jalr on init
   }
 
-  val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
-  init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
-  init_entry.carry   := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos - instOffsetBits), true.B)
-
-  require(
-    isPow2(PredictWidth),
-    "If PredictWidth does not satisfy the power of 2," +
-      "pftAddr := getLower(io.start_addr) and carry := true.B  not working!!"
+  val pc_addr_fetch_bytes = io.start_addr(carryPos - 1, 0) +& (FetchWidth * 4).U
+  val jmpPft              = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
+  init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(pc_addr_fetch_bytes))
+  init_entry.carry := Mux(
+    entry_has_jmp && !last_jmp_rvi,
+    jmpPft(carryPos - instOffsetBits),
+    pc_addr_fetch_bytes(carryPos)
   )
 
   init_entry.isJalr := new_jmp_is_jalr

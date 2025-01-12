@@ -435,16 +435,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_foldpc = VecInit(f2_pc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
   val f2_jump_range =
-    Fill(PredictWidth, !f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~f2_ftq_req.ftqOffset.bits
-  require(
-    isPow2(PredictWidth),
-    "If PredictWidth does not satisfy the power of 2," +
-      "expression: Fill(PredictWidth, 1.U(1.W)) >> ~f2_ftq_req.ftqOffset.bits is not right !!"
-  )
-  val f2_ftr_range = Fill(PredictWidth, f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(
+    Fill(PredictWidth, !f2_ftq_req.ftqOffset.valid) | Fill(
+      PredictWidth,
+      1.U(1.W)
+    ) >> ((PredictWidth - 1).U - f2_ftq_req.ftqOffset.bits)
+
+  val f2_ftr_range = Fill(PredictWidth, f2_ftq_req.ftqOffset.valid) | Fill(
+    PredictWidth,
+    1.U(1.W)
+  ) >> ((PredictWidth - 1).U - getBasicBlockIdx(
     f2_ftq_req.nextStartAddr,
     f2_ftq_req.startAddr
-  )
+  ))
   val f2_instr_range = f2_jump_range & f2_ftr_range
   val f2_exception_vec = VecInit((0 until PredictWidth).map(i =>
     MuxCase(

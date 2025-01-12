@@ -34,7 +34,7 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
   val ftqIdx:           FtqPtr = new FtqPtr
   val isSoftPrefetch:   Bool   = Bool()
   val backendException: UInt   = UInt(ExceptionType.width.W)
-  def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
+  def crossCacheline:   Bool   = startAddr(blockOffBits - 1, 0) > 6.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
     this.startAddr      := info.startAddr
