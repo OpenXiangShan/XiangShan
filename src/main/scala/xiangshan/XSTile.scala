@@ -103,6 +103,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val cpu_poff = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
@@ -117,6 +118,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    dontTouch(io.cpu_poff)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -139,6 +141,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
+
+    //lower power
+    l2top.module.io.l2_flush_en := core.module.io.l2_flush_en
+    core.module.io.l2_flush_done := l2top.module.io.l2_flush_done
+    io.cpu_poff := core.module.io.power_down_en
     if (enableL2) {
       // TODO: add ECC interface of L2
 
