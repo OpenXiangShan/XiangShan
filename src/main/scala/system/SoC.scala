@@ -31,7 +31,7 @@ import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import xiangshan.backend.fu.{PMAConfigEntry, PMAConst}
+import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
@@ -43,7 +43,7 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 48,
-  PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
+  PmemRanges: Seq[MemoryRange] = Seq(MemoryRange(0x80000000L, 0x80000000000L)),
   PMAConfigs: Seq[PMAConfigEntry] = Seq(
     PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
     PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),

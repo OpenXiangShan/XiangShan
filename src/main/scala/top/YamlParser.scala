@@ -16,97 +16,61 @@
 
 package top
 
-import org.chipsalliance.cde.config.{Config, Parameters}
+import io.circe.generic.extras.Configuration
+import io.circe.generic.extras.auto._
 
-import scala.jdk.CollectionConverters._
-import scala.annotation.tailrec
-import java.util.{List => JList, Map => JMap}
+import org.chipsalliance.cde.config.Parameters
 import system.SoCParamsKey
-import xiangshan.backend.fu.PMAConfigEntry
+import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.util.AsyncQueueParams
 
+case class YamlConfig(
+  PmemRanges: Option[List[MemoryRange]],
+  PMAConfigs: Option[List[PMAConfigEntry]],
+  CHIAsyncBridge: Option[AsyncQueueParams],
+  L2CacheConfig: Option[L2CacheConfig],
+  L3CacheConfig: Option[L3CacheConfig],
+  DebugModuleBaseAddr: Option[BigInt]
+)
+
 object YamlParser {
-  private def getSizeInKB(a: String): Int = a match {
-    case s"${k}KB" => k.strip().toInt
-    case s"${m}MB" => (m.strip().toDouble * 1024).toInt
-  }
+  implicit val customParserConfig: Configuration = Configuration.default.withDefaults
   def parseYaml(config: Parameters, yamlFile: String): Parameters = {
-    val file = new java.io.File(yamlFile)
-    val inputStream = new java.io.FileInputStream(file)
-    val yaml = new org.yaml.snakeyaml.Yaml()
-    val yamlSeq = yaml.load(inputStream).asInstanceOf[JMap[String, Any]].asScala.toSeq
-    @tailrec
-    def nextConfig(config: Parameters, yamlSeq: Seq[(String, Any)]): Parameters = {
-      def toBigInt(a: Any): BigInt = a match {
-        case i: Int => BigInt(i)
-        case l: Long => BigInt(l)
-        case s"PmemRanges($i).lower" => config(SoCParamsKey).PmemRanges(i.toInt)._1
-        case s"PmemRanges($i).upper" => config(SoCParamsKey).PmemRanges(i.toInt)._2
-      }
-      yamlSeq match {
-        case Nil => config
-        case ("PmemRanges", pmemRanges) :: tail =>
-          val param = pmemRanges.asInstanceOf[JList[JMap[String, Any]]].asScala.map { range =>
-            val Seq(lower, upper) = Seq("lower", "upper").map(key => toBigInt(range.asScala(key)))
-            (lower, upper)
-          }.toSeq
-          nextConfig(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(PmemRanges = param)
-          }), tail)
-        case ("PMAConfigs", pmaConfigs) :: tail =>
-          val param = pmaConfigs.asInstanceOf[JList[JMap[String, Any]]].asScala.map { pmaConfig =>
-            require(pmaConfig.containsKey("base_addr"), "base_addr is required in every PMAConfigs")
-            val conf = pmaConfig.asScala
-            val base_addr = toBigInt(conf.withDefaultValue(0)("base_addr"))
-            val range = toBigInt(conf.withDefaultValue(0)("range"))
-            val a = conf.withDefaultValue(0)("a").asInstanceOf[Int]
-            require(a == 0 || a == 1 || a == 3, "a should be 0, 1 or 3")
-            val Seq(l, c, atomic, x, w, r) = Seq("l", "c", "atomic", "x", "w", "r").map { key =>
-              conf.withDefaultValue(false)(key).asInstanceOf[Boolean]
-            }
-            PMAConfigEntry(base_addr, range, l, c, atomic, a, x, w, r)
-          }.toSeq
-          nextConfig(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = param)
-          }), tail)
-        case ("CHIAsyncBridge", chiAsyncBridge) :: tail =>
-          val param = chiAsyncBridge.asInstanceOf[JMap[String, Any]].asScala
-          require(param.contains("depth"), "depth is required in CHIAsyncBridge")
-          val depth = param("depth").asInstanceOf[Int]
-          val enableCHIAsyncBridge = if (depth != 0) {
-            val sync = param.withDefaultValue(3)("sync").asInstanceOf[Int]
-            val safe = param.withDefaultValue(false)("safe").asInstanceOf[Boolean]
-            Some(AsyncQueueParams(depth, sync, safe))
-          } else None
-          nextConfig(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(EnableCHIAsyncBridge = enableCHIAsyncBridge)
-          }), tail)
-        case ("L2CacheConfig", l2CacheConfig) :: tail =>
-          val param = l2CacheConfig.asInstanceOf[JMap[String, Any]].asScala
-          val n = getSizeInKB(param("size").asInstanceOf[String])
-          val ways = param.withDefaultValue(8)("ways").asInstanceOf[Int]
-          val inclusive = param.withDefaultValue(true)("inclusive").asInstanceOf[Boolean]
-          val banks = param.withDefaultValue(1)("banks").asInstanceOf[Int]
-          val tp = param.withDefaultValue(true)("tp").asInstanceOf[Boolean]
-          nextConfig(config.alter(new WithNKBL2(n, ways, inclusive, banks, tp)), tail)
-        case ("L3CacheConfig", l3CacheConfig) :: tail =>
-          val param = l3CacheConfig.asInstanceOf[JMap[String, Any]].asScala
-          val n = getSizeInKB(param("size").asInstanceOf[String])
-          val ways = param.withDefaultValue(8)("ways").asInstanceOf[Int]
-          val inclusive = param.withDefaultValue(true)("inclusive").asInstanceOf[Boolean]
-          val banks = param.withDefaultValue(1)("banks").asInstanceOf[Int]
-          nextConfig(config.alter(new WithNKBL3(n, ways, inclusive, banks)), tail)
-        case ("DebugModuleBaseAddr", debugModuleBaseAddr) :: tail =>
-          val param = toBigInt(debugModuleBaseAddr)
-          nextConfig(config.alter((site, here, up) => {
-            case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = param))
-          }), tail)
-        case (s, _) :: tail =>
-          println(s"Warning: $s is not supported in Yaml Config")
-          nextConfig(config, tail)
-      }
+    val yaml = scala.io.Source.fromFile(yamlFile).mkString
+    val json = io.circe.yaml.parser.parse(yaml) match {
+      case Left(value) => throw value
+      case Right(value) => value
     }
-    nextConfig(config, yamlSeq)
+    val yamlConfig = json.as[YamlConfig] match {
+      case Left(value) => throw value
+      case Right(value) => value
+    }
+    var newConfig = config
+    yamlConfig.PmemRanges.foreach { ranges =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(PmemRanges = ranges)
+      })
+    }
+    yamlConfig.PMAConfigs.foreach { pmaConfigs =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = pmaConfigs)
+      })
+    }
+    yamlConfig.CHIAsyncBridge.foreach { bridge =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(
+          EnableCHIAsyncBridge = Option.when(bridge.depth > 0)(bridge)
+        )
+      })
+    }
+    yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))
+    yamlConfig.L3CacheConfig.foreach(l3 => newConfig = newConfig.alter(l3))
+    yamlConfig.DebugModuleBaseAddr.foreach { addr =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = addr))
+      })
+    }
+    newConfig
   }
 }

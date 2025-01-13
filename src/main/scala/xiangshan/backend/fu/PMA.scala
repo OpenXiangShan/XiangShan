@@ -34,6 +34,11 @@ case class MMPMAConfig
   num: Int
 )
 
+case class MemoryRange(lower: BigInt, upper: BigInt) {
+  def cover(addr: BigInt): Boolean = addr >= lower && addr < upper
+  def cover(addr: UInt): Bool = addr >= lower.U && addr < upper.U
+}
+
 case class PMAConfigEntry(
   base_addr: BigInt,
   range: BigInt = 0L, // only use for napot mode

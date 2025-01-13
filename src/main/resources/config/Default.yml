@@ -3,8 +3,8 @@ PmemRanges:
 
 PMAConfigs:
   - { base_addr: 0x0, range: 0x1000000000000, a: 3 }
-  - { base_addr: PmemRanges(0).upper, c: true, atomic: true, a: 1, x: true, w: true, r: true }
-  - { base_addr: PmemRanges(0).lower, a: 1, w: true, r: true }
+  - { base_addr: 0x80000000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
+  - { base_addr: 0x80000000, a: 1, w: true, r: true }
   - { base_addr: 0x3A000000, a: 1 }
   - { base_addr: 0x38022000, a: 1, w: true, r: true }
   - { base_addr: 0x38021000, a: 1, x: true, w: true, r: true }

@@ -270,7 +270,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
-    ivy"org.yaml:snakeyaml:2.3"
+    ivy"io.circe::circe-yaml:1.15.0",
+    ivy"io.circe::circe-generic-extras:0.14.4"
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
@@ -343,11 +344,6 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     )
 
     override def forkArgs = forkArgsTask()
-
-    override def ivyDeps = super.ivyDeps() ++ Agg(
-      defaultVersions("chiseltest"),
-      ivy"org.yaml:snakeyaml:2.3"
-    )
 
     override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
 

@@ -257,7 +257,7 @@ class MinimalSimConfig(n: Int = 1) extends Config(
   })
 )
 
-class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
   case XSTileKey =>
     val sets = n * 1024 / ways / 64
     up(XSTileKey).map(_.copy(
@@ -278,9 +278,9 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
     ))
 })
 
-class WithNKBL2
+case class L2CacheConfig
 (
-  n: Int,
+  size: String,
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
@@ -288,8 +288,12 @@ class WithNKBL2
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
+    val nKB = size match {
+      case s"${k}KB" => k.strip().toInt
+      case s"${m}MB" => (m.strip().toDouble * 1024).toInt
+    }
     val upParams = up(XSTileKey)
-    val l2sets = n * 1024 / banks / ways / 64
+    val l2sets = nKB * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
       L2CacheParamsOpt = Some(L2Param(
         name = "L2",
@@ -322,9 +326,13 @@ class WithNKBL2
     ))
 })
 
-class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
+case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
   case SoCParamsKey =>
-    val sets = n * 1024 / banks / ways / 64
+    val nKB = size match {
+      case s"${k}KB" => k.strip().toInt
+      case s"${m}MB" => (m.strip().toDouble * 1024).toInt
+    }
+    val sets = nKB * 1024 / banks / ways / 64
     val tiles = site(XSTileKey)
     val clientDirBytes = tiles.map{ t =>
       t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
@@ -372,7 +380,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
 })
 
 class WithL3DebugConfig extends Config(
-  new WithNKBL3(256, inclusive = false) ++ new WithNKBL2(64)
+  L3CacheConfig("256KB", inclusive = false) ++ L2CacheConfig("64KB")
 )
 
 class MinimalL3DebugConfig(n: Int = 1) extends Config(
@@ -402,16 +410,16 @@ class WithFuzzer extends Config((site, here, up) => {
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
-  new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = true) ++
-    new WithNKBL1D(128) ++
-    new MinimalConfig(n)
+  L3CacheConfig("512KB", inclusive = false)
+    ++ L2CacheConfig("256KB", inclusive = true)
+    ++ WithNKBL1D(128)
+    ++ new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
-  new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = true)
-    ++ new WithNKBL1D(128)
+  L3CacheConfig("4MB", inclusive = false, banks = 4)
+    ++ L2CacheConfig("512KB", inclusive = true)
+    ++ WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
 
@@ -421,9 +429,9 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 4)
+  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
 
@@ -436,8 +444,8 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new Config((site, here, up) => {
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
-    ++ new WithNKBL1D(64, ways = 4)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new DefaultConfig(n)
 )
 
@@ -446,8 +454,8 @@ class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
     ++ new Config((site, here, up) => {
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
-    ++ new WithNKBL2(128, inclusive = true, banks = 1, tp = false)
-    ++ new WithNKBL1D(32, ways = 4)
+    ++ L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+    ++ WithNKBL1D(32, ways = 4)
     ++ new MinimalConfig(n)
 )
 
@@ -464,9 +472,9 @@ class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
 )
 
 class FpgaDefaultConfig(n: Int = 1) extends Config(
-  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 4)
+  (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,
@@ -481,9 +489,9 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
 )
 
 class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
-  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 8)
+  (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
