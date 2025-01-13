@@ -221,16 +221,16 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   val resp = DecoupledIO(new BpuToFtqBundle())
 }
 
-class PredictorIO(implicit p: Parameters) extends XSBundle {
+class BpuIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq   = new BpuToFtqIO()
   val ftq_to_bpu   = Flipped(new FtqToBpuIO)
   val ctrl         = Input(new BPUCtrl)
   val reset_vector = Input(UInt(PAddrBits.W))
 }
 
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
+class BPU(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
     with HasCircularQueuePtrHelper {
-  val io = IO(new PredictorIO)
+  val io = IO(new BpuIO)
 
   val ctrl       = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)

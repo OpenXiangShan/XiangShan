@@ -97,10 +97,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu          = Module(new Predictor)
-  val ifu          = Module(new NewIFU)
+  val bpu          = Module(new BPU)
+  val ifu          = Module(new IFU)
   val ibuffer      = Module(new IBuffer)
-  val ftq          = Module(new Ftq)
+  val ftq          = Module(new FTQ)
 
   val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)

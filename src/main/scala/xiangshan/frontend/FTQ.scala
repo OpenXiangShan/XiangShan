@@ -482,7 +482,7 @@ class FtqPcMemWrapper(numOtherReads: Int)(implicit p: Parameters) extends XSModu
   io.commPtr_rdata      := mem.io.rdata.last
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+class FTQ(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
     with HasBackendRedirectInfo with BPUUtils with HasBPUConst with HasPerfEvents
     with HasICacheParameters {
   val io = IO(new Bundle {
