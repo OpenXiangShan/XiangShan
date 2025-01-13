@@ -291,7 +291,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
       LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
-  def gitStatus: T[String] = {
+  // gitStatus changes frequently and unpredictably. Use `Task.Input` here.
+  def gitStatus: T[String] = Task.Input {
     val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
     val gitRevParseProcess = gitRevParseBuilder.start()
     val shaReader = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
