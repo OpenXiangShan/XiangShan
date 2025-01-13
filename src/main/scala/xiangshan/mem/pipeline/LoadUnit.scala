@@ -1758,6 +1758,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // vec feedback
   io.vecldout.bits.vecFeedback := vecFeedback
   // TODO: VLSU, uncache data logic
+  val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_pipe(1))
+  io.vecldout.bits.vecdata.get := Mux(
+    s3_in.misalignWith16Byte,
+    s3_picked_data_frm_pipe(1),
+    Mux(
+      s3_in.is128bit,
+      s3_merged_data_frm_pipe,
+      vecdata
+    )
+  )
+
   io.vecldout.bits.vecdata.get := rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_pipe(1))
   io.vecldout.bits.isvec := s3_vecout.isvec
   io.vecldout.bits.elemIdx := s3_vecout.elemIdx
@@ -1789,7 +1800,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf
   io.misalign_ldout.bits      := io.lsq.ldin.bits
-  io.misalign_ldout.bits.data := s3_ld_data_frm_pipe(2)
+  io.misalign_ldout.bits.data := io.lsq.ldin.bits
+  io.misalign_ldout.bits.data := Mux(s3_in.misalignWith16Byte, s3_merged_data_frm_pipe, s3_picked_data_frm_pipe(2))
   io.misalign_ldout.bits.rep_info.cause := s3_misalign_rep_cause
 
   // fast load to load forward
