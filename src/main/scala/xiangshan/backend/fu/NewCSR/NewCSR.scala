@@ -25,7 +25,7 @@ import xiangshan.backend.trace._
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
-  final val GEILEN = 63
+  final val GEILEN = 5 // m,s,5vs
 
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
@@ -468,6 +468,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
+
+  permitMod.io.in.status.vgein := hstatus.regOut.VGEIN.asUInt
 
   permitMod.io.in.xcounteren.mcounteren := mcounteren.rdata
   permitMod.io.in.xcounteren.hcounteren := hcounteren.rdata
