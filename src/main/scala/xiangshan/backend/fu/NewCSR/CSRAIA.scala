@@ -236,7 +236,7 @@ class CSRToAIABundle extends Bundle {
 }
 
 class AIAToCSRBundle extends Bundle {
-  private val NumVSIRFiles = 63
+  private val NumVSIRFiles = 5
   val rdata = ValidIO(new Bundle {
     val data = UInt(XLEN.W)
     val illegal = Bool()
