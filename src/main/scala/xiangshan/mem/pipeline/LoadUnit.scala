@@ -1800,9 +1800,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.misalign_ldout.valid     := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && s3_frm_mabuf
   io.misalign_ldout.bits      := io.lsq.ldin.bits
-  io.misalign_ldout.bits.data := io.lsq.ldin.bits
   io.misalign_ldout.bits.data := Mux(s3_in.misalignWith16Byte, s3_merged_data_frm_pipe, s3_picked_data_frm_pipe(2))
-  io.misalign_ldout.bits.rep_info.cause := s3_misalign_rep_cause
+  io.misalign_ldout.bits.ep_info.cause := s3_misalign_rep_cause
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
