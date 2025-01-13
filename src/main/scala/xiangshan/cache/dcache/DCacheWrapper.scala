@@ -588,7 +588,6 @@ class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new MainPipeReq)
   val resp = Flipped(ValidIO(new MainPipeResp))
-  val block_lr = Input(Bool())
 }
 
 class CMOReq(implicit p: Parameters) extends Bundle {
@@ -1418,7 +1417,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val atomic_resp_valid = mainPipe.io.atomic_resp.valid && mainPipe.io.atomic_resp.bits.isAMO
   io.lsu.atomics.resp.valid := RegNext(atomic_resp_valid)
   io.lsu.atomics.resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, atomic_resp_valid)
-  io.lsu.atomics.block_lr := mainPipe.io.block_lr
 
   // Request
   val missReqArb = Module(new TreeArbiter(new MissReq, MissReqPortCount))
@@ -1511,8 +1509,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // probe
   // probeQueue.io.mem_probe <> bus.b
   block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
-  probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
-  probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
   val refill_req = RegNext(missQueue.io.main_pipe_req.valid && ((missQueue.io.main_pipe_req.bits.isLoad) | (missQueue.io.main_pipe_req.bits.isStore)))
   //----------------------------------------
