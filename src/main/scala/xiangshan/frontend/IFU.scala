@@ -126,7 +126,7 @@ class IfuWbToFtqDB extends Bundle {
   val checkInvalidTaken = Bool()
 }
 
-class NewIFU(implicit p: Parameters) extends XSModule
+class IFU(implicit p: Parameters) extends XSModule
     with HasICacheParameters
     with HasXSParameter
     with HasIFUConst
