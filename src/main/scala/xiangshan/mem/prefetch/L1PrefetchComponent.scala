@@ -600,10 +600,10 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
     val l2_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === i.U)
     if(i < MLP_L1_SIZE) {
-      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && !not_tlbing_vec(i) && !l1_evict
+      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && not_tlbing_vec(i) && !l1_evict
       tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
     }else {
-      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && !not_tlbing_vec(i) && !l2_evict
+      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && not_tlbing_vec(i) && !l2_evict
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
