@@ -14,6 +14,10 @@ ifeq ($(DEVICE_AXI4),1)
 DEVICE_ARGS += --use-axi4
 endif
 
+ifeq ($(DEVICE_APB),1)
+DEVICE_ARGS += --use-apb
+endif
+
 ifneq ($(DEVICE_HART_NUM),)
 NUM_CORES = $(DEVICE_HART_NUM)
 endif
