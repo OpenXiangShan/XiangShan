@@ -1554,12 +1554,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
-    val diffAIAXtopeiEvent = DifftestModule(new DiffAIAXtopeiEvent)
-    diffAIAXtopeiEvent.coreid := hartId
-    diffAIAXtopeiEvent.valid := fromAIA.rdata.valid
-    diffAIAXtopeiEvent.mtopei := mtopei.rdata
-    diffAIAXtopeiEvent.stopei := stopei.rdata
-    diffAIAXtopeiEvent.vstopei := vstopei.rdata
+    val diffSyncAIAEvent = DifftestModule(new DiffSyncAIAEvent)
+    diffSyncAIAEvent.coreid := hartId
+    diffSyncAIAEvent.valid := fromAIA.rdata.valid
+    diffSyncAIAEvent.mtopei := mtopei.rdata
+    diffSyncAIAEvent.stopei := stopei.rdata
+    diffSyncAIAEvent.vstopei := vstopei.rdata
+    diffSyncAIAEvent.hgeip := hgeip.rdata
 
     val diffCustomMflushpwr = DifftestModule(new DiffSyncCustomMflushpwrEvent)
     diffCustomMflushpwr.coreid := hartId
