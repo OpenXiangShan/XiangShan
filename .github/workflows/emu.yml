@@ -216,6 +216,10 @@ jobs:
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3            \
             --with-dramsim3 --threads 16 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
+      - name: SPEC06 Test - hmmer-Vector
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci hmmer-Vector 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/hmmer-Vector.log
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
