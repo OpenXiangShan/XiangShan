@@ -1094,6 +1094,16 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   XSPerfAccumulate("sms_pf_filter_hit", s1_valid && s1_hit)
   XSPerfAccumulate("sms_pf_filter_tlb_req", io.tlb_req.req.fire)
   XSPerfAccumulate("sms_pf_filter_tlb_resp_miss", io.tlb_req.resp.fire && io.tlb_req.resp.bits.miss)
+  XSPerfAccumulate("sms_pf_filter_tlb_resp_drop", s3_drop)
+  XSPerfAccumulate("sms_pf_filter_tlb_resp_drop_by_pf_or_af",
+    s3_update_valid && (s3_tlb_resp.excp.head.pf.ld || s3_tlb_resp.excp.head.gpf.ld || s3_tlb_resp.excp.head.af.ld)
+  )
+  XSPerfAccumulate("sms_pf_filter_tlb_resp_drop_by_uncache",
+    s3_update_valid && (s3_pmp_resp.mmio || Pbmt.isUncache(s3_tlb_resp.pbmt.head))
+  )
+  XSPerfAccumulate("sms_pf_filter_tlb_resp_drop_by_pmp_af",
+    s3_update_valid && (s3_pmp_resp.ld)
+  )
   for(i <- 0 until smsParams.pf_filter_size){
     XSPerfAccumulate(s"sms_pf_filter_access_way_$i", s0_gen_req_valid && s0_access_way === i.U)
   }

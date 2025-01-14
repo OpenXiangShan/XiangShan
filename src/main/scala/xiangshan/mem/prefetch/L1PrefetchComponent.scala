@@ -686,13 +686,13 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   XSPerfAccumulate("s3_tlb_resp_valid", s3_tlb_resp_valid)
   XSPerfAccumulate("s3_tlb_resp_evict", s3_tlb_resp_valid && s3_tlb_evict)
-  XSPerfAccumulate("s3_tlb_resp_miss", s3_tlb_resp_valid && s3_tlb_evict && s3_tlb_resp.miss)
+  XSPerfAccumulate("s3_tlb_resp_miss", s3_tlb_resp_valid && !s3_tlb_evict && s3_tlb_resp.miss)
   XSPerfAccumulate("s3_tlb_resp_updated", s3_update_valid)
   XSPerfAccumulate("s3_tlb_resp_page_fault", s3_update_valid && s3_tlb_resp.excp.head.pf.ld)
   XSPerfAccumulate("s3_tlb_resp_guestpage_fault", s3_update_valid && s3_tlb_resp.excp.head.gpf.ld)
   XSPerfAccumulate("s3_tlb_resp_access_fault", s3_update_valid && s3_tlb_resp.excp.head.af.ld)
   XSPerfAccumulate("s3_tlb_resp_pmp_access_fault", s3_update_valid && s3_pmp_resp.ld)
-  XSPerfAccumulate("s3_tlb_resp_pmp_access_fault", s3_update_valid && (Pbmt.isUncache(s3_tlb_resp.pbmt.head) || s3_pmp_resp.mmio))
+  XSPerfAccumulate("s3_tlb_resp_uncache", s3_update_valid && (Pbmt.isUncache(s3_tlb_resp.pbmt.head) || s3_pmp_resp.mmio))
 
   // l1 pf
   // s0: generate prefetch req paddr per entry, arb them
