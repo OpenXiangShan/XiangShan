@@ -97,7 +97,7 @@ case class XSCoreParameters
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   FtbWays: Int = 4,
-  FtbTagLength: Int = 20,
+  FtbTagLength: Int = 12,
   RasSize: Int = 16,
   RasSpecSize: Int = 32,
   RasCtrSize: Int = 3,
