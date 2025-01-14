@@ -261,6 +261,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid && (activeNum =/= 0.U) // if activeNum == 0, this uop do nothing, can be killed.
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
+  io.out.bits.uopAddr   := s1_in.baseAddr + uopOffset
   io.out.bits.stride    := stride
   io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
   io.out.bits.usLowBitsAddr := usLowBitsAddr
@@ -311,6 +312,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueMbIndex     = issueEntry.mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
+  val issueUopAddr     = issueEntry.uopAddr
   val issueUop         = issueEntry.uop
   val issueUopIdx      = issueUop.vpu.vuopIdx
   val issueInstType    = issueEntry.instType
@@ -351,7 +353,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     eew = issueEew
   )
   val issueStride = Mux(isIndexed(issueInstType), indexedStride, strideOffsetReg)
-  val vaddr = issueBaseAddr + issueUopOffset + issueStride
+  val vaddr = issueUopAddr + issueStride
   val mask = genVWmask128(vaddr ,issueAlignedType) // scala maske for flow
   val flowMask = issueEntry.flowMask
   /*
@@ -363,7 +365,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usNoSplit        = (issueUsAligned128 || usMaskInSingleUop) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
-  val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx, XLEN)
+  val usSplitVaddr     = genUSSplitAddr(issueUopAddr, splitIdx, XLEN)
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
@@ -416,7 +418,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
       when (activeIssue || inActiveIssue) {
         // The uop has not been entirly splited yet
         splitIdx := splitIdx + issueCount
-        strideOffsetReg := Mux(!issuePreIsSplit, strideOffsetReg, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
+        strideOffsetReg := Mux(!issuePreIsSplit, 0.U, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
       }
     }.otherwise {
       when (activeIssue || inActiveIssue) {

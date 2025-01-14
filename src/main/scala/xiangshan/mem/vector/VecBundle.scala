@@ -38,6 +38,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val excp_eew_index      = UInt(elemIdxBits.W)
   // val exceptionVec   = ExceptionVec() // uop has exceptionVec
   val baseAddr            = UInt(XLEN.W)
+  val uopAddr             = UInt(XLEN.W)
   val stride              = UInt(VLEN.W)
   // val flow_counter = UInt(flowIdxBits.W)
 
