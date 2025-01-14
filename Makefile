@@ -87,6 +87,11 @@ ifneq ($(L3_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
 endif
 
+# configuration from yaml file
+ifneq ($(YAML_CONFIG),)
+COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
+endif
+
 # public args sumup
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
