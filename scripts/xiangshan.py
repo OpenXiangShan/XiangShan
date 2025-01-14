@@ -80,6 +80,7 @@ class XSArgs(object):
         self.config = args.config
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
+        self.issue = args.issue
         self.with_chiseldb = 0 if args.no_db else 1
         # emu arguments
         self.max_instr = args.max_instr
@@ -140,6 +141,7 @@ class XSArgs(object):
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
             (self.pgo_emu_args,  "PGO_EMU_ARGS"),
             (self.llvm_profdata, "LLVM_PROFDATA"),
+            (self.issue,         "ISSUE"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
@@ -672,6 +674,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', nargs='?', type=str, help='config')
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
     parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
+    parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
