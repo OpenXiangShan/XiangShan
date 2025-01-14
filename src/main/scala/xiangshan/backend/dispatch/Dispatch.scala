@@ -479,11 +479,18 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val robLsFull = io.robFull || !io.lqCanAccept || !io.sqCanAccept
 
     import TopDownCounters._
+    def inFilter(in: UInt): Bool = {
+      val filterList = Seq(
+        IntFlStall.id.U, FpFlStall.id.U, VecFlStall.id.U, V0FlStall.id.U, MultiFlStall.id.U
+      )
+      filterList.map(_ === in).reduce(_ || _)
+    }
+
     update := MuxCase(OtherCoreStall.id.U, Seq(
       // fire
       (fire                                              ) -> NoStall.id.U          ,
       // dispatch not stall / core stall from decode or rename
-      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U ) -> in                    ,
+      (in =/= OtherCoreStall.id.U && in =/= NoStall.id.U && !inFilter(in)) -> in                    ,
       // dispatch queue stall
       (!toIntDqCanAccept && !headIsInt && !io.robFull) -> IntDqStall.id.U       ,
       (!io.toVecDq.canAccept  && !headIsFp  && !io.robFull) -> FpDqStall.id.U        ,
@@ -495,6 +502,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       (headIsDiv                                         ) -> DivStall.id.U         ,
       (headIsInt                                         ) -> IntNotReadyStall.id.U ,
       (headIsFp                                          ) -> FPNotReadyStall.id.U  ,
+      (inFilter(in)                                      ) -> in                    ,
       (renameReason(idx) =/= NoStall.id.U                ) -> renameReason(idx)     ,
       (decodeReason(idx) =/= NoStall.id.U                ) -> decodeReason(idx)     ,
     ))
