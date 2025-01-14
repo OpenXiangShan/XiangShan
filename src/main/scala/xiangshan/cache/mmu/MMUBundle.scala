@@ -935,6 +935,7 @@ class PtwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = f
   val ppn_low = UInt(sectortlbwidth.W)
   val af = Bool()
   val pf = Bool()
+  val cf = Bool()
 }
 
 class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBits: Int)(implicit p: Parameters) extends PtwBundle {
@@ -1229,7 +1230,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   val not_super = Bool()
   val not_merge = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true, not_merge: Boolean = false) = {
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true, not_merge: Boolean = false, cf : Vec[Bool]) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val resp_pte = pte
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true, hasNapot = true))
@@ -1242,6 +1243,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
     ptw_resp.pf := pf
     ptw_resp.af := af
+    ptw_resp.cf := cf(pte.ppn(sectortlbwidth - 1, 0))
     ptw_resp.v := resp_pte.perm.v
     ptw_resp.prefetch := DontCare
     ptw_resp.asid := asid
@@ -1252,6 +1254,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 
     for (i <- 0 until tlbcontiguous) {
       this.entry(i) := ptw_resp
+      this.entry(i).cf := cf(i)
     }
   }
 
