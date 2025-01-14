@@ -456,13 +456,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   /******************************************************************
    * Load Data Forward to loadunit
-   *  f0: vaddr match, mask & data select, fast resp
-   *  f1: paddr match, resp
+   *  f0: vaddr match, fast resp
+   *  f1: mask & data select, merge; paddr match; resp
+   *      NOTE: forward.paddr from dtlb, which is far from uncache f0
    ******************************************************************/
 
   val f0_validMask = sizeMap(i => isStore(entries(i)) && states(i).isValid())
   val f0_fwdMaskCandidates = VecInit(entries.map(e => e.mask))
   val f0_fwdDataCandidates = VecInit(entries.map(e => e.data))
+  val f1_fwdMaskCandidates = sizeMap(i => RegEnable(entries(i).mask, f0_validMask(i)))
+  val f1_fwdDataCandidates = sizeMap(i => RegEnable(entries(i).data, f0_validMask(i)))
   val f1_tagMismatchVec = Wire(Vec(LoadPipelineWidth, Bool()))
   f1_needDrain := f1_tagMismatchVec.asUInt.orR && !empty
 
@@ -470,25 +473,36 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f0_fwdValid = forward.valid
     val f1_fwdValid = RegNext(f0_fwdValid)
 
-    // f0 vaddr match
+    /* f0 */
+    // vaddr match
     val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
     val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).inflight)
     val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && !states(i).inflight)
-    // f0 select
-    val f0_flyMask = Mux1H(f0_flyTagMatches, f0_fwdMaskCandidates)
-    val f0_flyData = Mux1H(f0_flyTagMatches, f0_fwdDataCandidates)
-    val f0_idleMask = Mux1H(f0_idleTagMatches, f0_fwdMaskCandidates)
-    val f0_idleData = Mux1H(f0_idleTagMatches, f0_fwdDataCandidates)
-    // f0: merge old(inflight) and new(idle)
-    val (f0_fwdDataTmp, f0_fwdMaskTmp) = doMerge(f0_flyData, f0_flyMask, f0_idleData, f0_idleMask)
-    val f0_fwdMask = shiftMaskToHigh(forward.vaddr, f0_fwdMaskTmp).asTypeOf(Vec(VDataBytes, Bool()))
-    val f0_fwdData = shiftDataToHigh(forward.vaddr, f0_fwdDataTmp).asTypeOf(Vec(VDataBytes, UInt(8.W)))
+    // ONLY for fast use to get better timing
+    val f0_flyMaskFast = shiftMaskToHigh(
+      forward.vaddr,
+      Mux1H(f0_flyTagMatches, f0_fwdMaskCandidates)
+    ).asTypeOf(Vec(VDataBytes, Bool()))
+    val f0_idleMaskFast = shiftMaskToHigh(
+      forward.vaddr,
+      Mux1H(f0_idleTagMatches, f0_fwdMaskCandidates)
+    ).asTypeOf(Vec(VDataBytes, Bool()))
 
-    // f1 paddr match
-    val f1_fwdMask = RegEnable(f0_fwdMask, f0_fwdValid)
-    val f1_fwdData = RegEnable(f0_fwdData, f0_fwdValid)
-    // forward.paddr from dtlb, which is far from uncache
-    val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), RegEnable(forward.paddr, f0_fwdValid)))
+    /* f1 */
+    val f1_flyTagMatches = RegEnable(f0_flyTagMatches, f0_fwdValid)
+    val f1_idleTagMatches = RegEnable(f0_idleTagMatches, f0_fwdValid)
+    val f1_fwdPAddr = RegEnable(forward.paddr, f0_fwdValid)
+    // select
+    val f1_flyMask = Mux1H(f1_flyTagMatches, f1_fwdMaskCandidates)
+    val f1_flyData = Mux1H(f1_flyTagMatches, f1_fwdDataCandidates)
+    val f1_idleMask = Mux1H(f1_idleTagMatches, f1_fwdMaskCandidates)
+    val f1_idleData = Mux1H(f1_idleTagMatches, f1_fwdDataCandidates)
+    // merge old(inflight) and new(idle)
+    val (f1_fwdDataTmp, f1_fwdMaskTmp) = doMerge(f1_flyData, f1_flyMask, f1_idleData, f1_idleMask)
+    val f1_fwdMask = shiftMaskToHigh(f1_fwdPAddr, f1_fwdMaskTmp).asTypeOf(Vec(VDataBytes, Bool()))
+    val f1_fwdData = shiftDataToHigh(f1_fwdPAddr, f1_fwdDataTmp).asTypeOf(Vec(VDataBytes, UInt(8.W)))
+    // paddr match and mismatch judge 
+    val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), f1_fwdPAddr))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
     ).asUInt.orR
@@ -500,12 +514,12 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
         RegEnable(forward.paddr, f0_fwdValid)
       )
     }
-    // f1 output
+    // response
     forward.addrInvalid := false.B // addr in ubuffer is always ready
     forward.dataInvalid := false.B // data in ubuffer is always ready
     forward.matchInvalid := f1_tagMismatchVec(i) // paddr / vaddr cam result does not match
     for (j <- 0 until VDataBytes) {
-      forward.forwardMaskFast(j) := f0_fwdMask(j)
+      forward.forwardMaskFast(j) := f0_flyMaskFast(j) || f0_idleMaskFast(j)
 
       forward.forwardData(j) := f1_fwdData(j)
       forward.forwardMask(j) := false.B
