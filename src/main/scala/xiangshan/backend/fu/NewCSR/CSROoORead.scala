@@ -12,7 +12,7 @@ object CSROoORead {
     CSRs.fcsr,
     CSRs.vxsat,
     CSRs.vcsr,
-//    CSRs.vstart,
+    CSRs.vstart,
     CSRs.sstatus,
     CSRs.vsstatus,
     CSRs.mstatus,
