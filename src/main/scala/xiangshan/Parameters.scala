@@ -818,6 +818,7 @@ trait HasXSParameter {
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
   def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
+  def UncacheBufferIndexWidth = log2Up(UncacheBufferSize)
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward
   def EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
