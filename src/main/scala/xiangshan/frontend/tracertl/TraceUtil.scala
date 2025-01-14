@@ -17,7 +17,9 @@ package xiangshan.frontend.tracertl
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.{DebugOptionsKey}
+import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.FuType.FuTypeOrR
 
 // From HX's NewCSR utility
 object ChiselRecordForField {
@@ -55,6 +57,55 @@ object TraceRTLDontCare {
     val env = p(DebugOptionsKey)
     if (env.TraceRTLMode) {
       origin := 0.U.asTypeOf(origin)
+    }
+  }
+}
+
+
+object TraceFastSimArthi {
+  val nonEliminatedFuType = Seq(
+    FuType.jmp, FuType.brh, FuType.csr, // cfi
+    FuType.ldu, FuType.stu, FuType.mou, // ls
+    FuType.vldu, FuType.vstu, FuType.vsegldu, FuType.vsegstu // vls
+  )
+
+  def fuTypeCheck(fuType: UInt)(implicit p: Parameters): Bool = {
+    !FuTypeOrR(fuType, nonEliminatedFuType)
+  }
+
+  def apply(fuType: UInt)(implicit p: Parameters): Bool = {
+    val env = p(DebugOptionsKey)
+    val xsParam = p(XSTileKey).head
+    if (env.TraceRTLMode) {
+      xsParam.TraceEliminateArthi.B &&
+      TraceFastSim.fastSimEnable() &&
+      fuTypeCheck(fuType)
+    } else {
+      false.B
+    }
+  }
+
+  def apply()(implicit p: Parameters): Bool = {
+    val env = p(DebugOptionsKey)
+    val xsParam = p(XSTileKey).head
+    if (env.TraceRTLMode) {
+      xsParam.TraceEliminateArthi.B &&
+      TraceFastSim.fastSimEnable()
+    } else {
+      false.B
+    }
+  }
+}
+
+object TraceFastSimDRAM {
+  def apply()(implicit p: Parameters): Bool = {
+    val env = p(DebugOptionsKey)
+    val xsParam = p(XSTileKey).head
+    if (env.TraceRTLMode) {
+      xsParam.TraceEliminateDRAM.B &&
+      TraceFastSim.fastSimEnable()
+    } else {
+      false.B
     }
   }
 }

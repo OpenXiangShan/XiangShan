@@ -821,6 +821,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.numUops := 1.U
   decodedInst.numWB   := 1.U
 
+  // TraceRTL
+  decodedInst.traceDynaInfo.eliminateArthi := false.B
+
   val isZimop = (BitPat("b1?00??0111??_?????_100_?????_1110011") === ctrl_flow.instr) ||
                 (BitPat("b1?00??1?????_?????_100_?????_1110011") === ctrl_flow.instr)
 

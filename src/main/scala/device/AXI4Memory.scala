@@ -23,6 +23,8 @@ import difftest.common.DifftestMem
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4Parameters, AXI4SlaveNode}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}
 import utility._
+import xiangshan.frontend.tracertl.{TraceAXI4Xbar, TraceAXI4Memory}
+import xiangshan.DebugOptionsKey
 
 class MemoryRequestHelper(requestType: Int)
   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
@@ -317,15 +319,41 @@ class AXI4MemoryWrapper (
   memByte: Long,
   useBlackBox: Boolean = false
 )(implicit p: Parameters) extends AXI4MemorySlave(slave, memByte, useBlackBox) {
+  val ramRange = if (p(DebugOptionsKey).TraceRTLMode) {
+    // ugly code to avoid AddressSet conflict check
+    // ram and fastRam actually have the same address range
+    require(slaveParam.address.map(_.contains(0x80000000L)).reduce(_||_))
+    require(slaveParam.address.map(_.contains(0x80000000L + 0x7ffffff0L)).reduce(_||_))
+
+    slaveParam.address.flatMap(_.subtract(AddressSet(0x80000000L, 0x7fffffffL)))
+  } else slaveParam.address
+
   val ram = LazyModule(new AXI4Memory(
-    slaveParam.address,
+    ramRange,
     memByte,
     useBlackBox,
     slaveParam.executable,
     portParam.beatBytes,
     burstLen
   ))
-  ram.node := master
+
+  if (p(DebugOptionsKey).TraceRTLMode) {
+    val fastRamRange = AddressSet(0x80000000L, 0x7fffffffL)
+    val fast = LazyModule(new TraceAXI4Memory(
+      Seq(fastRamRange),
+      memByte,
+      useBlackBox,
+      slaveParam.executable,
+      portParam.beatBytes,
+      burstLen
+    ))
+    val traceRouter = LazyModule(new TraceAXI4Xbar())
+    ram.node := traceRouter.node
+    fast.node := traceRouter.node
+    traceRouter.node := master
+  } else {
+    ram.node := master
+  }
 }
 
 abstract class AXI4MemorySlave (

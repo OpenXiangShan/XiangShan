@@ -20,7 +20,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceDynaInfo}
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
@@ -123,6 +123,7 @@ object Bundles {
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 //    val traceInfo       = OptionWrapper(env.TraceRTLMode, new TraceInstrBundle())
     val traceInfo       = new TraceInstrBundle()
+    val traceDynaInfo   = new TraceDynaInfo()
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -253,6 +254,7 @@ object Bundles {
     val numLsElem       = NumLsElem()
 
     val traceInfo       = new TraceInstrBundle()
+    val traceDynaInfo   = new TraceDynaInfo()
 
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 

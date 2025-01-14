@@ -353,7 +353,11 @@ case class XSCoreParameters
   usePTWRepeater: Boolean = false,
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
-  softPTWDelay: Int = 1
+  softPTWDelay: Int = 1,
+
+  // TraceRTLMode
+  TraceEliminateArthi: Boolean = true,
+  TraceEliminateDRAM: Boolean = true
 ){
   def vlWidth = log2Up(VLEN) + 1
 
@@ -862,9 +866,9 @@ trait HasXSParameter {
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 
-  // TraceRTLMode
-  def TraceFetchWidth = 16
+  // TraceRTL
   require(TraceFetchWidth >= PredictWidth)
+  def TraceFetchWidth = 16
   def TraceBufferSize = max(TraceFetchWidth * 4, RobSize) //
   def TraceCollectorWidth = CommitWidth
   def TraceRoBMergeNum = RenameWidth
@@ -876,6 +880,9 @@ trait HasXSParameter {
   def TraceSoftL1TLBCheck = false
   def TraceDummyFixCycleDivSqrt = false
   def TraceDummyFixCycleIntDiv = false
+  def TraceEliminateArthi = coreParams.TraceEliminateArthi
+  def TraceEliminateDRAM = coreParams.TraceEliminateDRAM
+
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25

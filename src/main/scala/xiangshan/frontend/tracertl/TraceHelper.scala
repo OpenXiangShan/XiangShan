@@ -788,3 +788,55 @@ class TraceSatp()(implicit p: Parameters) extends TraceModule {
   io.satp_ppn.valid := RegNext(helper.enable)
   io.satp_ppn.bits := helper.satp_ppn
 }
+
+class TraceFastSimHelper
+  extends ExtModule
+  with HasExtModuleInline {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val fastSimEnable = IO(Output(UInt(8.W)))
+
+  def getVerilog: String = {
+    s"""
+       |import "DPI-C" function byte tracertl_get_fastsim_state();
+       |
+       |module TraceFastSimHelper(
+       |  input  clock,
+       |  input  reset,
+       |  output reg [7:0] fastSimEnable
+       |);
+       |
+       |always @(posedge clock) begin
+       |  if (reset) begin
+       |    fastSimEnable <= 0;
+       |  end
+       |  else begin
+       |    fastSimEnable <= tracertl_get_fastsim_state();
+       |  end
+       |end
+       |
+       |endmodule
+       |
+       |""".stripMargin
+  }
+
+  setInline(s"$desiredName.sv", getVerilog)
+}
+
+class TraceFastSim() extends Module {
+  val io = IO(new Bundle {
+    val fastSimEnable = Output(Bool())
+  })
+
+  val helper = Module(new TraceFastSimHelper)
+  helper.clock := clock
+  helper.reset := reset.asAsyncReset
+  io.fastSimEnable := helper.fastSimEnable(0).asBool
+}
+
+object TraceFastSim {
+  def fastSimEnable(): Bool = {
+    val fastSim = Module(new TraceFastSim())
+    fastSim.io.fastSimEnable
+  }
+}
