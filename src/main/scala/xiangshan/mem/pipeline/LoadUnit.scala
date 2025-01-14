@@ -1768,8 +1768,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       vecdata
     )
   )
-
-  io.vecldout.bits.vecdata.get := rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_pipe(1))
   io.vecldout.bits.isvec := s3_vecout.isvec
   io.vecldout.bits.elemIdx := s3_vecout.elemIdx
   io.vecldout.bits.elemIdxInsideVd.get := s3_vecout.elemIdxInsideVd
