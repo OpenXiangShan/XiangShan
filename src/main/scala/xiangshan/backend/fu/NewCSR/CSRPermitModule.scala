@@ -65,15 +65,16 @@ class CSRPermitModule extends Module {
   val pPermit_EX_II = privilegePermitMod.io.out.privilege_EX_II
   val pPermit_EX_VI = privilegePermitMod.io.out.privilege_EX_VI
 
+  val vPermit_EX_II = virtualLevelPermitMod.io.out.virtualLevelPermit_EX_II
   val vPermit_EX_VI = virtualLevelPermitMod.io.out.virtualLevelPermit_EX_VI
 
   val indirectPermit_EX_II = indirectCSRPermitMod.io.out.indirectCSR_EX_II
   val indirectPermit_EX_VI = indirectCSRPermitMod.io.out.indirectCSR_EX_VI
 
-  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_VI
+  val directPermit_illegal = mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || pPermit_EX_VI || vPermit_EX_II || vPermit_EX_VI
 
   val csrAccess_EX_II = csrAccess && (
-    (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II) ||
+    (mPermit_EX_II || sPermit_EX_II || pPermit_EX_II || vPermit_EX_II) ||
     (!directPermit_illegal && indirectPermit_EX_II)
   )
   val csrAccess_EX_VI = csrAccess && (
@@ -380,6 +381,7 @@ class VirtualLevelPermitModule extends Module {
       val aia = new aiaIO
     })
     val out = Output(new Bundle {
+      val virtualLevelPermit_EX_II = Bool()
       val virtualLevelPermit_EX_VI = Bool()
     })
   })
@@ -390,7 +392,10 @@ class VirtualLevelPermitModule extends Module {
     io.in.privState,
   )
 
-  private val vtvm = io.in.status.vtvm
+  private val (vtvm, vgein) = (
+    io.in.status.vtvm,
+    io.in.status.vgein,
+  )
 
   private val (hcounteren, scounteren) = (
     io.in.xcounteren.hcounteren,
@@ -414,6 +419,9 @@ class VirtualLevelPermitModule extends Module {
   private val counterAddr = addr(4, 0) // 32 counters
 
   private val rwSatp_EX_VI = privState.isModeVS && vtvm && (addr === CSRs.satp.U)
+
+  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
+  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
 
   private val rwSip_Sie_EX_VI = privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
 
@@ -466,7 +474,8 @@ class VirtualLevelPermitModule extends Module {
   private val xstateControlAccess_EX_VI = accessStateen0_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
-  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
+  io.out.virtualLevelPermit_EX_II := rwVStopei_EX_II
+  io.out.virtualLevelPermit_EX_VI := rwSatp_EX_VI || rwStopei_EX_VI || rwSip_Sie_EX_VI || rwStimecmp_EX_VI || accessHPM_EX_VI || xstateControlAccess_EX_VI
 }
 
 class IndirectCSRPermitModule extends Module {
@@ -538,6 +547,7 @@ class statusIO extends Bundle {
   val tvm = Bool()
   // Virtual Trap Virtual Memory
   val vtvm = Bool()
+  val vgein = UInt(6.W)
   val mstatusFSOff = Bool()
   val vsstatusFSOff = Bool()
   val mstatusVSOff = Bool()

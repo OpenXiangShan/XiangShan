@@ -25,7 +25,7 @@ import xiangshan.backend.trace._
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
-  final val GEILEN = 63
+  final val GEILEN = 5 // m,s,5vs
 
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
@@ -467,6 +467,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
+
+  permitMod.io.in.status.vgein := hstatus.regOut.VGEIN.asUInt
 
   permitMod.io.in.xcounteren.mcounteren := mcounteren.rdata
   permitMod.io.in.xcounteren.hcounteren := hcounteren.rdata
@@ -1542,12 +1544,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
-    val diffAIAXtopeiEvent = DifftestModule(new DiffAIAXtopeiEvent)
-    diffAIAXtopeiEvent.coreid := hartId
-    diffAIAXtopeiEvent.valid := fromAIA.rdata.valid
-    diffAIAXtopeiEvent.mtopei := mtopei.rdata
-    diffAIAXtopeiEvent.stopei := stopei.rdata
-    diffAIAXtopeiEvent.vstopei := vstopei.rdata
+    val diffSyncAIAEvent = DifftestModule(new DiffSyncAIAEvent)
+    diffSyncAIAEvent.coreid := hartId
+    diffSyncAIAEvent.valid := fromAIA.rdata.valid
+    diffSyncAIAEvent.mtopei := mtopei.rdata
+    diffSyncAIAEvent.stopei := stopei.rdata
+    diffSyncAIAEvent.vstopei := vstopei.rdata
+    diffSyncAIAEvent.hgeip := hgeip.rdata
   }
 }
 
