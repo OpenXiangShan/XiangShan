@@ -213,6 +213,35 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
    *  bits0  0: need low 9bits
    *  bits1  0: need mid 9bits
    */
+  def fachit(vpn: UInt, facA: UInt, facB: UInt, facCarry: Bool, asid: UInt,
+      nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
+    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid))
+    val addr_low_hit = valididx(vpn(2, 0))
+    val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
+    val isPageSuper = !(level.getOrElse(0.U) === 0.U)
+    val pteidx_hit = Mux(hasS2xlate && !isPageSuper && !onlyS1 && n === 0.U, pteidx(vpn(2, 0)), true.B)
+
+    val tmp_level = level.get
+    val align_vpn = vpn(vpn.getWidth-1, sectortlbwidth)
+    val tag_match_fac = FastAdderComparator.genFac(facA, facB, facCarry, tag) // use Fast Adder Comparator to optimization
+    val tag_matchs = Wire(Vec(Level + 1, Bool()))
+    tag_matchs(0) := Mux(
+      n === 0.U,
+      tag_match_fac(vpnnLen - sectortlbwidth - 1, 0).andR,
+      tag_match_fac(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth).andR
+    )
+    for (i <- 1 until Level) {
+      tag_matchs(i) := tag_match_fac(vpnnLen * (i + 1) - sectortlbwidth - 1, vpnnLen * i - sectortlbwidth).andR
+    }
+    tag_matchs(Level) := tag_match_fac(sectorvpnLen - 1, vpnnLen * Level - sectortlbwidth).andR
+    val level_matchs = Wire(Vec(Level + 1, Bool()))
+    for (i <- 0 until Level) {
+      level_matchs(i) := tag_matchs(i) || tmp_level >= (i + 1).U
+    }
+    level_matchs(Level) := tag_matchs(Level)
+
+    asid_hit && level_matchs.asUInt.andR && addr_low_hit && vmid_hit && pteidx_hit
+  }
 
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
     val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid))
@@ -409,6 +438,9 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
       val s2xlate = Output(UInt(2.W))
+      val facA = Output(UInt(sectorvpnLen.W))
+      val facB = Output(UInt(sectorvpnLen.W))
+      val facCarry = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
@@ -426,11 +458,13 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }))
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate:UInt): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, facA: UInt, facB: UInt, facCarry: Bool, i: Int, s2xlate:UInt): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
     this.r.req(i).bits.s2xlate := s2xlate
-
+    this.r.req(i).bits.facA := facA
+    this.r.req(i).bits.facB := facB
+    this.r.req(i).bits.facCarry := facCarry
   }
 
   def r_resp_apply(i: Int) = {
@@ -450,6 +484,9 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
       val s2xlate = Output(UInt(2.W))
+      val facA = Output(UInt(sectorvpnLen.W))
+      val facB = Output(UInt(sectorvpnLen.W))
+      val facCarry = Output(Bool())
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
@@ -466,10 +503,13 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, facA: UInt, facB: UInt, facCarry: Bool, i: Int, s2xlate: UInt): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
     this.r.req(i).bits.s2xlate := s2xlate
+    this.r.req(i).bits.facA := facA
+    this.r.req(i).bits.facB := facB
+    this.r.req(i).bits.facCarry := facCarry
   }
 
   def r_resp_apply(i: Int) = {
@@ -537,7 +577,9 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
     val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }
-
+  val facA = Output(UInt(sectorvpnLen.W))
+  val facB = Output(UInt(sectorvpnLen.W))
+  val facCarry = Output(Bool())
   // Maybe Block req needs a kill: for itlb, itlb and icache may not sync, itlb should wait icache to go ahead
   override def toPrintable: Printable = {
     p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"

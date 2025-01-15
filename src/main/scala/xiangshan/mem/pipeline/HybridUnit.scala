@@ -204,7 +204,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_rep_stall           = io.lsin.valid && isAfter(io.ldu_io.replay.bits.uop.robIdx, io.lsin.bits.uop.robIdx)
   private val SRC_NUM = 8
   private val Seq(
-    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx, 
+    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
     int_iss_idx, vec_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -274,6 +274,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.no_translate       := s0_hw_prf_select  // hw b.reqetch addr does not need to be translated
   io.tlb.req.bits.debug.pc           := s0_uop.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
+  io.tlb.req.bits.facA               := DontCare
+  io.tlb.req.bits.facB               := DontCare
+  io.tlb.req.bits.facCarry           := DontCare
 
   // query DCache
   // for load
@@ -984,7 +987,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // generate XLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
     s2_fwd_mask(i) := io.ldu_io.lsq.forward.forwardMask(i) || io.ldu_io.sbuffer.forwardMask(i) || io.ldu_io.vec_forward.forwardMask(i) || io.ldu_io.ubuffer.forwardMask(i)
-    s2_fwd_data(i) := 
+    s2_fwd_data(i) :=
       Mux(io.ldu_io.lsq.forward.forwardMask(i), io.ldu_io.lsq.forward.forwardData(i),
       Mux(io.ldu_io.vec_forward.forwardMask(i), io.ldu_io.vec_forward.forwardData(i),
       Mux(io.ldu_io.ubuffer.forwardMask(i), io.ldu_io.ubuffer.forwardData(i),

@@ -264,7 +264,7 @@ class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val access_cnt = UInt((REGION_BLKS-1).U.getWidth.W)
   val decr_mode = Bool()
   val single_update = Bool()//this is a signal update request
-  val has_been_signal_updated = Bool() 
+  val has_been_signal_updated = Bool()
 }
 
 class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -368,7 +368,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s0_agt_entry.pht_tag := s0_lookup.pht_tag
   s0_agt_entry.region_bits := region_offset_to_bits(s0_lookup.region_offset)
   // update bits this time
-  s0_agt_entry.region_bit_single := region_offset_to_bits(s0_lookup.region_offset) 
+  s0_agt_entry.region_bit_single := region_offset_to_bits(s0_lookup.region_offset)
   s0_agt_entry.region_tag := s0_lookup.region_tag
   s0_agt_entry.region_offset := s0_lookup.region_offset
   s0_agt_entry.access_cnt := 1.U
@@ -505,7 +505,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   s1_pht_lookup.region_vaddr := s1_region_vaddr
   s1_pht_lookup.region_paddr := s1_region_paddr
   s1_pht_lookup.region_offset := s1_region_offset
-  s1_pht_lookup.region_bit_single := s1_bit_region_signal 
+  s1_pht_lookup.region_bit_single := s1_bit_region_signal
 
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
@@ -664,7 +664,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_region_offset = RegEnable(s0_region_offset, s1_reg_en)
   val s1_single_update = RegEnable(s0_single_update, s1_reg_en)
   val s1_has_been_single_update = RegEnable(s0_has_been_single_update, s1_reg_en)
-  val s1_region_bit_single = RegEnable(s0_region_bit_single, s1_reg_en)  
+  val s1_region_bit_single = RegEnable(s0_region_bit_single, s1_reg_en)
   val s1_pht_valids = pht_valids_reg.map(way => Mux1H(
     (0 until PHT_SETS).map(i => i.U === s1_ram_raddr),
     way
@@ -745,13 +745,13 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
 
 
   // pipe s3: send addr/data to ram, gen pf_req
-  val s3_valid = GatedValidRegNext(s2_valid && signal_update_write, false.B) 
+  val s3_valid = GatedValidRegNext(s2_valid && signal_update_write, false.B)
   val s3_evict = RegEnable(s2_evict, s2_valid)
   val s3_hist = RegEnable(s2_hist, s2_valid)
   val s3_hist_pf_gen = RegEnable(s2_hist_pf_gen, s2_valid)
 
   val s3_hist_update_mask = RegEnable(s2_hist_update_mask.asUInt, s2_valid)
-  
+
   val s3_region_offset = RegEnable(s2_region_offset, s2_valid)
   val s3_region_offset_mask = RegEnable(s2_region_offset_mask, s2_valid)
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)
@@ -915,7 +915,7 @@ class PrefetchFilterEntry()(implicit p: Parameters) extends XSBundle with HasSMS
   val debug_source_type = UInt(log2Up(nSourceType).W)
 }
 
-class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
+class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper with HasTlbConst {
   val io = IO(new Bundle() {
     val gen_req = Flipped(ValidIO(new PfGenReq()))
     val tlb_req = new TlbRequestIO(2)
@@ -961,8 +961,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val is_evicted = s1_valid && s1_replace_vec(i)
+    val tlb_req_vaddr = Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
-    tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
+    tlb_req_arb.io.in(i).bits.vaddr := tlb_req_vaddr
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     tlb_req_arb.io.in(i).bits.isPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
@@ -975,6 +976,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
     tlb_req_arb.io.in(i).bits.hyperinst := DontCare
     tlb_req_arb.io.in(i).bits.pmp_addr := DontCare
+    tlb_req_arb.io.in(i).bits.facA := tlb_req_vaddr(VAddrBits-1, sectorvpnOffLen)
+    tlb_req_arb.io.in(i).bits.facB := 0.U
+    tlb_req_arb.io.in(i).bits.facCarry := false.B
 
     val pending_req_vec = ent.region_bits & (~ent.filter_bits).asUInt
     val first_one_offset = PriorityMux(

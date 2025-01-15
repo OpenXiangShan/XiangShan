@@ -73,6 +73,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   with MemoryOpConstants
   with SdtrigExt
   with HasLoadHelper
+  with HasTlbConst
 {
   val io               = IO(new VSegmentUnitIO)
 
@@ -446,6 +447,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
   io.dtlb.req.bits.debug.isFirstIssue := DontCare
+  io.dtlb.req.bits.facA               := tlbReqVaddr(VAddrBits-1, sectorvpnOffLen)
+  io.dtlb.req.bits.facB               := 0.U
+  io.dtlb.req.bits.facCarry           := false.B
   io.dtlb.req_kill                    := false.B
 
   val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger

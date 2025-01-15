@@ -42,7 +42,8 @@ case class TLBParameters
   partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
   outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
   saveLevel: Boolean = false,
-  lgMaxSize: Int = 3
+  lgMaxSize: Int = 3,
+  useFac: Boolean = false
 )
 
 case class L2TLBParameters
@@ -119,6 +120,7 @@ trait HasTlbConst extends HasXSParameter {
   val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
   val sectorptePPNLen = ptePPNLen - sectortlbwidth
+  val sectorvpnOffLen = sectortlbwidth + offLen
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
   val storefiltersize = if (StorePipelineWidth >= 3) 16 else 8
