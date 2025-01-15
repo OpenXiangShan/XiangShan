@@ -562,6 +562,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.msiInfo.bits := RegEnable(io.fromTop.msiInfo.bits, io.fromTop.msiInfo.valid)
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
+  csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
@@ -1027,6 +1028,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
   val externalInterrupt = Output(new ExternalInterruptIO)
   val msiInfo           = Output(ValidIO(new MsiInfoBundle))
   val clintTime         = Output(ValidIO(UInt(64.W)))
+  val l2FlushDone       = Output(Bool())
 }
 
 class BackendToTopBundle extends Bundle {

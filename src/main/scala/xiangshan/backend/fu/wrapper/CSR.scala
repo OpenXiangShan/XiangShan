@@ -176,6 +176,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
+  csrMod.io.fromTop.l2FlushDone := io.csrin.get.l2FlushDone
   csrMod.io.fromTop.criticalErrorState := io.csrin.get.criticalErrorState
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
@@ -349,6 +350,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.uncache_write_outstanding_enable := csrMod.io.status.custom.uncache_write_outstanding_enable
       custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
+      custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
+      custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
@@ -379,6 +382,7 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
+  val l2FlushDone = Input(Bool())
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
   val fromVecExcpMod = Input(new Bundle {
     val busy = Bool()

@@ -764,3 +764,7 @@ trait HasPerfEventBundle { self: CSRModule[_] =>
 trait HasLocalInterruptReqBundle { self: CSRModule[_] =>
   val lcofiReq = IO(Input(Bool()))
 }
+
+trait HasMachineFlushL2Bundle { self: CSRModule[_] =>
+  val l2FlushDone = IO(Input(Bool()))
+}
