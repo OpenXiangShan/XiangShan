@@ -34,6 +34,9 @@ import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
+import difftest.common.DifftestWiring
+import difftest.util.Profile
+
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
   override lazy val desiredName: String = "XSTop"
@@ -210,4 +213,116 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   }
 
   lazy val module = new XSNoCTopImp(this)
+}
+
+class XSNoCDiffTop(implicit p: Parameters) extends Module {
+  override val desiredName: String = "XSDiffTop"
+  val l_soc = LazyModule(new XSNoCTop())
+  val soc = Module(l_soc.module)
+
+  // Expose XSTop IOs outside, i.e. io
+  def exposeIO(data: Data, name: String): Unit = {
+    val dummy = IO(chiselTypeOf(data)).suggestName(name)
+    dummy <> data
+  }
+  def exposeOptionIO(data: Option[Data], name: String): Unit = {
+    if (data.isDefined) {
+      val dummy = IO(chiselTypeOf(data.get)).suggestName(name)
+      dummy <> data.get
+    }
+  }
+  exposeIO(l_soc.clint, "clint")
+  exposeIO(l_soc.debug, "debug")
+  exposeIO(l_soc.plic, "plic")
+  exposeIO(l_soc.beu, "beu")
+  exposeIO(l_soc.nmi, "nmi")
+  soc.clock := clock
+  soc.reset := reset.asAsyncReset
+  exposeIO(soc.soc_clock, "soc_clock")
+  exposeIO(soc.soc_reset, "soc_reset")
+  exposeIO(soc.io, "io")
+  exposeOptionIO(soc.noc_clock, "noc_clock")
+  exposeOptionIO(soc.noc_reset, "noc_reset")
+  exposeOptionIO(soc.imsic_axi4lite, "imsic_axi4lite")
+
+  // TODO:
+  // XSDiffTop is only part of DUT, we can not instantiate difftest here.
+  // Temporarily we collect Performance counters for each DiffTop, need control signals passed from Difftest
+  val timer = IO(Input(UInt(64.W)))
+  val logEnable = IO(Input(Bool()))
+  val clean = IO(Input(Bool()))
+  val dump = IO(Input(Bool()))
+  XSLog.collect(timer, logEnable, clean, dump)
+  DifftestWiring.createAndConnectExtraIOs()
+  Profile.generateJson("XiangShan")
+  XSNoCDiffTopChecker()
+}
+
+//TODO:
+//Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
+//To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
+//We will try one-step XS-Diff later
+object XSNoCDiffTopChecker {
+  def apply(): Unit = {
+    val verilog =
+      """
+        |`define CONFIG_XSCORE_NR 2
+        |`include "gateway_interface.svh"
+        |module XSDiffTopChecker(
+        | input                                 cpu_clk,
+        | input                                 cpu_rstn,
+        | input                                 sys_clk,
+        | input                                 sys_rstn
+        |);
+        |wire [63:0] timer;
+        |wire logEnable;
+        |wire clean;
+        |wire dump;
+        |// FIXME: use siganls from Difftest rather than default value
+        |assign timer = 64'b0;
+        |assign logEnable = 1'b0;
+        |assign clean = 1'b0;
+        |assign dump = 1'b0;
+        |gateway_if gateway_if_i();
+        |core_if core_if_o[`CONFIG_XSCORE_NR]();
+        |generate
+        |    genvar i;
+        |    for (i = 0; i < `CONFIG_XSCORE_NR; i = i+1)
+        |    begin: u_CPU_TOP
+        |    XSDiffTop u_XSTop (
+        |        .clint_0_0               (),
+        |        .clint_0_1               (),
+        |        .debug_0_0               (),
+        |        .io_hartIsInReset        (),
+        |        .plic_1_0                (1'b0),
+        |        .plic_0_0                (1'b0),
+        |        .nmi_0_0                 (1'b0),
+        |        .nmi_0_1                 (1'b0),
+        |        .clock                   (cpu_clk),
+        |        .noc_clock               (sys_clk),
+        |        .soc_clock               (sys_clk),
+        |        .io_hartId               (64'h0 + i),
+        |        .timer                   (timer),
+        |        .logEnable               (logEnable),
+        |        .clean                   (clean),
+        |        .dump                    (dump),
+        |        .gateway_out             (core_if_o[i])
+        |    );
+        |    end
+        |endgenerate
+        |    CoreToGateway u_CoreToGateway(
+        |    .gateway_out (gateway_if_i.out),
+        |    .core_in (core_if_o)
+        |    );
+        |    GatewayEndpoint u_GatewayEndpoint(
+        |    .clock (sys_clk),
+        |    .reset (sys_rstn),
+        |    .gateway_in (gateway_if_i.in),
+        |    .step ()
+        |    );
+        |
+        |endmodule
+      """.stripMargin
+    FileRegisters.writeOutputFile("./build", "XSDiffTopChecker.sv", verilog)
+  }
 }
