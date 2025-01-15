@@ -110,6 +110,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
+      val l3Miss = Input(Bool())
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
@@ -153,6 +154,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+      core.module.io.topDownInfo.l2Miss := l2top.module.io.l2Miss
 
       core.module.io.perfEvents <> l2top.module.io.perfEvents
     } else {
@@ -164,6 +166,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := false.B
+      core.module.io.topDownInfo.l2Miss := false.B
 
       core.module.io.l2_tlb_req.req.valid := false.B
       core.module.io.l2_tlb_req.req.bits := DontCare
@@ -175,6 +178,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
     core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
+    l2top.module.io.l3Miss.fromTile := io.l3Miss
+    core.module.io.topDownInfo.l3Miss := l2top.module.io.l3Miss.toCore
 
     io.chi.foreach(_ <> l2top.module.io.chi.get)
     l2top.module.io.nodeID.foreach(_ := io.nodeID.get)
