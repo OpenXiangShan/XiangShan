@@ -7,7 +7,6 @@ import utils._
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
-import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.NewCSR.InterruptNO
 
 
