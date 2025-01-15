@@ -45,6 +45,10 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //  debug.node := TLFragmenter() := peripheralXbar
   val debugCustomXbarOpt = p(DebugModuleKey).map(params => LazyModule( new DebugCustomXbar(outputRequiresInput = false)))
   debug.dmInner.dmInner.customNode := debugCustomXbarOpt.get.node
+  val apbDebugNodeOpt = p(ExportDebug).apb.option(APBMasterNode(Seq(APBMasterPortParameters(Seq(APBMasterParameters("debugAPB"))))))
+  (apbDebugNodeOpt zip debug.apbNodeOpt) foreach { case (master, slave) =>
+    slave := master
+  }
 
 //  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
@@ -73,6 +77,26 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     debug.module.io.ctrl.dmactiveAck := io.debugIO.dmactiveAck
     io.debugIO.extTrigger.foreach { x => debug.module.io.extTrigger.foreach {y => x <> y}}
     debug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
+
+    io.debugIO.apb.zip(apbDebugNodeOpt).map{case(io, apbNodeOpt) =>
+      val apb =  apbNodeOpt.out(0)._1
+      apb.psel := io.psel
+      apb.penable := io.penable
+
+      apb.pwrite := io.pwrite
+      apb.paddr := io.paddr
+      apb.pprot := io.pprot
+      apb.pwdata := io.pwdata
+      apb.pstrb := io.pstrb
+      apb.pauser := io.pauser
+
+      io.pready := apb.pready
+      io.pslverr := apb.pslverr
+      io.prdata := apb.prdata
+      io.pduser := apb.pduser
+    }
+    debug.module.io.apb_clock.foreach(_ := io.debugIO.apb.get.clock)
+    debug.module.io.apb_reset.foreach(_ := io.debugIO.apb.get.reset)
 
     val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
 

@@ -22,7 +22,7 @@ import chisel3.experimental.{annotate, ChiselAnnotation}
 import chisel3.experimental.dataview._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
-import freechips.rocketchip.devices.debug.DebugModuleKey
+import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
@@ -169,6 +169,7 @@ object ArgParser {
     var firrtlOpts = Array[String]()
     var module: String = ""
     var useTL: Boolean = false
+    var useAPB: Boolean = false
     var baseAddress: BigInt = -1
     var addrWidth: Int = -1
     var dataWidth: Int = 64
@@ -184,6 +185,9 @@ object ArgParser {
           nextOption(tail)
         case "--use-axi4" :: tail =>
           useTL = false
+          nextOption(tail)
+        case "--use-apb" :: tail =>
+          useAPB = true
           nextOption(tail)
         case "--device-base-addr" :: value :: tail =>
           baseAddress = value match {
@@ -222,6 +226,7 @@ object ArgParser {
           useTL, baseAddress, addrWidth, dataWidth, p(XSTileKey).size
         )(p)))(p.alter((site, here, up) => {
           case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = baseAddress))
+          case ExportDebug    => up(ExportDebug).copy(protocols = (if(useAPB) Set(APB) else Set(JTAG)))
         }))
       case _: String => throw new IllegalArgumentException(s"$module not found")
     }
