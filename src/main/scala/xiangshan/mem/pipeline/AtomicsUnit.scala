@@ -31,11 +31,12 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
-import xiangshan.cache.mmu.Pbmt
+import xiangshan.cache.mmu.{HasTlbConst, Pbmt}
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule
   with MemoryOpConstants
   with HasDCacheParameters
+  with HasTlbConst
   with SdtrigExt{
 
   val StdCnt  = backendParams.StdCnt
