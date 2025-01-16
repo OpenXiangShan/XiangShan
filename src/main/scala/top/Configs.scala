@@ -289,8 +289,8 @@ case class L2CacheConfig
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
     val nKB = size.toUpperCase() match {
-      case s"${k}KB" => k.strip().toInt
-      case s"${m}MB" => (m.strip().toDouble * 1024).toInt
+      case s"${k}KB" => k.trim().toInt
+      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
     }
     val upParams = up(XSTileKey)
     val l2sets = nKB * 1024 / banks / ways / 64
@@ -329,8 +329,8 @@ case class L2CacheConfig
 case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val nKB = size.toUpperCase() match {
-      case s"${k}KB" => k.strip().toInt
-      case s"${m}MB" => (m.strip().toDouble * 1024).toInt
+      case s"${k}KB" => k.trim().toInt
+      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
     }
     val sets = nKB * 1024 / banks / ways / 64
     val tiles = site(XSTileKey)
