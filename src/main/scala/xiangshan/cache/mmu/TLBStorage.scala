@@ -91,7 +91,8 @@ class TLBFA(
   nWays: Int,
   saveLevel: Boolean = false,
   normalPage: Boolean,
-  superPage: Boolean
+  superPage: Boolean,
+  useFac: Boolean
 )(implicit p: Parameters) extends TlbModule with HasPerfEvents {
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
@@ -108,6 +109,9 @@ class TLBFA(
 
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire)
+    val facA = req.bits.facA
+    val facB = req.bits.facB
+    val facCarry = req.bits.facCarry
     val hasS2xlate = req.bits.s2xlate =/= noS2xlate
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
@@ -115,7 +119,12 @@ class TLBFA(
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+        val hit =
+          if (useFac) {
+            e._1.fachit(vpn, facA, facB, facCarry, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+          } else {
+            e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.vmid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
+          }
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
@@ -333,14 +342,15 @@ object TlbStorage {
     normalPage: Boolean,
     superPage: Boolean,
     useDmode: Boolean,
-    SoftTLB: Boolean
+    SoftTLB: Boolean,
+    useFac: Boolean
   )(implicit p: Parameters) = {
     if (SoftTLB) {
       val storage = Module(new TLBFakeFA(ports, nDups, nSets, nWays, useDmode))
       storage.suggestName(s"${parentName}_fake_fa")
       storage.io
     } else {
-       val storage = Module(new TLBFA(parentName, ports, nDups, nSets, nWays, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(parentName, ports, nDups, nSets, nWays, saveLevel, normalPage, superPage, useFac))
        storage.suggestName(s"${parentName}_fa")
        storage.io
     }
@@ -360,13 +370,17 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     normalPage = true,
     superPage = true,
     useDmode = q.useDmode,
-    SoftTLB = coreParams.softTLB
+    SoftTLB = coreParams.softTLB,
+    useFac = q.useFac
   )
 
   for (i <- 0 until ports) {
     page.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
+      facA = io.r.req(i).bits.facA,
+      facB = io.r.req(i).bits.facB,
+      facCarry = io.r.req(i).bits.facCarry,
       i = i,
       s2xlate = io.r.req(i).bits.s2xlate
     )

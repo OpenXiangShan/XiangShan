@@ -29,11 +29,12 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
+import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt, HasTlbConst}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
 class StoreUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
+  with HasTlbConst
   with HasVLSUParameters
   {
   val io = IO(new Bundle() {
@@ -127,6 +128,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
+  val s0_sel_facA = Wire(UInt(VAddrBits.W))
+  val s0_sel_facB = Wire(UInt(VAddrBits.W))
+  val s0_sel_facCarry = Wire(Bool())
 
   // generate addr
   val s0_saddr = s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), VAddrBits)
@@ -213,6 +217,34 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
   io.tlb.req.bits.hlvx               := false.B
   io.tlb.req.bits.pmp_addr           := DontCare
+  io.tlb.req.bits.facA               := s0_sel_facA(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facB               := s0_sel_facB(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facCarry           := s0_sel_facCarry
+
+  s0_sel_facA := Mux(
+    s0_use_flow_rs,
+    s0_stin.src(0),
+    Mux(
+      s0_use_flow_ma,
+      io.misalign_stin.bits.vaddr,
+      Mux(
+        s0_use_flow_vec,
+        s0_vecstin.vaddr,
+        io.prefetch_req.bits.vaddr
+      )
+    )
+  )
+  s0_sel_facB := Mux(
+    s0_use_flow_rs,
+    SignExt(s0_stin.uop.imm(11, 0), VAddrBits),
+    0.U
+  )
+  val s0_facCarry = s0_stin.src(0)(sectorvpnOffLen - 1, 0)  +& SignExt(s0_stin.uop.imm(11, 0), sectorvpnOffLen)
+  s0_sel_facCarry := Mux(
+    s0_use_flow_rs,
+    s0_facCarry(s0_facCarry.getWidth-1),
+    false.B
+  )
 
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
@@ -257,7 +289,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
-  
+
   io.stin.ready := s1_ready && s0_use_flow_rs
   io.vecstin.ready := s1_ready && s0_use_flow_vec
   io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
@@ -598,7 +630,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_in(i).hasException := s3_exception
-      sx_in_vec(i)         := s3_in.isvec          
+      sx_in_vec(i)         := s3_in.isvec
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)

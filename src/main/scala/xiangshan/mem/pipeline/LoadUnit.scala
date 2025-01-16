@@ -112,6 +112,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasVLSUParameters
+  with HasTlbConst
   with SdtrigExt
 {
   val io = IO(new Bundle() {
@@ -274,6 +275,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val data          = UInt((VLEN+1).W)
   }
   val s0_sel_src = Wire(new FlowSource)
+  val s0_sel_facA = Wire(UInt(VAddrBits.W))
+  val s0_sel_facB = Wire(UInt(VAddrBits.W))
+  val s0_sel_facCarry = Wire(Bool())
 
   // load flow select/gen
   // src 0: misalignBuffer load (io.misalign_ldin)
@@ -387,6 +391,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.no_translate       := s0_tlb_no_query  // hardware prefetch and fast replay does not need to be translated, need this signal for pmp check
   io.tlb.req.bits.debug.pc           := s0_sel_src.uop.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
+  io.tlb.req.bits.facA               := s0_sel_facA(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facB               := s0_sel_facB(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facCarry           := s0_sel_facCarry
 
   // query DCache
   io.dcache.req.valid             := s0_valid && !s0_sel_src.prf_i && !s0_nc_with_data
@@ -686,6 +693,33 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       int_vec_vaddr
     )
   )
+
+  s0_sel_facA := Mux(
+    s0_src_valid_vec(mab_idx) || s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx),
+    Mux(
+      s0_src_valid_vec(mab_idx),
+      io.misalign_ldin.bits.vaddr,
+      io.replay.bits.vaddr
+    ),
+    Mux(
+      s0_src_valid_vec(vec_iss_idx),
+      io.vecldin.bits.vaddr,
+      io.ldin.bits.src(0)
+    )
+  )
+  s0_sel_facB := Mux(
+    s0_src_valid_vec(mab_idx) || s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx) || s0_src_valid_vec(vec_iss_idx),
+    0.U,
+    SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
+  )
+  val s0_facCarry = io.ldin.bits.src(0)(sectorvpnOffLen - 1, 0) +& SignExt(io.ldin.bits.uop.imm(11, 0), sectorvpnOffLen)
+  s0_sel_facCarry := Mux(
+    s0_src_valid_vec(mab_idx) || s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx) || s0_src_valid_vec(vec_iss_idx),
+    false.B,
+    s0_facCarry(s0_facCarry.getWidth-1)
+  )
+
+
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.vaddr,
     Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(),

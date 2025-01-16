@@ -73,6 +73,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   with MemoryOpConstants
   with SdtrigExt
   with HasLoadHelper
+  with HasTlbConst
 {
   val io               = IO(new VSegmentUnitIO)
 
@@ -415,14 +416,40 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val realSegmentOffset               = Mux(isIndexed(issueInstType),
                                             indexStride,
                                             segmentOffset)
-  val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
+  val offset                          = (fieldIdx << alignedType).asUInt + realSegmentOffset
+  val vaddr                           = baseVaddr + offset
+  val tlb_req_facA                    = Wire(UInt(sectorvpnLen.W))
+  val tlb_req_facB                    = Wire(UInt(sectorvpnLen.W))
+  val tlb_req_facCarry                = Wire(Bool())
 
   val misalignLowVaddr                = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W))
-  val misalignHighVaddr               = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W)) + 8.U
+  val misalignHighVaddr               = Cat(latchVaddr(latchVaddr.getWidth - 1, 3) + 1.U, 0.U(3.W))
   val notCross16ByteVaddr             = Cat(latchVaddr(latchVaddr.getWidth - 1, 4), 0.U(4.W))
 //  val misalignVaddr                   = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr))
   val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)
   val tlbReqVaddr                     = Mux(isMisalignReg, misalignVaddr, vaddr)
+  tlb_req_facA := Mux(
+    isMisalignReg,
+    misalignLowVaddr(VAddrBits-1, sectorvpnOffLen),
+    baseVaddr(VAddrBits-1, sectorvpnOffLen)
+  )
+  tlb_req_facB := Mux(
+    isMisalignReg,
+    0.U,
+    offset(VAddrBits-1, sectorvpnOffLen)
+  )
+
+  val misalignCarry = misalignLowVaddr(sectorvpnOffLen-1, 0) +& 8.U
+  val facCarry = baseVaddr(sectorvpnOffLen-1, 0) +& offset(sectorvpnOffLen-1, 0)
+  tlb_req_facCarry := Mux(
+    isMisalignReg,
+    Mux(
+      isFirstSplit,
+      false.B,
+      misalignCarry(misalignCarry.getWidth-1)
+    ),
+    facCarry(facCarry.getWidth-1)
+  )
   //latch vaddr
   when(state === s_tlb_req && !isMisalignReg){
     latchVaddr := vaddr(VAddrBits - 1, 0)
@@ -446,6 +473,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
   io.dtlb.req.bits.debug.isFirstIssue := DontCare
+  io.dtlb.req.bits.facA               := tlbReqVaddr(VAddrBits-1, sectorvpnOffLen)
+  io.dtlb.req.bits.facB               := 0.U
+  io.dtlb.req.bits.facCarry           := false.B
   io.dtlb.req_kill                    := false.B
 
   val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger
