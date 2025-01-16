@@ -416,7 +416,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val realSegmentOffset               = Mux(isIndexed(issueInstType),
                                             indexStride,
                                             segmentOffset)
-  val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
+  val offset                          = (fieldIdx << alignedType).asUInt + realSegmentOffset
+  val vaddr                           = baseVaddr + offset
   val tlb_req_facA                    = Wire(UInt(sectorvpnLen.W))
   val tlb_req_facB                    = Wire(UInt(sectorvpnLen.W))
   val tlb_req_facCarry                = Wire(Bool())
@@ -430,16 +431,16 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   tlb_req_facA := Mux(
     isMisalignReg,
     misalignLowVaddr(VAddrBits-1, sectorvpnOffLen),
-    nextBaseVaddr(VAddrBits-1, sectorvpnOffLen)
+    baseVaddr(VAddrBits-1, sectorvpnOffLen)
   )
   tlb_req_facB := Mux(
     isMisalignReg,
     0.U,
-    realSegmentOffset(VAddrBits-1, sectorvpnOffLen)
+    offset(VAddrBits-1, sectorvpnOffLen)
   )
 
   val misalignCarry = misalignLowVaddr(sectorvpnOffLen-1, 0) +& 8.U
-  val facCarry = nextBaseVaddr(sectorvpnOffLen-1, 0) +& realSegmentOffset(sectorvpnOffLen-1, 0)
+  val facCarry = baseVaddr(sectorvpnOffLen-1, 0) +& offset(sectorvpnOffLen-1, 0)
   tlb_req_facCarry := Mux(
     isMisalignReg,
     Mux(
