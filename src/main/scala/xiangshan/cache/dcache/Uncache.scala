@@ -226,7 +226,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val entries = Reg(Vec(UncacheBufferSize, new UncacheEntry))
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
   val fence = RegInit(Bool(), false.B)
-  val s_idle :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
+  val s_idle :: s_inflight :: s_wait_return :: Nil = Enum(3)
   val uState = RegInit(s_idle)
 
   // drain buffer
@@ -269,21 +269,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   switch(uState){
     is(s_idle){
-      when(req.fire){
-        uState := s_refill_req
-      }
-    }
-    is(s_refill_req){
       when(mem_acquire.fire){
-        uState := s_refill_resp
+        uState := s_inflight
       }
     }
-    is(s_refill_resp){
+    is(s_inflight){
       when(mem_grant.fire){
-        uState := s_send_resp
+        uState := s_wait_return
       }
     }
-    is(s_send_resp){
+    is(s_wait_return){
       when(resp.fire){
         uState := s_idle
       }
@@ -361,7 +356,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    ******************************************************************/
 
   val q0_canSentVec = sizeMap(i =>
-    (io.enableOutstanding || uState === s_refill_req) &&
+    (io.enableOutstanding || uState === s_idle) &&
     states(i).can2Uncache()
   )
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
@@ -562,7 +557,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
   XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire)
+  XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && mem_acquire.fire)
   XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
@@ -571,7 +566,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     ("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
     ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
     ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
-    ("uncache_outstanding", uState =/= s_refill_req && mem_acquire.fire),
+    ("uncache_outstanding", uState =/= s_idle && mem_acquire.fire),
     ("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
   )
