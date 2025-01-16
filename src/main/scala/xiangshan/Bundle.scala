@@ -126,6 +126,9 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val fetchCacheTime = UInt(XLEN.W)
+  val cacheCompTime = UInt(XLEN.W)
+  val fetchTime = UInt(XLEN.W)
 }
 
 
@@ -193,19 +196,33 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
 class CfCtrl(implicit p: Parameters) extends XSBundle {
   val cf = new CtrlFlow
   val ctrl = new CtrlSignals
+  val debugInfo = new PerfDebugInfo
 }
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
-  // val fetchTime = UInt(64.W)
+  val fetchCacheTime = UInt(XLEN.W)
+  val cacheCompTime = UInt(XLEN.W)
+  val fetchTime = UInt(XLEN.W)
+  val decodeTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)
   val enqRsTime = UInt(XLEN.W)
+  val readyIssueTime = UInt(XLEN.W)
   val selectTime = UInt(XLEN.W)
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
   val runahead_checkpoint_id = UInt(64.W)
+  val block_from_rob = Bool()
+  val block_from_intrf = Bool()
+  val block_from_fprf = Bool()
+  val block_from_lq = Bool()
+  val block_from_sq = Bool()
+  val block_from_dpq = Bool()
+  val block_from_serial = Bool()
+  val fuIdx = UInt(XLEN.W)
+  val rsIdx = UInt(XLEN.W)
 }
 
 // Separate LSQ
@@ -224,7 +241,6 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
-  val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, isFp: Boolean, ignoreState: Boolean = true) : Bool = {
     val stateReady = srcState(index) === SrcState.rdy || ignoreState.B
     val readReg = if (isFp) {

@@ -191,8 +191,22 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
+  val block_from_rob_record = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val block_from_dpq_record = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val block_from_serial_record = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+
   // input for ROB, LSQ, Dispatch Queue
   for (i <- 0 until RenameWidth) {
+    updatedUop(i).debugInfo.block_from_rob := block_from_rob_record(i)
+    updatedUop(i).debugInfo.block_from_lq := false.B
+    updatedUop(i).debugInfo.block_from_sq := false.B
+    updatedUop(i).debugInfo.block_from_dpq := block_from_dpq_record(i)
+    updatedUop(i).debugInfo.block_from_serial := block_from_serial_record(i)
+
+    block_from_rob_record(i) := !io.enqRob.canAccept
+    block_from_dpq_record(i) := !io.toIntDq.canAccept || !io.toFpDq.canAccept || !io.toLsDq.canAccept
+    block_from_serial_record(i) := !thisCanActualOut(i)
+
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqRob.req(i).bits := updatedUop(i)

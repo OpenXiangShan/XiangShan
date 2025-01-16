@@ -241,12 +241,19 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     }
   }
 
+  val block_from_lsq_record = RegInit(false.B)
   // dispatch is allowed when lsq and rs can accept all the instructions
   // TODO: better algorithm here?
   if (io.enqLsq.isDefined) {
     when (!VecInit(s0_out.map(_.ready)).asUInt.andR || !io.enqLsq.get.canAccept) {
       in.foreach(_.ready := false.B)
       s0_out.foreach(_.valid := false.B)
+    }
+    block_from_lsq_record := !io.enqLsq.get.canAccept
+    s0_out.foreach{
+      case o =>
+        o.bits.debugInfo.block_from_lq := Mux(FuType.isStoreExu(o.bits.ctrl.fuType), false.B, block_from_lsq_record) && o.ready
+        o.bits.debugInfo.block_from_sq := Mux(FuType.isStoreExu(o.bits.ctrl.fuType), block_from_lsq_record, false.B) && o.ready
     }
   }
 

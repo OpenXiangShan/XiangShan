@@ -165,9 +165,11 @@ class Scheduler(
   }
   println(s"inner fast: $innerFastPorts")
   val numAllFastPorts = innerFastPorts.zip(outFastPorts).map{ case (i, o) => i.length + o.length }
+  var id = 0
   val reservationStations = configs.zipWithIndex.map{ case ((config, numDeq, _, _), i) =>
     val rs = LazyModule(new ReservationStationWrapper())
-    rs.addIssuePort(config, numDeq)
+    rs.addIssuePort(config, numDeq, id)
+    id += 1
     rs.addWakeup(wakeupPorts(i))
     rs.addEarlyWakeup(numAllFastPorts(i))
     rs

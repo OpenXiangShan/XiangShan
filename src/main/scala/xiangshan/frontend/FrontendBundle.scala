@@ -120,6 +120,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val acf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
+  val fetch_cache_time = UInt(XLEN.W)
+  val cache_comp_time = UInt(XLEN.W)
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {

@@ -109,10 +109,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val intSpecWen = Wire(Vec(RenameWidth, Bool()))
   val fpSpecWen = Wire(Vec(RenameWidth, Bool()))
 
+  val block_from_intrf_record = RegInit(false.B)
+  val block_from_fprf_record = RegInit(false.B)
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+    uops(i).debugInfo := io.in(i).bits.debugInfo
 
     // update cf according to ssit result
     uops(i).cf.storeSetHit := io.ssit(i).valid
@@ -155,6 +159,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
     // Assign performance counters
     uops(i).debugInfo.renameTime := GTimer()
+    uops(i).debugInfo.block_from_intrf := block_from_intrf_record
+    uops(i).debugInfo.block_from_fprf := block_from_fprf_record
+
+    block_from_intrf_record := !intFreeList.io.canAllocate
+    block_from_fprf_record := !fpFreeList.io.canAllocate
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
