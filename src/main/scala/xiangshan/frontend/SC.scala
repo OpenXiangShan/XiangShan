@@ -268,7 +268,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   var sc_fh_info                          = Set[FoldedHistoryInfo]()
   if (EnableSC) {
     val scCloseConfCounter = WireInit(0.S(scCloseConfCounterWidth.W))
-    val s0_sc_closed       = scCloseConfCounter >= 0.S
+    val s0_sc_closed       = if (DynCloseSC) { scCloseConfCounter >= 0.S }
+                             else { false.B }
     val s1_sc_closed       = RegEnable(s0_sc_closed, io.s0_fire(3))
     val s2_sc_closed       = RegEnable(s1_sc_closed, io.s1_fire(3))
     val s3_sc_closed       = RegEnable(s2_sc_closed, io.s2_fire(3))
@@ -536,7 +537,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
     XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
 
-    XSPerfAccumulate("sc_close_tick", PopCount(scCloseConfCounter >= 0.S))
+    XSPerfAccumulate("sc_close_cycle", PopCount(s0_sc_closed))
 
   }
 
