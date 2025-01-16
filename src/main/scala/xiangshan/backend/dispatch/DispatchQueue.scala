@@ -37,6 +37,8 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val dqFull = Output(Bool())
   val deqNext = Vec(deqnum, Output(new MicroOp))
   val psize = Input(UInt(64.W))
+  val numEnq = Output(UInt(64.W))
+  val numDeq = Output(UInt(64.W))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -156,6 +158,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   headPtrOH := Mux(io.redirect.valid, headPtrOH, ParallelPriorityMux(deqEnable_n, headPtrOHVec))
   XSError(headPtrOH =/= headPtr.head.toOH, p"head: $headPtrOH != UIntToOH(${headPtr.head})")
 
+  io.numDeq := numDeq
+
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
   // For now, we simply use PopCount to count #instr cancelled.
@@ -191,6 +195,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   tailPtrOH := Mux(lastLastCycleMisprediction, tailPtr.head.toOH, tailPtrOHVec(numEnq))
   val tailPtrOHAccurate = !lastCycleMisprediction && !lastLastCycleMisprediction
   XSError(tailPtrOHAccurate && tailPtrOH =/= tailPtr.head.toOH, p"tail: $tailPtrOH != UIntToOH(${tailPtr.head})")
+
+  io.numEnq := numEnq
 
   // update valid counter and allowEnqueue reg
   validCounter := Mux(io.redirect.valid,

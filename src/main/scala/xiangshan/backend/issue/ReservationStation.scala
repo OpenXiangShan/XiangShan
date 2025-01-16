@@ -43,6 +43,7 @@ case class RSParams
   var hasFeedback: Boolean = false,
   var fixedLatency: Int = -1,
   var checkWaitBit: Boolean = false,
+  var numCnt: Int = 0,
   // special cases
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
@@ -143,7 +144,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
       val numEnq = params.numEnq / numRS
       val numEntries = numDeq * params.numEntries / params.numDeq
-      val rsParam = params.copy(numEnq = numEnq, numDeq = numDeq, numEntries = numEntries)
+      val rsParam = params.copy(numEnq = numEnq, numDeq = numDeq, numEntries = numEntries, numCnt = 1)
       val updatedP = p.alter((site, here, up) => {
         case XSCoreParamsKey => up(XSCoreParamsKey).copy(
           IssQueSize = numEntries
@@ -187,6 +188,12 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
     }
+
+    io.issue_num := rs.map(_.io.issue_num).reduce(_ +& _)
+
+//    for ((rs, i) <- rs.zipWithIndex) {
+//      HardenXSPerfAccumulate(s"issue_num_$i", PopCount(rs.io.deq.map(_.valid)))
+//    }
 
     val perfEvents = rs.flatMap(_.getPerfEvents)
     generatePerfEvent()
@@ -237,6 +244,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val fastImm = Output(UInt(12.W))
   })) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
+  val issue_num = UInt(64.W)
 }
 
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule
@@ -1007,6 +1015,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   XSPerfAccumulate("redirect_num", io.redirect.valid)
   XSPerfAccumulate("allocate_num", PopCount(s0_doEnqueue))
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
+
+  io.issue_num := PopCount(io.deq.map(_.valid))
 
   def size: Int = params.numEntries
 

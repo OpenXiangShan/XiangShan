@@ -78,6 +78,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     // extra
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
+    val issue_num = Output(UInt(64.W))
   })
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.fuWriteback))
 
@@ -90,6 +91,8 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.writeback <> io.rfWriteback
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
+
+  io.issue_num := scheduler.io.issue_num
 
   val perfEvents = scheduler.getPerfEvents
   generatePerfEvent()

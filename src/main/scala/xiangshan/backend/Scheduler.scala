@@ -234,6 +234,10 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     println(s"  loadBalance: ${rs_all(i).params.needBalance}")
   }
 
+//  for ((rs, i) <- rs_all.zipWithIndex) {
+//    HardenXSPerfAccumulate(s"issue_num_$i", PopCount(rs.module.io.deq.map(_.valid)))
+//  }
+
   class SchedulerExtraIO extends XSBundle {
     // feedback to dispatch
     val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Output(Bool()))
@@ -286,6 +290,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // misc ports
     val extra = new SchedulerExtraIO
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
+    // perfcnt
+    val issue_num = Output(UInt(64.W))
   })
 
   // To reduce fanout, we add registers here for redirect.
@@ -471,6 +477,10 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     io.extra.loadFastMatch.get := allLoadRS.map(_.get.map(_.fastMatch)).fold(Seq())(_ ++ _)
     io.extra.loadFastImm.get := allLoadRS.map(_.get.map(_.fastImm)).fold(Seq())(_ ++ _)
   }
+
+  // val issue_num_vec = VecInit(rs_all.map(_.module.io.issue_num.reduce(_ + _)))
+  // io.issue_num := issue_num_vec.reduce(_ + _)
+  io.issue_num := rs_all.map(_.module.io.issue_num).reduce(_ + _)
 
   var intReadPort = 0
   var fpReadPort = 0

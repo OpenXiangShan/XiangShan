@@ -338,6 +338,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val is_fused_lui_load = io.out.map(o => o.fire && o.bits.ctrl.fuType === FuType.ldu && o.bits.ctrl.srcType(0) === SrcType.imm)
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
+  HardenXSPerfAccumulate("rename_reads", PopCount(uops.zipWithIndex.map{case (uop, i) => uop.needRfRPort(0, false) && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.needRfRPort(1, false) && io.in(i).valid}))
+  HardenXSPerfAccumulate("rename_writes", PopCount(intSpecWen))
+  HardenXSPerfAccumulate("fp_rename_reads", PopCount(uops.zipWithIndex.map{case (uop, i) => uop.needRfRPort(0, true) && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.needRfRPort(1, true) && io.in(i).valid}) + PopCount(uops.zipWithIndex.map{case (uop, i) => uop.needRfRPort(2, true) && io.in(i).valid}))
+  HardenXSPerfAccumulate("fp_rename_writes", PopCount(fpSpecWen))
+
   
   val renamePerf = Seq(
     ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
