@@ -85,7 +85,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
   EnableSC: Boolean = true,
-  DynCloseSC: Boolean = true,
+  DynCloseSC: Boolean = false,
   SCCloseConfIncWhenSCAgreeAndCorrect: Int = 1,
   SCCloseConfIncWhenSCAgreeButWrong: Int = 1,
   SCCloseConfIncWhenSCDisagreeButTAGECorrect: Int = 5,
