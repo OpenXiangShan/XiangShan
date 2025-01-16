@@ -39,6 +39,10 @@ trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters
     (resData, resMask)
   }
 
+  def INDEX_WIDTH = log2Up(UncacheBufferSize)
+  def BLOCK_OFFSET = log2Up(XLEN / 8)
+  def getAlias(x: UInt) = x(BLOCK_OFFSET - 1, 0)
+  def getBlockAddr(x: UInt) = x >> BLOCK_OFFSET
 }
 
 abstract class UncacheBundle(implicit p: Parameters) extends XSBundle with HasUncacheBufferParameters
@@ -83,8 +87,14 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
 
   def update(x: UncacheWordReq): Unit = {
     val (resData, resMask) = doMerge(data, mask, x.data, x.mask)
+    // mask -> get the first position as 1 -> for address align
+    val (resOffset, resFlag) = PriorityEncoderWithFlag(resMask)
     data := resData
     mask := resMask
+    when(resFlag){
+      addr := (getBlockAddr(addr) << BLOCK_OFFSET) | resOffset
+      vaddr := (getBlockAddr(vaddr) << BLOCK_OFFSET) | resOffset
+    }
   }
 
   def update(x: TLBundleD): Unit = {
@@ -192,10 +202,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   with HasUncacheBufferParameters
   with HasPerfEvents
 {
-  private val INDEX_WIDTH = log2Up(UncacheBufferSize)
-  private val BLOCK_OFFSET = log2Up(XLEN / 8)
-  private def getBlockAddr(x: UInt) = x >> BLOCK_OFFSET
-  private def getAlias(x: UInt) = x(BLOCK_OFFSET - 1, 0)
   println(s"Uncahe Buffer Size: $UncacheBufferSize entries")
   val io = IO(new UncacheIO)
 
@@ -251,11 +257,24 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   def addrMatch(x: UncacheEntry, y: UncacheEntry) : Bool = getBlockAddr(x.addr) === getBlockAddr(y.addr)
   def addrMatch(x: UInt, y: UInt) : Bool = getBlockAddr(x) === getBlockAddr(y)
 
+  def continueAndAlign(mask: UInt): Bool = {
+    val res =
+      mask === 0b00000011.U ||
+      mask === 0b00001100.U ||
+      mask === 0b00110000.U ||
+      mask === 0b11000000.U ||
+      mask === 0b00001111.U ||
+      mask === 0b11110000.U ||
+      mask === 0b11111111.U
+    res
+  }
+
   def canMergePrimary(x: UncacheWordReq, e: UncacheEntry): Bool = {
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) && 
       x.cmd === e.cmd && x.nc && e.nc &&
-      x.memBackTypeMM === e.memBackTypeMM && x.atomic === e.atomic
+      x.memBackTypeMM === e.memBackTypeMM && x.atomic === e.atomic &&
+      continueAndAlign(x.mask | e.mask)
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
