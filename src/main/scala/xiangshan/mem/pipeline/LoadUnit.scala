@@ -913,8 +913,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
+  val s1_tlb_hit          = !io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
   val s1_tlb_fast_miss    = io.tlb.resp.bits.fastMiss && io.tlb.resp.valid && s1_valid
-  val s1_pbmt             = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
+  val s1_pbmt             = Mux(s1_tlb_hit, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
   val s1_nc               = s1_in.nc
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
@@ -1147,6 +1148,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_nc_with_data = RegNext(s1_nc_with_data)
+  val s2_tlb_hit = RegNext(s1_tlb_hit)
   val s2_mmio_req = Wire(Valid(new MemExuOutput))
   s2_mmio_req.valid := RegNextN(io.lsq.uncache.fire, 2, Some(false.B))
   s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits, 2)
@@ -1166,11 +1168,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   val s2_un_misalign_exception =  s2_vecActive &&
                                   (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_exception_vec, LduCfg, Seq(loadAddrMisaligned)).asUInt.orR)
-  val s2_check_mmio = !s2_prf && !s2_in.tlbMiss && Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio) && !s2_un_misalign_exception
+  val s2_check_mmio = !s2_prf && Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio) && !s2_un_misalign_exception
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
-  val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
+  val s2_actually_uncache = (Pbmt.isPMA(s2_pbmt) && s2_tlb_hit && s2_pmp.mmio) || s2_in.nc || s2_in.mmio
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_vecActive && (
@@ -1201,10 +1203,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   // * if pbmt =/= 0, mmio is up to pbmt; otherwise, it's up to pmp
-  val s2_mmio = !s2_prf &&
-    !s2_exception && !s2_in.tlbMiss &&
-    Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio)
-  val s2_uncache = !s2_prf && !s2_exception && !s2_in.tlbMiss && s2_actually_uncache
+  val s2_mmio = !s2_prf && !s2_exception &&
+    Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
+  val s2_uncache = !s2_prf && !s2_exception && s2_actually_uncache
 
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
@@ -1837,10 +1838,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsTopdownInfo.s1.vaddr_valid     := s1_valid && s1_in.hasROBEntry
   io.lsTopdownInfo.s1.vaddr_bits      := s1_vaddr
   io.lsTopdownInfo.s2.robIdx          := s2_in.uop.robIdx.value
-  io.lsTopdownInfo.s2.paddr_valid     := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss
+  io.lsTopdownInfo.s2.paddr_valid     := s2_fire && s2_in.hasROBEntry && s2_tlb_hit
   io.lsTopdownInfo.s2.paddr_bits      := s2_in.paddr
   io.lsTopdownInfo.s2.first_real_miss := io.dcache.resp.bits.real_miss
-  io.lsTopdownInfo.s2.cache_miss_en   := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated
+  io.lsTopdownInfo.s2.cache_miss_en   := s2_fire && s2_in.hasROBEntry && s2_tlb_hit && !s2_in.missDbUpdated
 
   // perf cnt
   XSPerfAccumulate("s0_in_valid",                  io.ldin.valid)
