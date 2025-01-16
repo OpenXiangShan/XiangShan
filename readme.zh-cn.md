@@ -10,10 +10,11 @@ English Readme is [here](README.md).
 
 ## 文档和报告
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) 是我们的官方文档仓库，其中包含了设计文档、技术报告、使用教程等内容。
+香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
 
-* 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
+[docs.xiangshan.cc](https://docs.xiangshan.cc) 上的微架构文档尚未根据最新架构（昆明湖）更新，我们正在撰写新的设计文档。
 
+香山用户文档已单独发布，您可在此处查看：[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
 
 ## 论文发表情况
 

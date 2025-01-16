@@ -8,11 +8,13 @@ Copyright 2020-2022 by Institute of Computing Technology, Chinese Academy of Sci
 
 Copyright 2020-2022 by Peng Cheng Laboratory.
 
-## Docs and slides
+## Documentation
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorials and more.
+XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
 
-* Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
+The microarchitecture documentation on [docs.xiangshan.cc](https://docs.xiangshan.cc) is currently outdated for the latest version (Kunminghu). An updated version is in progress.
+
+XiangShan User Guide has been published separately. You can find it at [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
 
 ## Publications
 
