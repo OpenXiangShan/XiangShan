@@ -259,6 +259,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   def continueAndAlign(mask: UInt): Bool = {
     val res =
+      PopCount(mask) === 1.U ||
       mask === 0b00000011.U ||
       mask === 0b00001100.U ||
       mask === 0b00110000.U ||
