@@ -414,6 +414,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
+    val l1Miss = Output(Bool())
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -846,6 +847,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     prefetch := false.B
   }
 
+  io.l1Miss := req_valid
   // refill latency monitor
   val start_counting = GatedValidRegNext(io.mem_acquire.fire) || (GatedValidRegNextN(primary_fire, 2) && s_acquire)
   io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
@@ -948,6 +950,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mq_enq_cancel = Output(Bool())
 
     val debugTopDown = new DCacheTopDownIO
+    val l1Miss = Output(Bool())
   })
 
   // 128KBL1: FIXME: provide vaddr for l2
@@ -1199,6 +1202,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("max_inflight", max_inflight)
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
+  io.l1Miss := RegNext(Cat(entries.map(_.io.l1Miss)).orR)
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
   XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
