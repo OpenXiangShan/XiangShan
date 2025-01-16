@@ -698,7 +698,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     updateMeta.altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
     updateMeta.allocates(i) := RegEnable(
       u_meta.allocates(i),
-      io.update.valid && io.update.bits.mispred_mask(i)
+      io.update.valid // not using mispred_mask, because mispred_mask timing is bad
     )
   }
   if (EnableSC) {
