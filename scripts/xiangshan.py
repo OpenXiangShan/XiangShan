@@ -541,7 +541,8 @@ class XiangShan(object):
             "lbm": "_140840000000_.gz",
             "gromacs": "_275480000000_.gz",
             "wrf": "_1916220000000_.gz",
-            "astar": "_122060000000_.gz"
+            "astar": "_122060000000_.gz",
+            "hmmer-Vector": "_6598_0.250135_.zstd"
         }
         if name in workloads:
             return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
