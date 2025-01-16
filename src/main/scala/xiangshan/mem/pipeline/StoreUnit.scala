@@ -128,6 +128,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
+  val s0_sel_facA = Wire(UInt(VAddrBits.W))
+  val s0_sel_facB = Wire(UInt(VAddrBits.W))
+  val s0_sel_facCarry = Wire(Bool())
 
   // generate addr
   val s0_saddr = s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), VAddrBits)
@@ -214,37 +217,33 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
   io.tlb.req.bits.hlvx               := false.B
   io.tlb.req.bits.pmp_addr           := DontCare
-  io.tlb.req.bits.facA := Mux(
-    s0_use_flow_ma,
-    io.misalign_stin.bits.vaddr(VAddrBits-1, sectorvpnOffLen),
+  io.tlb.req.bits.facA               := s0_sel_facA(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facB               := s0_sel_facB(VAddrBits-1, sectorvpnOffLen)
+  io.tlb.req.bits.facCarry           := s0_sel_facCarry
+
+  s0_sel_facA := Mux(
+    s0_use_flow_rs,
+    s0_stin.src(0),
     Mux(
-      s0_use_flow_rs,
-      s0_stin.src(0)(VAddrBits-1, sectorvpnOffLen),
+      s0_use_flow_ma,
+      io.misalign_stin.bits.vaddr,
       Mux(
         s0_use_flow_vec,
-        s0_vecstin.vaddr(VAddrBits-1, sectorvpnOffLen),
-        io.prefetch_req.bits.vaddr(VAddrBits-1, sectorvpnOffLen)
+        s0_vecstin.vaddr,
+        io.prefetch_req.bits.vaddr
       )
     )
   )
-  io.tlb.req.bits.facB := Mux(
-    s0_use_flow_ma,
-    0.U,
-    Mux(
-      s0_use_flow_rs,
-      SignExt(s0_stin.uop.imm(11, 0), VAddrBits)(VAddrBits-1, sectorvpnOffLen),
-      0.U
-    )
+  s0_sel_facB := Mux(
+    s0_use_flow_rs,
+    SignExt(s0_stin.uop.imm(11, 0), VAddrBits),
+    0.U
   )
   val s0_facCarry = s0_stin.src(0)(sectorvpnOffLen - 1, 0)  +& SignExt(s0_stin.uop.imm(11, 0), sectorvpnOffLen)
-  io.tlb.req.bits.facCarry := Mux(
-    s0_use_flow_ma,
-    false.B,
-    Mux(
-      s0_use_flow_rs,
-      s0_facCarry(s0_facCarry.getWidth-1),
-      false.B
-    )
+  s0_sel_facCarry := Mux(
+    s0_use_flow_rs,
+    s0_facCarry(s0_facCarry.getWidth-1),
+    false.B
   )
 
   // Dcache access here: not **real** dcache write
