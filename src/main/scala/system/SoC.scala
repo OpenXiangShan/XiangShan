@@ -71,13 +71,7 @@ case class SoCParameters
     ways = 8,
     sets = 2048 // 1MB per bank
   )),
-  OpenLLCParamsOpt: Option[OpenLLCParam] = Some(OpenLLCParam(
-    name = "LLC",
-    ways = 8,
-    sets = 2048,
-    banks = 4,
-    clientCaches = Seq(L2Param())
-  )),
+  OpenLLCParamsOpt: Option[OpenLLCParam] = None,
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
     "B" -> 7,
@@ -91,6 +85,10 @@ case class SoCParameters
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
 ){
+  require(
+    L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
+    "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
+  )
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64

@@ -226,7 +226,7 @@ class MinimalConfig(n: Int = 1) extends Config(
     case SoCParamsKey =>
       val tiles = site(XSTileKey)
       up(SoCParamsKey).copy(
-        L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        L3CacheParamsOpt = Option.when(!up(EnableCHI))(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
           sets = 1024,
           inclusive = false,
           clientCaches = tiles.map{ core =>
@@ -238,6 +238,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           },
           simulation = !site(DebugOptionsKey).FPGAPlatform,
           prefetch = None
+        )),
+        OpenLLCParamsOpt = Option.when(up(EnableCHI))(OpenLLCParam(
+          name = "LLC",
+          ways = 8,
+          sets = 2048,
+          banks = 4,
+          clientCaches = Seq(L2Param())
         )),
         L3NBanks = 1
       )
@@ -252,7 +259,8 @@ class MinimalSimConfig(n: Int = 1) extends Config(
       softPTW = true
     ))
     case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = None
+      L3CacheParamsOpt = None,
+      OpenLLCParamsOpt = None
     )
   })
 )
@@ -339,7 +347,7 @@ case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true,
     }.sum
     up(SoCParamsKey).copy(
       L3NBanks = banks,
-      L3CacheParamsOpt = Some(HCCacheParameters(
+      L3CacheParamsOpt = Option.when(!up(EnableCHI))(HCCacheParameters(
         name = "L3",
         level = 3,
         ways = ways,
@@ -363,7 +371,7 @@ case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true,
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
       )),
-      OpenLLCParamsOpt = Some(OpenLLCParam(
+      OpenLLCParamsOpt = Option.when(up(EnableCHI))(OpenLLCParam(
         name = "LLC",
         ways = ways,
         sets = sets,
@@ -396,7 +404,10 @@ class WithFuzzer extends Config((site, here, up) => {
     EnablePerfDebug = false,
   )
   case SoCParamsKey => up(SoCParamsKey).copy(
-    L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+    L3CacheParamsOpt = up(SoCParamsKey).L3CacheParamsOpt.map(_.copy(
+      enablePerf = false,
+    )),
+    OpenLLCParamsOpt = up(SoCParamsKey).OpenLLCParamsOpt.map(_.copy(
       enablePerf = false,
     )),
   )
@@ -440,23 +451,16 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  new WithCHI
-    ++ new Config((site, here, up) => {
-      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
-    })
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
-    ++ WithNKBL1D(64, ways = 4)
+  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ new DefaultConfig(n)
+    ++ new WithCHI
 )
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
-  new WithCHI
-    ++ new Config((site, here, up) => {
-      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
-    })
-    ++ L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
     ++ WithNKBL1D(32, ways = 4)
     ++ new MinimalConfig(n)
+    ++ new WithCHI
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
