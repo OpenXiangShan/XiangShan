@@ -135,9 +135,9 @@ class RegionEntry(implicit p: Parameters) extends ITTageBundle {
 
 class RegionWays()(implicit p: Parameters) extends XSModule with ITTageParams {
   val io = IO(new Bundle {
-    val req_pointer = Input(Vec(RegionPorts, UInt(log2Ceil(RegionNums).W)))
-    val resp_hit    = Output(Vec(RegionPorts, Bool()))
-    val resp_region = Output(Vec(RegionPorts, UInt(RegionBits.W)))
+    val req_pointer = Input(Vec(ITTageNTables, UInt(log2Ceil(RegionNums).W)))
+    val resp_hit    = Output(Vec(ITTageNTables, Bool()))
+    val resp_region = Output(Vec(ITTageNTables, UInt(RegionBits.W)))
 
     val update_region  = Input(Vec(RegionPorts, UInt(RegionBits.W)))
     val update_hit     = Output(Vec(RegionPorts, Bool()))
@@ -163,11 +163,13 @@ class RegionWays()(implicit p: Parameters) extends XSModule with ITTageParams {
 
   io.write_pointer := w_pointer
   // read and metaTarget update read ports
-  for (i <- 0 until RegionPorts) {
+  for (i <- 0 until ITTageNTables) {
     // read region use pointer
     io.resp_hit(i)    := regions(io.req_pointer(i)).valid
     io.resp_region(i) := regions(io.req_pointer(i)).region
+  }
 
+  for (i <- 0 until RegionPorts) {
     // When using metaTarget for updates, redefine the pointer
     val u_total_hits =
       VecInit((0 until RegionNums).map(w => regions(w).region === io.update_region(i) && regions(w).valid))
@@ -535,8 +537,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // access tag tables and output meta info
   class ITTageTableInfo(implicit p: Parameters) extends ITTageResp {
-    val tableIdx = UInt(log2Ceil(ITTageNTables).W)
+    val tableIdx   = UInt(log2Ceil(ITTageNTables).W)
+    val maskTarget = Vec(ITTageNTables, UInt(VAddrBits.W))
   }
+
   val inputRes = VecInit(s2_resps.zipWithIndex.map {
     case (r, i) =>
       val tableInfo = Wire(new ITTageTableInfo)
@@ -544,6 +548,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       tableInfo.ctr           := r.bits.ctr
       tableInfo.target_offset := r.bits.target_offset
       tableInfo.tableIdx      := i.U(log2Ceil(ITTageNTables).W)
+      tableInfo.maskTarget    := VecInit(Seq.fill(ITTageNTables)(0.U(VAddrBits.W)))
+      tableInfo.maskTarget(i) := "hffff_ffff_ffff_ffff".U
       SelectTwoInterRes(r.valid, tableInfo)
   })
 
@@ -555,20 +561,29 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val altProviderInfo = selectedInfo.second
   val providerNull    = providerInfo.ctr === 0.U
 
-  val baseTarget = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
+  val baseTarget             = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
+  val region_r_target_offset = VecInit(s2_resps.map(r => r.bits.target_offset))
 
-  rTable.io.req_pointer := VecInit(providerInfo.target_offset.pointer, altProviderInfo.target_offset.pointer)
+  rTable.io.req_pointer.zipWithIndex.map { case (req_pointer, i) =>
+    req_pointer := region_r_target_offset(i).pointer
+  }
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
-  val providerCatTarget = Mux(
-    rTable.io.resp_hit(0) && !providerInfo.target_offset.usePCRegion,
-    Cat(rTable.io.resp_region(0), providerInfo.target_offset.offset),
-    Cat(targetGetRegion(s2_pc_dup(0).getAddr()), providerInfo.target_offset.offset)
-  )
-  val altproviderCatTarget = Mux(
-    rTable.io.resp_hit(1) && !altProviderInfo.target_offset.usePCRegion,
-    Cat(rTable.io.resp_region(1), altProviderInfo.target_offset.offset),
-    Cat(targetGetRegion(s2_pc_dup(0).getAddr()), altProviderInfo.target_offset.offset)
-  )
+  val region_targets = Wire(Vec(ITTageNTables, UInt(VAddrBits.W)))
+  for (i <- 0 until ITTageNTables) {
+    region_targets(i) := Mux(
+      rTable.io.resp_hit(i) && !region_r_target_offset(i).usePCRegion,
+      Cat(rTable.io.resp_region(i), region_r_target_offset(i).offset),
+      Cat(targetGetRegion(s2_pc_dup(0).getAddr()), region_r_target_offset(i).offset)
+    )
+  }
+
+  val providerCatTarget = providerInfo.maskTarget.zipWithIndex.map {
+    case (mask, i) => mask & region_targets(i)
+  }.reduce(_ | _)
+
+  val altproviderCatTarget = altProviderInfo.maskTarget.zipWithIndex.map {
+    case (mask, i) => mask & region_targets(i)
+  }.reduce(_ | _)
 
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerCatTarget),
@@ -626,6 +641,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val updateRealUsePCRegion = updateRealTargetRegion === updatePCRegion
   // If rTable is not written in Region, the pointer value will be invalid.
   // At this time, it is necessary to raise usePCRegion.
+  // The update mechanism of the usePCRegion bit requires further consideration.
   updateRealTargetOffset.usePCRegion := updateRealUsePCRegion || !updateAlloc.reduce(_ || _)
   rTable.io.write_valid              := !updateRealUsePCRegion && updateAlloc.reduce(_ || _)
   rTable.io.write_region             := updateRealTargetRegion
