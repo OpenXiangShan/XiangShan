@@ -39,7 +39,7 @@ NUM_CORES ?= 1
 ISSUE ?= E.b
 CHISEL_TARGET ?= systemverilog
 
-SUPPORT_CHI_ISSUE = B E.b
+SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
 $(error "Unsupported CHI issue: $(ISSUE)")
 endif
