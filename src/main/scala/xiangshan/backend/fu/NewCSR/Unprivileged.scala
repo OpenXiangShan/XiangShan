@@ -131,14 +131,19 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
     val cycle = RO(63, 0)
-  }) with HasMHPMSink {
-    regOut.cycle := mHPM.cycle
+  }) with HasMHPMSink with HasDebugStopBundle {
+    when(unprivCountUpdate) {
+      reg := mHPM.cycle
+    }.otherwise{
+      reg := reg
+    }
+    regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.cycle)
   })
     .setAddr(CSRs.cycle)
 
   val time = Module(new CSRModule("time", new CSRBundle {
     val time = RO(63, 0)
-  }) with HasMHPMSink {
+  }) with HasMHPMSink with HasDebugStopBundle {
     val updated = IO(Output(Bool()))
     val stime  = IO(Output(UInt(64.W)))
     val vstime = IO(Output(UInt(64.W)))
@@ -146,11 +151,17 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val stimeTmp  = mHPM.time.bits
     val vstimeTmp = mHPM.time.bits + htimedelta
 
-    when (mHPM.time.valid) {
+    // Update when rtc clock tick and not dcsr.STOPTIME
+    // or virtual mode changed
+    // Note: we delay a cycle and use `v` for better timing
+    val virtModeChanged = RegNext(nextV =/= v, false.B)
+    when(mHPM.time.valid && !debugModeStopTime || virtModeChanged) {
       reg.time := Mux(v, vstimeTmp, stimeTmp)
+    }.otherwise {
+      reg := reg
     }
 
-    updated := GatedValidRegNext(mHPM.time.valid)
+    updated := GatedValidRegNext(mHPM.time.valid && !debugModeStopTime)
     stime  := stimeTmp
     vstime := vstimeTmp
   })
@@ -158,16 +169,26 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val instret = Module(new CSRModule("instret", new CSRBundle {
     val instret = RO(63, 0)
-  }) with HasMHPMSink {
-    regOut.instret := mHPM.instret
+  }) with HasMHPMSink with HasDebugStopBundle {
+    when(unprivCountUpdate) {
+      reg := mHPM.instret
+    }.otherwise{
+      reg := reg
+    }
+    regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.instret)
   })
     .setAddr(CSRs.instret)
 
   val hpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Hpmcounter$num", new CSRBundle {
       val hpmcounter = RO(63, 0).withReset(0.U)
-    }) with HasMHPMSink {
-      regOut.hpmcounter := mHPM.hpmcounters(num - 3)
+    }) with HasMHPMSink with HasDebugStopBundle {
+      when(unprivCountUpdate) {
+        reg := mHPM.hpmcounters(num - 3)
+      }.otherwise{
+        reg := reg
+      }
+      regOut := Mux(debugModeStopCount, reg.asUInt, mHPM.hpmcounters(num - 3))
     }).setAddr(CSRs.cycle + num)
   )
 
@@ -251,5 +272,12 @@ trait HasMHPMSink { self: CSRModule[_] =>
     val hpmcounters = Vec(perfCntNum, UInt(XLEN.W))
   }))
   val v = IO(Input(Bool()))
+  val nextV = IO(Input(Bool()))
   val htimedelta = IO(Input(UInt(64.W)))
+}
+
+trait HasDebugStopBundle { self: CSRModule[_] =>
+  val debugModeStopCount = IO(Input(Bool()))
+  val debugModeStopTime  = IO(Input(Bool()))
+  val unprivCountUpdate  = IO(Input(Bool()))
 }

@@ -29,8 +29,8 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
+import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
-import xiangshan.cache.prefetch._
 import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
@@ -47,7 +47,7 @@ import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
-import scala.math.{max, min}
+import scala.math.{max, min, pow}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -68,6 +68,7 @@ case class XSCoreParameters
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
+  PAddrBitsMax: Int = 56,   // The bits of physical address from Sv39/Sv48/Sv57 virtual address translation.
   VAddrBitsSv39: Int = 39,
   GPAddrBitsSv39x4: Int = 41,
   VAddrBitsSv48: Int = 48,
@@ -96,11 +97,12 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
+  FtbWays: Int = 4,
+  FtbTagLength: Int = 20,
   RasSize: Int = 16,
   RasSpecSize: Int = 32,
   RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
-  FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
     Seq(( 4096,    8,    8),
@@ -164,12 +166,12 @@ case class XSCoreParameters
   NRPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 72,
   LoadQueueRARSize: Int = 72,
-  LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  LoadQueueRAWSize: Int = 32, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 72,
-  LoadUncacheBufferSize: Int = 20,
+  LoadUncacheBufferSize: Int = 4,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
-  StoreQueueSize: Int = 64,
+  StoreQueueSize: Int = 56,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
@@ -214,6 +216,8 @@ case class XSCoreParameters
   ),
   IntRegCacheSize: Int = 16,
   MemRegCacheSize: Int = 12,
+  intSchdVlWbPort: Int = 0,
+  vfSchdVlWbPort: Int = 1,
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
@@ -225,7 +229,7 @@ case class XSCoreParameters
   VecMemDispatchWidth: Int = 1,
   VecMemDispatchMaxNumber: Int = 16,
   VecMemUnitStrideMaxFlowNum: Int = 2,
-  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 2, 2, 2, 2, 2),
+  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 16, 16, 16, 16, 16),
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -333,6 +337,7 @@ case class XSCoreParameters
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
+    cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f))
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -342,6 +347,9 @@ case class XSCoreParameters
     nProbeEntries = 8,
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
+    enableTagEcc = true,
+    enableDataEcc = true,
+    cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
@@ -356,6 +364,22 @@ case class XSCoreParameters
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1
 ){
+  def ISABase = "rv64i"
+  def ISAExtensions = Seq(
+    // single letter extensions, in canonical order
+    "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
+    // multi-letter extensions, sorted alphanumerically
+    "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
+    "shvstvecd", "smaia", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
+    "ss1p13", "ssaia", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
+    "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
+    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zba", "zbb",
+    "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
+    "zicbom", "zicbop", "zicboz", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond", "zicsr",
+    "zifencei", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh", "zksed", "zksh",
+    "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
+  )
+
   def vlWidth = log2Up(VLEN) + 1
 
   /**
@@ -387,7 +411,7 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU2", Seq(AluCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0))), true, 2),
-        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg, I2fCfg, VSetRiWiCfg, VSetRiWvfCfg, I2vCfg), Seq(IntWB(port = 4, 0), VfWB(2, 0), V0WB(port = 2, 0), VlWB(port = 0, 0), FpWB(port = 4, 0)), Seq(Seq(IntRD(2, 1)), Seq(IntRD(3, 1)))),
+        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg, I2fCfg, VSetRiWiCfg, VSetRiWvfCfg, I2vCfg), Seq(IntWB(port = 4, 0), VfWB(2, 0), V0WB(port = 2, 0), VlWB(port = intSchdVlWbPort, 0), FpWB(port = 2, 1)), Seq(Seq(IntRD(2, 1)), Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU3", Seq(AluCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0))), true, 2),
@@ -407,20 +431,15 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("FEX0", Seq(FaluCfg, FcvtCfg, F2vCfg, FmacCfg), Seq(FpWB(port = 0, 0), IntWB(port = 0, 2), VfWB(port = 3, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
-      ), numEntries = 18, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX1", Seq(FdivCfg), Seq(FpWB(port = 3, 1)), Seq(Seq(FpRD(2, 1)), Seq(FpRD(5, 1)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 1, 0), IntWB(port = 1, 2)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
-      ), numEntries = 18, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 1, 0), IntWB(port = 1, 2)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+        ExeUnitParams("FEX3", Seq(FdivCfg), Seq(FpWB(port = 4, 1)), Seq(Seq(FpRD(8, 1)), Seq(FpRD(9, 1)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 2, 0), IntWB(port = 2, 2)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
-      ), numEntries = 18, numEnq = 2, numComp = 16),
-      IssueBlockParams(Seq(
-        ExeUnitParams("FEX3", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 3, 0), IntWB(port = 3, 2)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
-      ), numEntries = 18, numEnq = 2, numComp = 16),
-      IssueBlockParams(Seq(
-        ExeUnitParams("FEX4", Seq(FdivCfg), Seq(FpWB(port = 4, 1)), Seq(Seq(FpRD(2, 1)), Seq(FpRD(5, 1)))),
-        ExeUnitParams("FEX5", Seq(FdivCfg), Seq(FpWB(port = 3, 1)), Seq(Seq(FpRD(8, 1)), Seq(FpRD(11, 1)))),
-      ), numEntries = 18, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX4", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 2, 0), IntWB(port = 2, 1)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+      ), numEntries = 18, numEnq = 2, numComp = 14),
     ),
       numPregs = fpPreg.numEntries,
       numDeqOutside = 0,
@@ -435,15 +454,15 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX0", Seq(VfmaCfg, VialuCfg, VimacCfg, VppuCfg), Seq(VfWB(port = 0, 0), V0WB(port = 0, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0)), Seq(VlRD(0, 0)))),
-        ExeUnitParams("VFEX1", Seq(VfaluCfg, VfcvtCfg, VipuCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 1), V0WB(port = 0, 1), VlWB(port = 1, 0), IntWB(port = 1, 1), FpWB(port = 0, 1)), Seq(Seq(VfRD(0, 1)), Seq(VfRD(1, 1)), Seq(VfRD(2, 1)), Seq(V0RD(0, 1)), Seq(VlRD(0, 1)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+        ExeUnitParams("VFEX1", Seq(VfaluCfg, VfcvtCfg, VipuCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 1), V0WB(port = 0, 1), VlWB(port = vfSchdVlWbPort, 0), IntWB(port = 1, 1), FpWB(port = 0, 1)), Seq(Seq(VfRD(0, 1)), Seq(VfRD(1, 1)), Seq(VfRD(2, 1)), Seq(V0RD(0, 1)), Seq(VlRD(0, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX2", Seq(VfmaCfg, VialuCfg), Seq(VfWB(port = 1, 0), V0WB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0)), Seq(VlRD(1, 0)))),
-        ExeUnitParams("VFEX3", Seq(VfaluCfg, VfcvtCfg), Seq(VfWB(port = 2, 1), V0WB(port = 2, 1), FpWB(port = 1, 1)), Seq(Seq(VfRD(3, 1)), Seq(VfRD(4, 1)), Seq(VfRD(5, 1)), Seq(V0RD(1, 1)), Seq(VlRD(1, 1)))),
-      ), numEntries = 16, numEnq = 2, numComp = 14),
+        ExeUnitParams("VFEX3", Seq(VfaluCfg), Seq(VfWB(port = 2, 1), V0WB(port = 2, 1), FpWB(port = 1, 1)), Seq(Seq(VfRD(3, 1)), Seq(VfRD(4, 1)), Seq(VfRD(5, 1)), Seq(V0RD(1, 1)), Seq(VlRD(1, 1)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX4", Seq(VfdivCfg, VidivCfg), Seq(VfWB(port = 3, 1), V0WB(port = 3, 1)), Seq(Seq(VfRD(3, 2)), Seq(VfRD(4, 2)), Seq(VfRD(5, 2)), Seq(V0RD(1, 2)), Seq(VlRD(1, 2)))),
-      ), numEntries = 10, numEnq = 2, numComp = 8),
+      ), numEntries = 10, numEnq = 2, numComp = 6),
     ),
       numPregs = vfPreg.numEntries,
       numDeqOutside = 0,
@@ -460,31 +479,31 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(7, 2)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(6, 2)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), FpWB(5, 0)), Seq(Seq(IntRD(8, 0))), true, 2),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), FpWB(3, 0)), Seq(Seq(IntRD(8, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(6, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(4, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(7, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(5, 0)), Seq(Seq(IntRD(10, 0))), true, 2),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(4, 0), V0WB(4, 0), VlWB(port = 2, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0)), Seq(VlRD(2, 0)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(5, 0), V0WB(5, 0), VlWB(port = 3, 0)), Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0)), Seq(VlRD(3, 0)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(12, 0)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 2), FpRD(9, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(3, 2), FpRD(13, 0)))),
-      ), numEntries = 16, numEnq = 1, numComp = 15),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(3, 2), FpRD(10, 0)))),
+      ), numEntries = 16, numEnq = 2, numComp = 12),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
       numDeqOutside = 0,
@@ -504,17 +523,9 @@ case class XSCoreParameters
       ),
       // TODO: add load -> fp slow wakeup
       WakeUpConfig(
-        Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
-        Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4", "FEX5")
+        Seq("FEX0", "FEX2", "FEX4") ->
+        Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4")
       ),
-      WakeUpConfig(
-        Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
-        Seq("STD0", "STD1")
-      ),
-//      WakeUpConfig(
-//        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3") ->
-//        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3")
-//      ),
     ).flatten
   }
 
@@ -540,7 +551,13 @@ case class XSCoreParameters
 
   // Parameters for trace extension.
   // Trace parameters is useful for XSTOP.
-  val TraceGroupNum          = 3 // Width to Encoder
+  val traceParams: TraceParams = new TraceParams(
+    TraceGroupNum  = 3,
+    IaddrWidth     = GPAddrBitsSv48x4,
+    PrivWidth      = 3,
+    ItypeWidth     = 4,
+    IlastsizeWidth = 1,
+  )
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -574,6 +591,8 @@ trait HasXSParameter {
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)
 
+  def ISABase = coreParams.ISABase
+  def ISAExtensions = coreParams.ISAExtensions
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
   def ELEN = coreParams.ELEN
@@ -591,6 +610,7 @@ trait HasXSParameter {
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  def PAddrBitsMax = coreParams.PAddrBitsMax
   def GPAddrBitsSv39x4 = coreParams.GPAddrBitsSv39x4
   def GPAddrBitsSv48x4 = coreParams.GPAddrBitsSv48x4
   def GPAddrBits = {
@@ -627,6 +647,8 @@ trait HasXSParameter {
   def AddrBytes = AddrBits / 8 // unused
   def DataBits = XLEN
   def DataBytes = DataBits / 8
+  def QuadWordBits = DataBits * 2
+  def QuadWordBytes = QuadWordBits / 8
   def VDataBytes = VLEN / 8
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
@@ -650,6 +672,7 @@ trait HasXSParameter {
   def EnableFauFTB = coreParams.EnableFauFTB
   def FtbSize = coreParams.FtbSize
   def FtbWays = coreParams.FtbWays
+  def FtbTagLength = coreParams.FtbTagLength
   def RasSize = coreParams.RasSize
   def RasSpecSize = coreParams.RasSpecSize
   def RasCtrSize = coreParams.RasCtrSize
@@ -870,6 +893,8 @@ trait HasXSParameter {
   def numCSRPCntLsu      = 8
   def numCSRPCntHc       = 5
   def printEventCoding   = true
+  def printCriticalError = false
+  def maxCommitStuck = pow(2, 21).toInt
 
   // Vector load exception
   def maxMergeNumPerCycle = 4
@@ -879,5 +904,13 @@ trait HasXSParameter {
   protected def TriggerChainMaxLength = 2
 
   // Parameters for Trace extension
-  def TraceGroupNum          = coreParams.TraceGroupNum
+  def TraceGroupNum          = coreParams.traceParams.TraceGroupNum
+  def CauseWidth             = XLEN
+  def TvalWidth              = coreParams.traceParams.IaddrWidth
+  def PrivWidth              = coreParams.traceParams.PrivWidth
+  def IaddrWidth             = coreParams.traceParams.IaddrWidth
+  def ItypeWidth             = coreParams.traceParams.ItypeWidth
+  def IretireWidthInPipe     = log2Up(RenameWidth * 2)
+  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 }

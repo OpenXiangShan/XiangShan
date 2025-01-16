@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2021-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -23,25 +24,19 @@ import utils._
 import utility._
 import system._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
-import system._
-import utility._
-import utils._
-import huancun._
-import openLLC.{OpenLLCParam}
-import xiangshan._
+import openLLC.OpenLLCParam
+import freechips.rocketchip.diplomacy._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import device.{EnableJtag, XSDebugModuleParams}
+import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
-import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -50,7 +45,15 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
-  case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
+  case DebugModuleKey => Some(DebugModuleParams(
+    nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
+    maxSupportedSBAccess = site(XLen),
+    hasBusMaster = true,
+    baseAddress = BigInt(0x38020000),
+    nScratch = 2,
+    crossingHasSafeReset = false,
+    hasHartResets = true
+  ))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
@@ -117,6 +120,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
+          cacheCtrlAddressOpt = Some(AddressSet(0x38022080, 0x7f)),
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -128,6 +132,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           nProbeEntries = 4,
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
+          enableTagEcc = true,
+          enableDataEcc = true,
+          cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
         )),
         // ============ BPU ===============
         EnableLoop = false,
@@ -211,7 +218,6 @@ class MinimalConfig(n: Int = 1) extends Config(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
           )),
-          hasCMO = p.HasCMO && site(EnableCHI),
         )),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
@@ -265,6 +271,9 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         nProbeEntries = 8,
         nReleaseEntries = 18,
         nMaxPrefetchEntry = 6,
+        enableTagEcc = true,
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
       ))
     ))
 })
@@ -296,10 +305,14 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        enableTagECC = true,
+        enableDataECC = true,
+        dataCheck = Some("oddparity"),
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
-        hasCMO = p.HasCMO && site(EnableCHI),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -351,7 +364,9 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         clientCaches = tiles.map { core =>
           val l2params = core.L2CacheParamsOpt.get
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
-        }
+        },
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
 })
@@ -408,7 +423,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 8)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
 
@@ -422,8 +437,18 @@ class KunminghuV2Config(n: Int = 1) extends Config(
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
-    ++ new WithNKBL1D(64, ways = 8)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new DefaultConfig(n)
+)
+
+class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
+  new WithCHI
+    ++ new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+    })
+    ++ new WithNKBL2(128, inclusive = true, banks = 1, tp = false)
+    ++ new WithNKBL1D(32, ways = 4)
+    ++ new MinimalConfig(n)
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
@@ -432,13 +457,36 @@ class XSNoCTopConfig(n: Int = 1) extends Config(
   })
 )
 
+class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
+  (new KunminghuV2MinimalConfig(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
+
 class FpgaDefaultConfig(n: Int = 1) extends Config(
+  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 4)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = false,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)
+
+class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
   (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
     ++ new WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
-      AlwaysBasicDiff = false,
+      AlwaysBasicDiff = true,
       AlwaysBasicDB = false
     )
     case SoCParamsKey => up(SoCParamsKey).copy(

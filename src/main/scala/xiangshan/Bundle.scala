@@ -46,6 +46,7 @@ import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.backend.trace._
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -145,7 +146,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
-  val exceptionFromBackend = Bool()
+  val backendException = Bool()
   val trigger = TriggerAction()
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -166,19 +167,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
 
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-  val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(1.W)
-  val typeTagOut = UInt(1.W)
-  val fromInt = Bool()
+  val typeTagOut = UInt(2.W) // H S D
   val wflags = Bool()
-  val fpWen = Bool()
-  val fmaCmd = UInt(2.W)
-  val div = Bool()
-  val sqrt = Bool()
-  val fcvt = Bool()
   val typ = UInt(2.W)
   val fmt = UInt(2.W)
-  val ren3 = Bool() //TODO: remove SrcType.fp
   val rm = UInt(3.W)
 }
 
@@ -351,9 +343,12 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
 
 class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
+  val isNC = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+
+  def isSkipDiff: Bool = isMMIO || isNC || isPerfCnt
   /* add L/S inst info in EXU */
   // val L1toL2TlbLatency = UInt(XLEN.W)
   // val levelTlbHit = UInt(2.W)
@@ -534,6 +529,13 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   }
   val mPBMTE = Bool()
   val hPBMTE = Bool()
+  val pmm = new Bundle {
+    val mseccfg = UInt(2.W)
+    val menvcfg = UInt(2.W)
+    val henvcfg = UInt(2.W)
+    val hstatus = UInt(2.W)
+    val senvcfg = UInt(2.W)
+  }
 
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
@@ -584,8 +586,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val l1D_pf_active_stride = Output(UInt(6.W))
   val l1D_pf_enable_stride = Output(Bool())
   val l2_pf_store_only = Output(Bool())
-  // ICache
-  val icache_parity_enable = Output(Bool())
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
@@ -614,6 +614,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode
   val virtMode = Output(Bool())
+  // xstatus.fs field is off
+  val fsIsOff = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {

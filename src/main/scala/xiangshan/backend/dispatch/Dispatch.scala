@@ -195,28 +195,31 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward  = VecInit(io.fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
-  
+
   // Singlestep should only commit one machine instruction after dret, and then hart enter debugMode according to singlestep exception.
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
-  
-  val robidxStepNext  = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
+
+  val robidxStepHold  = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
   val robidxStepReg   = RegInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
   val robidxCanCommitStepping = WireInit(0.U.asTypeOf(io.fromRename(0).bits.robIdx))
-  
+  robidxStepReg := robidxCanCommitStepping
+
   when(!io.singleStep) {
     singleStepState := s_updateRobidx
   }.elsewhen(io.singleStep && io.fromRename(0).fire && io.enqRob.req(0).valid) {
     singleStepState := s_holdRobidx
-    robidxStepNext := io.fromRename(0).bits.robIdx
+    robidxStepHold := io.fromRename(0).bits.robIdx
   }
-  
+
   when(singleStepState === s_updateRobidx) {
-    robidxStepReg := robidxStepNext
-    robidxCanCommitStepping := robidxStepNext
+    robidxCanCommitStepping := robidxStepHold
   }.elsewhen(singleStepState === s_holdRobidx) {
-    robidxStepReg := robidxStepReg 
-    robidxCanCommitStepping := robidxStepReg
+    when(io.redirect.valid){
+      robidxCanCommitStepping.flag := !robidxStepReg.flag
+    }.otherwise {
+      robidxCanCommitStepping := robidxStepReg
+    }
   }
 
   val updatedUop = Wire(Vec(RenameWidth, new DynInst))
@@ -247,12 +250,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     } else {
       updatedUop(i).loadWaitBit := isLs(i) && !isStore(i) && io.fromRename(i).bits.loadWaitBit
     }
-    // // update singleStep, singleStep exception only enable in next machine instruction.
+    // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && (io.fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
-    when (io.fromRename(i).fire) {
-      XSDebug(TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint), s"Debug Mode: inst ${i} has frontend trigger exception\n")
-      XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
-    }
+    XSDebug(io.fromRename(i).fire &&
+              (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)),
+            s"Debug Mode: inst ${i} has frontend trigger exception\n")
+    XSDebug(io.fromRename(i).fire &&
+              updatedUop(i).singleStep,
+            s"Debug Mode: inst ${i} has single step exception\n")
     if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
@@ -517,15 +522,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
-    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),
-    ("dispatch_empty",              !hasValidInstr                                                                 ),
-    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                                           ),
-    ("dispatch_waitinstr",          PopCount(io.fromRename.map(!_.valid && canAccept))                 ),
-    ("dispatch_stall_cycle_lsq",    false.B                                                                        ),
-    ("dispatch_stall_cycle_rob",    stall_rob                                                                      ),
-    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                                   ),
-    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                                    ),
-    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                                    )
+    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))),
+    ("dispatch_empty",              !hasValidInstr                                               ),
+    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                         ),
+    ("dispatch_waitinstr",          PopCount(io.fromRename.map(!_.valid && canAccept))           ),
+    ("dispatch_stall_cycle_lsq",    false.B                                                      ),
+    ("dispatch_stall_cycle_rob",    stall_rob                                                    ),
+    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                 ),
+    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                  ),
+    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                  )
   )
   generatePerfEvent()
 }

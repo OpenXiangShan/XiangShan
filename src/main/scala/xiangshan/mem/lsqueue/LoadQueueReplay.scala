@@ -68,8 +68,10 @@ object LoadReplayCauses {
   val C_RAW = 8
   // st-ld violation
   val C_NK  = 9
+  // misalignBuffer Full
+  val C_MF  = 10
   // total causes
-  val allCauses = 10
+  val allCauses = 11
 }
 
 class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
@@ -203,6 +205,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ldWbPtr = Input(new LqPtr)
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
+    val loadMisalignFull = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
@@ -277,6 +280,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
     canEnqueue(w) && !cancelEnq(w) && needReplay(w) && !hasExceptions(w)
   }))
+  val newEnqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   val canFreeVec = VecInit((0 until LoadPipelineWidth).map(w => {
     canEnqueue(w) && loadReplay(w) && (!needReplay(w) || hasExceptions(w))
   }))
@@ -358,6 +362,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     when (cause(i)(LoadReplayCauses.C_RAW)) {
       blocking(i) := Mux((!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr)), false.B, blocking(i))
     }
+    // case C_MF
+    when (cause(i)(LoadReplayCauses.C_MF)) {
+      blocking(i) := Mux(!io.loadMisalignFull, false.B, blocking(i))
+    }
   })
 
   //  Replay is splitted into 3 stages
@@ -381,7 +389,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val needCancel = Wire(Vec(LoadQueueReplaySize, Bool()))
   // generate enq mask
   val enqIndexOH = Wire(Vec(LoadPipelineWidth, UInt(LoadQueueReplaySize.W)))
-  val s0_loadEnqFireMask = io.enq.map(x => x.fire && !x.bits.isLoadReplay && x.bits.rep_info.need_rep).zip(enqIndexOH).map(x => Mux(x._1, x._2, 0.U))
+  val s0_loadEnqFireMask = newEnqueue.zip(enqIndexOH).map(x => Mux(x._1, x._2, 0.U))
   val s0_remLoadEnqFireVec = s0_loadEnqFireMask.map(x => VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(x)(rem))))
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
@@ -535,6 +543,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).valid             := s2_oldestSel(i).valid
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
+    replay_req(i).bits.uop.exceptionVec(loadAddrMisaligned) := false.B
     replay_req(i).bits.isvec        := s2_vecReplay.isvec
     replay_req(i).bits.isLastElem   := s2_vecReplay.isLastElem
     replay_req(i).bits.is128bit     := s2_vecReplay.is128bit
@@ -559,9 +568,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
     replay_req(i).bits.uop.loadWaitStrict := false.B
 
-    when (replay_req(i).fire) {
-      XSError(!allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
-    }
+    XSError(replay_req(i).fire && !allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
   }
 
   val EnableHybridUnitReplay = Constantin.createRecord("EnableHybridUnitReplay", true)
@@ -590,9 +597,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
- // when(io.refill.valid) {
- //   XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
- // }
+  // XSDebug(io.refill.valid, "miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
+
 
   // init
   freeMaskVec.map(e => e := false.B)
@@ -602,9 +608,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   assert(freeList.io.canAllocate.reduce(_ || _) || !io.enq.map(_.valid).reduce(_ || _), s"LoadQueueReplay Overflow")
 
   // Allocate logic
-  val newEnqueue = (0 until LoadPipelineWidth).map(i => {
-    needEnqueue(i) && !io.enq(i).bits.isLoadReplay
-  })
+  needEnqueue.zip(newEnqueue).zip(io.enq).map {
+    case ((needEnq, newEnq), enq) =>
+      newEnq := needEnq && !enq.bits.isLoadReplay
+  }
 
   for ((enq, w) <- io.enq.zipWithIndex) {
     vaddrModule.io.wen(w) := false.B
@@ -618,12 +625,16 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := true.B
 
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(
+      needEnqueue(w) && enq.ready &&
+      allocated(enqIndex) && !enq.bits.isLoadReplay,
+      p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
+    XSError(
+      needEnqueue(w) && enq.ready &&
+      hasExceptions(w),
+      p"LoadQueueReplay: The instruction has exception, it can not be replay, check: ldu $w, robIdx $debug_robIdx!")
     when (needEnqueue(w) && enq.ready) {
-
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex) && !enq.bits.isLoadReplay, p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
-      XSError(hasExceptions(w), p"LoadQueueReplay: The instruction has exception, it can not be replay, check: ldu $w, robIdx $debug_robIdx!")
-
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
       //  Allocate new entry

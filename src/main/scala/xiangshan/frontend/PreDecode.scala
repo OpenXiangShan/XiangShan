@@ -281,12 +281,13 @@ class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
 
 class RVCExpander(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val in  = Input(UInt(32.W))
-    val out = Output(new ExpandedInstruction)
-    val ill = Output(Bool())
+    val in      = Input(UInt(32.W))
+    val fsIsOff = Input(Bool())
+    val out     = Output(new ExpandedInstruction)
+    val ill     = Output(Bool())
   })
 
-  val decoder = new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true)
+  val decoder = new RVCDecoder(io.in, io.fsIsOff, XLEN, fLen, useAddiForMv = true)
 
   if (HasCExtension) {
     io.out := decoder.decode
@@ -367,6 +368,12 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   val remaskIdx   = ParallelPriorityEncoder(remaskFault.asUInt)
   val needRemask  = ParallelOR(remaskFault)
   val fixedRange  = instrRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
+
+  require(
+    isPow2(PredictWidth),
+    "If PredictWidth does not satisfy the power of 2," +
+      "expression: Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
+  )
 
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
 

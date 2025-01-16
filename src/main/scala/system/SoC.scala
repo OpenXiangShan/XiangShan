@@ -98,6 +98,16 @@ trait HasSoCParameter {
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
 
+  // Parameters for trace extension
+  val TraceTraceGroupNum          = tiles.head.traceParams.TraceGroupNum
+  val TraceCauseWidth             = tiles.head.XLEN
+  val TraceTvalWidth              = tiles.head.traceParams.IaddrWidth
+  val TracePrivWidth              = tiles.head.traceParams.PrivWidth
+  val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
+  val TraceItypeWidth             = tiles.head.traceParams.ItypeWidth
+  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2)
+  val TraceIlastsizeWidth         = tiles.head.traceParams.IlastsizeWidth
+
   // L3 configurations
   val L3InnerBusWidth = soc.L3InnerBusWidth
   val L3BlockSize = soc.L3BlockSize
@@ -414,7 +424,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   } else {
     debugModule.debug.node := peripheralXbar.get
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-      l3_xbar.get := TLBuffer() := sb2tl.node
+      l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
   }
 

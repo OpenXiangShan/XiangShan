@@ -23,6 +23,7 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
+import utility._
 
 object Bundles {
   /**
@@ -58,7 +59,7 @@ object Bundles {
       this.pc               := source.pc
       this.foldpc           := source.foldpc
       this.exceptionVec     := source.exceptionVec
-      this.isFetchMalAddr   := source.exceptionFromBackend
+      this.isFetchMalAddr   := source.backendException
       this.trigger          := source.trigger
       this.preDecodeInfo    := source.pd
       this.pred_taken       := source.pred_taken
@@ -201,6 +202,7 @@ object Bundles {
     val vlsInstr        = Bool()
     val wfflags         = Bool()
     val isMove          = Bool()
+    val isDropAmocasSta = Bool()
     val uopIdx          = UopIdx()
     val isVset          = Bool()
     val firstUop        = Bool()
@@ -220,7 +222,7 @@ object Bundles {
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
     val dirtyVs         = Bool()
-    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
+    val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
@@ -262,6 +264,8 @@ object Bundles {
     def isHls: Bool = {
       fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
     }
+
+    def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
 
     def srcIsReady: Vec[Bool] = {
       VecInit(this.srcType.zip(this.srcState).map {
@@ -442,7 +446,7 @@ object Bundles {
     val isOpMask  = Bool() // vmand, vmnand
     val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
 
-    val isDependOldvd = Bool() // some instruction's computation depends on oldvd
+    val isDependOldVd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
 
     val isVleff = Bool() // vleff
@@ -589,11 +593,13 @@ object Bundles {
   }
 
   // DataPath --[ExuInput]--> Exu
-  class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
+  class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
-    val imm           = UInt(32.W)
+    val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
+    val imm           = UInt(64.W)
+    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((log2Up(PredictWidth) + 1).W))
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
@@ -634,29 +640,13 @@ object Bundles {
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
-    val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
+    val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 
     def exuIdx = this.params.exuIdx
-
-    def needCancel(og0CancelOH: UInt, og1CancelOH: UInt) : Bool = {
-      if (params.isIQWakeUpSink) {
-        require(
-          og0CancelOH.getWidth == l1ExuOH.get.head.getWidth,
-          s"cancelVecSize: {og0: ${og0CancelOH.getWidth}, og1: ${og1CancelOH.getWidth}}"
-        )
-        val l1Cancel: Bool = l1ExuOH.get.zip(srcTimer.get).map {
-          case(exuOH: Vec[Bool], srcTimer: UInt) =>
-            (exuOH.asUInt & og0CancelOH).orR && srcTimer === 1.U
-        }.reduce(_ | _)
-        l1Cancel
-      } else {
-        false.B
-      }
-    }
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
@@ -668,7 +658,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
-      this.l1ExuOH       .foreach(_ := source.common.l1ExuOH.get)
+      this.exuSources    .foreach(_ := source.common.exuSources.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
@@ -679,6 +669,7 @@ object Bundles {
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)
       this.preDecode     .foreach(_ := source.common.preDecode.get)
+      this.nextPcOffset  .foreach(_ := source.common.nextPcOffset.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
@@ -884,12 +875,43 @@ object Bundles {
     def width = 4 // 0~15 // Todo: assosiate it with FuConfig
   }
 
-  object ExuOH {
-    def apply(exuNum: Int): UInt = UInt(exuNum.W)
+  class ExuSource(exuNum: Int)(implicit p: Parameters) extends XSBundle {
+    val value = UInt(log2Ceil(exuNum + 1).W)
 
-    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+    val allExuNum = p(XSCoreParamsKey).backendParams.numExu
 
-    def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
+    def toExuOH(num: Int, filter: Seq[Int]): Vec[Bool] = {
+      require(num == filter.size)
+      val encodedExuOH = UIntToOH(this.value)(num, 1)
+      val ext = Module(new UIntExtractor(allExuNum, filter))
+      ext.io.in := encodedExuOH
+      VecInit(ext.io.out.asBools.zipWithIndex.map{ case(out, idx) =>
+        if (filter.contains(idx)) out
+        else false.B
+      })
+    }
+
+    def toExuOH(exuParams: ExeUnitParams): Vec[Bool] = {
+      toExuOH(exuParams.numWakeupFromIQ, exuParams.iqWakeUpSinkPairs.map(x => x.source.getExuParam(p(XSCoreParamsKey).backendParams.allExuParams).exuIdx))
+    }
+
+    def toExuOH(iqParams: IssueBlockParams): Vec[Bool] = {
+      toExuOH(iqParams.numWakeupFromIQ, iqParams.wakeUpSourceExuIdx)
+    }
+
+    def fromExuOH(iqParams: IssueBlockParams, exuOH: UInt): UInt = {
+      val comp = Module(new UIntCompressor(allExuNum, iqParams.wakeUpSourceExuIdx))
+      comp.io.in := exuOH
+      OHToUInt(Cat(comp.io.out, 0.U(1.W)))
+    }
+  }
+
+  object ExuSource {
+    def apply(exuNum: Int)(implicit p: Parameters) = new ExuSource(exuNum)
+
+    def apply(params: ExeUnitParams)(implicit p: Parameters) = new ExuSource(params.numWakeupFromIQ)
+
+    def apply()(implicit p: Parameters, params: IssueBlockParams) = new ExuSource(params.numWakeupFromIQ)
   }
 
   object ExuVec {
@@ -917,6 +939,7 @@ object Bundles {
     val flowNum      = OptionWrapper(isVector, NumLsElem())
 
     def src_rs1 = src(0)
+    def src_rs2 = src(1)
     def src_stride = src(1)
     def src_vs3 = src(2)
     def src_mask = if (isVector) src(3) else 0.U

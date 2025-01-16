@@ -159,7 +159,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     // lmul < 1, foldTime = vlmul - foldFastVlmul
     // lmul >= 1, foldTime = 0.U - foldFastVlmul
     val foldTime = Mux(vlmul(2), vlmul, 0.U) - foldLastVlmul
-    addTime + foldTime
+    Mux((addTime + foldTime).orR, addTime + foldTime, 1.U)
   }
   val numOfUopVFREDOSUM = {
     val uvlMax = MuxLookup(vsew, 1.U)(Seq(
@@ -169,7 +169,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     ))
     val vlMax = Wire(UInt(7.W))
     vlMax := Mux(vlmul(2), uvlMax >> (-vlmul)(1,0), uvlMax << vlmul(1,0)).asUInt
-    vlMax
+    Mux(vlMax.orR, vlMax, 1.U)
   }
   /*
    * when 1 <= lmul <= 4, numOfUopWV = 2 * lmul, otherwise numOfUopWV = 1
@@ -236,13 +236,16 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_US_FF_LD -> (numOfUopVLoadStoreStrided +& 2.U),
     UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
+    UopSplitType.AMO_CAS_W -> 2.U,
+    UopSplitType.AMO_CAS_D -> 2.U,
+    UopSplitType.AMO_CAS_Q -> 4.U,
   ))
 
   // number of writeback num
-  val numOfWB = numOfUop
+  val numOfWB = Mux(UopSplitType.isAMOCAS(typeOfSplit), numOfUop >> 1, numOfUop)
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
-  isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
+  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
@@ -260,6 +263,9 @@ class UopInfoGenIO(implicit p: Parameters) extends XSBundle {
 }
 
 class PreInfo(implicit p: Parameters) extends XSBundle {
+  val isVecArith = Bool() // is vector arith or config instr
+  val isVecMem = Bool()
+  val isAmoCAS = Bool()
   val typeOfSplit = UopSplitType()
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()

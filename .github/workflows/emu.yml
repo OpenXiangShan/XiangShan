@@ -32,9 +32,7 @@ jobs:
     timeout-minutes: 900
     name: Generate Verilog
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -42,6 +40,8 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -74,6 +74,10 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: generate chirrtl only
+        run: |
+          make sim-verilog CHISEL_TARGET=chirrtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -90,9 +94,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Basics
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -104,6 +106,8 @@ jobs:
           echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -146,6 +150,12 @@ jobs:
       - name: V Extension Test - rvv-bench
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-bench 2> /dev/zero
+      - name: F16 Test - f16_test
+        run: |
+          python3 ./scripts/xiangshan.py --wave-dump ./build --thread 16 --numa --ci f16_test 2> /dev/zero
+      - name: Zcb Extension Test - zcb-test
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci zcb-test 2> /dev/zero
   emu-chi:
     runs-on: bosc
     needs: changes
@@ -154,9 +164,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - CHI
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -164,6 +172,8 @@ jobs:
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -183,9 +193,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Performance
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -197,6 +205,8 @@ jobs:
           echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -250,9 +260,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - MC
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -263,6 +271,8 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -287,9 +297,7 @@ jobs:
     timeout-minutes: 900
     name: SIMV - Basics
     steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
+      - uses: actions/checkout@v4
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -300,6 +308,8 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: init
+        run: make init
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean

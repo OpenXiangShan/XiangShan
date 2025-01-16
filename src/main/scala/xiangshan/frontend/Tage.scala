@@ -12,6 +12,18 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Pierre Michaud. "[A PPM-like, tag-based branch predictor.](https://inria.hal.science/hal-03406188)" The Journal
+* of Instruction-Level Parallelism (JILP) 7: 10. 2005.
+* [2] André Seznec, and Pierre Michaud. "[A case for (partially) tagged geometric history length branch prediction.]
+* (https://inria.hal.science/hal-03408381)" The Journal of Instruction-Level Parallelism (JILP) 8: 23. 2006.
+* [3] André Seznec. "[A 256 kbits l-tage branch predictor.](http://www.irisa.fr/caps/people/seznec/L-TAGE.pdf)" The
+* Journal of Instruction-Level Parallelism (JILP) Special Issue: The Second Championship Branch Prediction Competition
+* (CBP) 9: 1-6. 2007.
 ***************************************************************************************/
 
 package xiangshan.frontend
@@ -150,18 +162,11 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true
+      bypassWrite = true,
+      withClockGate = true,
+      avoidSameAddr = true
     )
   )
-
-  val wrbypass =
-    Module(new WrBypass(
-      UInt(2.W),
-      bypassEntries,
-      log2Up(BtSize),
-      numWays = numBr,
-      extraPort = Some(true)
-    )) // logical bridx
 
   // Power-on reset to weak taken
   val doing_reset = RegInit(true.B)
@@ -180,11 +185,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   bt.io.r.req.valid       := s0_fire
   bt.io.r.req.bits.setIdx := s0_idx
 
-  val s1_idx = RegEnable(s0_idx, s0_fire)
-  // The cached data in wrbypass can participate in prediction
-  val use_wrbypass_data =
-    wrbypass.io.has_conflict.getOrElse(false.B) && wrbypass.io.update_idx.getOrElse(0.U) === s1_idx
-  val s1_read = Mux(use_wrbypass_data, wrbypass.io.update_data.get, bt.io.r.resp.data)
+  val s1_read = bt.io.r.resp.data
+  val s1_idx  = RegEnable(s0_idx, s0_fire)
 
   val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
   io.s1_cnt := per_br_ctr
@@ -194,6 +196,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
 
   val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
 
+  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr)) // logical bridx
   wrbypass.io.wen       := io.update_mask.reduce(_ || _)
   wrbypass.io.write_idx := u_idx
   wrbypass.io.write_way_mask.map(_ := io.update_mask)
@@ -230,25 +233,11 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
     ).reduce(_ || _)
   )).asUInt
 
-  // Using WrBypass to store wdata dual ports for reading and writing to the same address.
-  val write_conflict = u_idx === s0_idx && io.update_mask.reduce(_ || _) && s0_fire
-  val can_write      = (wrbypass.io.update_idx.get =/= s0_idx || !s0_fire) && wrbypass.io.has_conflict.get
-
-  wrbypass.io.conflict_valid.get      := write_conflict || (can_write && (io.update_mask.reduce(_ || _) || doing_reset))
-  wrbypass.io.conflict_write_data.get := Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs)
-  wrbypass.io.conflict_way_mask.get   := Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask.asUInt)
-
-  val wrbrpass_idx           = wrbypass.io.update_idx.get
-  val wrbypass_write_data    = wrbypass.io.update_data.get
-  val wrbypass_write_waymask = wrbypass.io.update_way_mask.get
-  wrbypass.io.conflict_clean.get := can_write
-
   bt.io.w.apply(
-    valid = ((io.update_mask.reduce(_ || _) || doing_reset) && !write_conflict) || can_write,
-    data =
-      Mux(can_write, wrbypass_write_data, Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs)), // Weak taken
-    setIdx = Mux(can_write, wrbrpass_idx, Mux(doing_reset, resetRow, u_idx)),
-    waymask = Mux(can_write, wrbypass_write_waymask, Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask))
+    valid = io.update_mask.reduce(_ || _) || doing_reset,
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
+    setIdx = Mux(doing_reset, resetRow, u_idx),
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
 }
 
@@ -333,7 +322,8 @@ class TageTable(
     shouldReset = true,
     extraReset = true,
     holdRead = true,
-    singlePort = true
+    singlePort = true,
+    withClockGate = true
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -345,7 +335,8 @@ class TageTable(
       way = numBr,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      withClockGate = true
     ))
   )
 
@@ -678,14 +669,56 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val resp_s2 = io.out.s2
 
   // Update logic
-  val u_valid = io.update.valid
-  val update  = io.update.bits
+  val u_valid = RegNext(io.update.valid, init = false.B)
+  val update  = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+
+  // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
+  // so io.update.bits.pc is used directly here
+  val update_pc = io.update.bits.pc
+
+  // To improve Clock Gating Efficiency
+  val u_valids_for_cge =
+    VecInit((0 until TageBanks).map(w =>
+      io.update.bits.ftb_entry.brValids(w) && io.update.valid
+    )) // io.update.bits.ftb_entry.always_taken has timing issues(FTQEntryGen)
+  val u_meta     = io.update.bits.meta.asTypeOf(new TageMeta)
+  val updateMeta = Wire(new TageMeta)
+  update.meta := updateMeta.asUInt
+  updateMeta  := RegEnable(u_meta, io.update.valid)
+  for (i <- 0 until numBr) {
+    updateMeta.providers(i).bits := RegEnable(
+      u_meta.providers(i).bits,
+      u_meta.providers(i).valid && u_valids_for_cge(i)
+    )
+    updateMeta.providerResps(i) := RegEnable(
+      u_meta.providerResps(i),
+      u_meta.providers(i).valid && u_valids_for_cge(i)
+    )
+    updateMeta.altUsed(i) := RegEnable(u_meta.altUsed(i), u_valids_for_cge(i))
+    updateMeta.allocates(i) := RegEnable(
+      u_meta.allocates(i),
+      io.update.valid && io.update.bits.mispred_mask(i)
+    )
+  }
+  if (EnableSC) {
+    for (w <- 0 until TageBanks) {
+      updateMeta.scMeta.get.scPreds(w) := RegEnable(
+        u_meta.scMeta.get.scPreds(w),
+        u_valids_for_cge(w) && u_meta.providers(w).valid
+      )
+      updateMeta.scMeta.get.ctrs(w) := RegEnable(
+        u_meta.scMeta.get.ctrs(w),
+        u_valids_for_cge(w) && u_meta.providers(w).valid
+      )
+    }
+  }
+  update.ghist := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
+
   val updateValids = VecInit((0 until TageBanks).map(w =>
-    update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
+    update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.strong_bias(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)
   ))
-
-  val updateMeta = update.meta.asTypeOf(new TageMeta)
 
   val updateMask    = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
   val updateUMask   = WireInit(0.U.asTypeOf(Vec(numBr, Vec(TageNTables, Bool()))))
@@ -785,7 +818,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val updateProviderCorrect = updateProviderResp.ctr(TageCtrBits - 1) === updateTaken
     val updateUseAlt          = updateMeta.altUsed(i)
     val updateAltDiffers      = updateMeta.altDiffers(i)
-    val updateAltIdx          = use_alt_idx(update.pc)
+    val updateAltIdx          = use_alt_idx(update_pc)
     val updateUseAltCtr       = Mux1H(UIntToOH(updateAltIdx, NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
     val updateAltPred         = updateMeta.altPreds(i)
     val updateAltCorrect      = updateAltPred === updateTaken
@@ -921,13 +954,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
       tables(i).io.update.us(w)    := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
-      tables(i).io.update.pc    := RegEnable(update.pc, realWen)
-      tables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
+      tables(i).io.update.pc    := RegEnable(update_pc, realWen)
+      tables(i).io.update.ghist := RegEnable(update.ghist, realWen)
     }
   }
   bt.io.update_mask   := RegNext(baseupdate)
   bt.io.update_cnt    := RegEnable(updatebcnt, baseupdate.reduce(_ | _))
-  bt.io.update_pc     := RegEnable(update.pc, baseupdate.reduce(_ | _))
+  bt.io.update_pc     := RegEnable(update_pc, baseupdate.reduce(_ | _))
   bt.io.update_takens := RegEnable(bUpdateTakens, baseupdate.reduce(_ | _))
 
   // all should be ready for req
@@ -982,7 +1015,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       updateValids(b),
       "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc:%b\n",
       b.U,
-      update.pc,
+      update_pc,
       0.U,
       update.br_taken_mask(b),
       update.mispred_mask(b),

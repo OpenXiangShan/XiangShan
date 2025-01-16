@@ -1,6 +1,10 @@
 name: Format Checking
 
-on: [push]
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
 jobs:
   scalafmt:
@@ -17,7 +21,7 @@ jobs:
           distribution: 'temurin'
           java-version: '11'
       - run: |
-          mkdir ~/.local/bin
+          mkdir -p ~/.local/bin
           sh -c "curl -L https://github.com/com-lihaoyi/mill/releases/download/0.11.7/0.11.7 > ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
           export PATH=~/.local/bin:$PATH
       - run: make check-format

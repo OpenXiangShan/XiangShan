@@ -61,12 +61,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isVset = Bool()
     val isHls = Bool()
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
-    val loadWaitBit = Bool()    // for perfEvents
-    val eliminatedMove = Bool() // for perfEvents
     // data end
     
     // trace
-    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
+    val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
     // status begin
     val valid = Bool()
     val fflags = UInt(5.W)
@@ -76,7 +74,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vxsat = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val commitTrigger = Bool()
     val needFlush = Bool()
     // status end
 
@@ -106,17 +103,17 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isVset = Bool()
     val isHls = Bool()
     val isVls = Bool()
+    val vls = Bool()
+    val mmio = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     val fpWen = Bool()
     val rfWen = Bool()
-    val loadWaitBit = Bool() // for perfEvents
-    val isMove = Bool()      // for perfEvents
     val needFlush = Bool()
     // trace
-    val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
+    val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -140,8 +137,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
     robEntry.dirtyVs := robEnq.dirtyVs
-    robEntry.loadWaitBit := robEnq.loadWaitBit
-    robEntry.eliminatedMove := robEnq.eliminatedMove
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     // trace
@@ -168,12 +163,12 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.isVset := robEntry.isVset
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
+    robCommitEntry.vls := robEntry.vls
+    robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.instrSize := robEntry.instrSize
-    robCommitEntry.loadWaitBit := robEntry.loadWaitBit
-    robCommitEntry.isMove := robEntry.eliminatedMove
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
@@ -225,6 +220,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val trapTarget = Input(new TargetPCBundle)
   val isXRet     = Input(Bool())
   val wfiEvent   = Input(Bool())
+  val criticalErrorState = Input(Bool())
 
   val fflags     = Output(Valid(UInt(5.W)))
   val vxsat      = Output(Valid(Bool()))
@@ -239,7 +235,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val lcommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
-  val pendingUncacheld = Output(Bool())
+  val pendingMMIOld = Output(Bool())
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   // set when vector store at the head of ROB
@@ -255,6 +251,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
 
 class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
+  val canAcceptForDispatch = Output(Bool())
   val isEmpty = Output(Bool())
   // valid vector, for robIdx gen and walk
   val needAlloc = Vec(RenameWidth, Input(Bool()))

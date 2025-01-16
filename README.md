@@ -10,7 +10,7 @@ Copyright 2020-2022 by Peng Cheng Laboratory.
 
 ## Docs and slides
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorial and more.
+[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorials and more.
 
 * Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
 
@@ -38,19 +38,19 @@ Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangsha
 
 Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
-You can contact us through [our mail list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived to [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
+You can contact us through [our mailing list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
 
 ## Architecture
 
-The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) [on the yanqihu branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020.
+The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) and is [on the yanqihu branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020.
 
-The second stable micro-architecture of XiangShan is called Nanhu (南湖) [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
+The second stable micro-architecture of XiangShan is called Nanhu (南湖) and is [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
 
 The current version of XiangShan, also known as Kunminghu (昆明湖), is still under development on the master branch.
 
-The micro-architecture overview of Nanhu (南湖) is shown below.
+The micro-architecture overview of Kunminghu (昆明湖) is shown below.
 
-![xs-arch-nanhu](images/xs-arch-nanhu.svg)
+![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
 
 
@@ -122,3 +122,7 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
+
+## Acknowledgement
+
+The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.

@@ -8,9 +8,9 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.rename.BusyTableReadIO
+import xiangshan.backend.rename.{BusyTableReadIO,VlBusyTableReadIO}
 import xiangshan.mem._
-import xiangshan.backend.Bundles.{DynInst, ExuOH}
+import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.dispatch.Dispatch2IqFpImp
@@ -112,6 +112,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
     val readV0State = if (numV0StateRead > 0) Some(Vec(numV0StateRead, Flipped(new BusyTableReadIO))) else None
     val readVlState = if (numVlStateRead > 0) Some(Vec(numVlStateRead, Flipped(new BusyTableReadIO))) else None
+    val readVlInfo  = if (numVlStateRead > 0) Some(Vec(numVlStateRead, Flipped(new VlBusyTableReadIO))) else None
     val readRCTagTableState = Option.when(numRCTagTableStateRead > 0)(Vec(numRCTagTableStateRead, Flipped(new RCTagTableReadPort(RegCacheIdxWidth, params.pregIdxWidth))))
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
@@ -139,6 +140,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   private val vfSrcStateVec  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, SrcState()))) 
   private val v0SrcStateVec  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, SrcState())))
   private val vlSrcStateVec  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, SrcState())))
+  private val vlSrcIsZeroVec  = Option.when(io.readVlInfo.isDefined )(Wire(Vec(numVlStateRead, Bool())))
+  private val vlSrcIsVlMaxVec  = Option.when(io.readVlInfo.isDefined )(Wire(Vec(numVlStateRead, Bool())))
   private val intAllSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIn * numRegSrc, SrcState())))
   private val fpAllSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
   private val vecAllSrcStateVec = Option.when(io.readVfState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
@@ -204,6 +207,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
 
     io.readVlState.get.map(_.req).zip(vlReqPsrcVec).foreach(x => x._1 := x._2)
     io.readVlState.get.map(_.resp).zip(vlSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readVlInfo.get.map(_.is_zero).zip(vlSrcIsZeroVec.get).foreach(x => x._2 := x._1)
+    io.readVlInfo.get.map(_.is_vlmax).zip(vlSrcIsVlMaxVec.get).foreach(x => x._2 := x._1)
     io.readVlState.get.map(_.loadDependency).zip(vlSrcLoadDependency.get).foreach(x => x._2 := x._1)
 
     for (i <- 0 until numIn) {
@@ -215,6 +220,30 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
       vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 1)       := vlSrcStateVec.get(i);
       vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 2) := v0SrcLoadDependency.get(i);
       vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 1) := vlSrcLoadDependency.get(i);
+
+      // same as eliminate the old vd dependency in issue queue when wake up by wakeup
+      val isDependOldVd = io.in(i).bits.vpu.isDependOldVd
+      val isWritePartVd = io.in(i).bits.vpu.isWritePartVd
+      val vta = io.in(i).bits.vpu.vta
+      val vma = io.in(i).bits.vpu.vma
+      val vm = io.in(i).bits.vpu.vm
+      val vlIsVlmax = vlSrcIsVlMaxVec.get(i)
+      val vlIsZero = vlSrcIsZeroVec.get(i)
+      val vlIsNonZero = !vlSrcIsZeroVec.get(i)
+      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
+      val ignoreWhole = (vm =/= 0.U || vma) && vta
+      for (j <- 0 until numRegSrcVf) {
+        val ignoreOldVd = Wire(Bool())
+        if (j == numRegSrcVf - 1) {
+          // check whether can ignore the old vd dependency
+          ignoreOldVd := SrcState.isReady(vlSrcStateVec.get(i)) && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
+        } else {
+          // check whether can ignore the src
+          ignoreOldVd := false.B
+        }
+        uopsIn(i).bits.srcType(j) := Mux(ignoreOldVd, SrcType.no, io.in(i).bits.srcType(j))
+        vecAllSrcStateVec.get(i * numRegSrc + j) := Mux(ignoreOldVd, SrcState.rdy, vfSrcStateVec.get(i * numRegSrcVf + j))
+      }
     }
   }
   if (io.readRCTagTableState.isDefined) {

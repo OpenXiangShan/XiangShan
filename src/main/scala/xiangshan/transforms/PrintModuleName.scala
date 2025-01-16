@@ -17,6 +17,8 @@
 
 package xiangshan.transforms
 
+import utility.XSLog
+
 class PrintModuleName extends firrtl.options.Phase {
 
   override def invalidates(a: firrtl.options.Phase) = false
@@ -33,7 +35,7 @@ class PrintModuleName extends firrtl.options.Phase {
 
     def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
       case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en) =>
-        firrtl.ir.Print(info, firrtl.ir.StringLit(string.replace(utility.XSLog.MagicStr, "%m")), args, clk, en)
+        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en)
       case other: firrtl.ir.Statement =>
         other.mapStmt(onStmt)
     }

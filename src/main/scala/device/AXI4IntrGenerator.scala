@@ -63,9 +63,21 @@ class AXI4IntrGenerator
     for (i <- 0 until delayCycles) {
       w_fire = RegNext(w_fire, init=false.B)
     }
-    val w_data = DelayN(in.w.bits.data(31, 0), delayCycles)
+    val dataWidth = in.w.bits.data.getWidth
+    val w_data =
+      if (dataWidth == 32)
+        in.w.bits.data
+      else {
+        val addrCandidate = waddr(log2Ceil(dataWidth / 8) - 1, 2)
+        Mux1H(
+          Seq.tabulate(dataWidth / 32)(
+            i => (addrCandidate === i.U, in.w.bits.data(i * 32 + 31, i * 32))
+          )
+        )
+      }
+    val w_data_delayed = DelayN(w_data, delayCycles)
     when (w_fire) {
-      intrGenRegs(DelayN(waddr(4, 2), delayCycles)) := w_data
+      intrGenRegs(DelayN(waddr(4, 2), delayCycles)) := w_data_delayed
     }
     // Clear takes effect immediately
     when (in.w.fire && in.w.bits.data === 0.U) {

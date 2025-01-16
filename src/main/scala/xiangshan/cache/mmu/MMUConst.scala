@@ -58,12 +58,12 @@ case class L2TLBParameters
   l2Replacer: Option[String] = Some("plru"),
   // l1
   l1nSets: Int = 8,
-  l1nWays: Int = 4,
+  l1nWays: Int = 2,
   l1ReservedBits: Int = 10,
   l1Replacer: Option[String] = Some("setplru"),
   // l0
   l0nSets: Int = 32,
-  l0nWays: Int = 8,
+  l0nWays: Int = 4,
   l0ReservedBits: Int = 3,
   l0Replacer: Option[String] = Some("setplru"),
   // sp
@@ -109,6 +109,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteResLen = 7
   val ptePbmtLen = 2
   val pteNLen = 1
+  val pteNapotBits = 4
   val ppnHignLen = ptePPNLen - ppnLen
   val gvpnLen = GPAddrBits - offLen
 
@@ -137,6 +138,10 @@ trait HasTlbConst extends HasXSParameter {
 
   def Sv39x4 = "h8".U
   def Sv48x4 = "h9".U
+
+  def PMLEN7  = "b10".U
+  def PMLEN16 = "b11".U
+  def MaxMaskedWidth = 16
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -248,8 +253,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL0SetIdxLen = log2Up(PtwL0SetNum)
   val PtwL0TagLen = if (EnableSv48) vpnnLen * 4 - PtwL0IdxLen + extendVpnnBits else vpnnLen * 3 - PtwL0IdxLen + extendVpnnBits
 
-  // super page, including 1GB and 2MB page
-  val SPTagLen = if (EnableSv48) vpnnLen * 3 + extendVpnnBits else vpnnLen * 2 + extendVpnnBits
+  // super page, including 512GB, 1GB, 2MB page && Svnapot page
+  val SPTagLen = if (EnableSv48) vpnnLen * 4 + extendVpnnBits else vpnnLen * 3 + extendVpnnBits
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize

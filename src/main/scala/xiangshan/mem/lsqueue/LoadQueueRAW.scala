@@ -37,7 +37,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(ValidIO(new Redirect))
-    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
 
     // violation query
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
@@ -53,6 +52,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val stIssuePtr       = Input(new SqPtr)
     val lqFull           = Output(Bool())
   })
+
+  private def PartialPAddrWidth: Int = 24
+  private def genPartialPAddr(paddr: UInt) = {
+    paddr(DCacheVWordOffset + PartialPAddrWidth - 1, DCacheVWordOffset)
+  }
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
   //  LoadQueueRAW field
@@ -70,7 +74,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
-    gen = UInt(PAddrBits.W),
+    gen = UInt(PartialPAddrWidth.W),
     numEntries = LoadQueueRAWSize,
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
@@ -136,9 +140,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (needEnqueue(w) && enq.ready) {
       acceptedVec(w) := true.B
 
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
-
       freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
@@ -147,7 +148,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.bits.paddr
+      paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
 
       //  Write mask
       maskModule.io.wen(w) := true.B
@@ -158,6 +159,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       uop(enqIndex) := enq.bits.uop
       datavalid(enqIndex) := enq.bits.data_valid
     }
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
@@ -173,18 +176,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // when the stores that "older than" current load address were ready.
   // current load will be released.
-  val vecLdCanceltmp = Wire(Vec(LoadQueueRAWSize, Vec(VecLoadPipelineWidth, Bool())))
-  val vecLdCancel = Wire(Vec(LoadQueueRAWSize, Bool()))
   for (i <- 0 until LoadQueueRAWSize) {
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
-    val fbk = io.vecFeedback
-    for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-    }
-    vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocated(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
+    when (allocated(i) && (deqNotBlock || needCancel)) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }
@@ -289,7 +285,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val storeIn = io.storeIn
 
   def detectRollback(i: Int) = {
-    paddrModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.paddr, storeIn(i).valid)
+    paddrModule.io.violationMdata(i) := genPartialPAddr(RegEnable(storeIn(i).bits.paddr, storeIn(i).valid))
     maskModule.io.violationMdata(i) := RegEnable(storeIn(i).bits.mask, storeIn(i).valid)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt

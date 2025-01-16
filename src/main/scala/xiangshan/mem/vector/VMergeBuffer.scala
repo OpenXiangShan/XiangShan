@@ -175,20 +175,27 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // handle the situation where multiple ports are going to write the same uop queue entry
   // select the oldest exception and count the flownum of the pipeline writeback.
   val mergePortMatrix        = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
+  val mergePortMatrixHasExcp = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
   val mergedByPrevPortVec    = Wire(Vec(pipeWidth, Bool()))
   (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
-    mergePortMatrix(i)(j) := (j == i).B ||
+    val mergePortValid = (j == i).B ||
       (j > i).B &&
       io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
       io.fromPipeline(j).valid
+
+    mergePortMatrix(i)(j)        := mergePortValid
+    mergePortMatrixHasExcp(i)(j) := mergePortValid && io.fromPipeline(j).bits.hasException
   }}
   (0 until pipeWidth).map{case i =>
     mergedByPrevPortVec(i) := (i != 0).B && Cat((0 until i).map(j =>
       io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
       io.fromPipeline(j).valid)).orR
   }
-  dontTouch(mergePortMatrix)
-  dontTouch(mergedByPrevPortVec)
+
+  if (backendParams.debugEn){
+    dontTouch(mergePortMatrix)
+    dontTouch(mergedByPrevPortVec)
+  }
 
   // for exception, select exception, when multi port writeback exception, we need select oldest one
   def selectOldest[T <: VecPipelineFeedbackIO](valid: Seq[Bool], bits: Seq[T], sel: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
@@ -225,12 +232,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val wbMbIndex        = pipeBits.map(_.mBIndex)
   val wbElemIdxInField = wbElemIdx.zip(wbMbIndex).map(x => x._1 & (entries(x._2).vlmax - 1.U))
 
-  val portHasExcp       = pipeBits.zip(mergePortMatrix).map{case (port, v) =>
-    (0 until pipeWidth).map{case i =>
-      val pipeHasExcep = ExceptionNO.selectByFu(port.exceptionVec, fuCfg).asUInt.orR
-      (v(i) && ((pipeHasExcep && io.fromPipeline(i).bits.mask.orR) || TriggerAction.isDmode(port.trigger))) // this port have exception or merged port have exception
-    }.reduce(_ || _)
-  }
+  // this port have exception or merged port have exception
+  val portHasExcp       = mergePortMatrixHasExcp.map{_.reduce(_ || _)}
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val entry               = entries(wbMbIndex(i))
@@ -242,7 +245,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entryVstart         = entry.vstart
     val entryElemIdx        = entry.elemIdx
 
-    val sel                    = selectOldest(mergePortMatrix(i), pipeBits, wbElemIdxInField)
+    val sel                    = selectOldest(mergePortMatrixHasExcp(i), pipeBits, wbElemIdxInField)
     val selPort                = sel._2
     val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
@@ -280,9 +283,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // for pipeline writeback
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex          = pipewb.bits.mBIndex
-    val flowNumOffset    = Mux(pipewb.bits.usSecondInv,
-                               2.U,
-                               PopCount(mergePortMatrix(i)))
+    val flowNumOffset    = PopCount(mergePortMatrix(i))
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
     val hasExp           = ExceptionNO.selectByFu(pipewb.bits.exceptionVec, fuCfg).asUInt.orR
 
@@ -303,15 +304,13 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       needRSReplay(wbIndex) := true.B
     }
     pipewb.ready := true.B
-    XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, "FlowWriteback overflow!!\n")
-    XSError(!allocated(latchWbIndex) && latchWbValid, "Writeback error flow!!\n")
+    XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, s"entry: $latchWbIndex, FlowWriteback overflow!!\n")
+    XSError(!allocated(latchWbIndex) && latchWbValid, s"entry: $latchWbIndex, Writeback error flow!!\n")
   }
-  // for inorder mem asscess
-  io.toSplit := DontCare
 
   //uopwriteback(deq)
   for (i <- 0 until uopSize){
-    when(allocated(i) && entries(i).allReady()){
+    when(allocated(i) && entries(i).allReady() && !needCancel(i)){
       uopFinish(i) := true.B
     }
   }
@@ -376,6 +375,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     enablePreAlloc = false,
     moduleName = "VLoad MergeBuffer freelist"
   ))
+  io.toSplit.get.threshold := freeCount <= 6.U
 
   //merge data
   val flowWbElemIdx     = Wire(Vec(pipeWidth, UInt(elemIdxBits.W)))
@@ -464,5 +464,10 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.isFromLoadUnit   := DontCare
     sink.uop.vpu.vstart   := source.vstart
     sink
+  }
+
+  // from misalignBuffer flush
+  when(io.fromMisalignBuffer.get.flush){
+    needRSReplay(io.fromMisalignBuffer.get.mbIndex) := true.B
   }
 }

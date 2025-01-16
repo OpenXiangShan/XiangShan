@@ -35,8 +35,8 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   // probe queue entry ID
   val id = UInt(log2Up(cfg.nProbeEntries).W)
 
-  def dump() = {
-    XSDebug("ProbeReq source: %d opcode: %d addr: %x param: %d\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "ProbeReq source: %d opcode: %d addr: %x param: %d\n",
       source, opcode, addr, param)
   }
 }
@@ -72,13 +72,9 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   io.block_addr.valid := state =/= s_invalid
   io.block_addr.bits  := req.addr
 
-  when (state =/= s_invalid) {
-    XSDebug("state: %d\n", state)
-  }
+  XSDebug(state =/= s_invalid, "state: %d\n", state)
 
-  when (state =/= s_invalid) {
-    XSDebug("ProbeEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
-  }
+  XSDebug(state =/= s_invalid, "ProbeEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
 
   when (state === s_invalid) {
     io.req.ready := true.B
@@ -219,18 +215,12 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   // debug output
-  when (io.mem_probe.fire) {
-    XSDebug("mem_probe: ")
-    io.mem_probe.bits.dump
-  }
+  XSDebug(io.mem_probe.fire, "mem_probe: ")
+  io.mem_probe.bits.dump(io.mem_probe.fire)
 
-//  when (io.pipe_req.fire) {
-//    io.pipe_req.bits.dump()
-//  }
+// io.pipe_req.bits.dump(io.pipe_req.fire)
 
-  when (io.lrsc_locked_block.valid) {
-    XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
-  }
+  XSDebug(io.lrsc_locked_block.valid, "lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   XSPerfAccumulate("ProbeL1DCache", io.mem_probe.fire)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))

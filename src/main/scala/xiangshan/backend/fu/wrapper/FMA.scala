@@ -22,16 +22,16 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   // modules
   private val fma = Module(new FloatFMA)
 
-  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
-                              fp_fmt === VSew.e16 && !src1.head(48).andR
-  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
+  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
                               fp_fmt === VSew.e16 && !src0.head(48).andR
+  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
+                              fp_fmt === VSew.e16 && !src1.head(48).andR
   val fp_cIsFpCanonicalNAN  = !(opcode === VfmaType.vfmul) && (fp_fmt === VSew.e32 && !src2.head(32).andR ||
                               fp_fmt === VSew.e16 && !src2.head(48).andR)
 
   fma.io.fire         := io.in.valid
-  fma.io.fp_a         := src1
-  fma.io.fp_b         := src0
+  fma.io.fp_a         := src0
+  fma.io.fp_b         := src1
   fma.io.fp_c         := src2
   fma.io.round_mode   := rm
   fma.io.fp_format    := fp_fmt

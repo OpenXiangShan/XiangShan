@@ -30,7 +30,9 @@ trait HasXSDts {
       "device_type" -> "cpu".asProperty,
       "status" -> "okay".asProperty,
       "clock-frequency" -> 0.asProperty,
-      "riscv,isa" -> "rv64imafdch".asProperty,
+      "riscv,isa" -> "rv64imafdcvh".asProperty, // deprecated
+      "riscv,isa-base" -> ISABase.asProperty,
+      "riscv,isa-extensions" -> ISAExtensions.map(ResourceString),
       "timebase-frequency" -> 1000000.asProperty
     )
 

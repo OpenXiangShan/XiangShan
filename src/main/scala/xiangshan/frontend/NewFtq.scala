@@ -12,6 +12,14 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Glenn Reinman, Todd Austin, and Brad Calder. "[A scalable front-end architecture for fast instruction delivery.]
+* (https://doi.org/10.1109/ISCA.1999.765954)" 26th International Symposium on Computer Architecture (ISCA). 1999.
+*
 ***************************************************************************************/
 
 package xiangshan.frontend
@@ -68,7 +76,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplate(gen, FtqSize, withClockGate = true))
     sram.io.r.req.valid       := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i)               := sram.io.r.resp.data(0)
@@ -210,8 +218,9 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FtqToPrefetchIO(implicit p: Parameters) extends XSBundle {
-  val req          = Decoupled(new FtqICacheInfo)
-  val flushFromBpu = new BpuFlushInfo
+  val req              = Decoupled(new FtqICacheInfo)
+  val flushFromBpu     = new BpuFlushInfo
+  val backendException = UInt(ExceptionType.width.W)
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {
@@ -246,12 +255,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     val mispred_mask      = Output(Vec(numBr + 1, Bool()))
 
     // for perf counters
-    val is_init_entry            = Output(Bool())
-    val is_old_entry             = Output(Bool())
-    val is_new_br                = Output(Bool())
-    val is_jalr_target_modified  = Output(Bool())
-    val is_always_taken_modified = Output(Bool())
-    val is_br_full               = Output(Bool())
+    val is_init_entry           = Output(Bool())
+    val is_old_entry            = Output(Bool())
+    val is_new_br               = Output(Bool())
+    val is_jalr_target_modified = Output(Bool())
+    val is_strong_bias_modified = Output(Bool())
+    val is_br_full              = Output(Bool())
   })
 
   // no mispredictions detected at predecode
@@ -284,7 +293,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     init_br_slot.valid  := true.B
     init_br_slot.offset := io.cfiIndex.bits
     init_br_slot.setLowerStatByTarget(io.start_addr, io.target, numBr == 1)
-    init_entry.always_taken(0) := true.B // set to always taken on init
+    init_entry.strong_bias(0) := true.B // set to strong bias on init
   }
 
   // case jmp
@@ -292,14 +301,22 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     init_entry.tailSlot.offset := pd.jmpOffset
     init_entry.tailSlot.valid  := new_jmp_is_jal || new_jmp_is_jalr
     init_entry.tailSlot.setLowerStatByTarget(io.start_addr, Mux(cfi_is_jalr, io.target, pd.jalTarget), isShare = false)
+    init_entry.strong_bias(numBr - 1) := new_jmp_is_jalr // set strong bias for the jalr on init
   }
 
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
   init_entry.carry   := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos - instOffsetBits), true.B)
-  init_entry.isJalr  := new_jmp_is_jalr
-  init_entry.isCall  := new_jmp_is_call
-  init_entry.isRet   := new_jmp_is_ret
+
+  require(
+    isPow2(PredictWidth),
+    "If PredictWidth does not satisfy the power of 2," +
+      "pftAddr := getLower(io.start_addr) and carry := true.B  not working!!"
+  )
+
+  init_entry.isJalr := new_jmp_is_jalr
+  init_entry.isCall := new_jmp_is_call
+  init_entry.isRet  := new_jmp_is_ret
   // that means fall thru points to the middle of an inst
   init_entry.last_may_be_rvi_call := pd.jmpOffset === (PredictWidth - 1).U && !pd.rvcMask(pd.jmpOffset)
 
@@ -329,9 +346,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
       slot.valid  := true.B
       slot.offset := new_br_offset
       slot.setLowerStatByTarget(io.start_addr, io.target, i == numBr - 1)
-      old_entry_modified.always_taken(i) := true.B
+      old_entry_modified.strong_bias(i) := true.B
     }.elsewhen(new_br_offset > oe.allSlotsForBr(i).offset) {
-      old_entry_modified.always_taken(i) := false.B
+      old_entry_modified.strong_bias(i) := false.B
       // all other fields remain unchanged
     }.otherwise {
       // case i == 0, remain unchanged
@@ -339,7 +356,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
         val noNeedToMoveFromFormerSlot = (i == numBr - 1).B && !oe.brSlots.last.valid
         when(!noNeedToMoveFromFormerSlot) {
           slot.fromAnotherSlot(oe.allSlotsForBr(i - 1))
-          old_entry_modified.always_taken(i) := oe.always_taken(i)
+          old_entry_modified.strong_bias(i) := oe.strong_bias(i)
         }
       }
     }
@@ -371,20 +388,28 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val jalr_target_modified = cfi_is_jalr && (old_target =/= io.target) && old_tail_is_jmp // TODO: pass full jalr target
   when(jalr_target_modified) {
     old_entry_jmp_target_modified.setByJmpTarget(io.start_addr, io.target)
-    old_entry_jmp_target_modified.always_taken := 0.U.asTypeOf(Vec(numBr, Bool()))
+    old_entry_jmp_target_modified.strong_bias := 0.U.asTypeOf(Vec(numBr, Bool()))
   }
 
-  val old_entry_always_taken    = WireInit(oe)
-  val always_taken_modified_vec = Wire(Vec(numBr, Bool())) // whether modified or not
+  val old_entry_strong_bias    = WireInit(oe)
+  val strong_bias_modified_vec = Wire(Vec(numBr, Bool())) // whether modified or not
   for (i <- 0 until numBr) {
-    old_entry_always_taken.always_taken(i) :=
-      oe.always_taken(i) && io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i)
-    always_taken_modified_vec(i) := oe.always_taken(i) && !old_entry_always_taken.always_taken(i)
+    when(br_recorded_vec(0)) {
+      old_entry_strong_bias.strong_bias(0) :=
+        oe.strong_bias(0) && io.cfiIndex.valid && oe.brValids(0) && io.cfiIndex.bits === oe.brOffset(0)
+    }.elsewhen(br_recorded_vec(numBr - 1)) {
+      old_entry_strong_bias.strong_bias(0) := false.B
+      old_entry_strong_bias.strong_bias(numBr - 1) :=
+        oe.strong_bias(numBr - 1) && io.cfiIndex.valid && oe.brValids(numBr - 1) && io.cfiIndex.bits === oe.brOffset(
+          numBr - 1
+        )
+    }
+    strong_bias_modified_vec(i) := oe.strong_bias(i) && oe.brValids(i) && !old_entry_strong_bias.strong_bias(i)
   }
-  val always_taken_modified = always_taken_modified_vec.reduce(_ || _)
+  val strong_bias_modified = strong_bias_modified_vec.reduce(_ || _)
 
   val derived_from_old_entry =
-    Mux(is_new_br, old_entry_modified, Mux(jalr_target_modified, old_entry_jmp_target_modified, old_entry_always_taken))
+    Mux(is_new_br, old_entry_modified, Mux(jalr_target_modified, old_entry_jmp_target_modified, old_entry_strong_bias))
 
   io.new_entry := Mux(!hit, init_entry, derived_from_old_entry)
 
@@ -399,12 +424,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.mispred_mask.last := io.new_entry.jmpValid && io.mispredict_vec(pd.jmpOffset)
 
   // for perf counters
-  io.is_init_entry            := !hit
-  io.is_old_entry             := hit && !is_new_br && !jalr_target_modified && !always_taken_modified
-  io.is_new_br                := hit && is_new_br
-  io.is_jalr_target_modified  := hit && jalr_target_modified
-  io.is_always_taken_modified := hit && always_taken_modified
-  io.is_br_full               := hit && is_new_br && may_have_to_replace
+  io.is_init_entry           := !hit
+  io.is_old_entry            := hit && !is_new_br && !jalr_target_modified && !strong_bias_modified
+  io.is_new_br               := hit && is_new_br
+  io.is_jalr_target_modified := hit && jalr_target_modified
+  io.is_strong_bias_modified := hit && strong_bias_modified
+  io.is_br_full              := hit && is_new_br && may_have_to_replace
 }
 
 class FtqPcMemWrapper(numOtherReads: Int)(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo {
@@ -558,23 +583,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
   // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
   // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
-  val backendIpf        = RegInit(false.B)
-  val backendIgpf       = RegInit(false.B)
-  val backendIaf        = RegInit(false.B)
+  val backendException  = RegInit(ExceptionType.none)
   val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
   when(fromBackendRedirect.valid) {
-    backendIpf  := fromBackendRedirect.bits.cfiUpdate.backendIPF
-    backendIgpf := fromBackendRedirect.bits.cfiUpdate.backendIGPF
-    backendIaf  := fromBackendRedirect.bits.cfiUpdate.backendIAF
+    backendException := ExceptionType.fromOH(
+      has_pf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
+      has_gpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
+      has_af = fromBackendRedirect.bits.cfiUpdate.backendIAF
+    )
     when(
-      fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF || fromBackendRedirect.bits.cfiUpdate.backendIAF
+      fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF ||
+        fromBackendRedirect.bits.cfiUpdate.backendIAF
     ) {
       backendPcFaultPtr := ifuWbPtr_write
     }
   }.elsewhen(ifuWbPtr =/= backendPcFaultPtr) {
-    backendIpf  := false.B
-    backendIgpf := false.B
-    backendIaf  := false.B
+    backendException := ExceptionType.none
   }
 
   // **********************************************************************
@@ -899,13 +923,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     copy.fromFtqPcBundle(toICachePcBundle(i))
     copy.ftqIdx := ifuPtr
   }
-  io.toICache.req.bits.backendIpf  := backendIpf && backendPcFaultPtr === ifuPtr
-  io.toICache.req.bits.backendIgpf := backendIgpf && backendPcFaultPtr === ifuPtr
-  io.toICache.req.bits.backendIaf  := backendIaf && backendPcFaultPtr === ifuPtr
+  io.toICache.req.bits.backendException := ExceptionType.hasException(backendException) && backendPcFaultPtr === ifuPtr
 
   io.toPrefetch.req.valid := toPrefetchEntryToSend && pfPtr =/= bpuPtr
   io.toPrefetch.req.bits.fromFtqPcBundle(toPrefetchPcBundle)
-  io.toPrefetch.req.bits.ftqIdx := pfPtr
+  io.toPrefetch.req.bits.ftqIdx  := pfPtr
+  io.toPrefetch.backendException := Mux(backendPcFaultPtr === pfPtr, backendException, ExceptionType.none)
   // io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
   //   bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
@@ -926,13 +949,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       entry_hit_status(ifuPtr.value) := h_false_hit
       // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
     }
-    XSDebug(
-      true.B,
-      "fallThruError! start:%x, fallThru:%x\n",
-      io.toIfu.req.bits.startAddr,
-      io.toIfu.req.bits.nextStartAddr
-    )
   }
+  XSDebug(
+    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit,
+    "fallThruError! start:%x, fallThru:%x\n",
+    io.toIfu.req.bits.startAddr,
+    io.toIfu.req.bits.nextStartAddr
+  )
 
   XSPerfAccumulate(
     f"fall_through_error_to_ifu",
@@ -1014,10 +1037,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         (pred_ftb_entry.isRet && !(jmp_pd.valid && jmp_pd.isRet)))
 
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
-    XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
-
     // assert(!has_false_hit)
   }
+  XSDebug(
+    RegNext(hit_pd_valid) && has_false_hit,
+    "FTB false hit by br or jal or hit_pd, startAddr: %x\n",
+    pdWb.bits.pc(0)
+  )
 
   when(has_false_hit) {
     entry_hit_status(wb_idx_reg) := h_false_hit
@@ -1336,9 +1362,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_ftb_update_stall    = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
 
-  val validInstructions       = commitStateQueueReg(commPtr.value).map(s => s === c_toCommit || s === c_committed)
-  val lastInstructionStatus   = PriorityMux(validInstructions.reverse.zip(commitStateQueueReg(commPtr.value).reverse))
-  val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed
+  val validInstructions     = commitStateQueueReg(commPtr.value).map(s => s === c_toCommit || s === c_committed)
+  val lastInstructionStatus = PriorityMux(validInstructions.reverse.zip(commitStateQueueReg(commPtr.value).reverse))
+  val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed ||
+    commitStateQueueReg(commPtr.value)(0) === c_empty && commitStateQueueReg(commPtr.value)(1) === c_flushed
   canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     (isAfter(robCommPtr, commPtr) ||
       validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed)
@@ -1429,9 +1456,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       bpu_ftb_update_stall := 0.U
     }
     is(3.U) {
-      XSError(true.B, "bpu_ftb_update_stall should be 0, 1 or 2")
+      // XSError below
     }
   }
+  XSError(bpu_ftb_update_stall === 3.U, "bpu_ftb_update_stall should be 0, 1 or 2")
 
   // TODO: remove this
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
@@ -1628,12 +1656,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftb_old_entry = u(ftbEntryGen.is_old_entry)
 
   val ftb_modified_entry =
-    u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified || ftbEntryGen.is_always_taken_modified)
+    u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified || ftbEntryGen.is_strong_bias_modified)
   val ftb_modified_entry_new_br               = u(ftbEntryGen.is_new_br)
   val ftb_modified_entry_ifu_redirected       = u(ifuRedirected(do_commit_ptr.value))
   val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
   val ftb_modified_entry_br_full              = ftb_modified_entry && ftbEntryGen.is_br_full
-  val ftb_modified_entry_always_taken         = ftb_modified_entry && ftbEntryGen.is_always_taken_modified
+  val ftb_modified_entry_strong_bias          = ftb_modified_entry && ftbEntryGen.is_strong_bias_modified
 
   def getFtbEntryLen(pc: UInt, entry: FTBEntry) = (entry.getFallThrough(pc) - pc) >> instOffsetBits
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
@@ -1645,32 +1673,32 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfHistogram("ftq_has_entry", validEntries, true.B, 0, FtqSize + 1, 1)
 
   val perfCountsMap = Map(
-    "BpInstr"                         -> PopCount(mbpInstrs),
-    "BpBInstr"                        -> PopCount(mbpBRights | mbpBWrongs),
-    "BpRight"                         -> PopCount(mbpRights),
-    "BpWrong"                         -> PopCount(mbpWrongs),
-    "BpBRight"                        -> PopCount(mbpBRights),
-    "BpBWrong"                        -> PopCount(mbpBWrongs),
-    "BpJRight"                        -> PopCount(mbpJRights),
-    "BpJWrong"                        -> PopCount(mbpJWrongs),
-    "BpIRight"                        -> PopCount(mbpIRights),
-    "BpIWrong"                        -> PopCount(mbpIWrongs),
-    "BpCRight"                        -> PopCount(mbpCRights),
-    "BpCWrong"                        -> PopCount(mbpCWrongs),
-    "BpRRight"                        -> PopCount(mbpRRights),
-    "BpRWrong"                        -> PopCount(mbpRWrongs),
-    "ftb_false_hit"                   -> PopCount(ftb_false_hit),
-    "ftb_hit"                         -> PopCount(ftb_hit),
-    "ftb_new_entry"                   -> PopCount(ftb_new_entry),
-    "ftb_new_entry_only_br"           -> PopCount(ftb_new_entry_only_br),
-    "ftb_new_entry_only_jmp"          -> PopCount(ftb_new_entry_only_jmp),
-    "ftb_new_entry_has_br_and_jmp"    -> PopCount(ftb_new_entry_has_br_and_jmp),
-    "ftb_old_entry"                   -> PopCount(ftb_old_entry),
-    "ftb_modified_entry"              -> PopCount(ftb_modified_entry),
-    "ftb_modified_entry_new_br"       -> PopCount(ftb_modified_entry_new_br),
-    "ftb_jalr_target_modified"        -> PopCount(ftb_modified_entry_jalr_target_modified),
-    "ftb_modified_entry_br_full"      -> PopCount(ftb_modified_entry_br_full),
-    "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
+    "BpInstr"                        -> PopCount(mbpInstrs),
+    "BpBInstr"                       -> PopCount(mbpBRights | mbpBWrongs),
+    "BpRight"                        -> PopCount(mbpRights),
+    "BpWrong"                        -> PopCount(mbpWrongs),
+    "BpBRight"                       -> PopCount(mbpBRights),
+    "BpBWrong"                       -> PopCount(mbpBWrongs),
+    "BpJRight"                       -> PopCount(mbpJRights),
+    "BpJWrong"                       -> PopCount(mbpJWrongs),
+    "BpIRight"                       -> PopCount(mbpIRights),
+    "BpIWrong"                       -> PopCount(mbpIWrongs),
+    "BpCRight"                       -> PopCount(mbpCRights),
+    "BpCWrong"                       -> PopCount(mbpCWrongs),
+    "BpRRight"                       -> PopCount(mbpRRights),
+    "BpRWrong"                       -> PopCount(mbpRWrongs),
+    "ftb_false_hit"                  -> PopCount(ftb_false_hit),
+    "ftb_hit"                        -> PopCount(ftb_hit),
+    "ftb_new_entry"                  -> PopCount(ftb_new_entry),
+    "ftb_new_entry_only_br"          -> PopCount(ftb_new_entry_only_br),
+    "ftb_new_entry_only_jmp"         -> PopCount(ftb_new_entry_only_jmp),
+    "ftb_new_entry_has_br_and_jmp"   -> PopCount(ftb_new_entry_has_br_and_jmp),
+    "ftb_old_entry"                  -> PopCount(ftb_old_entry),
+    "ftb_modified_entry"             -> PopCount(ftb_modified_entry),
+    "ftb_modified_entry_new_br"      -> PopCount(ftb_modified_entry_new_br),
+    "ftb_jalr_target_modified"       -> PopCount(ftb_modified_entry_jalr_target_modified),
+    "ftb_modified_entry_br_full"     -> PopCount(ftb_modified_entry_br_full),
+    "ftb_modified_entry_strong_bias" -> PopCount(ftb_modified_entry_strong_bias)
   ) ++ mispred_stage_map ++ br_mispred_stage_map ++ jalr_mispred_stage_map ++
     correct_stage_map ++ br_correct_stage_map ++ jalr_correct_stage_map
 

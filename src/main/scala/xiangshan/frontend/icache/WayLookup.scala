@@ -1,18 +1,19 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-  * Copyright (c) 2020-2021 Peng Cheng Laboratory
-  *
-  * XiangShan is licensed under Mulan PSL v2.
-  * You can use this software according to the terms and conditions of the Mulan PSL v2.
-  * You may obtain a copy of Mulan PSL v2 at:
-  *          http://license.coscl.org.cn/MulanPSL2
-  *
-  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-  *
-  * See the Mulan PSL v2 for more details.
-  ***************************************************************************************/
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
 
 package xiangshan.frontend.icache
 
@@ -39,7 +40,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  val gpaddr:            UInt = UInt(GPAddrBits.W)
+  // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
+  val gpaddr:            UInt = UInt(PAddrBitsMax.W)
   val isForVSnonLeafPTE: Bool = Bool()
 }
 
@@ -59,18 +61,18 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
-  val flush  = Input(Bool())
-  val read   = DecoupledIO(new WayLookupInfo)
-  val write  = Flipped(DecoupledIO(new WayLookupInfo))
-  val update = Flipped(ValidIO(new ICacheMissResp))
+  val flush:  Bool                       = Input(Bool())
+  val read:   DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
+  val write:  DecoupledIO[WayLookupInfo] = Flipped(DecoupledIO(new WayLookupInfo))
+  val update: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
 }
 
-class WayLookup(implicit p: Parameters) extends ICacheModule {
+class WayLookup(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
   val io: WayLookupInterface = IO(new WayLookupInterface)
 
-  class WayLookupPtr(implicit p: Parameters) extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)
+  class WayLookupPtr extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)
   private object WayLookupPtr {
-    def apply(f: Bool, v: UInt)(implicit p: Parameters): WayLookupPtr = {
+    def apply(f: Bool, v: UInt): WayLookupPtr = {
       val ptr = Wire(new WayLookupPtr)
       ptr.flag  := f
       ptr.value := v
@@ -126,12 +128,13 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
           // also update meta_codes
-          // we have getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i), so we can use entry.ptag(i) for better timing
+          // NOTE: we have getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i),
+          //       so we can use entry.ptag(i) for better timing
           entry.meta_codes(i) := encodeMetaECC(entry.ptag(i))
         }.elsewhen(way_same) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
-          // dont care meta_codes, since it's not used for a missed request
+          // don't care meta_codes, since it's not used for a missed request
         }
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)
@@ -153,7 +156,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     io.read.bits.entry := entries(readPtr.value)
     when(gpf_hit) { // ptr match && entry valid
       io.read.bits.gpf := gpf_entry.bits
-      // also clear gpf_entry.valid when it's read, note this will be override by write (L175)
+      // also clear gpf_entry.valid when it's read, note this will be overridden by write (L175)
       when(io.read.fire) {
         gpf_entry.valid := false.B
       }
@@ -167,7 +170,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * write
     ******************************************************************************
     */
-  // if there is a valid gpf to be read, we should stall the write
+  // if there is a valid gpf to be read, we should stall write
   private val gpf_stall = gpf_entry.valid && !(io.read.fire && gpf_hit)
   io.write.ready := !full && !gpf_stall
   when(io.write.fire) {

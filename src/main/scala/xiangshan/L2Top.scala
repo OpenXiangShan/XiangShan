@@ -33,6 +33,7 @@ import top.BusPerfMonitor
 import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -80,6 +81,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   ))
 
   val i_mmio_port = TLTempNode()
+  val icachectrl_port_opt = if(icacheParameters.cacheCtrlAddressOpt.nonEmpty) Option(TLTempNode()) else None
   val d_mmio_port = TLTempNode()
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
@@ -132,11 +134,22 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     case None =>
       memory_port.get := l1_xbar
   }
-  
+
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  mmio_port := TLBuffer() := mmio_xbar
+  if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
+    icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
+  }
+
+  // filter out in-core addresses before sent to mmio_port
+  // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
+  private def mmioFilters: Seq[AddressSet] =
+    (icacheParameters.cacheCtrlAddressOpt ++ dcacheParameters.cacheCtrlAddressOpt).toSeq
+  mmio_port :=
+    TLFilter(TLFilter.mSubtract(mmioFilters)) :=
+    TLBuffer() :=
+    mmio_xbar
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
@@ -153,9 +166,17 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
+      val cpu_critical_error = new Bundle() {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
+      }
       val hartIsInReset = new Bundle() {
         val resetInFrontend = Input(Bool())
         val toTile = Output(Bool())
+      }
+      val traceCoreInterface = new Bundle{
+        val fromCore = Flipped(new TraceCoreInterface)
+        val toTile   = new TraceCoreInterface
       }
       val debugTopDown = new Bundle() {
         val robTrueCommit = Input(UInt(64.W))
@@ -173,13 +194,42 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
-    beu.module.io.errors <> io.beu_errors
+    beu.module.io.errors.icache := io.beu_errors.icache
+    beu.module.io.errors.dcache := io.beu_errors.dcache
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
+    io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
+    // trace interface
+    val traceToTile = io.traceCoreInterface.toTile
+    val traceFromCore = io.traceCoreInterface.fromCore
+    traceFromCore.fromEncoder := RegNext(traceToTile.fromEncoder)
+    traceToTile.toEncoder.trap := RegEnable(
+      traceFromCore.toEncoder.trap,
+      traceFromCore.toEncoder.groups(0).valid && Itype.isTrap(traceFromCore.toEncoder.groups(0).bits.itype)
+    )
+    traceToTile.toEncoder.priv := RegEnable(
+      traceFromCore.toEncoder.priv,
+      traceFromCore.toEncoder.groups(0).valid
+    )
+    (0 until TraceGroupNum).foreach{ i =>
+      traceToTile.toEncoder.groups(i).valid := RegNext(traceFromCore.toEncoder.groups(i).valid)
+      traceToTile.toEncoder.groups(i).bits.iretire := RegNext(traceFromCore.toEncoder.groups(i).bits.iretire)
+      traceToTile.toEncoder.groups(i).bits.itype := RegNext(traceFromCore.toEncoder.groups(i).bits.itype)
+      traceToTile.toEncoder.groups(i).bits.ilastsize := RegEnable(
+        traceFromCore.toEncoder.groups(i).bits.ilastsize,
+        traceFromCore.toEncoder.groups(i).valid
+      )
+      traceToTile.toEncoder.groups(i).bits.iaddr := RegEnable(
+        traceFromCore.toEncoder.groups(i).bits.iaddr,
+        traceFromCore.toEncoder.groups(i).valid
+      )
+    }
+
     dontTouch(io.hartId)
     dontTouch(io.cpu_halt)
+    dontTouch(io.cpu_critical_error)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val hartIsInReset = RegInit(true.B)
@@ -234,6 +284,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           io.chi.get <> l2.io_chi
         case l2cache: TL2TLCoupledL2 =>
       }
+
+      beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid
+      beu.module.io.errors.l2.ecc_error.bits := l2.io.error.address
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.debugTopDown <> DontCare
@@ -243,6 +296,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req_kill := DontCare
       io.l2_tlb_req.resp.ready := true.B
       io.perfEvents := DontCare
+
+      beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
     }
   }
 

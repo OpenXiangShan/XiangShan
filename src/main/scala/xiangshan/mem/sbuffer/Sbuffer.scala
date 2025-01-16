@@ -303,7 +303,7 @@ class Sbuffer(implicit p: Parameters)
   // sbuffer_in_s1:
   // * read data and meta from fifo queue
   // * update sbuffer meta (vtag, ptag, flag)
-  // * prevert that line from being sent to dcache (add a block condition)
+  // * prevent that line from being sent to dcache (add a block condition)
   // * prepare cacheline level write enable signal, RegNext() data and mask
 
   // sbuffer_in_s2:
@@ -456,15 +456,17 @@ class Sbuffer(implicit p: Parameters)
         // missqReplayCount(entryIdx) := 0.U
         // check if vtag is the same, if not, trigger sbuffer flush
         when(reqvtag =/= vtag(entryIdx)) {
-          XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
-            reqvtag << OffsetWidth,
-            reqptag << OffsetWidth,
-            vtag(entryIdx) << OffsetWidth,
-            ptag(entryIdx) << OffsetWidth
-          )
           merge_need_uarch_drain := true.B
         }
       }
+      XSDebug(
+        mergeVec(entryIdx) && reqvtag =/= vtag(entryIdx),
+        "reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
+        reqvtag << OffsetWidth,
+        reqptag << OffsetWidth,
+        vtag(entryIdx) << OffsetWidth,
+        ptag(entryIdx) << OffsetWidth
+      )
     })
   }
 
@@ -481,15 +483,16 @@ class Sbuffer(implicit p: Parameters)
     val accessValid = in.fire && in.bits.vecValid
     accessIdx(i).valid := RegNext(accessValid)
     accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessValid)
+
+    XSDebug(accessValid && canMerge(i), p"merge req $i to line [${mergeIdx(i)}]\n")
+    XSDebug(accessValid && !canMerge(i), p"insert req $i to line[$insertIdx]\n")
     when(accessValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
         mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
-        XSDebug(p"merge req $i to line [${mergeIdx(i)}]\n")
       }.otherwise({
         writeReq(i).bits.wvec := insertVec
         wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, vwordOffset)
-        XSDebug(p"insert req $i to line[$insertIdx]\n")
         assert(debug_insertIdx === insertIdx)
       })
     }
@@ -660,8 +663,8 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).state_inflight := true.B
     stateVec(sbuffer_out_s0_evictionIdx).w_timeout := false.B
     // stateVec(sbuffer_out_s0_evictionIdx).s_pipe_req := true.B
-    XSDebug(p"$sbuffer_out_s0_evictionIdx will be sent to Dcache\n")
   }
+  XSDebug(sbuffer_out_s0_fire, p"$sbuffer_out_s0_evictionIdx will be sent to Dcache\n")
 
   XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
   XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
@@ -684,11 +687,6 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
-
-  when (sbuffer_out_s1_fire) {
-    assert(!(io.dcache.req.bits.vaddr === 0.U))
-    assert(!(io.dcache.req.bits.addr === 0.U))
-  }
 
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
@@ -781,14 +779,16 @@ class Sbuffer(implicit p: Parameters)
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
-      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
-        RegNext(ptag_matches.asUInt),
-        RegNext(vtag_matches.asUInt),
-        RegNext(forward.vaddr),
-        RegNext(forward.paddr)
-      )
       forward_need_uarch_drain := true.B
     }
+    XSDebug(
+      tag_mismatch,
+      "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
+      RegNext(ptag_matches.asUInt),
+      RegNext(vtag_matches.asUInt),
+      RegNext(forward.vaddr),
+      RegNext(forward.paddr)
+    )
     val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getVWordOffset(forward.paddr))
@@ -849,7 +849,7 @@ class Sbuffer(implicit p: Parameters)
       stateVec(i).w_timeout
     )
   }
-  
+
   /*
   *
   **********************************************************
@@ -946,6 +946,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
 
       } .elsewhen (!isWline) {
         val storeCommit       = io.in(i).fire
@@ -961,7 +963,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
-
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
       }
 
       for (index <- 0 until WlineMaxNumber) {
@@ -977,7 +980,9 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := blockAddr + (index.U << wordOffBits)
           difftest.data   := io.in(i).bits.data
           difftest.mask   := ((1 << wordBytes) - 1).U
-          
+          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.pc
+
           assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
         }
       }
@@ -1009,7 +1014,8 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := waddr
           difftest.data   := wdata
           difftest.mask   := wmask
-
+          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.pc
         }
       }
     }

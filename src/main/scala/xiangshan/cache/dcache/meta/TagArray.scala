@@ -19,7 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{SRAMTemplate, XSPerfAccumulate}
+import utility.{SRAMTemplate, XSPerfAccumulate, ClockGate}
 import xiangshan.cache.CacheInstrucion._
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
@@ -30,10 +30,19 @@ class TagReadReq(implicit p: Parameters) extends DCacheBundle {
 class TagWriteReq(implicit p: Parameters) extends TagReadReq {
   val vaddr = UInt(vtagBits.W)
   val tag = UInt(tagBits.W)
+  val ecc = UInt(tagECCBits.W)
+
+  def asECCTag() = {
+    if (EnableTagEcc) {
+      Cat(ecc, tag)
+    } else {
+      tag
+    }
+  }
 }
 
 class TagEccWriteReq(implicit p: Parameters) extends TagReadReq {
-  val ecc = UInt(eccTagBits.W)
+  val ecc = UInt(tagECCBits.W)
 }
 
 case object HasTagEccParam
@@ -45,36 +54,26 @@ abstract class AbstractTagArray(implicit p: Parameters) extends DCacheModule {
 class TagArray(implicit p: Parameters) extends AbstractTagArray {
   val io = IO(new Bundle() {
     val read = Flipped(DecoupledIO(new TagReadReq))
-    val resp = Output(Vec(nWays, UInt(tagBits.W)))
+    val resp = Output(Vec(nWays, UInt(encTagBits.W)))
     val write = Flipped(DecoupledIO(new TagWriteReq))
-    // ecc
-    val ecc_read = Flipped(DecoupledIO(new TagReadReq))
-    val ecc_resp = Output(Vec(nWays, UInt(eccTagBits.W)))
-    val ecc_write = Flipped(DecoupledIO(new TagEccWriteReq))
   })
   // TODO: reset is unnecessary?
   val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
   val rst = rst_cnt < nSets.U
   val rstVal = 0.U
   val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
-  val wdata = Mux(rst, rstVal, io.write.bits.tag)
+  val wdata = Mux(rst, rstVal, io.write.bits.asECCTag())
   val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
   val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
   when (rst) {
     rst_cnt := rst_cnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
-
-  val ecc_array = TagEccParam.map {
-    case _ =>
-      val ecc = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
-      shouldReset = false, holdRead = false, singlePort = true))
-    ecc
-  }
+  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = nWays,
+    shouldReset = false, holdRead = false, singlePort = true, withClockGate = true))
 
   val wen = rst || io.write.valid
+  io.write.ready := !rst
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx = waddr,
@@ -82,49 +81,14 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
     waymask = VecInit(wmask).asUInt
   )
 
-  val ecc_wen = rst || io.ecc_write.valid
-  val ecc_waddr = Mux(rst, rst_cnt, io.ecc_write.bits.idx)
-  val ecc_wdata = Mux(rst, rstVal, io.ecc_write.bits.ecc)
-  val ecc_wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.ecc_write.bits.way_en.asSInt).asBools
-  ecc_array match {
-    case Some(ecc) =>
-      ecc.io.w.req.valid := ecc_wen
-      ecc.io.w.req.bits.apply(
-        setIdx = ecc_waddr,
-        data = ecc_wdata,
-        waymask = VecInit(ecc_wmask).asUInt
-      )
-    case None =>
-  }
-
   // tag read
   val ren = io.read.fire
-
+  io.read.ready := !wen
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
+
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
-
-  val ecc_ren = io.ecc_read.fire
-  ecc_array match {
-    case Some(ecc) =>
-      ecc.io.r.req.valid := ecc_ren
-      ecc.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
-      io.ecc_resp := ecc.io.r.resp.data
-    case None =>
-      io.ecc_resp := 0.U.asTypeOf(io.ecc_resp)
-  }
-
-  io.write.ready := !rst
-  io.read.ready := !wen
-  ecc_array match {
-    case Some(ecc) =>
-      io.ecc_write.ready := !rst
-      io.ecc_read.ready := !ecc_wen
-    case None =>
-      io.ecc_write.ready := true.B
-      io.ecc_read.ready := true.B
-  }
 }
 
 class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends AbstractTagArray {
@@ -132,88 +96,35 @@ class DuplicatedTagArray(readPorts: Int)(implicit p: Parameters) extends Abstrac
     val read = Vec(readPorts, Flipped(DecoupledIO(new TagReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encTagBits.W))))
     val write = Flipped(DecoupledIO(new TagWriteReq))
-    // customized cache op port
-    val cacheOp = Flipped(new L1CacheInnerOpIO)
-    val cacheOp_req_dup = Vec(DCacheDupNum, Flipped(Valid(new CacheCtrlReqInfo)))
-    val cacheOp_req_bits_opCode_dup = Input(Vec(DCacheDupNum, UInt(XLEN.W)))
   })
 
   val array = Seq.fill(readPorts) { Module(new TagArray) }
 
   def getECCFromEncTag(encTag: UInt) = {
-    require(encTag.getWidth == encTagBits)
-    encTag(encTagBits - 1, tagBits)
+    if (EnableDataEcc) {
+      require(encTag.getWidth == encTagBits, s"encTag=$encTag != encTagBits=$encTagBits!")
+      encTag(encTagBits - 1, tagBits)
+    } else {
+      0.U
+    }
   }
 
   val tag_read_oh = WireInit(VecInit(Seq.fill(readPorts)(0.U(XLEN.W))))
   for (i <- 0 until readPorts) {
     // normal read / write
     array(i).io.write.valid := io.write.valid
-    array(i).io.write.bits := io.write.bits
-    array(i).io.ecc_write.valid := io.write.valid
-    array(i).io.ecc_write.bits.idx := io.write.bits.idx
-    array(i).io.ecc_write.bits.way_en := io.write.bits.way_en
-    val ecc = getECCFromEncTag(cacheParams.tagCode.encode(io.write.bits.tag))
-    array(i).io.ecc_write.bits.ecc := ecc
+    array(i).io.write.bits.idx := io.write.bits.idx
+    array(i).io.write.bits.way_en := io.write.bits.way_en
+    array(i).io.write.bits.vaddr := io.write.bits.vaddr
+    array(i).io.write.bits.tag := io.write.bits.tag
+    array(i).io.write.bits.ecc := getECCFromEncTag(cacheParams.tagCode.encode(io.write.bits.tag))
+    io.write.ready := true.B
 
     array(i).io.read <> io.read(i)
-    array(i).io.ecc_read.valid := io.read(i).valid
-    array(i).io.ecc_read.bits := io.read(i).bits
-    io.resp(i) := (array(i).io.ecc_resp zip array(i).io.resp).map { case (e, r) => Cat(e, r) }
-    // extra ports for cache op
-//    array(i).io.ecc_write.valid := false.B
-//    array(i).io.ecc_write.bits := DontCare
-    io.read(i).ready := array(i).io.read.ready && array(i).io.ecc_read.ready
+    io.read(i).ready := array(i).io.read.ready
+    io.resp(i) := array(i).io.resp
     tag_read_oh(i) := PopCount(array(i).io.read.fire)
   }
+
   XSPerfAccumulate("tag_read_counter", tag_read_oh.reduce(_ + _))
-  io.write.ready := true.B
-
-  require(nWays <= 32)
-  io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B)
-  // DCacheDupNum is 16
-  // vec: the dupIdx for every bank and every group
-  val rdata_dup_vec = Seq(0, 1, 2)
-  val rdataEcc_dup_vec = Seq(3, 4, 5)
-  val wdata_dup_vec = Seq(6, 7, 8)
-  val wdataEcc_dup_vec = Seq(9, 10, 11)
-  rdata_dup_vec.zipWithIndex.map{ case(dupIdx, idx) =>
-    when(io.cacheOp_req_dup(dupIdx).valid && isReadTag(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
-      array(idx).io.read.valid := true.B
-      array(idx).io.read.bits.idx := io.cacheOp.req.bits.index
-      array(idx).io.read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      cacheOpShouldResp := true.B
-    }
-  }
-  rdataEcc_dup_vec.zipWithIndex.map{ case(dupIdx, idx) =>
-    when(io.cacheOp_req_dup(dupIdx).valid && isReadTagECC(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
-      array(idx).io.ecc_read.valid := true.B
-      array(idx).io.ecc_read.bits.idx := io.cacheOp.req.bits.index
-      array(idx).io.ecc_read.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      cacheOpShouldResp := true.B
-    }
-  }
-  wdata_dup_vec.zipWithIndex.map{ case(dupIdx, idx) =>
-    when(io.cacheOp_req_dup(dupIdx).valid && isWriteTag(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
-      array(idx).io.write.valid := true.B
-      array(idx).io.write.bits.idx := io.cacheOp.req.bits.index
-      array(idx).io.write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      array(idx).io.write.bits.tag := io.cacheOp.req.bits.write_tag_low
-      cacheOpShouldResp := true.B
-    }
-  }
-  wdataEcc_dup_vec.zipWithIndex.map{ case(dupIdx, idx) =>
-    when(io.cacheOp_req_dup(dupIdx).valid && isWriteTagECC(io.cacheOp_req_bits_opCode_dup(dupIdx))) {
-      array(idx).io.ecc_write.valid := true.B
-      array(idx).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
-      array(idx).io.ecc_write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-      array(idx).io.ecc_write.bits.ecc := io.cacheOp.req.bits.write_tag_ecc
-      cacheOpShouldResp := true.B
-    }
-  }
-
-  io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid, array(0).io.resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
-  io.cacheOp.resp.bits.read_tag_ecc := Mux(io.cacheOp.resp.valid, array(0).io.ecc_resp(RegNext(io.cacheOp.req.bits.wayNum)), 0.U)
 }

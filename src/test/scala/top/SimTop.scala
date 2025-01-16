@@ -26,7 +26,7 @@ import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import freechips.rocketchip.util.HeterogeneousBag
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
 import xiangshan.DebugOptionsKey
 import system.SoCParamsKey
 
@@ -58,7 +58,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val simAXIMem = Module(l_simAXIMem.module)
   l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
 
-  soc.io.clock := clock.asBool
+  soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.sram_config := 0.U
@@ -66,6 +66,8 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
   l_soc.nmi.foreach(_.foreach(intr => { intr := false.B; dontTouch(intr) }))
+  soc.io.traceCoreInterface.foreach(_.fromEncoder.enable := false.B)
+  soc.io.traceCoreInterface.foreach(_.fromEncoder.stall  := false.B)
 
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
@@ -98,10 +100,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
-  dontTouch(timer)
-  dontTouch(logEnable)
-  dontTouch(clean)
-  dontTouch(dump)
+  XSLog.collect(timer, logEnable, clean, dump)
 }
 
 object SimTop extends App {

@@ -1,6 +1,7 @@
 package xiangshan.backend.decode.isa.bitfield
 
 import chisel3._
+import chisel3.util.BitPat
 
 abstract class RiscvInst(bitWidth: Int) extends Bundle {
   val inst: UInt = UInt(bitWidth.W)
@@ -16,6 +17,12 @@ class Riscv32BitInst extends RiscvInst(32) {
   def FUNCT7    : UInt  = inst(31, 25)
   def OPCODE5Bit: UInt  = inst( 6,  2)
   def OPCODE7Bit: UInt  = inst( 6,  0)
+
+  // Not handle illegal instr in this function
+  def isAMOCAS = {
+    this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.AMO &&
+      this.FUNCT7 === BitPat("b00101??")
+  }
 }
 
 trait BitFieldsI { this: Riscv32BitInst =>
@@ -74,11 +81,17 @@ trait BitFieldsVec { this: Riscv32BitInst =>
   }
 
   def isVecStore = {
-    this.OPCODE === "b0100111".U && (this.WIDTH === 0.U || this.WIDTH(2) === 1.B)
+    this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.STORE_FP &&
+      (this.WIDTH === 0.U || this.WIDTH(2) === 1.B)
   }
 
   def isVecLoad = {
-    this.OPCODE === "b0000111".U && (this.WIDTH === 0.U || this.WIDTH(2) === 1.B)
+    this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.LOAD_FP &&
+      (this.WIDTH === 0.U || this.WIDTH(2) === 1.B)
+  }
+
+  def isVecArith = {
+    this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.OP_V
   }
 
   def isOPIVV = {
@@ -117,12 +130,21 @@ trait BitFieldsVec { this: Riscv32BitInst =>
   }
 }
 
+trait BitFieldsRVK { this: Riscv32BitInst =>
+  def RNUM          : UInt = inst(23, 20)
+
+  def isRnumIllegal = {
+    this.RNUM > 0xA.U
+  }
+}
+
 class XSInstBitFields extends Riscv32BitInst
   with BitFieldsI
   with BitFieldsS
   with BitFieldsCSR
   with BitFieldsFp
   with BitFieldsVec
+  with BitFieldsRVK
 
 class InstVType extends Bundle {
   val reserved = UInt(3.W)

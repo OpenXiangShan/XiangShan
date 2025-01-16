@@ -37,6 +37,7 @@ MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
+CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
@@ -53,26 +54,43 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+# JVM memory configurations
+JVM_XMX ?= 40G
+JVM_XSS ?= 256m
+
+# mill arguments for build.sc
+MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
+
 # common chisel args
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
-MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
+MFC_ARGS = --dump-fir --target $(CHISEL_TARGET) --split-verilog \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
-RELEASE_ARGS += $(MFC_ARGS)
-DEBUG_ARGS += $(MFC_ARGS)
-PLDM_ARGS += $(MFC_ARGS)
 
+# prefix of XSTop or XSNoCTop
 ifneq ($(XSTOP_PREFIX),)
-RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
-DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
-PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+COMMON_EXTRA_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 endif
 
+# IMSIC use TileLink rather than AXI4Lite
 ifeq ($(IMSIC_USE_TL),1)
-RELEASE_ARGS += --imsic-use-tl
-DEBUG_ARGS += --imsic-use-tl
-PLDM_ARGS += --imsic-use-tl
+COMMON_EXTRA_ARGS += --imsic-use-tl
 endif
+
+# L2 cache size in KB
+ifneq ($(L2_CACHE_SIZE),)
+COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
+endif
+
+# L3 cache size in KB
+ifneq ($(L3_CACHE_SIZE),)
+COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
+endif
+
+# public args sumup
+RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
+PLDM_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -148,9 +166,10 @@ test-jar:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan.runMain $(FPGATOP)   \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FPGATOP)   \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(FPGA_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
+ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -159,6 +178,7 @@ $(TOP_V): $(SCALA_FILE)
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
+endif
 
 verilog: $(TOP_V)
 
@@ -166,9 +186,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan.test.runMain $(SIMTOP)    \
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP)    \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) $(SIM_MEM_ARGS)		\
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
+ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -188,6 +209,7 @@ else
 endif
 endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
+endif
 
 sim-verilog: $(SIM_TOP_V)
 

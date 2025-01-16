@@ -80,6 +80,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = new TlbRequestIO
   val pmp             = new ICachePMPBundle
   val mmioCommitRead  = new mmioCommitRead
+  val csr_fsIsOff     = Input(Bool())
 }
 
 // record the situation in which fallThruAddr falls into
@@ -365,9 +366,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f2_ready := f2_fire || !f2_valid
   // TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire =
-    fromICache(0).valid && (fromICache(0).bits.vaddr === f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(
-      1
-    ).bits.vaddr === f2_ftq_req.nextlineStart)) || !f2_doubleLine)
+    fromICache.valid &&
+      fromICache.bits.vaddr(0) === f2_ftq_req.startAddr &&
+      (fromICache.bits.doubleline && fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
   val f2_icache_all_resp_reg = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
@@ -385,21 +386,34 @@ class NewIFU(implicit p: Parameters) extends XSModule
     .elsewhen(f1_fire && !f1_flush)(f2_valid := true.B)
     .elsewhen(f2_fire)(f2_valid := false.B)
 
-  val f2_exception          = VecInit((0 until PortNumber).map(i => fromICache(i).bits.exception))
-  val f2_except_fromBackend = fromICache(0).bits.exceptionFromBackend
+  val f2_exception_in     = fromICache.bits.exception
+  val f2_backendException = fromICache.bits.backendException
   // paddr and gpaddr of [startAddr, nextLineAddr]
-  val f2_paddrs            = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
-  val f2_gpaddr            = fromICache(0).bits.gpaddr
-  val f2_isForVSnonLeafPTE = fromICache(0).bits.isForVSnonLeafPTE
+  val f2_paddrs            = fromICache.bits.paddr
+  val f2_gpaddr            = fromICache.bits.gpaddr
+  val f2_isForVSnonLeafPTE = fromICache.bits.isForVSnonLeafPTE
 
-  // FIXME: what if port 0 is not mmio, but port 1 is?
-  // cancel mmio fetch if exception occurs
-  val f2_mmio = f2_exception(0) === ExceptionType.none && (
-    fromICache(0).bits.pmp_mmio ||
-      // currently, we do not distinguish between Pbmt.nc and Pbmt.io
-      // anyway, they are both non-cacheable, and should be handled with mmio fsm and sent to Uncache module
-      Pbmt.isUncache(fromICache(0).bits.itlb_pbmt)
-  )
+  // FIXME: raise af if one fetch block crosses the cacheable-noncacheable boundary, might not correct
+  val f2_mmio_mismatch_exception = VecInit(Seq(
+    ExceptionType.none, // mark the exception only on the second line
+    Mux(
+      // not double-line, skip check
+      !fromICache.bits.doubleline || (
+        // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
+        fromICache.bits.pmp_mmio(0) === fromICache.bits.pmp_mmio(1) &&
+          fromICache.bits.itlb_pbmt(0) === fromICache.bits.itlb_pbmt(1)
+      ),
+      ExceptionType.none,
+      ExceptionType.af
+    )
+  ))
+
+  // merge exceptions
+  val f2_exception = ExceptionType.merge(f2_exception_in, f2_mmio_mismatch_exception)
+
+  // we need only the first port, as the second is asked to be the same
+  val f2_pmp_mmio  = fromICache.bits.pmp_mmio(0)
+  val f2_itlb_pbmt = fromICache.bits.itlb_pbmt(0)
 
   /**
     * reduce the number of registers, origin code
@@ -422,6 +436,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_foldpc = VecInit(f2_pc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
   val f2_jump_range =
     Fill(PredictWidth, !f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~f2_ftq_req.ftqOffset.bits
+  require(
+    isPow2(PredictWidth),
+    "If PredictWidth does not satisfy the power of 2," +
+      "expression: Fill(PredictWidth, 1.U(1.W)) >> ~f2_ftq_req.ftqOffset.bits is not right !!"
+  )
   val f2_ftr_range = Fill(PredictWidth, f2_ftq_req.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~getBasicBlockIdx(
     f2_ftq_req.nextStartAddr,
     f2_ftq_req.startAddr
@@ -457,8 +476,35 @@ class NewIFU(implicit p: Parameters) extends XSModule
     // }
   }
 
-  val f2_cache_response_data = fromICache.map(_.bits.data)
-  val f2_data_2_cacheline    = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
+  /* NOTE: the following `Cat(_data, _data)` *is* intentional.
+   * Explanation:
+   * In the old design, IFU is responsible for selecting requested data from two adjacent cachelines,
+   *    so IFU has to receive 2*64B (2cacheline * 64B) data from ICache, and do `Cat(_data(1), _data(0))` here.
+   * However, a fetch block is 34B at max, sending 2*64B is quiet a waste of power.
+   * In current design (2024.06~), ICacheDataArray is responsible for selecting data from two adjacent cachelines,
+   *    so IFU only need to receive 40B (5bank * 8B) valid data, and use only one port is enough.
+   * For example, when pc falls on the 6th bank in cacheline0(so this is a doubleline request):
+   *                                MSB                                         LSB
+   *                  cacheline 1 || 1-7 | 1-6 | 1-5 | 1-4 | 1-3 | 1-2 | 1-1 | 1-0 ||
+   *                  cacheline 0 || 0-7 | 0-6 | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | 0-0 ||
+   *    and ICacheDataArray will respond:
+   *         fromICache.bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *    therefore simply make a copy of the response and `Cat` together, and obtain the requested data from centre:
+   *          f2_data_2_cacheline || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 | 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *                                             requested data: ^-----------------------------^
+   * For another example, pc falls on the 1st bank in cacheline 0, we have:
+   *         fromICache.bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *          f2_data_2_cacheline || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx | xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *                                                                           requested data: ^-----------------------------^
+   * Each "| x-y |" block is a 8B bank from cacheline(x).bank(y)
+   * Please also refer to:
+   * - DataArray selects data:
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L355-L381
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICache.scala#L149-L161
+   * - ICache respond to IFU:
+   * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
+   */
+  val f2_data_2_cacheline = Cat(fromICache.bits.data, fromICache.bits.data)
 
   val f2_cut_data = cut(f2_data_2_cacheline, f2_cut_ptr)
 
@@ -485,7 +531,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
    */
   val f2_crossPage_exception_vec = VecInit((0 until PredictWidth).map { i =>
     Mux(
-      isLastInLine(f2_pc(i)) && !f2_pd(i).isRVC && f2_doubleLine && f2_exception(0) === ExceptionType.none,
+      isLastInLine(f2_pc(i)) && !f2_pd(i).isRVC && f2_doubleLine && !ExceptionType.hasException(f2_exception(0)),
       f2_exception(1),
       ExceptionType.none
     )
@@ -516,14 +562,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_cut_data = RegEnable(f2_cut_data, f2_fire)
 
-  val f3_exception          = RegEnable(f2_exception, f2_fire)
-  val f3_mmio               = RegEnable(f2_mmio, f2_fire)
-  val f3_except_fromBackend = RegEnable(f2_except_fromBackend, f2_fire)
+  val f3_exception        = RegEnable(f2_exception, f2_fire)
+  val f3_pmp_mmio         = RegEnable(f2_pmp_mmio, f2_fire)
+  val f3_itlb_pbmt        = RegEnable(f2_itlb_pbmt, f2_fire)
+  val f3_backendException = RegEnable(f2_backendException, f2_fire)
 
   val f3_instr = RegEnable(f2_instr, f2_fire)
 
   expanders.zipWithIndex.foreach { case (expander, i) =>
-    expander.io.in := f3_instr(i)
+    expander.io.in      := f3_instr(i)
+    expander.io.fsIsOff := io.csr_fsIsOff
   }
   // Use expanded instruction only when input is legal.
   // Otherwise use origin illegal RVC instruction.
@@ -596,11 +644,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /*** MMIO State Machine***/
-  val f3_mmio_data                  = Reg(Vec(2, UInt(16.W)))
-  val mmio_is_RVC                   = RegInit(false.B)
-  val mmio_resend_addr              = RegInit(0.U(PAddrBits.W))
-  val mmio_resend_exception         = RegInit(0.U(ExceptionType.width.W))
-  val mmio_resend_gpaddr            = RegInit(0.U(GPAddrBits.W))
+  val f3_mmio_data          = Reg(Vec(2, UInt(16.W)))
+  val mmio_is_RVC           = RegInit(false.B)
+  val mmio_resend_addr      = RegInit(0.U(PAddrBits.W))
+  val mmio_resend_exception = RegInit(0.U(ExceptionType.width.W))
+  // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
+  val mmio_resend_gpaddr            = RegInit(0.U(PAddrBitsMax.W))
   val mmio_resend_isForVSnonLeafPTE = RegInit(false.B)
 
   // last instuction finish
@@ -613,7 +662,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     Enum(11)
   val mmio_state = RegInit(m_idle)
 
-  val f3_req_is_mmio = f3_mmio && f3_valid
+  // do mmio fetch only when pmp/pbmt shows it is a uncacheable address and no exception occurs
+  /* FIXME: we do not distinguish pbmt is NC or IO now
+   *        but we actually can do speculative execution if pbmt is NC, maybe fix this later for performance
+   */
+  val f3_req_is_mmio =
+    f3_valid && (f3_pmp_mmio || Pbmt.isUncache(f3_itlb_pbmt)) && !ExceptionType.hasException(f3_exception)
   val mmio_commit = VecInit(io.rob_commits.map { commit =>
     commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx && commit.bits.ftqOffset === 0.U
   }).asUInt.orR
@@ -667,7 +721,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   switch(mmio_state) {
     is(m_idle) {
       when(f3_req_is_mmio) {
-        mmio_state := m_waitLastCmt
+        // in idempotent spaces, we can send request directly (i.e. can do speculative fetch)
+        mmio_state := Mux(f3_itlb_pbmt === Pbmt.nc, m_sendReq, m_waitLastCmt)
       }
     }
 
@@ -703,23 +758,36 @@ class NewIFU(implicit p: Parameters) extends XSModule
         // we are using a blocked tlb, so resp.fire must have !resp.bits.miss
         assert(!io.iTLBInter.resp.bits.miss, "blocked mode iTLB miss when resp.fire")
         val tlb_exception = ExceptionType.fromTlbResp(io.iTLBInter.resp.bits)
+        // if itlb re-check respond pbmt mismatch with previous check, must be access fault
+        val pbmt_mismatch_exception = Mux(
+          io.iTLBInter.resp.bits.pbmt(0) =/= f3_itlb_pbmt,
+          ExceptionType.af,
+          ExceptionType.none
+        )
+        val exception = ExceptionType.merge(tlb_exception, pbmt_mismatch_exception)
         // if tlb has exception, abort checking pmp, just send instr & exception to ibuffer and wait for commit
-        mmio_state := Mux(tlb_exception === ExceptionType.none, m_sendPMP, m_waitCommit)
+        mmio_state := Mux(ExceptionType.hasException(exception), m_waitCommit, m_sendPMP)
         // also save itlb response
         mmio_resend_addr              := io.iTLBInter.resp.bits.paddr(0)
-        mmio_resend_exception         := tlb_exception
+        mmio_resend_exception         := exception
         mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)
         mmio_resend_isForVSnonLeafPTE := io.iTLBInter.resp.bits.isForVSnonLeafPTE(0)
       }
     }
 
     is(m_sendPMP) {
-      // if pmp re-check does not respond mmio, must be access fault
-      val pmp_exception = Mux(io.pmp.resp.mmio, ExceptionType.fromPMPResp(io.pmp.resp), ExceptionType.af)
+      val pmp_exception = ExceptionType.fromPMPResp(io.pmp.resp)
+      // if pmp re-check respond mismatch with previous check, must be access fault
+      val mmio_mismatch_exception = Mux(
+        io.pmp.resp.mmio =/= f3_pmp_mmio,
+        ExceptionType.af,
+        ExceptionType.none
+      )
+      val exception = ExceptionType.merge(pmp_exception, mmio_mismatch_exception)
       // if pmp has exception, abort sending request, just send instr & exception to ibuffer and wait for commit
-      mmio_state := Mux(pmp_exception === ExceptionType.none, m_resendReq, m_waitCommit)
+      mmio_state := Mux(ExceptionType.hasException(exception), m_waitCommit, m_resendReq)
       // also save pmp response
-      mmio_resend_exception := pmp_exception
+      mmio_resend_exception := exception
     }
 
     is(m_resendReq) {
@@ -734,7 +802,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_waitCommit) {
-      mmio_state := Mux(mmio_commit, m_commited, m_waitCommit)
+      // in idempotent spaces, we can skip waiting for commit (i.e. can do speculative fetch)
+      // but we do not skip m_waitCommit state, as other signals (e.g. f3_mmio_can_go relies on this)
+      mmio_state := Mux(mmio_commit || f3_itlb_pbmt === Pbmt.nc, m_commited, m_waitCommit)
     }
 
     // normal mmio instruction
@@ -862,14 +932,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
   io.toIbuffer.bits.foldpc        := f3_foldpc
   io.toIbuffer.bits.exceptionType := ExceptionType.merge(f3_exception_vec, f3_crossPage_exception_vec)
-  // exceptionFromBackend only needs to be set for the first instruction.
+  // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
-    case 0 => f3_except_fromBackend
+  io.toIbuffer.bits.backendException := (0 until PredictWidth).map {
+    case 0 => f3_backendException
     case _ => false.B
   }
-  io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(_ =/= ExceptionType.none)
+  io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(ExceptionType.hasException)
   io.toIbuffer.bits.illegalInstr    := f3_ill
   io.toIbuffer.bits.triggered       := f3_triggered
 
@@ -919,7 +989,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
   val mmioRVCExpander = Module(new RVCExpander)
-  mmioRVCExpander.io.in := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+  mmioRVCExpander.io.in      := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
+  mmioRVCExpander.io.fsIsOff := io.csr_fsIsOff
 
   /** external predecode for MMIO instruction */
   when(f3_req_is_mmio) {
@@ -939,7 +1010,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isRet  := isRet
 
     io.toIbuffer.bits.exceptionType(0)   := mmio_resend_exception
-    io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_exception =/= ExceptionType.none
+    io.toIbuffer.bits.crossPageIPFFix(0) := ExceptionType.hasException(mmio_resend_exception)
     io.toIbuffer.bits.illegalInstr(0)    := mmioRVCExpander.io.ill
 
     io.toIbuffer.bits.enqEnable := f3_mmio_range.asUInt
@@ -1058,15 +1129,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("predecode_flush_notCFIFault", checkNotCFIFault)
   XSPerfAccumulate("predecode_flush_incalidTakenFault", checkInvalidTaken)
 
-  when(checkRetFault) {
-    XSDebug(
-      "startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n",
-      wb_ftq_req.startAddr,
-      wb_ftq_req.nextStartAddr,
-      wb_ftq_req.ftqOffset.valid,
-      wb_ftq_req.ftqOffset.bits
-    )
-  }
+  XSDebug(
+    checkRetFault,
+    "startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n",
+    wb_ftq_req.startAddr,
+    wb_ftq_req.nextStartAddr,
+    wb_ftq_req.ftqOffset.valid,
+    wb_ftq_req.ftqOffset.bits
+  )
 
   /** performance counter */
   val f3_perf_info = RegEnable(f2_perf_info, f2_fire)

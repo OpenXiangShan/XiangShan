@@ -13,6 +13,17 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Kevin Skadron, Pritpal S. Ahuja, Margaret Martonosi, and Douglas W. Clark. "[Improving prediction for procedure
+* returns with return-address-stack repair mechanisms.](https://doi.org/10.1109/MICRO.1998.742787)" 31st Annual
+* ACM/IEEE International Symposium on Microarchitecture (MICRO). 1998.
+* [2] Tan Hongze, and Wang Jian. "[A Return Address Predictor Based on Persistent Stack.]
+* (https://crad.ict.ac.cn/en/article/doi/10.7544/issn1000-1239.202111274)" Journal of Computer Research and Development
+* (CRAD) 60.6: 1337-1345. 2023.
 ***************************************************************************************/
 package xiangshan.frontend
 
@@ -713,14 +724,24 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.redirect_meta_NOS  := recover_cfi.NOS
   stack.redirect_callAddr  := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  val update      = io.update.bits
-  val updateMeta  = io.update.bits.meta.asTypeOf(new RASMeta)
-  val updateValid = io.update.valid
+  val updateValid = RegNext(io.update.valid, init = false.B)
+  val update      = Wire(new BranchPredictionUpdate)
+  update := RegEnable(io.update.bits, io.update.valid)
+
+  // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
+  // so io.update.bits.pc is used directly here
+  val update_pc = io.update.bits.pc
+
+  // full core power down sequence need 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid)' to be
+  // 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))',
+  // but the fault-tolerance mechanism of the return stack needs to be updated in time. Using an unexpected old value on reset will cause errors.
+  // Only 9 registers have clock gate efficiency affected, so we relaxed the control signals.
+  val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid)
 
   stack.commit_valid      := updateValid
   stack.commit_push_valid := updateValid && update.is_call_taken
   stack.commit_pop_valid  := updateValid && update.is_ret_taken
-  stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(
+  stack.commit_push_addr := update.ftb_entry.getFallThrough(update_pc) + Mux(
     update.ftb_entry.last_may_be_rvi_call,
     2.U,
     0.U
@@ -745,9 +766,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       spec_debug.spec_queue(i).ctr,
       spec_debug.spec_nos(i).value
     )
-    when(i.U === stack.TOSW.value)(XSDebug(io.s2_fire(2), "   <----TOSW"))
-    when(i.U === stack.TOSR.value)(XSDebug(io.s2_fire(2), "   <----TOSR"))
-    when(i.U === stack.BOS.value)(XSDebug(io.s2_fire(2), "   <----BOS"))
+    XSDebug(io.s2_fire(2) && i.U === stack.TOSW.value, "   <----TOSW")
+    XSDebug(io.s2_fire(2) && i.U === stack.TOSR.value, "   <----TOSR")
+    XSDebug(io.s2_fire(2) && i.U === stack.BOS.value, "   <----BOS")
     XSDebug(io.s2_fire(2), "\n")
   }
   XSDebug(io.s2_fire(2), "  index       addr           ctr   (committed part)\n")
@@ -759,8 +780,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       spec_debug.commit_stack(i).retAddr,
       spec_debug.commit_stack(i).ctr
     )
-    when(i.U === stack.ssp)(XSDebug(io.s2_fire(2), "   <----ssp"))
-    when(i.U === stack.nsp)(XSDebug(io.s2_fire(2), "   <----nsp"))
+    XSDebug(io.s2_fire(2) && i.U === stack.ssp, "   <----ssp")
+    XSDebug(io.s2_fire(2) && i.U === stack.nsp, "   <----nsp")
     XSDebug(io.s2_fire(2), "\n")
   }
   /*

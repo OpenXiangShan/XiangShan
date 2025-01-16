@@ -441,8 +441,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   }
   predictors.io.s1_fire := s1_fire_dup
 
-  s2_fire_dup := s2_valid_dup
-
   for (
     ((((s1_fire, s2_flush), s2_fire), s2_valid), s1_flush) <-
       s1_fire_dup zip s2_flush_dup zip s2_fire_dup zip s2_valid_dup zip s1_flush_dup
@@ -810,7 +808,41 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+  // To optimize Clock Gating Efficiency of previous_s2_*
+  val previous_s2_pred = Wire(new BranchPredictionBundle(isNotS3 = true))
+  previous_s2_pred.pc := RegEnable(resp.s2.pc, 0.U.asTypeOf(resp.s2.pc), s2_fire_dup(0)).suggestName(
+    s"previous_s2_pred_pc"
+  )
+  previous_s2_pred.valid := RegEnable(resp.s2.valid, 0.U.asTypeOf(resp.s2.valid), s2_fire_dup(0)).suggestName(
+    s"previous_s2_pred_valid"
+  )
+  previous_s2_pred.hasRedirect := RegEnable(
+    resp.s2.hasRedirect,
+    0.U.asTypeOf(resp.s2.hasRedirect),
+    s2_fire_dup(0)
+  ).suggestName(s"previous_s2_pred_hasRedirect")
+  previous_s2_pred.ftq_idx := RegEnable(resp.s2.ftq_idx, 0.U.asTypeOf(resp.s2.ftq_idx), s2_fire_dup(0)).suggestName(
+    s"previous_s2_pred_ftq_idx"
+  )
+  previous_s2_pred.full_pred := RegEnable(
+    resp.s2.full_pred,
+    0.U.asTypeOf(resp.s2.full_pred),
+    s2_fire_dup(0)
+  ).suggestName(s"previous_s2_pred_full_pred")
+  previous_s2_pred.full_pred.zip(resp.s2.full_pred.zipWithIndex).map { case (prev_fp, (new_fp, dupIdx)) =>
+    prev_fp.targets.zip(new_fp.taken_mask_on_slot.zipWithIndex).map { case (target, (taken_mask, slotIdx)) =>
+      // This enable signal can better improve CGE, but it may lead to timing violations:
+      //    s2_fire_dup(0) && !new_fp.taken_mask_on_slot.take(slotIdx).fold(false.B)(_||_) && taken_mask && new_fp.hit
+      target := RegEnable(new_fp.targets(slotIdx), 0.U.asTypeOf(new_fp.targets(slotIdx)), s2_fire_dup(0) && taken_mask)
+    }
+    // This enable signal can better improve CGE, but it may lead to timing violations:
+    //    s2_fire_dup(0) && new_fp.hit && !new_fp.taken_mask_on_slot.reduce(_||_)
+    prev_fp.fallThroughAddr := RegEnable(
+      new_fp.fallThroughAddr,
+      0.U.asTypeOf(new_fp.fallThroughAddr),
+      s2_fire_dup(0) && resp.s2.full_pred(0).hit && !resp.s2.full_pred(0).taken_mask_on_slot(0)
+    )
+  }
 
   val s3_redirect_on_br_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map { case (fp1, fp2) =>
     fp1.real_br_taken_mask().asUInt =/= fp2.real_br_taken_mask().asUInt
@@ -890,12 +922,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map { case (hr, r) => hr := r }
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
-  predictors.io.update.bits  := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
-  predictors.io.update.bits.ghist := RegEnable(
-    getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr),
-    io.ftq_to_bpu.update.valid
-  )
+  predictors.io.update            := io.ftq_to_bpu.update
+  predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)
+  // Move the update pc registers out of predictors.
+  predictors.io.update.bits.pc := SegmentedAddrNext(
+    io.ftq_to_bpu.update.bits.pc,
+    pcSegments,
+    io.ftq_to_bpu.update.valid,
+    Some("predictors_io_update_pc")
+  ).getAddr()
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
@@ -983,7 +1018,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     val misPredictMask:      UInt      = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
     val takenMask: UInt =
       io.ftq_to_bpu.update.bits.br_taken_mask.asUInt |
-        io.ftq_to_bpu.update.bits.ftb_entry.always_taken.asUInt // Always taken branch is recorded in history
+        io.ftq_to_bpu.update.bits.ftb_entry.strong_bias.asUInt // Always taken branch is recorded in history
     val takenIdx:      UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val misPredictIdx: UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val shouldShiftMask: UInt = Mux(takenMask.orR, LowerMask(takenIdx).asUInt, ((1 << numBr) - 1).asUInt) &

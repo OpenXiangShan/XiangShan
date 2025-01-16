@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -19,36 +20,26 @@ package xiangshan.frontend.icache
 import chisel3._
 import chisel3.util._
 import difftest._
-import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.tilelink.ClientStates._
-import freechips.rocketchip.tilelink.TLPermissions._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan._
-import xiangshan.cache._
 
-abstract class ICacheMissUnitModule(implicit p: Parameters) extends XSModule
-    with HasICacheParameters
+class DeMultiplexerIO[T <: Data](gen: T, n: Int) extends Bundle {
+  val in:     DecoupledIO[T]      = Flipped(DecoupledIO(gen))
+  val out:    Vec[DecoupledIO[T]] = Vec(n, DecoupledIO(gen))
+  val chosen: UInt                = Output(UInt(log2Ceil(n).W))
+}
 
-abstract class ICacheMissUnitBundle(implicit p: Parameters) extends XSBundle
-    with HasICacheParameters
-
-class Demultiplexer[T <: Data](val gen: T, val n: Int) extends Module {
-
-  /** Hardware module that is used to sequence 1 producers into n consumer.
-    * Priority is given to lower producer.
-    */
+/** Hardware module that is used to sequence 1 producer into n consumer.
+ * Priority is given to lower producer.
+ */
+class DeMultiplexer[T <: Data](val gen: T, val n: Int) extends Module {
   require(n >= 2)
-  val io = IO(new Bundle {
-    val in     = Flipped(DecoupledIO(gen))
-    val out    = Vec(n, DecoupledIO(gen))
-    val chosen = Output(UInt(log2Ceil(n).W))
-  })
+  val io: DeMultiplexerIO[T] = IO(new DeMultiplexerIO(gen, n))
 
-  val grant = false.B +: (1 until n).map(i => (0 until i).map(io.out(_).ready).reduce(_ || _))
-  for (i <- 0 until n) {
+  private val grant = false.B +: (1 until n).map(i => (0 until i).map(io.out(_).ready).reduce(_ || _))
+  (0 until n).foreach { i =>
     io.out(i).bits  := io.in.bits
     io.out(i).valid := !grant(i) && io.in.valid
   }
@@ -57,17 +48,19 @@ class Demultiplexer[T <: Data](val gen: T, val n: Int) extends Module {
   io.chosen   := PriorityEncoder(VecInit(io.out.map(_.ready)))
 }
 
+class MuxBundleIO[T <: Data](gen: T, n: Int) extends Bundle {
+  val sel: UInt                = Input(UInt(log2Ceil(n).W))
+  val in:  Vec[DecoupledIO[T]] = Flipped(Vec(n, DecoupledIO(gen)))
+  val out: DecoupledIO[T]      = DecoupledIO(gen)
+}
+
 class MuxBundle[T <: Data](val gen: T, val n: Int) extends Module {
   require(n >= 2)
-  val io = IO(new Bundle {
-    val sel = Input(UInt(log2Ceil(n).W))
-    val in  = Flipped(Vec(n, DecoupledIO(gen)))
-    val out = DecoupledIO(gen)
-  })
+  val io: MuxBundleIO[T] = IO(new MuxBundleIO[T](gen, n))
 
   io.in <> DontCare
   io.out <> DontCare
-  for (i <- 0 until n) {
+  (0 until n).foreach { i =>
     when(io.sel === i.U) {
       io.out <> io.in(i)
     }
@@ -76,62 +69,64 @@ class MuxBundle[T <: Data](val gen: T, val n: Int) extends Module {
 }
 
 class ICacheMissReq(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx  = UInt(idxBits.W)
+  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:  UInt = UInt(idxBits.W)
 }
 
 class ICacheMissResp(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx  = UInt(idxBits.W)
-  val waymask  = UInt(nWays.W)
-  val data     = UInt(blockBits.W)
-  val corrupt  = Bool()
+  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:  UInt = UInt(idxBits.W)
+  val waymask:  UInt = UInt(nWays.W)
+  val data:     UInt = UInt(blockBits.W)
+  val corrupt:  Bool = Bool()
 }
 
 class LookUpMSHR(implicit p: Parameters) extends ICacheBundle {
-  val info = ValidIO(new ICacheMissReq)
-  val hit  = Input(Bool())
+  val info: Valid[ICacheMissReq] = ValidIO(new ICacheMissReq)
+  val hit:  Bool                 = Input(Bool())
 }
 
 class MSHRResp(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx  = UInt(idxBits.W)
-  val waymask  = UInt(log2Ceil(nWays).W)
+  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:  UInt = UInt(idxBits.W)
+  val way:      UInt = UInt(wayBits.W)
 }
 
 class MSHRAcquire(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
-  val acquire = new TLBundleA(edge.bundle)
-  val vSetIdx = UInt(idxBits.W)
+  val acquire: TLBundleA = new TLBundleA(edge.bundle)
+  val vSetIdx: UInt      = UInt(idxBits.W)
 }
 
-class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheMissUnitModule {
-  val io = IO(new Bundle {
-    val fencei    = Input(Bool())
-    val flush     = Input(Bool())
-    val invalid   = Input(Bool())
-    val req       = Flipped(DecoupledIO(new ICacheMissReq))
-    val acquire   = DecoupledIO(new MSHRAcquire(edge))
-    val lookUps   = Flipped(Vec(2, new LookUpMSHR))
-    val resp      = ValidIO(new MSHRResp)
-    val victimWay = Input(UInt(log2Ceil(nWays).W))
-  })
+class ICacheMSHRIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+  val fencei:    Bool                       = Input(Bool())
+  val flush:     Bool                       = Input(Bool())
+  val invalid:   Bool                       = Input(Bool())
+  val req:       DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
+  val acquire:   DecoupledIO[MSHRAcquire]   = DecoupledIO(new MSHRAcquire(edge))
+  val lookUps:   Vec[LookUpMSHR]            = Flipped(Vec(2, new LookUpMSHR))
+  val resp:      Valid[MSHRResp]            = ValidIO(new MSHRResp)
+  val victimWay: UInt                       = Input(UInt(wayBits.W))
+}
 
-  val valid = RegInit(Bool(), false.B)
-  // this MSHR doesn't respones to fetch and sram
-  val flush  = RegInit(Bool(), false.B)
-  val fencei = RegInit(Bool(), false.B)
+class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
+  val io: ICacheMSHRIO = IO(new ICacheMSHRIO(edge))
+
+  private val valid = RegInit(Bool(), false.B)
+  // this MSHR doesn't respond to fetch and sram
+  private val flush  = RegInit(Bool(), false.B)
+  private val fencei = RegInit(Bool(), false.B)
   // this MSHR has been issued
-  val issue = RegInit(Bool(), false.B)
+  private val issue = RegInit(Bool(), false.B)
 
-  val blkPaddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
-  val vSetIdx  = RegInit(UInt(idxBits.W), 0.U)
-  val waymask  = RegInit(UInt(log2Ceil(nWays).W), 0.U)
+  private val blkPaddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
+  private val vSetIdx  = RegInit(UInt(idxBits.W), 0.U)
+  private val way      = RegInit(UInt(wayBits.W), 0.U)
 
   // look up and return result at the same cycle
-  val hits = io.lookUps.map(lookup =>
+  private val hits = io.lookUps.map { lookup =>
     valid && !fencei && !flush && (lookup.info.bits.vSetIdx === vSetIdx) &&
-      (lookup.info.bits.blkPaddr === blkPaddr)
-  )
+    (lookup.info.bits.blkPaddr === blkPaddr)
+  }
   // Decoupling valid and bits
   (0 until 2).foreach(i => io.lookUps(i).hit := hits(i))
 
@@ -162,7 +157,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // send request to L2
   io.acquire.valid := valid && !issue && !io.flush && !io.fencei
-  val getBlock = edge.Get(
+  private val getBlock = edge.Get(
     fromSource = ID.U,
     toAddress = Cat(blkPaddr, 0.U(blockOffBits.W)),
     lgSize = log2Up(cacheParams.blockBytes).U
@@ -173,8 +168,8 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // get victim way when acquire fire
   when(io.acquire.fire) {
-    issue   := true.B
-    waymask := io.victimWay
+    issue := true.B
+    way   := io.victimWay
   }
 
   // invalid request when grant finish
@@ -186,32 +181,32 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   io.resp.valid         := valid && (!flush && !fencei)
   io.resp.bits.blkPaddr := blkPaddr
   io.resp.bits.vSetIdx  := vSetIdx
-  io.resp.bits.waymask  := waymask
+  io.resp.bits.way      := way
 }
 
-class ICacheMissBundle(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
   // difftest
-  val hartId = Input(Bool())
+  val hartId: Bool = Input(Bool())
   // control
-  val fencei = Input(Bool())
-  val flush  = Input(Bool())
+  val fencei: Bool = Input(Bool())
+  val flush:  Bool = Input(Bool())
   // fetch
-  val fetch_req  = Flipped(DecoupledIO(new ICacheMissReq))
-  val fetch_resp = ValidIO(new ICacheMissResp)
+  val fetch_req:  DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
+  val fetch_resp: Valid[ICacheMissResp]      = ValidIO(new ICacheMissResp)
   // prefetch
-  val prefetch_req = Flipped(DecoupledIO(new ICacheMissReq))
+  val prefetch_req: DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
   // SRAM Write Req
-  val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
-  val data_write = DecoupledIO(new ICacheDataWriteBundle)
+  val meta_write: DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
+  val data_write: DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
   // get victim from replacer
-  val victim = new ReplacerVictim
+  val victim: ReplacerVictim = new ReplacerVictim
   // Tilelink
-  val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-  val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+  val mem_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
+  val mem_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 }
 
-class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissUnitModule {
-  val io = IO(new ICacheMissBundle(edge))
+class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule {
+  val io: ICacheMissUnitIO = IO(new ICacheMissUnitIO(edge))
 
   /**
     ******************************************************************************
@@ -226,7 +221,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     *                                                           |
     *                                -----------------          |
     *                                | prefetch MSHR |          |
-    *                 ---------      -----------------     ----------- 
+    *                 ---------      -----------------     -----------
     * ---fetch reg--->| Demux |----> | prefetch MSHR |---->| Arbiter |
     *                 ---------      -----------------     -----------
     *                                |    .......    |
@@ -234,13 +229,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     ******************************************************************************
     */
 
-  val fetchDemux    = Module(new Demultiplexer(new ICacheMissReq, nFetchMshr))
-  val prefetchDemux = Module(new Demultiplexer(new ICacheMissReq, nPrefetchMshr))
-  val prefetchArb   = Module(new MuxBundle(new MSHRAcquire(edge), nPrefetchMshr))
-  val acquireArb    = Module(new Arbiter(new MSHRAcquire(edge), nFetchMshr + 1))
+  private val fetchDemux    = Module(new DeMultiplexer(new ICacheMissReq, nFetchMshr))
+  private val prefetchDemux = Module(new DeMultiplexer(new ICacheMissReq, nPrefetchMshr))
+  private val prefetchArb   = Module(new MuxBundle(new MSHRAcquire(edge), nPrefetchMshr))
+  private val acquireArb    = Module(new Arbiter(new MSHRAcquire(edge), nFetchMshr + 1))
 
   // To avoid duplicate request reception.
-  val fetchHit, prefetchHit = Wire(Bool())
+  private val fetchHit    = Wire(Bool())
+  private val prefetchHit = Wire(Bool())
   fetchDemux.io.in <> io.fetch_req
   fetchDemux.io.in.valid := io.fetch_req.valid && !fetchHit
   io.fetch_req.ready     := fetchDemux.io.in.ready || fetchHit
@@ -254,7 +250,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   io.mem_acquire.bits     := acquireArb.io.out.bits.acquire
   acquireArb.io.out.ready := io.mem_acquire.ready
 
-  val fetchMSHRs = (0 until nFetchMshr).map { i =>
+  private val fetchMSHRs = (0 until nFetchMshr).map { i =>
     val mshr = Module(new ICacheMSHR(edge, true, i))
     mshr.io.flush  := false.B
     mshr.io.fencei := io.fencei
@@ -268,7 +264,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     mshr
   }
 
-  val prefetchMSHRs = (0 until nPrefetchMshr).map { i =>
+  private val prefetchMSHRs = (0 until nPrefetchMshr).map { i =>
     val mshr = Module(new ICacheMSHR(edge, false, nFetchMshr + i))
     mshr.io.flush  := io.flush
     mshr.io.fencei := io.fencei
@@ -288,8 +284,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     * - look up all mshr
     ******************************************************************************
     */
-  val allMSHRs = fetchMSHRs ++ prefetchMSHRs
-  val prefetchHitFetchReq = (io.prefetch_req.bits.blkPaddr === io.fetch_req.bits.blkPaddr) &&
+  private val allMSHRs = fetchMSHRs ++ prefetchMSHRs
+  private val prefetchHitFetchReq = (io.prefetch_req.bits.blkPaddr === io.fetch_req.bits.blkPaddr) &&
     (io.prefetch_req.bits.vSetIdx === io.fetch_req.bits.vSetIdx) &&
     io.fetch_req.valid
   fetchHit    := allMSHRs.map(mshr => mshr.io.lookUps(0).hit).reduce(_ || _)
@@ -299,14 +295,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     ******************************************************************************
     * prefetchMSHRs priority
     * - The requests that enter the prefetchMSHRs earlier have a higher priority in issuing.
-    * - The order of enqueuing is recorded in FIFO when requset enters MSHRs.
+    * - The order of enqueuing is recorded in FIFO when request enters MSHRs.
     * - The requests are dispatched in the order they are recorded in FIFO.
     ******************************************************************************
     */
   // When the FIFO is full, enqueue and dequeue operations do not occur at the same cycle.
   // So the depth of the FIFO is set to match the number of MSHRs.
   // val priorityFIFO = Module(new Queue(UInt(log2Ceil(nPrefetchMshr).W), nPrefetchMshr, hasFlush=true))
-  val priorityFIFO = Module(new FIFOReg(UInt(log2Ceil(nPrefetchMshr).W), nPrefetchMshr, hasFlush = true))
+  private val priorityFIFO = Module(new FIFOReg(UInt(log2Ceil(nPrefetchMshr).W), nPrefetchMshr, hasFlush = true))
   priorityFIFO.io.flush.get := io.flush || io.fencei
   priorityFIFO.io.enq.valid := prefetchDemux.io.in.fire
   priorityFIFO.io.enq.bits  := prefetchDemux.io.chosen
@@ -327,30 +323,37 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     ******************************************************************************
     */
   // cacheline register
-  val readBeatCnt = RegInit(UInt(log2Up(refillCycles).W), 0.U)
-  val respDataReg = RegInit(VecInit(Seq.fill(refillCycles)(0.U(beatBits.W))))
+  private val readBeatCnt = RegInit(UInt(log2Up(refillCycles).W), 0.U)
+  private val respDataReg = RegInit(VecInit(Seq.fill(refillCycles)(0.U(beatBits.W))))
 
-  val wait_last = readBeatCnt === (refillCycles - 1).U
+  private val wait_last = readBeatCnt === (refillCycles - 1).U
   when(io.mem_grant.fire && edge.hasData(io.mem_grant.bits)) {
     respDataReg(readBeatCnt) := io.mem_grant.bits.data
     readBeatCnt              := Mux(wait_last, 0.U, readBeatCnt + 1.U)
   }
 
-  // last transition finsh or corrupt
-  val last_fire = io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && wait_last
+  // last transition finish or corrupt
+  private val last_fire = io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && wait_last
 
-  val (_, _, refill_done, _) = edge.addr_inc(io.mem_grant)
+  private val (_, _, refill_done, _) = edge.addr_inc(io.mem_grant)
   assert(!(refill_done ^ last_fire), "refill not done!")
   io.mem_grant.ready := true.B
 
-  val last_fire_r = RegNext(last_fire)
-  val id_r        = RegNext(io.mem_grant.bits.source)
+  private val last_fire_r = RegNext(last_fire)
+  private val id_r        = RegNext(io.mem_grant.bits.source)
 
   // if any beat is corrupt, the whole response (to mainPipe/metaArray/dataArray) is corrupt
-  val corrupt_r = RegInit(false.B)
+  private val corrupt_r = RegInit(false.B)
   when(io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && io.mem_grant.bits.corrupt) {
+    // Set corrupt_r when any beat is corrupt
+    // This is actually when(xxx.fire && xxx.hasData) { corrupt_r := corrupt_r || io.mem_grant.bits.corrupt }
     corrupt_r := true.B
-  }.elsewhen(io.fetch_resp.fire) {
+  }.elsewhen(last_fire_r) {
+    // Clear corrupt_r when response it sent to mainPipe
+    // This used to be io.fetch_resp.valid (last_fire_r && mshr_resp.valid) but when mshr is flushed by io.flush/fencei,
+    // mshr_resp.valid is false.B and corrupt_r will never be cleared, that's not correct
+    // so we remove mshr_resp.valid here, and the condition leftover is last_fire_r
+    // or, actually, io.fetch_resp.valid || (last_fire_r && !mshr_resp.valid)
     corrupt_r := false.B
   }
 
@@ -367,32 +370,34 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     ******************************************************************************
     */
   // get request information from MSHRs
-  val allMSHRs_resp = VecInit(allMSHRs.map(mshr => mshr.io.resp))
-  val mshr_resp     = allMSHRs_resp(id_r)
+  private val allMSHRs_resp = VecInit(allMSHRs.map(mshr => mshr.io.resp))
+  private val mshr_resp     = allMSHRs_resp(id_r)
 
   // get waymask from replacer when acquire fire
   io.victim.vSetIdx.valid := acquireArb.io.out.fire
   io.victim.vSetIdx.bits  := acquireArb.io.out.bits.vSetIdx
-  val waymask = UIntToOH(mshr_resp.bits.waymask)
+  private val waymask = UIntToOH(mshr_resp.bits.way)
   // NOTE: when flush/fencei, missUnit will still send response to mainPipe/prefetchPipe
   //       this is intentional to fix timing (io.flush -> mainPipe/prefetchPipe s2_miss -> s2_ready -> ftq ready)
   //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
-  val fetch_resp_valid = mshr_resp.valid && last_fire_r
+  private val fetch_resp_valid = mshr_resp.valid && last_fire_r
   // NOTE: but we should not write meta/dataArray when flush/fencei
-  val write_sram_valid = fetch_resp_valid && !corrupt_r && !io.flush && !io.fencei
+  private val write_sram_valid = fetch_resp_valid && !corrupt_r && !io.flush && !io.fencei
 
   // write SRAM
   io.meta_write.bits.generate(
     tag = getPhyTagFromBlk(mshr_resp.bits.blkPaddr),
     idx = mshr_resp.bits.vSetIdx,
     waymask = waymask,
-    bankIdx = mshr_resp.bits.vSetIdx(0)
+    bankIdx = mshr_resp.bits.vSetIdx(0),
+    poison = false.B
   )
   io.data_write.bits.generate(
     data = respDataReg.asUInt,
     idx = mshr_resp.bits.vSetIdx,
     waymask = waymask,
-    bankIdx = mshr_resp.bits.vSetIdx(0)
+    bankIdx = mshr_resp.bits.vSetIdx(0),
+    poison = false.B
   )
 
   io.meta_write.valid := write_sram_valid
@@ -420,17 +425,18 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     * ChiselDB: record ICache SRAM write log
     ******************************************************************************
     */
-  class ICacheSRAMDB(implicit p: Parameters) extends ICacheBundle {
-    val blkPaddr = UInt((PAddrBits - blockOffBits).W)
-    val vSetIdx  = UInt(idxBits.W)
-    val waymask  = UInt(log2Ceil(nWays).W)
+  private class ICacheSRAMDB(implicit p: Parameters) extends ICacheBundle {
+    val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+    val vSetIdx:  UInt = UInt(idxBits.W)
+    val waymask:  UInt = UInt(wayBits.W)
   }
 
-  val isWriteICacheSRAMTable =
+  private val isWriteICacheSRAMTable =
     WireInit(Constantin.createRecord("isWriteICacheSRAMTable" + p(XSCoreParamsKey).HartId.toString))
-  val ICacheSRAMTable = ChiselDB.createTable("ICacheSRAMTable" + p(XSCoreParamsKey).HartId.toString, new ICacheSRAMDB)
+  private val ICacheSRAMTable =
+    ChiselDB.createTable("ICacheSRAMTable" + p(XSCoreParamsKey).HartId.toString, new ICacheSRAMDB)
 
-  val ICacheSRAMDBDumpData = Wire(new ICacheSRAMDB)
+  private val ICacheSRAMDBDumpData = Wire(new ICacheSRAMDB)
   ICacheSRAMDBDumpData.blkPaddr := mshr_resp.bits.blkPaddr
   ICacheSRAMDBDumpData.vSetIdx  := mshr_resp.bits.vSetIdx
   ICacheSRAMDBDumpData.waymask  := OHToUInt(waymask)

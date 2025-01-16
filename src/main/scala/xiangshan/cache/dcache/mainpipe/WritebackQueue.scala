@@ -29,6 +29,7 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val param  = UInt(cWidth.W)
   val voluntary = Bool()
   val hasData = Bool()
+  val corrupt = Bool()
   val dirty = Bool()
 
   val delay_release = Bool()
@@ -38,8 +39,8 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
 class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
   val addr = UInt(PAddrBits.W)
 
-  def dump() = {
-    XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
+  def dump(cond: Bool) = {
+    XSDebug(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b\n",
       addr, param, voluntary, hasData)
   }
 }
@@ -51,8 +52,8 @@ class WritebackReqData(implicit p: Parameters) extends DCacheBundle {
 class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
   val data = UInt((cfg.blockBytes * 8).W)
 
-  override def dump() = {
-    XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
+  override def dump(cond: Bool) = {
+    XSDebug(cond, "WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
       addr, param, voluntary, hasData, data)
   }
 
@@ -62,6 +63,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.param := param
     out.voluntary := voluntary
     out.hasData := hasData
+    out.corrupt := corrupt
     out.dirty := dirty
     out.delay_release := delay_release
     out.miss_id := miss_id
@@ -73,6 +75,7 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.param := param
     out.voluntary := voluntary
     out.hasData := hasData
+    out.corrupt := corrupt
     out.dirty := dirty
     out.delay_release := delay_release
     out.miss_id := miss_id
@@ -187,10 +190,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   s_data_override := true.B // data_override takes only 1 cycle
   //s_data_merge := true.B // data_merge takes only 1 cycle
 
-  when (state =/= s_invalid) {
-    XSDebug("WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
-  }
-
+  XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
 
   // --------------------------------------------------------------------------------
   // s_invalid: receive requests
@@ -205,7 +205,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     paddr_dup_0 := io.req.bits.addr
     paddr_dup_1 := io.req.bits.addr
     paddr_dup_2 := io.req.bits.addr
-  
+
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     state      := s_release_req
     state_dup_0 := s_release_req
@@ -229,13 +229,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param
   )
+  probeResponse.corrupt := req.corrupt
 
   val probeResponseData = edge.ProbeAck(
     fromSource = io.id,
     toAddress = paddr_dup_1,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param,
-    data = beat_data(beat)
+    data = beat_data(beat),
+    corrupt = req.corrupt
   )
 
   val voluntaryRelease = edge.Release(
@@ -244,13 +246,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     lgSize = log2Ceil(cfg.blockBytes).U,
     shrinkPermissions = req.param
   )._2
+  voluntaryRelease.corrupt := req.corrupt
 
   val voluntaryReleaseData = edge.Release(
     fromSource = io.id,
     toAddress = paddr_dup_2,
     lgSize = log2Ceil(cfg.blockBytes).U,
     shrinkPermissions = req.param,
-    data = beat_data(beat)
+    data = beat_data(beat),
+    corrupt = req.corrupt
   )._2
 
   // voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
@@ -386,21 +390,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // sanity check
   // print all input/output requests for debug purpose
   // print req
-  when(io.req.fire) {
-    io.req.bits.dump()
-  }
+  io.req.bits.dump(io.req.fire)
 
-  when(io.mem_release.fire){
-    io.mem_grant.bits.dump
-  }
+  io.mem_grant.bits.dump(io.mem_release.fire)
 
-  // when (io.miss_req.valid) {
-  //   XSDebug("miss_req: addr: %x\n", io.miss_req.bits)
-  // }
-
-  // when (io.block_miss_req) {
-  //   XSDebug("block_miss_req\n")
-  // }
+  // XSDebug(io.miss_req.valid, "miss_req: addr: %x\n", io.miss_req.bits)
+  // XSDebug(io.block_miss_req, "block_miss_req\n")
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire)
@@ -413,6 +408,6 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     ("dcache_wbq_3_4_valid", (perfValidCount > (cfg.nReleaseEntries.U/2.U)) & (perfValidCount <= (cfg.nReleaseEntries.U*3.U/4.U))),
     ("dcache_wbq_4_4_valid", (perfValidCount > (cfg.nReleaseEntries.U*3.U/4.U))),
   )
-  generatePerfEvent()  
+  generatePerfEvent()
 
 }

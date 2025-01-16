@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -21,7 +22,6 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
-import freechips.rocketchip.diplomacy.TransferSizes
 import freechips.rocketchip.tilelink.TLArbiter
 import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLBundleD
@@ -30,40 +30,39 @@ import freechips.rocketchip.tilelink.TLEdgeOut
 import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
-import utility._
 import utils._
-import xiangshan._
 import xiangshan.frontend._
 
 class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
-  val addr = UInt(PAddrBits.W)
+  val addr: UInt = UInt(PAddrBits.W)
 }
 
 class InsUncacheResp(implicit p: Parameters) extends ICacheBundle {
-  val data = UInt(maxInstrLen.W)
+  val data: UInt = UInt(maxInstrLen.W)
+}
+
+class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+  val id: UInt = Input(UInt(log2Up(cacheParams.nMMIOs).W))
+  // client requests
+  val req:  DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
+  val resp: DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
+
+  val mmio_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
+  val mmio_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+
+  val flush: Bool = Input(Bool())
 }
 
 // One miss entry deals with one mmio request
-class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule with HasICacheParameters
-    with HasIFUConst {
-  val io = IO(new Bundle {
-    val id = Input(UInt(log2Up(cacheParams.nMMIOs).W))
-    // client requests
-    val req  = Flipped(DecoupledIO(new InsUncacheReq))
-    val resp = DecoupledIO(new InsUncacheResp)
+class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with HasIFUConst {
+  val io: InstrMMIOEntryIO = IO(new InstrMMIOEntryIO(edge))
 
-    val mmio_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-    val mmio_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+  private val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
 
-    val flush = Input(Bool())
-  })
+  private val state = RegInit(s_invalid)
 
-  val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
-
-  val state = RegInit(s_invalid)
-
-  val req         = Reg(new InsUncacheReq)
-  val respDataReg = Reg(UInt(mmioBusWidth.W))
+  private val req         = Reg(new InsUncacheReq)
+  private val respDataReg = Reg(UInt(mmioBusWidth.W))
 
   // assign default values to output signals
   io.req.ready  := false.B
@@ -75,7 +74,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
   io.mmio_grant.ready := false.B
 
-  val needFlush = RegInit(false.B)
+  private val needFlush = RegInit(false.B)
 
   when(io.flush && (state =/= s_invalid) && (state =/= s_send_resp))(needFlush := true.B)
     .elsewhen((state === s_send_resp) && needFlush)(needFlush := false.B)
@@ -116,7 +115,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
     }
   }
 
-  def getDataFromBus(pc: UInt) = {
+  private def getDataFromBus(pc: UInt): UInt = {
     val respData = Wire(UInt(maxInstrLen.W))
     respData := Mux(
       pc(2, 1) === "b00".U,
@@ -133,7 +132,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   when(state === s_send_resp) {
     io.resp.valid     := !needFlush
     io.resp.bits.data := getDataFromBus(req.addr)
-    // meta data should go with the response
+    // metadata should go with the response
     when(io.resp.fire || needFlush) {
       state := s_invalid
     }
@@ -141,43 +140,42 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 }
 
 class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
-  val req   = Flipped(DecoupledIO(new InsUncacheReq))
-  val resp  = DecoupledIO(new InsUncacheResp)
-  val flush = Input(Bool())
+  val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
+  val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
+  val flush: Bool                        = Input(Bool())
 }
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  val clientParameters = TLMasterPortParameters.v1(
+  val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "InstrUncache",
       sourceId = IdRange(0, cacheParams.nMMIOs)
     ))
   )
-  val clientNode = TLClientNode(Seq(clientParameters))
+  val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
-  lazy val module = new InstrUncacheImp(this)
-
+  lazy val module: InstrUncacheImp = new InstrUncacheImp(this)
 }
 
 class InstrUncacheImp(outer: InstrUncache)
     extends LazyModuleImp(outer)
     with HasICacheParameters
     with HasTLDump {
-  val io = IO(new InstrUncacheIO)
+  val io: InstrUncacheIO = IO(new InstrUncacheIO)
 
-  val (bus, edge) = outer.clientNode.out.head
+  private val (bus, edge) = outer.clientNode.out.head
 
-  val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
+  private val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 
-  val req          = io.req
-  val resp         = io.resp
-  val mmio_acquire = bus.a
-  val mmio_grant   = bus.d
+  private val req          = io.req
+  private val resp         = io.resp
+  private val mmio_acquire = bus.a
+  private val mmio_grant   = bus.d
 
-  val entry_alloc_idx = Wire(UInt())
-  val req_ready       = WireInit(false.B)
+  private val entry_alloc_idx = Wire(UInt())
+  private val req_ready       = WireInit(false.B)
 
   // assign default values to output signals
   bus.b.ready := false.B
@@ -187,7 +185,7 @@ class InstrUncacheImp(outer: InstrUncache)
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  val entries = (0 until cacheParams.nMMIOs) map { i =>
+  private val entries = (0 until cacheParams.nMMIOs).map { i =>
     val entry = Module(new InstrMMIOEntry(edge))
 
     entry.io.id    := i.U(log2Up(cacheParams.nMMIOs).W)
@@ -216,5 +214,4 @@ class InstrUncacheImp(outer: InstrUncache)
   req.ready := req_ready
   resp <> resp_arb.io.out
   TLArbiter.lowestFromSeq(edge, mmio_acquire, entries.map(_.io.mmio_acquire))
-
 }

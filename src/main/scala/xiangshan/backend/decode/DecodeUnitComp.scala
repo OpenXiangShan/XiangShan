@@ -1,19 +1,19 @@
 /***************************************************************************************
-  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-  * Copyright (c) 2020-2021 Peng Cheng Laboratory
-  *
-  * XiangShan is licensed under Mulan PSL v2.
-  * You can use this software according to the terms and conditions of the Mulan PSL v2.
-  * You may obtain a copy of Mulan PSL v2 at:
-  *          http://license.coscl.org.cn/MulanPSL2
-  *
-  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-  *
-  * See the Mulan PSL v2 for more details.
-  ***************************************************************************************/
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.decode
 
@@ -31,7 +31,7 @@ import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
+import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul, Vl}
 import yunsuan.VpermType
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
@@ -83,24 +83,28 @@ trait VectorConstants {
   val MAX_INDEXED_LS_UOPNUM = 64
 }
 
+class DecodeUnitCompInput(implicit p: Parameters) extends XSBundle {
+  val simpleDecodedInst = new DecodedInst
+  val uopInfo = new UopInfo
+}
+
+class DecodeUnitCompOutput(implicit p: Parameters) extends XSBundle {
+  val complexDecodedInsts = Vec(RenameWidth, DecoupledIO(new DecodedInst))
+}
+
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   val redirect = Input(Bool())
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val vtypeBypass = Input(new VType)
   // When the first inst in decode vector is complex inst, pass it in
-  val in = Flipped(DecoupledIO(new Bundle {
-    val simpleDecodedInst = new DecodedInst
-    val uopInfo = new UopInfo
-  }))
-  val out = new Bundle {
-    val complexDecodedInsts = Vec(RenameWidth, DecoupledIO(new DecodedInst))
-  }
+  val in = Flipped(DecoupledIO(new DecodeUnitCompInput))
+  val out = new DecodeUnitCompOutput
   val complexNum = Output(UInt(3.W))
 }
 
 /**
-  * @author zly
-  */
+ * @author zly
+ */
 class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnitConstants with VectorConstants {
   val io = IO(new DecodeUnitCompIO)
 
@@ -160,6 +164,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   val isVstore = FuType.isVStore(latchedInst.fuType)
 
+  // exception generator
+  val vecException = Module(new VecExceptionGen)
+  vecException.io.inst := latchedInst.instr
+  vecException.io.decodedInst := latchedInst
+  vecException.io.vtype := latchedInst.vpu.vtype
+  vecException.io.vstart := latchedInst.vpu.vstart
+  val illegalInst = vecException.io.illegalInst
+
   numOfUop := latchedUopInfo.numOfUop
   numOfWB := latchedUopInfo.numOfWB
 
@@ -183,6 +195,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     dst := latchedInst
     dst.numUops := latchedUopInfo.numOfUop
     dst.numWB := latchedUopInfo.numOfWB
+    dst.exceptionVec(ExceptionNO.EX_II) := latchedInst.exceptionVec(ExceptionNO.EX_II) || illegalInst
     dst.firstUop := false.B
     dst.lastUop := false.B
     dst.vlsInstr := false.B
@@ -197,6 +210,70 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   csBundle(0.U).flushPipe := vstartReg =/= 0.U
 
   switch(typeOfSplit) {
+    is(UopSplitType.AMO_CAS_W) {
+      csBundle(0).uopIdx := 0.U
+      csBundle(0).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_w)
+      csBundle(0).lsrc(0) := src1
+      csBundle(0).lsrc(1) := dest
+      csBundle(0).waitForward := true.B
+      csBundle(0).blockBackward := false.B
+
+      csBundle(1).uopIdx := 1.U
+      csBundle(1).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_w)
+      csBundle(1).lsrc(0) := src1
+      csBundle(1).lsrc(1) := src2
+      csBundle(1).rfWen := false.B
+      csBundle(1).waitForward := false.B
+      csBundle(1).blockBackward := true.B
+    }
+    is(UopSplitType.AMO_CAS_D) {
+      csBundle(0).uopIdx := 0.U
+      csBundle(0).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_d)
+      csBundle(0).lsrc(0) := src1
+      csBundle(0).lsrc(1) := dest
+      csBundle(0).waitForward := true.B
+      csBundle(0).blockBackward := false.B
+
+      csBundle(1).uopIdx := 1.U
+      csBundle(1).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_d)
+      csBundle(1).lsrc(0) := src1
+      csBundle(1).lsrc(1) := src2
+      csBundle(1).rfWen := false.B
+      csBundle(1).waitForward := false.B
+      csBundle(1).blockBackward := true.B
+    }
+    is(UopSplitType.AMO_CAS_Q) {
+      csBundle(0).uopIdx := 0.U
+      csBundle(0).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_q)
+      csBundle(0).lsrc(0) := src1
+      csBundle(0).lsrc(1) := dest
+      csBundle(0).waitForward := true.B
+      csBundle(0).blockBackward := false.B
+
+      csBundle(1).uopIdx := 1.U
+      csBundle(1).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_q)
+      csBundle(1).lsrc(0) := src1
+      csBundle(1).lsrc(1) := src2
+      csBundle(1).rfWen := false.B
+      csBundle(1).waitForward := false.B
+      csBundle(1).blockBackward := false.B
+
+      csBundle(2).uopIdx := 2.U
+      csBundle(2).fuOpType := Cat(2.U(3.W), LSUOpType.amocas_q)
+      csBundle(2).lsrc(0) := src1
+      csBundle(2).lsrc(1) := Mux(dest === 0.U, 0.U, dest + 1.U)
+      csBundle(2).ldest := Mux(dest === 0.U, 0.U, dest + 1.U)
+      csBundle(2).waitForward := false.B
+      csBundle(2).blockBackward := false.B
+
+      csBundle(3).uopIdx := 3.U
+      csBundle(3).fuOpType := Cat(3.U(3.W), LSUOpType.amocas_q)
+      csBundle(3).lsrc(0) := src1
+      csBundle(3).lsrc(1) := Mux(src2 === 0.U, 0.U, src2 + 1.U)
+      csBundle(3).rfWen := false.B
+      csBundle(3).waitForward := false.B
+      csBundle(3).blockBackward := true.B
+    }
     is(UopSplitType.VSET) {
       // In simple decoder, rfWen and vecWen are not set
       when(isVsetSimple) {
@@ -1911,11 +1988,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
   val thisAllOut = uopRes <= readyCounter
 
+  val count = RegInit(0.U(log2Up(maxUopSize/RenameWidth + 1).W))
+  val countNext = WireInit(count)
+
   switch(state) {
     is(s_idle) {
       when (inValid) {
         stateNext := s_active
         uopResNext := inUopInfo.numOfUop
+        countNext := 0.U
       }
     }
     is(s_active) {
@@ -1927,15 +2008,18 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           stateNext := s_idle
           uopResNext := 0.U
         }
+        countNext := 0.U
       }.otherwise {
         stateNext := s_active
         uopResNext := uopRes - readyCounter
+        countNext := count + outReadys.head.asUInt
       }
     }
   }
 
   state := Mux(io.redirect, s_idle, stateNext)
   uopRes := Mux(io.redirect, 0.U, uopResNext)
+  count := Mux(io.redirect, 0.U, countNext)
 
   val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
@@ -1944,12 +2028,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // when vstart is not zero, the last uop will modify vstart to zero
   // therefore, blockback and flush pipe
   fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
+  val uopsSeq = (0 until RenameWidth).map(i => VecInit(fixedDecodedInst.zipWithIndex.filter(_._2 % RenameWidth == i).map(_._1)))
 
+  /** Generate output insts and valid signals */
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
-    outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
+    outDecodedInsts(i) := uopsSeq(i)(count)
   }
 
+  /** Generate number of valid output insts */
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
   inReady := state === s_idle || state === s_active && thisAllOut
 

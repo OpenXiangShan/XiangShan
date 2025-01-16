@@ -594,6 +594,7 @@ package object xiangshan {
     // since atomics use a different fu type
     // so we can safely reuse other load/store's encodings
     // bit encoding: | optype(4bit) | size (2bit) |
+    def AMOFuOpWidth = 6
     def lr_w      = "b000010".U
     def sc_w      = "b000110".U
     def amoswap_w = "b001010".U
@@ -605,6 +606,7 @@ package object xiangshan {
     def amomax_w  = "b100010".U
     def amominu_w = "b100110".U
     def amomaxu_w = "b101010".U
+    def amocas_w  = "b101110".U
 
     def lr_d      = "b000011".U
     def sc_d      = "b000111".U
@@ -617,17 +619,25 @@ package object xiangshan {
     def amomax_d  = "b100011".U
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
+    def amocas_d  = "b101111".U
+
+    def amocas_q  = "b101100".U
 
     def size(op: UInt) = op(1,0)
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
-    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
+    def isAllUS   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isUStride (fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
+    def isWhole   (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided (fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed (fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
+    def isLr      (fuOpType: UInt): Bool = fuOpType === lr_w || fuOpType === lr_d
+    def isSc      (fuOpType: UInt): Bool = fuOpType === sc_w || fuOpType === sc_d
+    def isAMOCASQ (fuOpType: UInt): Bool = fuOpType === amocas_q
+    def isAMOCASWD(fuOpType: UInt): Bool = fuOpType === amocas_w || fuOpType === amocas_d
+    def isAMOCAS  (fuOpType: UInt): Bool = fuOpType(5, 2) === "b1011".U
   }
 
   object BKUOpType {
@@ -789,15 +799,20 @@ package object xiangshan {
     def VEC_VFM          = "b111011".U // VEC_VFM
     def VEC_VFRED        = "b111100".U // VEC_VFRED
     def VEC_VFREDOSUM    = "b111101".U // VEC_VFREDOSUM
-    def VEC_M0M          = "b000000".U // VEC_M0M
-    def VEC_MMM          = "b000000".U // VEC_MMM
     def VEC_MVNR         = "b000100".U // vmvnr
+
+    def AMO_CAS_W        = "b110101".U // amocas_w
+    def AMO_CAS_D        = "b110110".U // amocas_d
+    def AMO_CAS_Q        = "b110111".U // amocas_q
+    // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")
 
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
+
+    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
   }
 
   object ExceptionNO {
@@ -817,6 +832,8 @@ package object xiangshan {
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def doubleTrap          = 16
+    def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
     def virtualInstr        = 22
@@ -838,6 +855,7 @@ package object xiangshan {
     def EX_IPF    = instrPageFault
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
+    def EX_DT     = doubleTrap
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
     def EX_VI     = virtualInstr
@@ -860,6 +878,7 @@ package object xiangshan {
     def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
 
     def priorities = Seq(
+      doubleTrap,
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
       instrGuestPageFault,
@@ -875,7 +894,8 @@ package object xiangshan {
       storeGuestPageFault,
       loadGuestPageFault,
       storeAccessFault,
-      loadAccessFault
+      loadAccessFault,
+      hardwareError
     )
 
     def getHigherExcpThan(excp: Int): Seq[Int] = {

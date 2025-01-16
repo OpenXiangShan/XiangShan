@@ -4,6 +4,8 @@ core:
   - "!.github/filters.yaml"
   - "!.github/workflows/nightly.yml"
   - "!.github/workflows/perf.yml"
+  - "!.github/workflows/format.yml"
+  - "!.gitignore"
   - "!**/*.md"
   - "!LICENSE"
   - "!images/**"

@@ -12,6 +12,19 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] Alex Ramirez, Oliverio J. Santana, Josep L. Larriba-Pey, and Mateo Valero. "[Fetching instruction streams.]
+* (https://doi.org/10.1109/MICRO.2002.1176264)" 35th Annual IEEE/ACM International Symposium on Microarchitecture
+* (MICRO). 2002.
+* [2] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Rebasing instruction prefetching: An industry
+* perspective.](https://doi.org/10.1109/LCA.2020.3035068)" IEEE Computer Architecture Letters 19.2: 147-150. 2020.
+* [3] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Re-establishing fetch-directed instruction
+* prefetching: An industry perspective.](https://doi.org/10.1109/ISPASS51385.2021.00034)" 2021 IEEE International
+* Symposium on Performance Analysis of Systems and Software (ISPASS). 2021.
 ***************************************************************************************/
 
 package xiangshan.frontend
@@ -105,11 +118,14 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
 
+  // RVCDecoder fsIsOff
+  ifu.io.csr_fsIsOff := csrCtrl.fsIsOff
+
   // bpu ctrl
   bpu.io.ctrl         := csrCtrl.bp_ctrl
   bpu.io.reset_vector := io.reset_vector
 
-// pmp
+  // pmp
   val PortNumber = ICacheParameters().PortNumber
   val pmp        = Module(new PMP())
   val pmp_check  = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
@@ -130,7 +146,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
-  itlb.io.flushPipe.map(_ := needFlush)
+  itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
   itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
@@ -151,8 +167,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   ftq.io.fromBpu <> bpu.io.bpu_to_ftq
 
   ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
-  // IFU-ICache
 
+  // IFU-ICache
   icache.io.fetch.req <> ftq.io.toICache.req
   ftq.io.toICache.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
 
@@ -165,8 +181,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
-  icache.io.csr_parity_enable := RegNext(csrCtrl.icache_parity_enable)
+  icache.io.csr_pf_enable := RegNext(csrCtrl.l1I_pf_enable)
 
   icache.io.fencei := RegNext(io.fencei)
 
@@ -183,45 +198,55 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
 
-  val checkTargetIdx = Wire(Vec(DecodeWidth, UInt(log2Up(FtqSize).W)))
+  val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
   val checkTarget    = Wire(Vec(DecodeWidth, UInt(VAddrBits.W)))
 
   for (i <- 0 until DecodeWidth) {
-    checkTargetIdx(i) := ibuffer.io.out(i).bits.ftqPtr.value
+    checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
     checkTarget(i) := Mux(
-      ftq.io.toBackend.newest_entry_ptr.value === checkTargetIdx(i),
+      ftq.io.toBackend.newest_entry_ptr.value === checkTargetPtr(i).value,
       ftq.io.toBackend.newest_entry_target,
-      checkPcMem(checkTargetIdx(i) + 1.U).startAddr
+      checkPcMem((checkTargetPtr(i) + 1.U).value).startAddr
     )
   }
 
   // commented out for this br could be the last instruction in the fetch block
   def checkNotTakenConsecutive = {
     val prevNotTakenValid  = RegInit(0.B)
-    val prevNotTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    val prevNotTakenFtqPtr = Reg(new FtqPtr)
     for (i <- 0 until DecodeWidth - 1) {
       // for instrs that is not the last, if a not-taken br, the next instr should have the same ftqPtr
       // for instrs that is the last, record and check next request
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
-          XSError(checkTargetIdx(i) =/= checkTargetIdx(i + 1), "not-taken br should have same ftqPtr\n")
         }.otherwise {
           // last br, record its info
           prevNotTakenValid  := true.B
-          prevNotTakenFtqIdx := checkTargetIdx(i)
+          prevNotTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr &&
+          ibuffer.io.out(i + 1).fire &&
+          checkTargetPtr(i).value =/= checkTargetPtr(i + 1).value,
+        "not-taken br should have same ftqPtr\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr) {
       // last instr is a br, record its info
       prevNotTakenValid  := true.B
-      prevNotTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+      prevNotTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevNotTakenValid && ibuffer.io.out(0).fire) {
-      XSError(prevNotTakenFtqIdx =/= checkTargetIdx(0), "not-taken br should have same ftqPtr\n")
       prevNotTakenValid := false.B
     }
+    XSError(
+      prevNotTakenValid && ibuffer.io.out(0).fire &&
+        prevNotTakenFtqPtr.value =/= checkTargetPtr(0).value,
+      "not-taken br should have same ftqPtr\n"
+    )
+
     when(needFlush) {
       prevNotTakenValid := false.B
     }
@@ -229,32 +254,41 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   def checkTakenNotConsecutive = {
     val prevTakenValid  = RegInit(0.B)
-    val prevTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    val prevTakenFtqPtr = Reg(new FtqPtr)
     for (i <- 0 until DecodeWidth - 1) {
       // for instrs that is not the last, if a taken br, the next instr should not have the same ftqPtr
       // for instrs that is the last, record and check next request
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
-          XSError(checkTargetIdx(i) + 1.U =/= checkTargetIdx(i + 1), "taken br should have consecutive ftqPtr\n")
         }.otherwise {
           // last br, record its info
           prevTakenValid  := true.B
-          prevTakenFtqIdx := checkTargetIdx(i)
+          prevTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          (checkTargetPtr(i) + 1.U).value =/= checkTargetPtr(i + 1).value,
+        "taken br should have consecutive ftqPtr\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && ibuffer.io.out(
       DecodeWidth - 1
     ).bits.pred_taken) {
       // last instr is a br, record its info
       prevTakenValid  := true.B
-      prevTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+      prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevTakenValid && ibuffer.io.out(0).fire) {
-      XSError(prevTakenFtqIdx + 1.U =/= checkTargetIdx(0), "taken br should have consecutive ftqPtr\n")
       prevTakenValid := false.B
     }
+    XSError(
+      prevTakenValid && ibuffer.io.out(0).fire &&
+        (prevTakenFtqPtr + 1.U).value =/= checkTargetPtr(0).value,
+      "taken br should have consecutive ftqPtr\n"
+    )
     when(needFlush) {
       prevTakenValid := false.B
     }
@@ -267,19 +301,20 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken) {
-        when(ibuffer.io.out(i + 1).fire) {
-          XSError(
-            ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(
-              i + 1
-            ).bits.pc,
-            "not-taken br should have consecutive pc\n"
-          )
-        }.otherwise {
+        when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevNotTakenValid := true.B
           prevIsRVC         := ibuffer.io.out(i).bits.pd.isRVC
           prevNotTakenPC    := ibuffer.io.out(i).bits.pc
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(
+            i + 1
+          ).bits.pc,
+        "not-taken br should have consecutive pc\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && !ibuffer.io.out(
       DecodeWidth - 1
@@ -289,43 +324,52 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       prevNotTakenPC    := ibuffer.io.out(DecodeWidth - 1).bits.pc
     }
     when(prevNotTakenValid && ibuffer.io.out(0).fire) {
-      XSError(
-        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc,
-        "not-taken br should have same pc\n"
-      )
       prevNotTakenValid := false.B
     }
+    XSError(
+      prevNotTakenValid && ibuffer.io.out(0).fire &&
+        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc,
+      "not-taken br should have same pc\n"
+    )
     when(needFlush) {
       prevNotTakenValid := false.B
     }
   }
 
   def checkTakenPC = {
-    val prevTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    val prevTakenFtqPtr = Reg(new FtqPtr)
     val prevTakenValid  = RegInit(0.B)
     val prevTakenTarget = Wire(UInt(VAddrBits.W))
-    prevTakenTarget := checkPcMem(prevTakenFtqIdx + 1.U).startAddr
+    prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value).startAddr
 
     for (i <- 0 until DecodeWidth - 1) {
       when(ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {
-        when(ibuffer.io.out(i + 1).fire) {
-          XSError(checkTarget(i) =/= ibuffer.io.out(i + 1).bits.pc, "taken instr should follow target pc\n")
-        }.otherwise {
+        when(ibuffer.io.out(i + 1).fire) {}.otherwise {
           prevTakenValid  := true.B
-          prevTakenFtqIdx := checkTargetIdx(i)
+          prevTakenFtqPtr := checkTargetPtr(i)
         }
       }
+      XSError(
+        ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken &&
+          ibuffer.io.out(i + 1).fire &&
+          checkTarget(i) =/= ibuffer.io.out(i + 1).bits.pc,
+        "taken instr should follow target pc\n"
+      )
     }
     when(ibuffer.io.out(DecodeWidth - 1).fire && !ibuffer.io.out(DecodeWidth - 1).bits.pd.notCFI && ibuffer.io.out(
       DecodeWidth - 1
     ).bits.pred_taken) {
       prevTakenValid  := true.B
-      prevTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+      prevTakenFtqPtr := checkTargetPtr(DecodeWidth - 1)
     }
     when(prevTakenValid && ibuffer.io.out(0).fire) {
-      XSError(prevTakenTarget =/= ibuffer.io.out(0).bits.pc, "taken instr should follow target pc\n")
       prevTakenValid := false.B
     }
+    XSError(
+      prevTakenValid && ibuffer.io.out(0).fire &&
+        prevTakenTarget =/= ibuffer.io.out(0).bits.pc,
+      "taken instr should follow target pc\n"
+    )
     when(needFlush) {
       prevTakenValid := false.B
     }

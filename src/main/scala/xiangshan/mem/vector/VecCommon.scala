@@ -172,8 +172,12 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
       val muxLength = data.length
       val selDataMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLEN * 2).W)))) // 3 * 2 * 256
       val selMaskMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLENB * 2).W)))) // 3 * 2 * 16
-      dontTouch(selDataMatrix)
-      dontTouch(selMaskMatrix)
+
+      if (backendParams.debugEn){
+        dontTouch(selDataMatrix)
+        dontTouch(selMaskMatrix)
+      }
+
       for(i <- 0 until muxLength){
         if(i == 0){
           selDataMatrix(i)(0) := Cat(0.U(VLEN.W), data(i))
@@ -286,8 +290,10 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
 class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle{
   val output = new MemExuOutput(isVector)
   val vecFeedback = Bool()
+  val nc = Bool()
   val mmio = Bool()
   val usSecondInv = Bool()
+  val hasException = Bool()
   val elemIdx = UInt(elemIdxBits.W)
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)

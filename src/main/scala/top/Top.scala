@@ -103,6 +103,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val chi_llcBridge_opt = Option.when(enableCHI)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
+        outstandingDepth    = 64,
         axiMasterOrder      = EnumAXIMasterOrder.WriteAddress,
         readCompDMT         = false,
         writeCancelable     = false,
@@ -115,6 +116,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
+        outstandingDepth            = 32,
         axiMasterOrder              = EnumAXIMasterOrder.None,
         readCompDMT                 = false,
         writeCancelable             = false,
@@ -237,7 +239,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
-      val clock = Input(Bool())
+      val clock = Input(Clock())
       val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
@@ -254,21 +256,40 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val rtc_clock = Input(Bool())
       val cacheable_check = new TLPMAIO()
       val riscv_halt = Output(Vec(NumCores, Bool()))
+      val riscv_critical_error = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
+      val traceCoreInterface = Vec(NumCores, new Bundle {
+        val fromEncoder = Input(new Bundle {
+          val enable = Bool()
+          val stall  = Bool()
+        })
+        val toEncoder   = Output(new Bundle {
+          val cause     = UInt(TraceCauseWidth.W)
+          val tval      = UInt(TraceTvalWidth.W)
+          val priv      = UInt(TracePrivWidth.W)
+          val iaddr     = UInt((TraceTraceGroupNum * TraceIaddrWidth).W)
+          val itype     = UInt((TraceTraceGroupNum * TraceItypeWidth).W)
+          val iretire   = UInt((TraceTraceGroupNum * TraceIretireWidthCompressed).W)
+          val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
+        })
+      })
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
     val chi_openllc_opt = Option.when(enableCHI)(
-      withClockAndReset(io.clock.asClock, io.reset) {
+      withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
-          case OpenLLCParamKey => soc.OpenLLCParamsOpt.get
+          case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
+            hartIds = tiles.map(_.HartId),
+            FPGAPlatform = debugOpts.FPGAPlatform
+          )
         })))
       }
     )
 
     // override LazyRawModuleImp's clock and reset
-    childClock := io.clock.asClock
+    childClock := io.clock
     childReset := reset_sync
 
     // output
@@ -292,10 +313,22 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.msiInfo := msiInfo
       core.module.io.clintTime := misc.module.clintTime
       io.riscv_halt(i) := core.module.io.cpu_halt
+      io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
+      // trace Interface
+      val traceInterface = core.module.io.traceCoreInterface
+      traceInterface.fromEncoder := io.traceCoreInterface(i).fromEncoder
+      io.traceCoreInterface(i).toEncoder.priv := traceInterface.toEncoder.priv
+      io.traceCoreInterface(i).toEncoder.cause := traceInterface.toEncoder.trap.cause
+      io.traceCoreInterface(i).toEncoder.tval := traceInterface.toEncoder.trap.tval
+      io.traceCoreInterface(i).toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
+      io.traceCoreInterface(i).toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+      io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
+      io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
-    withClockAndReset(io.clock.asClock, io.reset) {
+    withClockAndReset(io.clock, io.reset) {
       Option.when(enableCHI)(true.B).foreach { _ =>
         for ((core, i) <- core_with_l2.zipWithIndex) {
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
@@ -315,6 +348,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
         chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
         chi_openllc_opt.get.io.nodeID := (NumCores * 2).U
+        chi_openllc_opt.foreach { l3 =>
+          l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        }
+        core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
+          tile.module.io.debugTopDown.l3MissMatch := l3Match
+        }
       }
     }
 
@@ -340,22 +379,27 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         }
         l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
         core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
-      case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+      case None =>
     }
 
-    core_with_l2.foreach { case tile =>
+    (chi_openllc_opt, l3cacheOpt) match {
+      case (None, None) => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+      case _ =>
+    }
+
+    core_with_l2.zipWithIndex.foreach { case (tile, i) =>
       tile.module.io.nodeID.foreach { case nodeID =>
-        nodeID := DontCare
+        nodeID := i.U
         dontTouch(nodeID)
       }
     }
 
-    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
+    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.hartIsInReset)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := reset_sync
 
     misc.module.debug_module_io.debugIO.reset := misc.module.reset
-    misc.module.debug_module_io.debugIO.clock := io.clock.asClock
+    misc.module.debug_module_io.debugIO.clock := io.clock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
@@ -367,11 +411,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock.asClock, reset_sync) {
+    withClockAndReset(io.clock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
-      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
+      val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module))
       ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
+      // Ensure that cores could be reset when DM disable `hartReset` or l3cacheOpt.isEmpty.
+      val dmResetReqVec = misc.module.debug_module_io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(Vec(core_with_l2.map(_.module).length, Bool())))
+      val syncResetCores = if(l3cacheOpt.nonEmpty) l3cacheOpt.map(_.module).get.reset.asBool else misc.module.reset.asBool
+      (core_with_l2.map(_.module)).zip(dmResetReqVec).map { case(core, dmResetReq) =>
+        ResetGen(Seq(Seq(core)), (syncResetCores || dmResetReq).asAsyncReset, !debugOpts.ResetGen)
+      }
     }
 
   }

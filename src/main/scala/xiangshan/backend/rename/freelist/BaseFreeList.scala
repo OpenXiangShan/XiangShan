@@ -57,8 +57,8 @@ abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parame
     }
   }
 
-  val lastCycleRedirect = GatedValidRegNext(io.redirect, false.B)
-  val lastCycleSnpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
+  val lastCycleRedirect = RegNext(RegNext(io.redirect))
+  val lastCycleSnpt = RegNext(RegNext(io.snpt, 0.U.asTypeOf(io.snpt)))
 
   val headPtr = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))

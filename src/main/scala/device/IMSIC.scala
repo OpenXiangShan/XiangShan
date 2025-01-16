@@ -96,7 +96,7 @@ class imsic_csr_top(
   "XLEN"           -> XLEN,
   "NR_SRC"         -> NumIRSrc,
   "EID_VLD_DLY_NUM"-> EidVldDlyNum,
-)) with HasBlackBoxResource with HasBlackBoxPath {
+)) with HasBlackBoxResource {
   private val NR_SRC_WIDTH = log2Up(NumIRSrc)
   private val NR_HARTS_WIDTH = log2Up(NumHart)
   private val INTP_FILE_WIDTH = log2Up(NumIRFiles)

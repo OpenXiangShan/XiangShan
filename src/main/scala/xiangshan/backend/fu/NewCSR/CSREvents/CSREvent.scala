@@ -117,7 +117,7 @@ trait CSREventBase {
 class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val causeNO = Input(new CauseBundle)
   val trapPc = Input(UInt(VaddrMaxWidth.W))
-  val trapPcGPA = Input(UInt(GPAddrBits.W))
+  val trapPcGPA = Input(UInt(PAddrBitsMax.W))
   val trapInst = Input(ValidIO(UInt(InstWidth.W)))
   val fetchMalTval = Input(UInt(XLEN.W))
   val isCrossPageIPF = Input(Bool())
@@ -125,6 +125,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isFetchMalAddr = Input(Bool())
   val isFetchBkpt = Input(Bool())
   val trapIsForVSnonLeafPTE = Input(Bool())
+  val hasDTExcp = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())
@@ -136,6 +137,9 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val hstatus = Input(new HstatusBundle)
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
+  // envcfg
+  val menvcfg = Input(new MEnvCfg)
+  val henvcfg = Input(new HEnvCfg)
 
   val pcFromXtvec = Input(UInt(XLEN.W))
 

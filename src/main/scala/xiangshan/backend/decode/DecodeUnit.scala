@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.decode
 
@@ -39,7 +39,7 @@ import yunsuan.{VfaluType, VfcvtType}
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
  */
-abstract trait DecodeConstants {
+trait DecodeConstants {
   // This X should be used only in 1-bit signal. Otherwise, use BitPat("b???") to align with the width of UInt.
   def X = BitPat("b0")
   def N = BitPat("b0")
@@ -228,6 +228,7 @@ object XDecode extends DecodeConstants {
     SFENCE_VMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
     FENCE_I    -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fencei, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
     FENCE      -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence , SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    PAUSE      -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence , SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
 
     // RV64A
     AMOADD_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
@@ -239,6 +240,7 @@ object XDecode extends DecodeConstants {
     AMOMINU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAX_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAXU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_w, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_W, xWen = T, noSpec = T, blockBack = T),
 
     AMOADD_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOXOR_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
@@ -249,6 +251,9 @@ object XDecode extends DecodeConstants {
     AMOMINU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAX_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAXU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_d, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_D, xWen = T, noSpec = T, blockBack = T),
+
+    AMOCAS_Q  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_q, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_Q, xWen = T, noSpec = T, blockBack = T),
 
     LR_W    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
     LR_D    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
@@ -407,6 +412,10 @@ object FpDecode extends DecodeConstants{
     FCVT_D_L  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
     FCVT_D_LU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
 
+    FCVT_H_W  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_H_WU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_H_L  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_H_LU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
   )
 }
 
@@ -507,8 +516,8 @@ object ZicondDecode extends DecodeConstants {
 }
 
 /**
-  * "Zimop" Extension for May-Be-Operations
-  */
+ * "Zimop" Extension for May-Be-Operations
+ */
 object ZimopDecode extends DecodeConstants {
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     // temp use addi to decode MOP_R and MOP_RR
@@ -656,10 +665,10 @@ case class Imm_VSETVLI() extends Imm(11){
     instr(30, 20)
   }
   /**
-    * get VType from extended imm
-    * @param extedImm
-    * @return VType
-    */
+   * get VType from extended imm
+   * @param extedImm
+   * @return VType
+   */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
     vtype := extedImm(10, 0).asTypeOf(new InstVType)
@@ -677,10 +686,10 @@ case class Imm_VSETIVLI() extends Imm(15){
     Cat(uimm5, vtype8)
   }
   /**
-    * get VType from extended imm
-    * @param extedImm
-    * @return VType
-    */
+   * get VType from extended imm
+   * @param extedImm
+   * @return VType
+   */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
     vtype := extedImm(9, 0).asTypeOf(new InstVType)
@@ -758,18 +767,22 @@ case class Imm_LUI_LOAD() {
 /**
  * IO bundle for the Decode unit
  */
+
+class DecodeUnitEnqIO(implicit p: Parameters) extends XSBundle {
+  val ctrlFlow = Input(new StaticInst)
+  val vtype = Input(new VType)
+  val vstart = Input(Vl())
+}
+
 class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
   val decodedInst = Output(new DecodedInst)
   val isComplex = Output(Bool())
   val uopInfo = Output(new UopInfo)
 }
+
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle {
-    val ctrlFlow = Input(new StaticInst)
-    val vtype = Input(new VType)
-    val vstart = Input(Vl())
-  }
-//  val vconfig = Input(UInt(XLEN.W))
+  val enq = new DecodeUnitEnqIO
+  //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val fromCSR = Input(new CSRToDecode)
@@ -851,21 +864,20 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.v0Wen := false.B
   decodedInst.vlWen := false.B
 
-  // fill in exception vector
-  val vecException = Module(new VecExceptionGen)
-  vecException.io.inst := io.enq.ctrlFlow.instr
-  vecException.io.decodedInst := decodedInst
-  vecException.io.vtype := decodedInst.vpu.vtype
-  vecException.io.vstart := decodedInst.vpu.vstart
-
   private val isCboClean = CBO_CLEAN === io.enq.ctrlFlow.instr
   private val isCboFlush = CBO_FLUSH === io.enq.ctrlFlow.instr
   private val isCboInval = CBO_INVAL === io.enq.ctrlFlow.instr
   private val isCboZero  = CBO_ZERO  === io.enq.ctrlFlow.instr
 
+  // Note that rnum of aes64ks1i must be in the range 0x0..0xA. The values 0xB..0xF are reserved.
+  private val isAes64ks1iIllegal =
+    FuType.FuTypeOrR(decodedInst.fuType, FuType.bku) && (decodedInst.fuOpType === BKUOpType.aes64ks1i) && inst.isRnumIllegal
+
+  private val isAmocasQ = FuType.FuTypeOrR(decodedInst.fuType, FuType.mou) && decodedInst.fuOpType === LSUOpType.amocas_q
+  private val isAmocasQIllegal = isAmocasQ && (inst.RD(0) === 1.U || inst.RS2(0) === 1.U)
+
   private val exceptionII =
     decodedInst.selImm === SelImm.INVALID_INSTR ||
-    vecException.io.illegalInst ||
     io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
     io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
     io.fromCSR.illegalInst.hfenceGVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_g ||
@@ -874,8 +886,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.illegalInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType) ||
     io.fromCSR.illegalInst.fsIsOff    && (
       FuType.FuTypeOrR(decodedInst.fuType, FuType.fpOP ++ Seq(FuType.f2v)) ||
-      (FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu) && (decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
-      FuType.FuTypeOrR(decodedInst.fuType, FuType.stu) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
+      (FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu) && (decodedInst.fuOpType === LSUOpType.lh || decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
+      FuType.FuTypeOrR(decodedInst.fuType, FuType.stu) && (decodedInst.fuOpType === LSUOpType.sh || decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
       inst.isOPFVF || inst.isOPFVV
     ) ||
     io.fromCSR.illegalInst.vsIsOff    && FuType.FuTypeOrR(decodedInst.fuType, FuType.vecAll) ||
@@ -884,7 +896,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm ||
     io.fromCSR.illegalInst.cboZ       && isCboZero ||
     io.fromCSR.illegalInst.cboCF      && (isCboClean || isCboFlush) ||
-    io.fromCSR.illegalInst.cboI       && isCboInval
+    io.fromCSR.illegalInst.cboI       && isCboInval ||
+    isAes64ks1iIllegal ||
+    isAmocasQIllegal
 
   private val exceptionVI =
     io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
@@ -913,7 +927,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   private val isLs = FuType.isLoadStore(decodedInst.fuType)
-  private val isVls = FuType.isVls(decodedInst.fuType)
+  private val isVls = inst.isVecStore || inst.isVecLoad
   private val isStore = FuType.isStore(decodedInst.fuType)
   private val isAMO = FuType.isAMO(decodedInst.fuType)
   private val isVStore = FuType.isVStore(decodedInst.fuType)
@@ -948,13 +962,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   )
   private val wfflagsInsts = Seq(
     // opfff
-    FADD_S, FSUB_S, FADD_D, FSUB_D,
-    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
-    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
-    FMUL_S, FMUL_D,
-    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
-    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
-    FSGNJ_S, FSGNJN_S, FSGNJX_S,
+    FADD_S, FSUB_S, FADD_D, FSUB_D, FADD_H, FSUB_H,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D, FEQ_H, FLT_H, FLE_H,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D, FMIN_H, FMAX_H,
+    FMUL_S, FMUL_D, FMUL_H,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D, FDIV_H, FSQRT_H,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D, FMADD_H, FMSUB_H, FNMADD_H, FNMSUB_H,
+    FSGNJ_S, FSGNJN_S, FSGNJX_S, FSGNJ_H, FSGNJN_H, FSGNJX_H,
     // opfvv
     VFADD_VV, VFSUB_VV, VFWADD_VV, VFWSUB_VV, VFWADD_WV, VFWSUB_WV,
     VFMUL_VV, VFDIV_VV, VFWMUL_VV,
@@ -980,6 +994,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     FCVT_D_W, FCVT_D_WU, FCVT_D_L, FCVT_D_LU,
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
     FCVT_S_H, FCVT_H_S, FCVT_H_D, FCVT_D_H,
+    FCVT_H_W, FCVT_H_WU, FCVT_H_L, FCVT_H_LU,
+    FCVT_W_H, FCVT_WU_H, FCVT_L_H, FCVT_LU_H,
     VFCVT_XU_F_V, VFCVT_X_F_V, VFCVT_RTZ_XU_F_V, VFCVT_RTZ_X_F_V, VFCVT_F_XU_V, VFCVT_F_X_V,
     VFWCVT_XU_F_V, VFWCVT_X_F_V, VFWCVT_RTZ_XU_F_V, VFWCVT_RTZ_X_F_V, VFWCVT_F_XU_V, VFWCVT_F_X_V, VFWCVT_F_F_V,
     VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W,
@@ -992,9 +1008,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   )
 
   private val scalaNeedFrmInsts = Seq(
-    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FADD_S, FSUB_S, FADD_D, FSUB_D, FADD_H, FSUB_H,
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
     FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+    FCVT_W_H, FCVT_WU_H, FCVT_L_H, FCVT_LU_H,
+    FCVT_S_H, FCVT_H_S, FCVT_H_D, FCVT_D_H,
     FROUND_H, FROUND_S, FROUND_D, FROUNDNX_H, FROUNDNX_S, FROUNDNX_D,
   )
 
@@ -1005,40 +1023,36 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
-  val fpToVecDecoder = Module(new FPToVecDecoder())
-  fpToVecDecoder.io.instr := inst.asUInt
-  val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
-  when(isFpToVecInst){
-    decodedInst.vpu := fpToVecDecoder.io.vpuCtrl
-  }.otherwise{
-    decodedInst.vpu.vill := io.enq.vtype.illegal
-    decodedInst.vpu.vma := io.enq.vtype.vma
-    decodedInst.vpu.vta := io.enq.vtype.vta
-    decodedInst.vpu.vsew := io.enq.vtype.vsew
-    decodedInst.vpu.vlmul := io.enq.vtype.vlmul
-    decodedInst.vpu.vm := inst.VM
-    decodedInst.vpu.nf := inst.NF
-    decodedInst.vpu.veew := inst.WIDTH
-    decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
-    val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
-    val isVle = decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse
-    val isVlm = decodedInst.fuOpType === VlduType.vlm
-    val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
-    val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
-    val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
-    decodedInst.vpu.isNarrow := isNarrow
-    decodedInst.vpu.isDstMask := isDstMask
-    decodedInst.vpu.isOpMask := isOpMask
-    decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma
-    decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
-    decodedInst.vpu.vstart := io.enq.vstart
-    decodedInst.vpu.isVleff := decodedInst.fuOpType === VlduType.vleff && inst.NF === 0.U
-  }
+  decodedInst.vpu.vill := io.enq.vtype.illegal
+  decodedInst.vpu.vma := io.enq.vtype.vma
+  decodedInst.vpu.vta := io.enq.vtype.vta
+  decodedInst.vpu.vsew := io.enq.vtype.vsew
+  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+  decodedInst.vpu.vm := inst.VM
+  decodedInst.vpu.nf := inst.NF
+  decodedInst.vpu.veew := inst.WIDTH
+  decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+  val isVload = FuType.isVLoad(decodedInst.fuType)
+  val isVlx = isVload && (decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe)
+  val isVle = isVload && (decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse)
+  val isVlm = isVload && (decodedInst.fuOpType === VlduType.vlm)
+  val isFof = isVload && (decodedInst.fuOpType === VlduType.vleff)
+  val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV || decodedInst.uopSplitType === UopSplitType.VEC_VWW
+  val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
+  val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
+  val vstartIsNotZero = io.enq.vstart =/= 0.U
+  decodedInst.vpu.isNarrow := isNarrow
+  decodedInst.vpu.isDstMask := isDstMask
+  decodedInst.vpu.isOpMask := isOpMask
+  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
+  decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
+  decodedInst.vpu.vstart := io.enq.vstart
+  decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
   decodedInst.vpu.specVill := io.enq.vtype.illegal
   decodedInst.vpu.specVma := io.enq.vtype.vma
   decodedInst.vpu.specVta := io.enq.vtype.vta
@@ -1047,10 +1061,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.vlsInstr := isVls
 
-  decodedInst.srcType(3) := Mux(inst.VM === 0.U && !isFpToVecInst, SrcType.vp, SrcType.DC) // mask src
-  decodedInst.srcType(4) := Mux(!isFpToVecInst, SrcType.vp, SrcType.DC) // vconfig
+  decodedInst.srcType(3) := Mux(inst.VM === 0.U, SrcType.vp, SrcType.DC) // mask src
+  decodedInst.srcType(4) := SrcType.vp // vconfig
 
   val uopInfoGen = Module(new UopInfoGen)
+  uopInfoGen.io.in.preInfo.isVecArith := inst.isVecArith
+  uopInfoGen.io.in.preInfo.isVecMem := inst.isVecStore || inst.isVecLoad
+  uopInfoGen.io.in.preInfo.isAmoCAS := inst.isAMOCAS
+
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
   uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
   uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
@@ -1060,8 +1078,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
   uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
   io.deq.isComplex := uopInfoGen.io.out.isComplex
-  // numOfUop should be 1 when vector instruction is illegalInst
-  io.deq.uopInfo.numOfUop := Mux(vecException.io.illegalInst, 1.U, uopInfoGen.io.out.uopInfo.numOfUop)
+  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 

@@ -12,18 +12,27 @@
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 *
 * See the Mulan PSL v2 for more details.
+*
+*
+* Acknowledgement
+*
+* This implementation is inspired by several key papers:
+* [1] David Kroft. "[Lockup-free instruction fetch/prefetch cache organization.]
+* (https://dl.acm.org/doi/10.5555/800052.801868)" 8th Annual Symposium on Computer Architecture (ISCA). 1981.
 ***************************************************************************************/
 
 package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import coupledL2.VaddrKey
 import coupledL2.IsKeywordKey
 import difftest._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
+import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink._
 import huancun.{AliasKey, DirtyKey, PrefetchKey}
 import org.chipsalliance.cde.config.Parameters
@@ -47,10 +56,11 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // store
   val full_overwrite = Bool()
 
-  // which word does amo work on?
+  // amo
   val word_idx = UInt(log2Up(blockWords).W)
-  val amo_data = UInt(DataBits.W)
-  val amo_mask = UInt((DataBits / 8).W)
+  val amo_data   = UInt(QuadWordBits.W)
+  val amo_mask   = UInt(QuadWordBytes.W)
+  val amo_cmp    = UInt(QuadWordBits.W) // data to be compared in AMOCAS
 
   val req_coh = new ClientMetadata
   val id = UInt(reqIdWidth.W)
@@ -105,22 +115,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   }
 
   def toMissReqWoStoreData(): MissReqWoStoreData = {
-    val out = Wire(new MissReqWoStoreData)
-    out.source := source
-    out.pf_source := pf_source
-    out.cmd := cmd
-    out.addr := addr
-    out.vaddr := vaddr
-    out.full_overwrite := full_overwrite
-    out.word_idx := word_idx
-    out.amo_data := amo_data
-    out.amo_mask := amo_mask
-    out.req_coh := req_coh
-    out.id := id
-    out.cancel := cancel
-    out.pc := pc
-    out.lqIdx := lqIdx
-    out
+    this.viewAsSupertype(new MissReqWoStoreData)
   }
 }
 
@@ -276,6 +271,63 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def block_match(release_addr: UInt): Bool = {
     reg_valid() && get_block(req.addr) === get_block(release_addr)
   }
+}
+
+class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
+  val io = IO(new Bundle() {
+    val req = Flipped(DecoupledIO(new CMOReq))
+    val req_chanA = DecoupledIO(new TLBundleA(edge.bundle))
+    val resp_chanD = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val resp_to_lsq = DecoupledIO(new CMOResp)
+  })
+
+  val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
+  val state = RegInit(s_idle)
+  val state_next = WireInit(state)
+  val req = RegEnable(io.req.bits, io.req.fire)
+
+  state := state_next
+
+  switch (state) {
+    is(s_idle) {
+      when (io.req.fire) {
+        state_next := s_sreq
+      }
+    }
+    is(s_sreq) {
+      when (io.req_chanA.fire) {
+        state_next := s_wresp
+      }
+    }
+    is(s_wresp) {
+      when (io.resp_chanD.fire) {
+        state_next := s_lsq_resp
+      }
+    }
+    is(s_lsq_resp) {
+      when (io.resp_to_lsq.fire) {
+        state_next := s_idle
+      }
+    }
+  }
+
+  io.req.ready := state === s_idle
+
+  io.req_chanA.valid := state === s_sreq
+  io.req_chanA.bits := edge.CacheBlockOperation(
+    fromSource = (cfg.nMissEntries + 1).U,
+    toAddress = req.address,
+    lgSize = (log2Up(cfg.blockBytes)).U,
+    opcode = req.opcode
+  )._2
+
+  io.resp_chanD.ready := state === s_wresp
+
+  io.resp_to_lsq.valid := state === s_lsq_resp
+  io.resp_to_lsq.bits.address := req.address
+
+  assert(!(state =/= s_idle && io.req.valid))
+  assert(!(state =/= s_wresp && io.resp_chanD.valid))
 }
 
 class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DCacheModule 
@@ -780,7 +832,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
-  io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst_forward_info, w_grantlast_forward_info)
+  io.forwardInfo.inflight := req_valid
+  io.forwardInfo.paddr := req.addr
+  io.forwardInfo.raw_data := refill_and_store_data
+  io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
+  io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
+  io.forwardInfo.corrupt := error
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
   io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
@@ -822,6 +879,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 100, 400, 30, true, false)
 
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, GatedValidRegNext(io.mem_grant.fire && refill_done))
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
@@ -836,6 +894,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val req = Flipped(DecoupledIO(new MissReq))
     val resp = Output(new MissResp)
     val refill_to_ldq = ValidIO(new Refill)
+
+    // cmo req
+    val cmo_req = Flipped(DecoupledIO(new CMOReq))
+    val cmo_resp = DecoupledIO(new CMOResp)
 
     val queryMQ = Vec(reqNum, Flipped(new DCacheMQQueryIOBundle))
 
@@ -891,6 +953,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // 128KBL1: FIXME: provide vaddr for l2
 
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge, reqNum)))
+  val cmo_unit = Module(new CMOUnit(edge))
 
   val miss_req_pipe_reg = RegInit(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))
   val acquire_from_pipereg = Wire(chiselTypeOf(io.mem_acquire))
@@ -966,6 +1029,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.forward(i).forward_result_valid := forwardInfo_vec(id).check(req_valid, paddr)
     io.forward(i).forward_mshr := forward_mshr
     io.forward(i).forwardData := forwardData
+    io.forward(i).corrupt := RegNext(forwardInfo_vec(id).corrupt)
   })
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
@@ -1048,6 +1112,15 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       }
   }
 
+  cmo_unit.io.req <> io.cmo_req
+  io.cmo_resp <> cmo_unit.io.resp_to_lsq
+  when (io.mem_grant.valid && io.mem_grant.bits.opcode === TLMessages.CBOAck) {
+    cmo_unit.io.resp_chanD <> io.mem_grant
+  } .otherwise {
+    cmo_unit.io.resp_chanD.valid := false.B
+    cmo_unit.io.resp_chanD.bits := DontCare
+  }
+
   io.req.ready := accept
   io.mq_enq_cancel := io.req.bits.cancel
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
@@ -1062,7 +1135,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
   XSPerfAccumulate("pipereg_valid", miss_req_pipe_reg.reg_valid())
 
-  val acquire_sources = Seq(acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
+  val acquire_sources = Seq(cmo_unit.io.req_chanA, acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
