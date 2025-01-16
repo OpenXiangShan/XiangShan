@@ -93,7 +93,7 @@ case class XSCoreParameters
   SCCloseConfIncWhenSCDisagreeButTAGECorrect: Int = 5,
   SCCloseConfDecWhenSCDisagreeAndSCCorrect: Int = -50,
   SCCloseConfIncWhenSCClosedAndTAGECorrect: Int = 1,
-  SCCloseConfIncWhenSCClosedAndTAGEWrong: Int = -30,
+  SCCloseConfDecWhenSCClosedAndTAGEWrong: Int = -30,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
@@ -665,7 +665,7 @@ trait HasXSParameter {
   def SCCloseConfIncWhenSCDisagreeButTAGECorrect = coreParams.SCCloseConfIncWhenSCDisagreeButTAGECorrect
   def SCCloseConfDecWhenSCDisagreeAndSCCorrect = coreParams.SCCloseConfDecWhenSCDisagreeAndSCCorrect
   def SCCloseConfIncWhenSCClosedAndTAGECorrect = coreParams.SCCloseConfIncWhenSCClosedAndTAGECorrect
-  def SCCloseConfIncWhenSCClosedAndTAGEWrong = coreParams.SCCloseConfIncWhenSCClosedAndTAGEWrong
+  def SCCloseConfDecWhenSCClosedAndTAGEWrong = coreParams.SCCloseConfDecWhenSCClosedAndTAGEWrong
   def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   def HistoryLength = coreParams.HistoryLength
   def EnableGHistDiff = coreParams.EnableGHistDiff
