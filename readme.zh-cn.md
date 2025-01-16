@@ -4,10 +4,6 @@
 
 English Readme is [here](README.md).
 
-©2020-2022 中国科学院计算技术研究所版权所有
-
-©2020-2022 鹏城实验室版权所有
-
 ## 文档和报告
 
 香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
@@ -122,3 +118,13 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## 致谢
 
 香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。
+
+## 许可证
+
+版权所有 © 2020-2025 中国科学院计算技术研究所
+
+版权所有 © 2021-2025 北京开源芯片研究院
+
+版权所有 © 2020-2022 鹏城实验室
+
+香山以 [木兰宽松许可证 第2版](LICENSE) 授权。
