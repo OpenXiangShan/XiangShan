@@ -271,11 +271,11 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   var sc_fh_info                          = Set[FoldedHistoryInfo]()
   if (EnableSC) {
     val scCloseConfCounter = WireInit(0.S(scCloseConfCounterWidth.W))
-    val s0_sc_closed       = if (DynCloseSC) { scCloseConfCounter >= 0.S }
-                             else { false.B }
-    val s1_sc_closed       = RegEnable(s0_sc_closed, io.s0_fire(3))
-    val s2_sc_closed       = RegEnable(s1_sc_closed, io.s1_fire(3))
-    val s3_sc_closed       = RegEnable(s2_sc_closed, io.s2_fire(3))
+    val s0_sc_closed = if (DynCloseSC) { scCloseConfCounter >= 0.S }
+    else { false.B }
+    val s1_sc_closed = RegEnable(s0_sc_closed, io.s0_fire(3))
+    val s2_sc_closed = RegEnable(s1_sc_closed, io.s1_fire(3))
+    val s3_sc_closed = RegEnable(s2_sc_closed, io.s2_fire(3))
 
     val scTables = SCTableInfos.map {
       case (nRows, ctrBits, histLen) => {
@@ -489,7 +489,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     for (b <- 0 until TageBanks) {
       for (i <- 0 until SCNTables) {
         val realWen = if (DynCloseSC) { realWens(i) && !s0_sc_closed }
-                      else { realWens(i) }
+        else { realWens(i) }
         scTables(i).io.update.mask(b)      := RegNext(scUpdateMask(b)(i))
         scTables(i).io.update.tagePreds(b) := RegEnable(scUpdateTagePreds(b), realWen)
         scTables(i).io.update.takens(b)    := RegEnable(scUpdateTakens(b), realWen)
