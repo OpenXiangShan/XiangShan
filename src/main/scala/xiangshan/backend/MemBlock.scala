@@ -1160,7 +1160,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DLBPortIndex).req.bits.facA := io.l2_tlb_req.req.bits.vaddr(VAddrBits-1, sectorvpnOffLen)
   dtlb_reqs(L2toL1DLBPortIndex).req.bits.facB := 0.U
-  dtlb_reqs(L2toL1DLBPortIndex).req.bits.facC0 := false.B
+  dtlb_reqs(L2toL1DLBPortIndex).req.bits.facCarry := false.B
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
   io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
