@@ -115,12 +115,12 @@ trait BPUUtils extends HasXSParameter {
 
     val finalDelta = MuxLookup(deltaType(uIdx), 0.S)(
       Seq(
-        0.U -> 1.S,   // SC opened, SC agree and correct, can be closed
-        1.U -> 1.S,   // SC opened, SC agree but wrong, should be closed more
-        2.U -> 5.S,   // SC opened, SC disagree and wrong, should definitely be closed
-        3.U -> -50.S, // SC opened, SC disagree but correct, should stay open
-        4.U -> 1.S,   // SC closed, TAGE pred correct, SC can be closed
-        5.U -> -30.S  // SC closed, TAGE pred wrong, SC should be opened
+        0.U -> SCCloseConfIncWhenSCAgreeAndCorrect.S,   // SC opened, SC agree and correct, can be closed
+        1.U -> SCCloseConfIncWhenSCAgreeButWrong.S,   // SC opened, SC agree but wrong, should be closed more
+        2.U -> SCCloseConfIncWhenSCDisagreeButTAGECorrect.S,   // SC opened, SC disagree and wrong, should definitely be closed
+        3.U -> SCCloseConfDecWhenSCDisagreeAndSCCorrect.S, // SC opened, SC disagree but correct, should stay open
+        4.U -> SCCloseConfIncWhenSCClosedAndTAGECorrect.S,   // SC closed, TAGE pred correct, SC can be closed
+        5.U -> SCCloseConfIncWhenSCClosedAndTAGEWrong.S  // SC closed, TAGE pred wrong, SC should be opened
       )
     )
 
