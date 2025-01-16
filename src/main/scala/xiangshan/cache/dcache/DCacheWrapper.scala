@@ -1653,13 +1653,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // dcache should only deal with DRAM addresses
   import freechips.rocketchip.util._
   when (bus.a.fire) {
-    assert(PmemRanges.map(range => bus.a.bits.address.inRange(range._1.U, range._2.U)).reduce(_ || _))
+    assert(PmemRanges.map(_.cover(bus.a.bits.address)).reduce(_ || _))
   }
   when (bus.b.fire) {
-    assert(PmemRanges.map(range => bus.b.bits.address.inRange(range._1.U, range._2.U)).reduce(_ || _))
+    assert(PmemRanges.map(_.cover(bus.b.bits.address)).reduce(_ || _))
   }
   when (bus.c.fire) {
-    assert(PmemRanges.map(range => bus.c.bits.address.inRange(range._1.U, range._2.U)).reduce(_ || _))
+    assert(PmemRanges.map(_.cover(bus.c.bits.address)).reduce(_ || _))
   }
 
   //----------------------------------------

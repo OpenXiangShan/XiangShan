@@ -177,7 +177,7 @@ object difftest extends HasChisel {
 
   object test extends SbtTests with TestModule.ScalaTest {
     override def sources = T.sources {
-      super.sources() ++ Seq(PathRef(millSourcePath / "src" / "generator" / "chisel"))
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / "generator" / "chisel"))
     }
   }
 
@@ -270,6 +270,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chiseltest"),
+    ivy"io.circe::circe-yaml:1.15.0",
+    ivy"io.circe::circe-generic-extras:0.14.4"
   )
 
   override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
@@ -291,7 +293,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
       LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
   )
 
-  def gitStatus: T[String] = {
+  // gitStatus changes frequently and unpredictably. Use `Task.Input` here.
+  def gitStatus: T[String] = Task.Input {
     val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
     val gitRevParseProcess = gitRevParseBuilder.start()
     val shaReader = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
@@ -342,10 +345,6 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
     )
 
     override def forkArgs = forkArgsTask()
-
-    override def ivyDeps = super.ivyDeps() ++ Agg(
-      defaultVersions("chiseltest")
-    )
 
     override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
 
