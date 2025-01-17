@@ -147,7 +147,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def isInflight(): Bool = valid && inflight
   def isWaitReturn(): Bool = valid && waitReturn
   def isWaitSame(): Bool = valid && waitSame
-  def can2Uncache(): Bool = valid && !inflight && !waitSame && !waitReturn
+  def can2Bus(): Bool = valid && !inflight && !waitSame && !waitReturn
   def can2Lsq(): Bool = valid && waitReturn
   
   def setValid(x: Bool): Unit = { valid := x}
@@ -377,7 +377,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val q0_canSentVec = sizeMap(i =>
     (io.enableOutstanding || uState === s_idle) &&
-    states(i).can2Uncache()
+    states(i).can2Bus()
   )
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
   q0_canSentIdx := q0_res._1
