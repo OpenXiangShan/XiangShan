@@ -28,7 +28,7 @@ import freechips.rocketchip.util.AsyncQueueParams
 case class YamlConfig(
   PmemRanges: Option[List[MemoryRange]],
   PMAConfigs: Option[List[PMAConfigEntry]],
-  CHIAsyncBridge: Option[AsyncQueueParams],
+  EnableCHIAsyncBridge: Option[Boolean],
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
   DebugModuleBaseAddr: Option[BigInt]
@@ -57,10 +57,10 @@ object YamlParser {
         case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = pmaConfigs)
       })
     }
-    yamlConfig.CHIAsyncBridge.foreach { bridge =>
+    yamlConfig.EnableCHIAsyncBridge.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(
-          EnableCHIAsyncBridge = Option.when(bridge.depth > 0)(bridge)
+          EnableCHIAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 16, sync = 3, safe = false))
         )
       })
     }
