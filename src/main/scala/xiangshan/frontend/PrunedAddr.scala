@@ -35,11 +35,12 @@ class PrunedAddr(val length: Int)(implicit p: Parameters) extends XSBundle {
     addr := UIntAddr(length - 1, instOffsetBits)
   }
 
+  // This method should only be used when offset is an immediate value
   def +(offset: UInt): PrunedAddr = PrunedAddrInit(toUInt + offset)
 
-  def -(offset: UInt): PrunedAddr = PrunedAddrInit(toUInt - offset)
+  def +(that: PrunedAddr): PrunedAddr = PrunedAddrInit(toUInt + that.toUInt)
 
-  def -(that: PrunedAddr): UInt = toUInt - that.toUInt
+  def -(that: PrunedAddr): PrunedAddr = PrunedAddrInit(toUInt - that.toUInt)
 
   def >>(offset: Int): UInt = (toUInt >> offset).asUInt
 
