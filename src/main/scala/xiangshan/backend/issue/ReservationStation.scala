@@ -191,10 +191,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
     io.issue_num := rs.map(_.io.issue_num).reduce(_ +& _)
 
-//    for ((rs, i) <- rs.zipWithIndex) {
-//      HardenXSPerfAccumulate(s"issue_num_$i", PopCount(rs.io.deq.map(_.valid)))
-//    }
-
     val perfEvents = rs.flatMap(_.getPerfEvents)
     generatePerfEvent()
   }
