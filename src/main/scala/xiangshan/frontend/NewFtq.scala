@@ -1675,7 +1675,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftb_modified_entry_br_full              = ftb_modified_entry && ftbEntryGen.is_br_full
   val ftb_modified_entry_strong_bias          = ftb_modified_entry && ftbEntryGen.is_strong_bias_modified
 
-  def getFtbEntryLen(pc: PrunedAddr, entry: FTBEntry): UInt = (entry.getFallThrough(pc) - pc) >> instOffsetBits
+  def getFtbEntryLen(pc: PrunedAddr, entry: FTBEntry): UInt =
+    ((entry.getFallThrough(pc) - pc).toUInt >> instOffsetBits).asUInt
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)

@@ -39,7 +39,7 @@ trait HasIFUConst extends HasXSParameter {
   def fetchQueueSize = 2
 
   def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
-    val byteOffset = pc - start
+    val byteOffset = (pc - start).toUInt
     (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
   }
 }
@@ -99,7 +99,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
 
 class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val ftqOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
-  val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
+  val jumpOffset = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val target     = PrunedAddr(VAddrBits)
   val instrRange = Vec(PredictWidth, Bool())
   val instrValid = Vec(PredictWidth, Bool())

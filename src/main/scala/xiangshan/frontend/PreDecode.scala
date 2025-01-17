@@ -40,17 +40,17 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
     val isRet  = brType === BrType.jalr && isLink(rs) && !isCall
     List(brType, isCall, isRet)
   }
-  def jal_offset(inst: UInt, rvc: Bool): UInt = {
+  def jal_offset(inst: UInt, rvc: Bool): PrunedAddr = {
     val rvc_offset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))
     val rvi_offset = Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
     val max_width  = rvi_offset.getWidth
-    SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
+    PrunedAddrInit(SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), VAddrBits))
   }
-  def br_offset(inst: UInt, rvc: Bool): UInt = {
+  def br_offset(inst: UInt, rvc: Bool): PrunedAddr = {
     val rvc_offset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
     val rvi_offset = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
     val max_width  = rvi_offset.getWidth
-    SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
+    PrunedAddrInit(SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), VAddrBits))
   }
 
   def NOP = "h4501".U(16.W)
@@ -87,7 +87,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val hasHalfValid = Vec(PredictWidth, Bool())
   // val expInstr = Vec(PredictWidth, UInt(32.W))
   val instr      = Vec(PredictWidth, UInt(32.W))
-  val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
+  val jumpOffset = Vec(PredictWidth, PrunedAddr(VAddrBits))
 //  val hasLastHalf = Bool()
   val triggered = Vec(PredictWidth, TriggerAction())
 }
