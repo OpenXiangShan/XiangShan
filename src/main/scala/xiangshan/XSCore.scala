@@ -369,6 +369,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
+
+  HardenXSPerfAccumulate("issue_num", exuBlocks.map(_.io.issue_num).reduce(_ + _))
+
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
   memBlock.io.perfEventsPTW  := ptw.getPerf

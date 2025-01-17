@@ -276,6 +276,9 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   fpDq.io.psize := pFpDqSize
   lsDq.io.psize := pLsDqSize
 
+  HardenXSPerfAccumulate("intdqreads", intDq.io.numDeq)
+  HardenXSPerfAccumulate("intdqwrites", intDq.io.numEnq)
+
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)

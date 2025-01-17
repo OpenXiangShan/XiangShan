@@ -732,6 +732,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
+  HardenXSPerfAccumulate("commitUop", ifCommit(commitCnt))
+  HardenXSPerfAccumulate("rob_reads", io.commits.hasCommitInstr)
+  HardenXSPerfAccumulate("rob_writes", dispatchNum)
 
   allowEnqueue := numValidEntries + dispatchNum <= (pRobSize - RenameWidth.U).asUInt
 
@@ -967,6 +970,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val commitIsBranch = io.commits.info.map(_.commitType).map(_ === CommitType.BRANCH)
   val commitBranchValid = io.commits.commitValid.zip(commitIsBranch).map{ case (v, t) => v && t }
   XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
+  HardenXSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
   val commitLoadWaitBit = commitDebugUop.map(_.cf.loadWaitBit)
   XSPerfAccumulate("commitInstrLoadWait", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w })))
   val commitIsStore = io.commits.info.map(_.commitType).map(_ === CommitType.STORE)
@@ -997,6 +1001,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val fuName = FuType.functionNameMap(fuType)
     val commitIsFuType = io.commits.commitValid.zip(commitDebugUop).map(x => x._1 && x._2.ctrl.fuType === fuType.U )
     XSPerfAccumulate(s"${fuName}_instr_cnt", ifCommit(PopCount(commitIsFuType)))
+    HardenXSPerfAccumulate(s"${fuName}_instr_cnt", ifCommit(PopCount(commitIsFuType)))
     XSPerfAccumulate(s"${fuName}_latency_dispatch", ifCommit(latencySum(commitIsFuType, dispatchLatency)))
     XSPerfAccumulate(s"${fuName}_latency_enq_rs", ifCommit(latencySum(commitIsFuType, enqRsLatency)))
     XSPerfAccumulate(s"${fuName}_latency_select", ifCommit(latencySum(commitIsFuType, selectLatency)))
@@ -1007,6 +1012,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     if (fuType == FuType.fmac.litValue) {
       val commitIsFma = commitIsFuType.zip(commitDebugUop).map(x => x._1 && x._2.ctrl.fpu.ren3 )
       XSPerfAccumulate(s"${fuName}_instr_cnt_fma", ifCommit(PopCount(commitIsFma)))
+      HardenXSPerfAccumulate(s"${fuName}_instr_cnt_fma", ifCommit(PopCount(commitIsFma)))
       XSPerfAccumulate(s"${fuName}_latency_enq_rs_execute_fma", ifCommit(latencySum(commitIsFma, rsFuLatency)))
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
