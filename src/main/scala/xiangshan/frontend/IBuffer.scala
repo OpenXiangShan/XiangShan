@@ -477,7 +477,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val ibuffer_IDWidth_hvButNotFull = afterInit && (numValid =/= 0.U) && (numValid < DecodeWidth.U) && !headBubble
   XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", ibuffer_IDWidth_hvButNotFull)
 
-  val FrontBubble = Mux(decodeCanAccept, DecodeWidth.U - numOut, 0.U)
+  val FrontBubble = Mux(decodeCanAccept && !headBubble, DecodeWidth.U - numOut, 0.U)
 
   val fetchLatency = decodeCanAccept && !headBubble && numOut === 0.U
 
