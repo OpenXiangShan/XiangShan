@@ -828,6 +828,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.dcsr := dcsr.regOut
       in.dpc  := dpc.regOut
       in.mstatus := mstatus.regOut
+      in.vsstatus := vsstatus.regOut
       in.satp := satp.regOut
       in.vsatp := vsatp.regOut
       in.hgatp := hgatp.regOut
