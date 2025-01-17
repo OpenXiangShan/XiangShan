@@ -274,7 +274,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) && 
       x.cmd === e.cmd && x.nc && e.nc &&
-      x.memBackTypeMM === e.memBackTypeMM && x.atomic === e.atomic &&
+      x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
       continueAndAlign(x.mask | e.mask)
   }
 
