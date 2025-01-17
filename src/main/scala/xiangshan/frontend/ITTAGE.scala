@@ -73,7 +73,7 @@ class ITTageReq(implicit p: Parameters) extends ITTageBundle {
 }
 
 class ITTageOffset(implicit p: Parameters) extends ITTageBundle {
-  val offset      = UInt(TargetOffsetBits.W)
+  val offset      = PrunedAddr(TargetOffsetBits)
   val pointer     = UInt(log2Ceil(RegionNums).W)
   val usePCRegion = Bool()
 }
@@ -247,7 +247,8 @@ class ITTageTable(
     val useful        = Bool() // Due to the bitMask the useful bit needs to be at the lowest bit
   }
 
-  val ittageEntrySz = 1 + tagLen + ITTageCtrBits + ITTageUsBits + TargetOffsetBits + log2Ceil(RegionNums) + 1
+  // The least significant bit of offset is pruned
+  val ittageEntrySz = 1 + tagLen + ITTageCtrBits + ITTageUsBits + TargetOffsetBits + log2Ceil(RegionNums)
   require(ittageEntrySz == (new ITTageEntry).getWidth)
 
   // pc is start address of basic block, most 2 branch inst in block
@@ -371,18 +372,18 @@ class ITTageTable(
     XSDebug(
       RegNext(io.req.fire) && s1_req_rhit,
       p"ITTageTableResp: idx=$s1_idx, hit:${s1_req_rhit}, " +
-        p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target_offset.offset)}\n"
+        p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target_offset.offset.toUInt)}\n"
     )
     XSDebug(
       io.update.valid,
       p"update ITTAGE Table: pc:${Hexadecimal(u.pc.toUInt)}}, " +
         p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCtr}, " +
-        p"target:${Hexadecimal(u.target_offset.offset)}, old_target:${Hexadecimal(u.old_target_offset.offset)}\n"
+        p"target:${Hexadecimal(u.target_offset.offset.toUInt)}, old_target:${Hexadecimal(u.old_target_offset.offset.toUInt)}\n"
     )
     XSDebug(
       io.update.valid,
       p"update ITTAGE Table: writing tag:${update_tag}, " +
-        p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target_offset.offset)}" +
+        p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target_offset.offset.toUInt)}" +
         p" in idx $update_idx\n"
     )
     XSDebug(RegNext(io.req.fire) && !s1_req_rhit, "TageTableResp: no hits!\n")
@@ -561,13 +562,13 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
   val providerCatTarget = PrunedAddrInit(Mux(
     rTable.io.resp_hit(0) && !providerInfo.target_offset.usePCRegion,
-    Cat(rTable.io.resp_region(0), providerInfo.target_offset.offset),
-    Cat(targetGetRegion(s2_pc_dup(0)), providerInfo.target_offset.offset)
+    Cat(rTable.io.resp_region(0), providerInfo.target_offset.offset.toUInt),
+    Cat(targetGetRegion(s2_pc_dup(0)), providerInfo.target_offset.offset.toUInt)
   ))
   val altproviderCatTarget = PrunedAddrInit(Mux(
     rTable.io.resp_hit(1) && !altProviderInfo.target_offset.usePCRegion,
-    Cat(rTable.io.resp_region(1), altProviderInfo.target_offset.offset),
-    Cat(targetGetRegion(s2_pc_dup(0)), altProviderInfo.target_offset.offset)
+    Cat(rTable.io.resp_region(1), altProviderInfo.target_offset.offset.toUInt),
+    Cat(targetGetRegion(s2_pc_dup(0)), altProviderInfo.target_offset.offset.toUInt)
   ))
 
   s2_tageTarget := Mux1H(Seq(
@@ -802,7 +803,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         VecInit(s2_resps_regs(i).valid).asUInt,
         s2_resps_regs(i).bits.ctr,
         s2_resps_regs(i).bits.u,
-        s2_resps_regs(i).bits.target_offset.offset
+        s2_resps_regs(i).bits.target_offset.offset.toUInt
       )
     }
   }
