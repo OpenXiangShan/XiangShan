@@ -258,7 +258,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val outVuopidx = outVecCtrl.vuopIdx(2, 0) // for vfadd max vuopidx=7
   val numOfUopVFRED = Wire(UInt(4.W))
   val numofUopVFREDReg = RegEnable(numOfUopVFRED, io.in.fire)
   val vs1Reg = RegEnable(vs1, io.in.fire)
@@ -361,9 +361,10 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
 
-  val outIsFisrtGroup = outVuopidx === 0.U ||
-    (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
-    ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
+  val outVuopidxForRed = outVecCtrl.vuopIdx(3, 0) // lmul=8 sew=16, (4+2+1)(vector)+(1+1+1)(fold)+(1)(scala) max vuopIdx=10
+  val outIsFisrtGroup = outVuopidxForRed === 0.U ||
+    (outVuopidxForRed === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
+    ((outVuopidxForRed === 2.U || outVuopidxForRed === 3.U) && outVlmul === VLmul.m8)
   val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnComp
   val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnComp
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
