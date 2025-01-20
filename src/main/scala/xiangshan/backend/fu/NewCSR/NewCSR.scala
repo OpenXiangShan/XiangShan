@@ -25,7 +25,7 @@ import xiangshan.backend.trace._
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
-  final val GEILEN = 63
+  final val GEILEN = 5 // m,s,5vs
 
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
@@ -126,6 +126,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromTop = Input(new Bundle {
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val l2FlushDone = Input(Bool())
       val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
@@ -457,11 +458,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
 
-  permitMod.io.in.mnret := io.in.bits.mnret && valid
-  permitMod.io.in.mret  := io.in.bits.mret  && valid
-  permitMod.io.in.sret  := io.in.bits.sret  && valid
-  permitMod.io.in.dret  := io.in.bits.dret  && valid
-  permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
+  permitMod.io.in.xRet.mnret := io.in.bits.mnret && valid
+  permitMod.io.in.xRet.mret  := io.in.bits.mret  && valid
+  permitMod.io.in.xRet.sret  := io.in.bits.sret  && valid
+  permitMod.io.in.xRet.dret  := io.in.bits.dret  && valid
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.regOut.VTSR.asBool
@@ -469,16 +469,18 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
 
-  permitMod.io.in.status.mcounteren := mcounteren.rdata
-  permitMod.io.in.status.hcounteren := hcounteren.rdata
-  permitMod.io.in.status.scounteren := scounteren.rdata
+  permitMod.io.in.status.vgein := hstatus.regOut.VGEIN.asUInt
 
-  permitMod.io.in.status.mstateen0 := mstateen0.rdata
-  permitMod.io.in.status.hstateen0 := hstateen0.rdata
-  permitMod.io.in.status.sstateen0 := sstateen0.rdata
+  permitMod.io.in.xcounteren.mcounteren := mcounteren.rdata
+  permitMod.io.in.xcounteren.hcounteren := hcounteren.rdata
+  permitMod.io.in.xcounteren.scounteren := scounteren.rdata
 
-  permitMod.io.in.status.menvcfg := menvcfg.rdata
-  permitMod.io.in.status.henvcfg := henvcfg.rdata
+  permitMod.io.in.xstateen.mstateen0 := mstateen0.rdata
+  permitMod.io.in.xstateen.hstateen0 := hstateen0.rdata
+  permitMod.io.in.xstateen.sstateen0 := sstateen0.rdata
+
+  permitMod.io.in.xenvcfg.menvcfg := menvcfg.rdata
+  permitMod.io.in.xenvcfg.henvcfg := henvcfg.rdata
 
   permitMod.io.in.status.mstatusFSOff  :=  mstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.mstatusVSOff  :=  mstatus.regOut.VS === ContextStatus.Off
@@ -497,10 +499,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   sstcIRGen.i.stime.bits  := time.stime
   sstcIRGen.i.vstime.valid := time.updated
   sstcIRGen.i.vstime.bits  := time.vstime
-  sstcIRGen.i.stimecmp := stimecmp.rdata
-  sstcIRGen.i.vstimecmp := vstimecmp.rdata
-  sstcIRGen.i.menvcfgSTCE := menvcfg.regOut.STCE.asBool
-  sstcIRGen.i.henvcfgSTCE := henvcfg.regOut.STCE.asBool
+  sstcIRGen.i.stimecmp.wen := GatedValidRegNext(stimecmp.w.wen)
+  sstcIRGen.i.stimecmp.rdata  := stimecmp.rdata
+  sstcIRGen.i.vstimecmp.wen   := GatedValidRegNext(vstimecmp.w.wen)
+  sstcIRGen.i.vstimecmp.rdata := vstimecmp.rdata
+  sstcIRGen.i.menvcfg.wen   := GatedValidRegNext(menvcfg.w.wen)
+  sstcIRGen.i.menvcfg.STCE  := menvcfg.regOut.STCE.asBool
+  sstcIRGen.i.henvcfg.wen   := GatedValidRegNext(henvcfg.w.wen)
+  sstcIRGen.i.henvcfg.STCE  := henvcfg.regOut.STCE.asBool
+  sstcIRGen.i.htimedeltaWen := GatedValidRegNext(htimedelta.w.wen)
 
   miregiprios.foreach { mod =>
     mod.w.wen := mireg.w.wen && (miselect.regOut.ALL.asUInt === mod.addr.U)
@@ -725,6 +732,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.nmip := nmip.asUInt.orR
       case _ =>
     }
+    mod match {
+      case m: HasMachineFlushL2Bundle =>
+        m.l2FlushDone := io.fromTop.l2FlushDone
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -824,6 +836,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.dcsr := dcsr.regOut
       in.dpc  := dpc.regOut
       in.mstatus := mstatus.regOut
+      in.vsstatus := vsstatus.regOut
       in.satp := satp.regOut
       in.vsatp := vsatp.regOut
       in.hgatp := hgatp.regOut
@@ -1250,6 +1263,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
 
+  io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+
+  io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
+
   io.status.instrAddrTransType.bare := privState.isModeM ||
     (!privState.isVirtual && satp.regOut.MODE === SatpMode.Bare) ||
     (privState.isVirtual && vsatp.regOut.MODE === SatpMode.Bare && hgatp.regOut.MODE === HgatpMode.Bare)
@@ -1538,12 +1555,18 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
-    val diffAIAXtopeiEvent = DifftestModule(new DiffAIAXtopeiEvent)
-    diffAIAXtopeiEvent.coreid := hartId
-    diffAIAXtopeiEvent.valid := fromAIA.rdata.valid
-    diffAIAXtopeiEvent.mtopei := mtopei.rdata
-    diffAIAXtopeiEvent.stopei := stopei.rdata
-    diffAIAXtopeiEvent.vstopei := vstopei.rdata
+    val diffSyncAIAEvent = DifftestModule(new DiffSyncAIAEvent)
+    diffSyncAIAEvent.coreid := hartId
+    diffSyncAIAEvent.valid := fromAIA.rdata.valid
+    diffSyncAIAEvent.mtopei := mtopei.rdata
+    diffSyncAIAEvent.stopei := stopei.rdata
+    diffSyncAIAEvent.vstopei := vstopei.rdata
+    diffSyncAIAEvent.hgeip := hgeip.rdata
+
+    val diffCustomMflushpwr = DifftestModule(new DiffSyncCustomMflushpwrEvent)
+    diffCustomMflushpwr.coreid := hartId
+    diffCustomMflushpwr.valid := RegNext(io.fromTop.l2FlushDone) =/= io.fromTop.l2FlushDone
+    diffCustomMflushpwr.l2FlushDone := io.fromTop.l2FlushDone
   }
 }
 

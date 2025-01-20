@@ -31,7 +31,6 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
-import xiangshan.mem.L1PrefetchFuzzer
 import scala.collection.mutable.ListBuffer
 import xiangshan.cache.mmu.TlbRequestIO
 
@@ -86,6 +85,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
+    val l2_flush_done = Input(Bool())
+    val l2_flush_en = Output(Bool())
+    val power_down_en = Output(Bool())
     val cpu_critical_error = Output(Bool())
     val resetInFrontend = Output(Bool())
     val traceCoreInterface = new TraceCoreInterface
@@ -102,7 +104,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
     }
+    val topDownInfo = Input(new Bundle {
+      val l2Miss = Bool()
+      val l3Miss = Bool()
+    })
   })
+
+  dontTouch(io.l2_flush_done)
+  dontTouch(io.l2_flush_en)
+  dontTouch(io.power_down_en)
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
@@ -183,6 +193,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.fromTopToBackend.clintTime := io.clintTime
   memBlock.io.fromTopToBackend.msiInfo := io.msiInfo
   memBlock.io.hartId := io.hartId
+  memBlock.io.l2_flush_done := io.l2_flush_done
   memBlock.io.outer_reset_vector := io.reset_vector
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
@@ -244,6 +255,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugRolling := backend.io.debugRolling
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.l2_flush_en := memBlock.io.outer_l2_flush_en
+  io.power_down_en := memBlock.io.outer_power_down_en
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
@@ -254,6 +267,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.resetInFrontend := memBlock.io.resetInFrontendBypass.toL2Top
   memBlock.io.traceCoreInterfaceBypass.fromBackend <> backend.io.traceCoreInterface
   io.traceCoreInterface <> memBlock.io.traceCoreInterfaceBypass.toL2Top
+  memBlock.io.topDownInfo.fromL2Top.l2Miss := io.topDownInfo.l2Miss
+  memBlock.io.topDownInfo.fromL2Top.l3Miss := io.topDownInfo.l3Miss
+  memBlock.io.topDownInfo.toBackend.noUopsIssued := backend.io.topDownInfo.noUopsIssued
+  backend.io.topDownInfo.lqEmpty := memBlock.io.topDownInfo.toBackend.lqEmpty
+  backend.io.topDownInfo.sqEmpty := memBlock.io.topDownInfo.toBackend.sqEmpty
+  backend.io.topDownInfo.l1Miss := memBlock.io.topDownInfo.toBackend.l1Miss
+  backend.io.topDownInfo.l2TopMiss.l2Miss := memBlock.io.topDownInfo.toBackend.l2TopMiss.l2Miss
+  backend.io.topDownInfo.l2TopMiss.l3Miss := memBlock.io.topDownInfo.toBackend.l2TopMiss.l3Miss
 
 
   if (debugOpts.ResetGen) {

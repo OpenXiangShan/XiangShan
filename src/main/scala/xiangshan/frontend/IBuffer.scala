@@ -477,7 +477,12 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val ibuffer_IDWidth_hvButNotFull = afterInit && (numValid =/= 0.U) && (numValid < DecodeWidth.U) && !headBubble
   XSPerfAccumulate("ibuffer_IDWidth_hvButNotFull", ibuffer_IDWidth_hvButNotFull)
 
-  val FrontBubble = Mux(decodeCanAccept, DecodeWidth.U - numOut, 0.U)
+  val FrontBubble = Mux(decodeCanAccept && !headBubble, DecodeWidth.U - numOut, 0.U)
+
+  val fetchLatency = decodeCanAccept && !headBubble && numOut === 0.U
+
+  XSPerfAccumulate("if_fetch_bubble", FrontBubble)
+  XSPerfAccumulate("if_fetch_bubble_eq_max", fetchLatency)
 
   val perfEvents = Seq(
     ("IBuffer_Flushed  ", io.flush),
@@ -487,7 +492,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     ("IBuffer_3_4_valid", (numValid >= (2 * (IBufSize / 4)).U) & (numValid < (3 * (IBufSize / 4)).U)),
     ("IBuffer_4_4_valid", (numValid >= (3 * (IBufSize / 4)).U) & (numValid < (4 * (IBufSize / 4)).U)),
     ("IBuffer_full     ", numValid.andR),
-    ("Front_Bubble     ", FrontBubble)
+    ("Front_Bubble     ", FrontBubble),
+    ("Fetch_Latency_Bound", fetchLatency)
   )
   generatePerfEvent()
 }

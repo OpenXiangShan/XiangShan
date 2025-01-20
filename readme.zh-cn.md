@@ -4,16 +4,13 @@
 
 English Readme is [here](README.md).
 
-©2020-2022 中国科学院计算技术研究所版权所有
-
-©2020-2022 鹏城实验室版权所有
-
 ## 文档和报告
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) 是我们的官方文档仓库，其中包含了设计文档、技术报告、使用教程等内容。
+香山的文档托管在 [docs.xiangshan.cc](https://docs.xiangshan.cc)。
 
-* 香山微结构文档已经发布，欢迎访问 https://xiangshan-doc.readthedocs.io
+[docs.xiangshan.cc](https://docs.xiangshan.cc) 上的微架构文档尚未根据最新架构（昆明湖）更新，我们正在撰写新的设计文档。
 
+香山用户文档已单独发布，您可在此处查看：[XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases)
 
 ## 论文发表情况
 
@@ -121,3 +118,13 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## 致谢
 
 香山处理器是绝佳的微架构学术研究平台，能够充分支持学术界的试验创新想法。香山处理器中已经实现或参考借鉴了如下论文，列举如下：[致谢](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/)。我们非常鼓励并期待，未来能够基于香山处理器实现更多的学术创新。
+
+## 许可证
+
+版权所有 © 2020-2025 中国科学院计算技术研究所
+
+版权所有 © 2021-2025 北京开源芯片研究院
+
+版权所有 © 2020-2022 鹏城实验室
+
+香山以 [木兰宽松许可证 第2版](LICENSE) 授权。

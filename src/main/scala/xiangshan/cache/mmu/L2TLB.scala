@@ -148,6 +148,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // NOTE: when cache out but miss and ptw doesnt accept,
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
 
+  val tlbCounter = RegInit(0.U(log2Ceil(MissQueueSize + 1).W))
+  val reqVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
+  val respVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
+
+  for (i <- 0 until PtwWidth) {
+    when (io.tlb(i).req(0).fire) {
+      reqVec(i) := true.B
+    }
+    when (io.tlb(i).resp.fire) {
+      respVec(i) := true.B
+    }
+  }
+
+  tlbCounter := tlbCounter + PopCount(reqVec) - PopCount(respVec)
+  XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
   arb2.io.in(InArbPTWPort).bits.req_info := ptw.io.llptw.bits.req_info
@@ -157,14 +172,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready))
 
-  arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
+  arb2.io.in(InArbTlbPort).valid := arb1.io.out.fire
   arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
   arb2.io.in(InArbTlbPort).bits.req_info.s2xlate := arb1.io.out.bits.s2xlate
   arb2.io.in(InArbTlbPort).bits.req_info.source := arb1.io.chosen
   arb2.io.in(InArbTlbPort).bits.isHptwReq := false.B
   arb2.io.in(InArbTlbPort).bits.isLLptw := false.B
   arb2.io.in(InArbTlbPort).bits.hptwId := DontCare
-  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready
+  // 1. arb1 and arb2 are both comb logic, so ready can work just the same cycle
+  // 2. arb1 can send one req at most in a cycle, so do not need to write
+  //    "tlbCounter <= (MissQueueSize - 2).U"
+  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready && tlbCounter < MissQueueSize.U
 
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
   arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
@@ -235,7 +253,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     llptw_stage1(llptw.io.mem.enq_ptr) := cache.io.resp.bits.stage1
   }
 
-  cache.io.req.valid := arb2.io.out.valid
+  cache.io.req.valid := arb2.io.out.fire
   cache.io.req.bits.req_info := arb2.io.out.bits.req_info
   cache.io.req.bits.isFirst := (arb2.io.chosen =/= InArbMissQueuePort.U && !arb2.io.out.bits.isHptwReq)
   cache.io.req.bits.isHptwReq := arb2.io.out.bits.isHptwReq
@@ -651,8 +669,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val ITlbReqDB, DTlbReqDB, ITlbRespDB, DTlbRespDB = Wire(new L1TlbDB)
   ITlbReqDB.vpn := io.tlb(0).req(0).bits.vpn
   DTlbReqDB.vpn := io.tlb(1).req(0).bits.vpn
-  ITlbRespDB.vpn := io.tlb(0).resp.bits.s1.entry.tag
-  DTlbRespDB.vpn := io.tlb(1).resp.bits.s1.entry.tag
+  ITlbRespDB.vpn := Cat(io.tlb(0).resp.bits.s1.entry.tag, OHToUInt(io.tlb(0).resp.bits.s1.pteidx))
+  DTlbRespDB.vpn := Cat(io.tlb(1).resp.bits.s1.entry.tag, OHToUInt(io.tlb(1).resp.bits.s1.pteidx))
   L1TlbTable.log(ITlbReqDB, isWriteL1TlbTable.orR && io.tlb(0).req(0).fire, "ITlbReq", clock, reset)
   L1TlbTable.log(DTlbReqDB, isWriteL1TlbTable.orR && io.tlb(1).req(0).fire, "DTlbReq", clock, reset)
   L1TlbTable.log(ITlbRespDB, isWriteL1TlbTable.orR && io.tlb(0).resp.fire, "ITlbResp", clock, reset)

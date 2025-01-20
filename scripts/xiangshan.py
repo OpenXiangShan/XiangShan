@@ -78,8 +78,10 @@ class XSArgs(object):
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
+        self.yaml_config = args.yaml_config
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
+        self.issue = args.issue
         self.with_chiseldb = 0 if args.no_db else 1
         # emu arguments
         self.max_instr = args.max_instr
@@ -136,10 +138,12 @@ class XSArgs(object):
             (self.emu_optimize,  "EMU_OPTIMIZE"),
             (self.xprop,         "ENABLE_XPROP"),
             (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.yaml_config,   "YAML_CONFIG"),
             (self.pgo,           "PGO_WORKLOAD"),
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
             (self.pgo_emu_args,  "PGO_EMU_ARGS"),
             (self.llvm_profdata, "LLVM_PROFDATA"),
+            (self.issue,         "ISSUE"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
@@ -537,7 +541,8 @@ class XiangShan(object):
             "lbm": "_140840000000_.gz",
             "gromacs": "_275480000000_.gz",
             "wrf": "_1916220000000_.gz",
-            "astar": "_122060000000_.gz"
+            "astar": "_122060000000_.gz",
+            "hmmer-Vector": "_6598_0.250135_.zstd"
         }
         if name in workloads:
             return [os.path.join("/nfs/home/share/ci-workloads", name, workloads[name])]
@@ -670,8 +675,10 @@ if __name__ == "__main__":
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
+    parser.add_argument('--yaml-config', nargs='?', type=str, help='yaml config')
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
     parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
+    parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')

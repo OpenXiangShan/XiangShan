@@ -7,7 +7,7 @@ import freechips.rocketchip.rocket.CSRs
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{VirtMode, CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
-import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, MretEventSinkBundle, MNretEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRConfig.PPNLength
@@ -22,6 +22,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
       with SretEventSinkBundle
       with MretEventSinkBundle
       with MNretEventSinkBundle
+      with DretEventSinkBundle
       with TrapEntryVSEventSinkBundle
       with HasRobCommitBundle
       with HasVirtualSupervisorEnvBundle

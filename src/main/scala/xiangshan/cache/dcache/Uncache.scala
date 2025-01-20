@@ -70,7 +70,7 @@ class UncacheEntry(implicit p: Parameters) extends DCacheBundle {
     when(cmd === MemoryOpConstants.M_XRD) {
       data := x.data
     }
-    resp_nderr := x.denied
+    resp_nderr := x.denied || x.corrupt
   }
 
   // def update(forwardData: UInt, forwardMask: UInt): Unit = {

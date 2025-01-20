@@ -257,13 +257,10 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   // `r_pipe`: the extra pipeline registers for the read response `in.r`
   prefix("r_pipe") {
     val valid = RegInit(false.B)
-    when (r_resp.valid && in.r.ready) {
-      valid := true.B
-    }.elsewhen (in.r.ready) {
-      valid := false.B
-    }
+    when (in.r.fire) { valid := false.B }
+    when (r_resp.fire) { valid := true.B }
     in.r.valid := valid
-    in.r.bits := RegEnable(r_resp.bits, r_resp.valid && in.r.ready)
+    in.r.bits := RegEnable(r_resp.bits, r_resp.fire)
     r_resp.ready := !valid || in.r.ready
 
     // the data should be auto-hold

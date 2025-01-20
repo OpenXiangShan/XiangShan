@@ -18,6 +18,7 @@ import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemSche
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
+import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.FuType.is0latency
 import xiangshan.mem.{LqPtr, SqPtr}
 
@@ -36,7 +37,7 @@ class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule
 }
 
 class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
-  extends LazyModuleImp(wrapper) with HasXSParameter {
+  extends LazyModuleImp(wrapper) with HasXSParameter with HasPerfEvents {
 
   val io = IO(new DataPathIO())
 
@@ -837,6 +838,52 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       XSPerfAccumulate(s"MEM_ExuId${exuParams.exuIdx}_src0_dataSource_zero",     exu.fire && exu.bits.common.dataSources(0).readZero)
     }
   })
+
+  // Top-Down
+  def FewUops = 4
+
+  val lqEmpty = io.topDownInfo.lqEmpty
+  val sqEmpty = io.topDownInfo.sqEmpty
+  val l1Miss = io.topDownInfo.l1Miss
+  val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
+  val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
+
+  val uopsIssued = fromIQ.flatten.map(_.fire).reduce(_ || _)
+  val uopsIssuedCnt = PopCount(fromIQ.flatten.map(_.fire))
+  val fewUopsIssued = (0 until FewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
+
+  val stallLoad = !uopsIssued
+
+  val noStoreIssued = !fromMemIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
+                                                         memIq.bits.exuParams.fuConfigs.contains(FuConfig.StdCfg)
+  ).map(_.fire).reduce(_ || _)
+  val stallStore = uopsIssued && noStoreIssued
+
+  val stallLoadReg = DelayN(stallLoad, 2)
+  val stallStoreReg = DelayN(stallStore, 2)
+
+  val memStallAnyLoad = stallLoadReg && !lqEmpty
+  val memStallStore = stallStoreReg && !sqEmpty
+  val memStallL1Miss = memStallAnyLoad && l1Miss
+  val memStallL2Miss = memStallL1Miss && l2Miss
+  val memStallL3Miss = memStallL2Miss && l3Miss
+
+  io.topDownInfo.noUopsIssued := stallLoad
+
+  XSPerfAccumulate("exec_stall_cycle",   fewUopsIssued)
+  XSPerfAccumulate("mem_stall_store",    memStallStore)
+  XSPerfAccumulate("mem_stall_l1miss",   memStallL1Miss)
+  XSPerfAccumulate("mem_stall_l2miss",   memStallL2Miss)
+  XSPerfAccumulate("mem_stall_l3miss",   memStallL3Miss)
+
+  val perfEvents = Seq(
+    ("EXEC_STALL_CYCLE",  fewUopsIssued),
+    ("MEMSTALL_STORE",    memStallStore),
+    ("MEMSTALL_L1MISS",   memStallL1Miss),
+    ("MEMSTALL_L2MISS",   memStallL2Miss),
+    ("MEMSTALL_L3MISS",   memStallL3Miss),
+  )
+  generatePerfEvent()
 }
 
 class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -923,4 +970,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val diffV0Rat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
   val diffVlRat  = if (params.basicDebugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
   val diffVl     = if (params.basicDebugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
+
+  val topDownInfo = new TopDownInfo
 }

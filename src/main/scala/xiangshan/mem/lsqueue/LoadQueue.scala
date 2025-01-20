@@ -111,8 +111,8 @@ trait HasLoadHelper { this: XSModule =>
   }
 
   def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
-    require(addrOffset.getWidth == 3)
-    VecInit((0 until 8).map{ case i =>
+    require(addrOffset.getWidth == 4)
+    VecInit((0 until 16).map{ case i =>
       addrOffset === i.U
     })
   }
@@ -204,6 +204,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqDeqPtr = Output(new LqPtr)
 
     val debugTopDown = new LoadQueueTopDownIO
+    val noUopsIssed = Input(Bool())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -331,6 +332,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
+
+  virtualLoadQueue.io.noUopsIssued := io.noUopsIssed
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)

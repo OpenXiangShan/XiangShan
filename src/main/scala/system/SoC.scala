@@ -31,12 +31,11 @@ import freechips.rocketchip.util.AsyncQueueParams
 import huancun._
 import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import xiangshan.backend.fu.PMAConst
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
+import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import coupledL2.{EnableCHI, L2Param}
 import coupledL2.tl2chi.CHIIssue
 import openLLC.OpenLLCParam
-import xiangshan.PMParameKey
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -44,7 +43,21 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 48,
-  PmemRanges: Seq[(BigInt, BigInt)] = Seq((0x80000000L, 0x80000000000L)),
+  PmemRanges: Seq[MemoryRange] = Seq(MemoryRange(0x80000000L, 0x80000000000L)),
+  PMAConfigs: Seq[PMAConfigEntry] = Seq(
+    PMAConfigEntry(0x0L, range = 0x1000000000000L, a = 3),
+    PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x3A000000L, a = 1),
+    PMAConfigEntry(0x38022000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x38020000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x30050000L, a = 1, w = true, r = true), // FIXME: GPU space is cacheable?
+    PMAConfigEntry(0x30010000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x20000000L, a = 1, x = true, w = true, r = true),
+    PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0)
+  ),
   CLINTRange: AddressSet = AddressSet(0x38000000L, CLINTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
@@ -58,13 +71,7 @@ case class SoCParameters
     ways = 8,
     sets = 2048 // 1MB per bank
   )),
-  OpenLLCParamsOpt: Option[OpenLLCParam] = Some(OpenLLCParam(
-    name = "LLC",
-    ways = 8,
-    sets = 2048,
-    banks = 4,
-    clientCaches = Seq(L2Param())
-  )),
+  OpenLLCParamsOpt: Option[OpenLLCParam] = None,
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
     "B" -> 7,
@@ -74,10 +81,15 @@ case class SoCParameters
   NumIRFiles: Int = 7,
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
+  UseXSNoCDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
 ){
+  require(
+    L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
+    "Atmost one of L3CacheParamsOpt and OpenLLCParamsOpt should be defined"
+  )
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
@@ -424,7 +436,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   } else {
     debugModule.debug.node := peripheralXbar.get
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-      l3_xbar.get := TLBuffer() := sb2tl.node
+      l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
   }
 

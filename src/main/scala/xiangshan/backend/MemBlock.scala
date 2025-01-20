@@ -316,6 +316,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
+    val l2_flush_done = Input(Bool())
 
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -332,6 +333,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val inner_reset_vector = Output(UInt(PAddrBits.W))
     val outer_reset_vector = Input(UInt(PAddrBits.W))
     val outer_cpu_halt = Output(Bool())
+    val outer_l2_flush_en = Output(Bool())
+    val outer_power_down_en = Output(Bool())
     val outer_cpu_critical_error = Output(Bool())
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
@@ -351,12 +354,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val fromBackend = Flipped(new TraceCoreInterface(hasOffset = true))
       val toL2Top     = new TraceCoreInterface
     }
+
+    val topDownInfo = new Bundle {
+      val fromL2Top = Input(new TopDownFromL2Top)
+      val toBackend = Flipped(new TopDownInfo)
+    }
   })
 
   dontTouch(io.inner_hartId)
   dontTouch(io.inner_reset_vector)
   dontTouch(io.outer_reset_vector)
   dontTouch(io.outer_cpu_halt)
+  dontTouch(io.outer_l2_flush_en)
+  dontTouch(io.outer_power_down_en)
   dontTouch(io.outer_cpu_critical_error)
   dontTouch(io.inner_beu_errors_icache)
   dontTouch(io.outer_beu_errors_icache)
@@ -1144,14 +1154,18 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
   val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
   prefetcherOpt match {
-  case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
+  case Some(pf) =>
+    dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
+    pf.io.pmp_resp := pmp_check(PrefetcherDTLBPortIndex).resp
   case None =>
     dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
     dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
     dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
   }
   l1PrefetcherOpt match {
-    case Some(pf) => dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
+    case Some(pf) =>
+      dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
+      pf.io.pmp_resp := pmp_check(StreamDTLBPortIndex).resp
     case None =>
         dtlb_reqs(StreamDTLBPortIndex) := DontCare
         dtlb_reqs(StreamDTLBPortIndex).req.valid := false.B
@@ -1870,6 +1884,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ))
   io.mem_to_ooo.topToBackendBypass match { case x =>
     x.hartId            := io.hartId
+    x.l2FlushDone       := RegNext(io.l2_flush_done)
     x.externalInterrupt.msip  := outer.clint_int_sink.in.head._1(0)
     x.externalInterrupt.mtip  := outer.clint_int_sink.in.head._1(1)
     x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
@@ -1888,6 +1903,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hartId := io.hartId
   io.inner_reset_vector := RegNext(io.outer_reset_vector)
   io.outer_cpu_halt := io.ooo_to_mem.backendToTopBypass.cpuHalted
+  io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
+  io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
@@ -1992,6 +2009,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
+
+  lsq.io.noUopsIssued := io.topDownInfo.toBackend.noUopsIssued
+  io.topDownInfo.toBackend.lqEmpty := lsq.io.lqEmpty
+  io.topDownInfo.toBackend.sqEmpty := lsq.io.sqEmpty
+  io.topDownInfo.toBackend.l1Miss := dcache.io.l1Miss
+  io.topDownInfo.toBackend.l2TopMiss.l2Miss := RegNext(io.topDownInfo.fromL2Top.l2Miss)
+  io.topDownInfo.toBackend.l2TopMiss.l3Miss := RegNext(io.topDownInfo.fromL2Top.l3Miss)
 
   val hyLdDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
   val hyStDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))

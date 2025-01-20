@@ -492,6 +492,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
   dataPath.io.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
   dataPath.io.fromVecExcpMod.w := vecExcpMod.o.toVPRF.w
+  dataPath.io.topDownInfo.lqEmpty := DelayN(io.topDownInfo.lqEmpty, 2)
+  dataPath.io.topDownInfo.sqEmpty := DelayN(io.topDownInfo.sqEmpty, 2)
+  dataPath.io.topDownInfo.l1Miss := RegNext(io.topDownInfo.l1Miss)
+  dataPath.io.topDownInfo.l2TopMiss.l2Miss := io.topDownInfo.l2TopMiss.l2Miss
+  dataPath.io.topDownInfo.l2TopMiss.l3Miss := io.topDownInfo.l2TopMiss.l3Miss
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -562,6 +567,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.msiInfo.bits := RegEnable(io.fromTop.msiInfo.bits, io.fromTop.msiInfo.valid)
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
+  csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
@@ -851,6 +857,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.debugRolling := ctrlBlock.io.debugRolling
 
+  io.topDownInfo.noUopsIssued := RegNext(dataPath.io.topDownInfo.noUopsIssued)
+
   if(backendParams.debugEn) {
     dontTouch(memScheduler.io)
     dontTouch(dataPath.io.toMemExu)
@@ -897,10 +905,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val fpSchedulerPerf  = fpScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
   val vecSchedulerPerf = vfScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
   val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEvents
+  val dataPathPerf = dataPath.getPerfEvents
 
   val perfBackend  = Seq()
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf  ++ dataPathPerf ++
+    intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
 
 
   if (printEventCoding) {
@@ -1027,6 +1037,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
   val externalInterrupt = Output(new ExternalInterruptIO)
   val msiInfo           = Output(ValidIO(new MsiInfoBundle))
   val clintTime         = Output(ValidIO(UInt(64.W)))
+  val l2FlushDone       = Output(Bool())
 }
 
 class BackendToTopBundle extends Bundle {
@@ -1061,4 +1072,5 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
     val fromCore = new CoreDispatchTopDownIO
   }
   val debugRolling = new RobDebugRollingIO
+  val topDownInfo = new TopDownInfo
 }

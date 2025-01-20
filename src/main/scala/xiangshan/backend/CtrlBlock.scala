@@ -543,10 +543,11 @@ class CtrlBlockImp(
   }.reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
-    (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
-      (snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
-        !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head), idx)
-    )
+    (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map{case idx =>
+      val thisSnapRobidx = snpt.io.snapshots(idx).robIdx.head
+      (snpt.io.valids(idx) && (redirectRobidx > thisSnapRobidx && (redirectRobidx.value =/= thisSnapRobidx.value) ||
+        !s1_s3_redirect.bits.flushItself() && redirectRobidx === thisSnapRobidx), idx)
+    }
   )
 
   rob.io.snpt.snptEnq := DontCare

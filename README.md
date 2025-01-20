@@ -4,15 +4,13 @@ XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 中文说明[在此](readme.zh-cn.md)。
 
-Copyright 2020-2022 by Institute of Computing Technology, Chinese Academy of Sciences.
+## Documentation
 
-Copyright 2020-2022 by Peng Cheng Laboratory.
+XiangShan's documentation is available at [docs.xiangshan.cc](https://docs.xiangshan.cc).
 
-## Docs and slides
+The microarchitecture documentation on [docs.xiangshan.cc](https://docs.xiangshan.cc) is currently outdated for the latest version (Kunminghu). An updated version is in progress.
 
-[XiangShan-doc](https://github.com/OpenXiangShan/XiangShan-doc) is our official documentation repository. It contains design spec., technical slides, tutorials and more.
-
-* Micro-architecture documentation of XiangShan has been published. Please check out https://xiangshan-doc.readthedocs.io
+XiangShan User Guide has been published separately. You can find it at [XiangShan-User-Guide/releases](https://github.com/OpenXiangShan/XiangShan-User-Guide/releases).
 
 ## Publications
 
@@ -126,3 +124,13 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Acknowledgement
 
 The implementation of XiangShan is inspired by several key papers. We list these papers in XiangShan document, see: [Acknowledgements](https://docs.xiangshan.cc/zh-cn/latest/acknowledgments/). We very much encourage and expect that more academic innovations can be realised based on XiangShan in the future.
+
+## LICENSE
+
+Copyright © 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences.
+
+Copyright © 2021-2025 Beijing Institute of Open Source Chip
+
+Copyright © 2020-2022 by Peng Cheng Laboratory.
+
+XiangShan is licensed under [Mulan PSL v2](LICENSE).

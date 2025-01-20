@@ -183,12 +183,19 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Flipped(Valid(UInt(36.W)))
         val l2MissMatch = Output(Bool())
       }
+      val l2Miss = Output(Bool())
+      val l3Miss = new Bundle {
+        val fromTile = Input(Bool())
+        val toCore = Output(Bool())
+      }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
+      val l2_flush_en = Input(Bool())
+      val l2_flush_done = Output(Bool())
       // val reset_core = IO(Output(Reset()))
     })
 
@@ -201,6 +208,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.hartId.toCore := io.hartId.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
+    io.l2_flush_done := true.B //TODO connect CoupleedL2
+    io.l3Miss.toCore := io.l3Miss.fromTile
     // trace interface
     val traceToTile = io.traceCoreInterface.toTile
     val traceFromCore = io.traceCoreInterface.fromCore
@@ -244,6 +253,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
       l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
       io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
+      io.l2Miss := l2.io.l2Miss
 
       /* l2 tlb */
       io.l2_tlb_req.req.bits := DontCare
@@ -290,6 +300,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.debugTopDown <> DontCare
+      io.l2Miss := false.B
 
       io.l2_tlb_req.req.valid := false.B
       io.l2_tlb_req.req.bits := DontCare

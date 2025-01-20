@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2021-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -23,26 +24,19 @@ import utils._
 import utility._
 import system._
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, MaxHartIdBits, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
-import system._
-import utility._
-import utils._
-import huancun._
-import openLLC.{OpenLLCParam}
+import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
-import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import device.{EnableJtag, XSDebugModuleParams}
+import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
-import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -51,7 +45,15 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
-  case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
+  case DebugModuleKey => Some(DebugModuleParams(
+    nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
+    maxSupportedSBAccess = site(XLen),
+    hasBusMaster = true,
+    baseAddress = BigInt(0x38020000),
+    nScratch = 2,
+    crossingHasSafeReset = false,
+    hasHartResets = true
+  ))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
@@ -224,7 +226,7 @@ class MinimalConfig(n: Int = 1) extends Config(
     case SoCParamsKey =>
       val tiles = site(XSTileKey)
       up(SoCParamsKey).copy(
-        L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        L3CacheParamsOpt = Option.when(!up(EnableCHI))(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
           sets = 1024,
           inclusive = false,
           clientCaches = tiles.map{ core =>
@@ -236,6 +238,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           },
           simulation = !site(DebugOptionsKey).FPGAPlatform,
           prefetch = None
+        )),
+        OpenLLCParamsOpt = Option.when(up(EnableCHI))(OpenLLCParam(
+          name = "LLC",
+          ways = 8,
+          sets = 2048,
+          banks = 4,
+          clientCaches = Seq(L2Param())
         )),
         L3NBanks = 1
       )
@@ -250,12 +259,13 @@ class MinimalSimConfig(n: Int = 1) extends Config(
       softPTW = true
     ))
     case SoCParamsKey => up(SoCParamsKey).copy(
-      L3CacheParamsOpt = None
+      L3CacheParamsOpt = None,
+      OpenLLCParamsOpt = None
     )
   })
 )
 
-class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
   case XSTileKey =>
     val sets = n * 1024 / ways / 64
     up(XSTileKey).map(_.copy(
@@ -276,9 +286,9 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
     ))
 })
 
-class WithNKBL2
+case class L2CacheConfig
 (
-  n: Int,
+  size: String,
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
@@ -286,8 +296,12 @@ class WithNKBL2
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
+    val nKB = size.toUpperCase() match {
+      case s"${k}KB" => k.trim().toInt
+      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
+    }
     val upParams = up(XSTileKey)
-    val l2sets = n * 1024 / banks / ways / 64
+    val l2sets = nKB * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
       L2CacheParamsOpt = Some(L2Param(
         name = "L2",
@@ -320,16 +334,20 @@ class WithNKBL2
     ))
 })
 
-class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
+case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
   case SoCParamsKey =>
-    val sets = n * 1024 / banks / ways / 64
+    val nKB = size.toUpperCase() match {
+      case s"${k}KB" => k.trim().toInt
+      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
+    }
+    val sets = nKB * 1024 / banks / ways / 64
     val tiles = site(XSTileKey)
     val clientDirBytes = tiles.map{ t =>
       t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
     }.sum
     up(SoCParamsKey).copy(
       L3NBanks = banks,
-      L3CacheParamsOpt = Some(HCCacheParameters(
+      L3CacheParamsOpt = Option.when(!up(EnableCHI))(HCCacheParameters(
         name = "L3",
         level = 3,
         ways = ways,
@@ -353,7 +371,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
         tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
       )),
-      OpenLLCParamsOpt = Some(OpenLLCParam(
+      OpenLLCParamsOpt = Option.when(up(EnableCHI))(OpenLLCParam(
         name = "LLC",
         ways = ways,
         sets = sets,
@@ -370,7 +388,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
 })
 
 class WithL3DebugConfig extends Config(
-  new WithNKBL3(256, inclusive = false) ++ new WithNKBL2(64)
+  L3CacheConfig("256KB", inclusive = false) ++ L2CacheConfig("64KB")
 )
 
 class MinimalL3DebugConfig(n: Int = 1) extends Config(
@@ -386,7 +404,10 @@ class WithFuzzer extends Config((site, here, up) => {
     EnablePerfDebug = false,
   )
   case SoCParamsKey => up(SoCParamsKey).copy(
-    L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+    L3CacheParamsOpt = up(SoCParamsKey).L3CacheParamsOpt.map(_.copy(
+      enablePerf = false,
+    )),
+    OpenLLCParamsOpt = up(SoCParamsKey).OpenLLCParamsOpt.map(_.copy(
       enablePerf = false,
     )),
   )
@@ -400,16 +421,16 @@ class WithFuzzer extends Config((site, here, up) => {
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
-  new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = true) ++
-    new WithNKBL1D(128) ++
-    new MinimalConfig(n)
+  L3CacheConfig("512KB", inclusive = false)
+    ++ L2CacheConfig("256KB", inclusive = true)
+    ++ WithNKBL1D(128)
+    ++ new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
-  new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = true)
-    ++ new WithNKBL1D(128)
+  L3CacheConfig("4MB", inclusive = false, banks = 4)
+    ++ L2CacheConfig("512KB", inclusive = true)
+    ++ WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
 
@@ -419,9 +440,9 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 4)
+  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
 
@@ -430,23 +451,16 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  new WithCHI
-    ++ new Config((site, here, up) => {
-      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
-    })
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
-    ++ new WithNKBL1D(64, ways = 4)
+  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ new DefaultConfig(n)
+    ++ new WithCHI
 )
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
-  new WithCHI
-    ++ new Config((site, here, up) => {
-      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
-    })
-    ++ new WithNKBL2(128, inclusive = true, banks = 1, tp = false)
-    ++ new WithNKBL1D(32, ways = 4)
+  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+    ++ WithNKBL1D(32, ways = 4)
     ++ new MinimalConfig(n)
+    ++ new WithCHI
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
@@ -461,10 +475,22 @@ class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
   })
 )
 
+class XSNoCDiffTopConfig(n: Int = 1) extends Config(
+  (new XSNoCTopConfig(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCDiffTop = true)
+  })
+)
+
+class XSNoCDiffTopMinimalConfig(n: Int = 1) extends Config(
+  (new XSNoCTopConfig(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCDiffTop = true)
+  })
+)
+
 class FpgaDefaultConfig(n: Int = 1) extends Config(
-  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 4)
+  (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = false,
@@ -479,9 +505,9 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
 )
 
 class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
-  (new WithNKBL3(3 * 1024, inclusive = false, banks = 1, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 8)
+  (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
