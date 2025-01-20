@@ -108,7 +108,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         readCompDMT         = false,
         writeCancelable     = false,
         writeNoError        = true,
-        axiBurstAlwaysIncr  = true
+        axiBurstAlwaysIncr  = true,
+        chiDataCheck        = EnumCHIDataCheck.OddParity
       )
     })))
   )
@@ -125,7 +126,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         acceptOrderEndpoint         = true,
         acceptMemAttrDevice         = true,
         readReceiptAfterAcception   = true,
-        axiBurstAlwaysIncr          = true
+        axiBurstAlwaysIncr          = true,
+        chiDataCheck                = EnumCHIDataCheck.OddParity
       )
     })))
   ))
@@ -343,6 +345,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
           )
           chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
           chi_openllc_opt.get.io.rn(i) <> llcLogger.io.down
+          require(core.module.io.chi.get.getWidth == llcLogger.io.up.getWidth)
+          require(llcLogger.io.down.getWidth == chi_openllc_opt.get.io.rn(i).getWidth)
         }
         val memLogger = CHILogger(s"LLC_MEM", true)
         chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
