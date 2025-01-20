@@ -441,6 +441,12 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
     val wfi = Bool()
 
     /**
+     * illegal wrs_nto
+     * raise EX_II when !isModeM && mstatus.TW=1
+     */
+    val wrs_nto = Bool()
+
+    /**
      * frm reserved
      * raise EX_II when frm.data > 4
      */
@@ -495,6 +501,12 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_VI when isModeVU && mstatus.TW=0 || isModeVS && mstatus.TW=0 && hstatus.VTW=1
      */
     val wfi = Bool()
+
+    /**
+     * illegal wrs_nto
+     * raise EX_VI when privState.V && mstatus.TW=0 && hstatus.VTW=1
+     */
+    val wrs_nto = Bool()
 
     /**
      * illegal CBO.ZERO

@@ -1361,6 +1361,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
   io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
+  io.toDecode.illegalInst.wrs_nto    := !isModeM && mstatus.regOut.TW
+  io.toDecode.virtualInst.wrs_nto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
   io.toDecode.illegalInst.frm        := frmIsReserved
   // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
   io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
