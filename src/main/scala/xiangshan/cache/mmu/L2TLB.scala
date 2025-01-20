@@ -161,7 +161,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     }
   }
 
-  tlbCounter := tlbCounter + PopCount(reqVec) - PopCount(respVec)
+  when (flush) {
+    tlbCounter := 0.U
+  } .otherwise {
+    tlbCounter := tlbCounter + PopCount(reqVec) - PopCount(respVec)
+  }
   XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
