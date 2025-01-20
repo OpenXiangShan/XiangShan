@@ -395,6 +395,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
                                     )
   io.dcache.req.bits.vaddr        := s0_dcache_vaddr
+  io.dcache.req.bits.vaddr_dup    := s0_dcache_vaddr
   io.dcache.req.bits.mask         := s0_sel_src.mask
   io.dcache.req.bits.data         := DontCare
   io.dcache.req.bits.isFirstIssue := s0_sel_src.isFirstIssue

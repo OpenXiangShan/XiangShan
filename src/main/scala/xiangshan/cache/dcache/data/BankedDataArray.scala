@@ -54,6 +54,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
 {
   val way_en = Bits(DCacheWays.W)
   val addr = Bits(PAddrBits.W)
+  val addr_dup = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
   val kill = Bool()
   val lqIdx = new LqPtr
@@ -260,6 +261,9 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
+
+  // bank (0, 1, 2, 3) each way use duplicate addr
+  def DuplicatedQueryBankSeq = Seq(0, 1, 2, 3)
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -650,10 +654,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val set_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
+  val set_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
+  val div_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
   val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt())))
+  val bank_addrs_dup = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt())))
   val way_en_reg = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val set_addrs_reg = Wire(Vec(LoadPipelineWidth, UInt()))
+  val set_addrs_dup_reg = Wire(Vec(LoadPipelineWidth, UInt()))
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
@@ -673,10 +681,15 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     div_addrs(rport_index) := addr_to_dcache_div(io.read(rport_index).bits.addr)
+    div_addrs_dup(rport_index) := addr_to_dcache_div(io.read(rport_index).bits.addr_dup)
     bank_addrs(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr)
     bank_addrs(rport_index)(1) := Mux(io.is128Req(rport_index), bank_addrs(rport_index)(0) + 1.U, bank_addrs(rport_index)(0))
+    bank_addrs_dup(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr_dup)
+    bank_addrs_dup(rport_index)(1) := Mux(io.is128Req(rport_index), bank_addrs_dup(rport_index)(0) + 1.U, bank_addrs_dup(rport_index)(0))
     set_addrs(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr)
+    set_addrs_dup(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr_dup)
     set_addrs_reg(rport_index) := RegEnable(addr_to_dcache_div_set(io.read(rport_index).bits.addr), io.read(rport_index).valid)
+    set_addrs_dup_reg(rport_index) := RegEnable(addr_to_dcache_div_set(io.read(rport_index).bits.addr_dup), io.read(rport_index).valid)
 
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
@@ -789,6 +802,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
           !rr_bank_conflict_oldest(i)
       })))
+      val bank_addr_matchs_dup = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+        io.read(i).valid && div_addrs_dup(i) === div_index.U && (bank_addrs_dup(i)(0) === bank_index.U || bank_addrs_dup(i)(1) === bank_index.U && io.is128Req(i)) &&
+          !rr_bank_conflict_oldest(i)
+      })))
       val readline_match = Wire(Bool())
       if (ReduceReadlineConflict) {
         readline_match := io.readline.valid && io.readline.bits.rmask(bank_index) && line_div_addr === div_index.U
@@ -800,12 +817,21 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
       )
+      val bank_set_addr_dup = Mux(readline_match,
+        line_set_addr,
+        PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs_dup(i) -> set_addrs_dup(i)))
+      )
       val read_enable = bank_addr_matchs.asUInt.orR || readline_match
 
       // read raw data
       val data_bank = data_banks(div_index)(bank_index)
       data_bank.io.r.en := read_enable
-      data_bank.io.r.addr := bank_set_addr
+
+      if (DuplicatedQueryBankSeq.contains(bank_index)) {
+        data_bank.io.r.addr := bank_set_addr_dup
+      } else {
+        data_bank.io.r.addr := bank_set_addr
+      }
       for (way_index <- 0 until DCacheWays) {
         bank_result(div_index)(bank_index)(way_index).ecc := getECCFromEncWord(data_bank.io.r.data(way_index))
         bank_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data(way_index)) ^ pseudo_data_toggle_mask(bank_index)
