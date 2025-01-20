@@ -243,11 +243,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_vSetIdx    = VecInit(get_idx(f0_ftq_req.startAddr), get_idx(f0_ftq_req.nextlineStart))
   val f0_fire       = fromFtq.req.fire
 
-  val f0_flush, f1_flush, f2_flush, f3_flush                                     = WireInit(false.B)
-  val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
+  val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
 
-  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
-    fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
+  val f0_flush_from_bpu = fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
 
   val wb_redirect, mmio_redirect, backend_redirect = WireInit(false.B)
   val f3_wb_not_flush                              = WireInit(false.B)
@@ -255,8 +253,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   backend_redirect := fromFtq.redirect.valid
   f3_flush         := backend_redirect || (wb_redirect && !f3_wb_not_flush)
   f2_flush         := backend_redirect || mmio_redirect || wb_redirect
-  f1_flush         := f2_flush || from_bpu_f1_flush
-  f0_flush         := f1_flush || from_bpu_f0_flush
+  f1_flush         := f2_flush
+  f0_flush         := f1_flush || f0_flush_from_bpu
 
   val f1_ready, f2_ready, f3_ready = WireInit(false.B)
 
@@ -279,8 +277,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // XSPerfAccumulate("fetch_bubble_icache_1_busy",   f0_valid && !toICache(1).ready  )
   XSPerfAccumulate("fetch_flush_backend_redirect", backend_redirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", wb_redirect)
-  XSPerfAccumulate("fetch_flush_bpu_f1_flush", from_bpu_f1_flush)
-  XSPerfAccumulate("fetch_flush_bpu_f0_flush", from_bpu_f0_flush)
+  XSPerfAccumulate("fetch_flush_f0_flush_from_bpu", f0_flush_from_bpu)
 
   /**
     ******************************************************************************
@@ -297,9 +294,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f1_fire       = f1_valid && f2_ready
 
   f1_ready := f1_fire || !f1_valid
-
-  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx) && f1_valid
-  // from_bpu_f1_flush := false.B
 
   when(f1_flush)(f1_valid := false.B)
     .elsewhen(f0_fire && !f0_flush)(f1_valid := true.B)
