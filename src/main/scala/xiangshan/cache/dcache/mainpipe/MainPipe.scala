@@ -971,7 +971,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.error.valid := s3_error && GatedValidRegNext(s2_fire)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
-  io.error.bits.report_to_beu := (s2_tag_error || s3_data_error) && RegNext(s2_fire)
+  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && RegNext(s2_fire)
   io.error.bits.paddr := s3_req.addr
   io.error.bits.source.tag := s3_tag_error
   io.error.bits.source.data := s3_data_error
