@@ -294,7 +294,7 @@ object Bundles {
       if (!isVStore) {
         res.reg_offset.get      := this.regOffset
         res.elemIdxInsideVd.get := this.elemIdxInsideVd
-        res.vecdata.get         := DontCare
+        res.vecdata.get         := this.data
       }
       res
     }

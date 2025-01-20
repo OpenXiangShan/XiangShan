@@ -120,7 +120,7 @@ class ForwardNetwork(implicit p: Parameters) extends XSModule with HasLoadHelper
   }
 
   // data from uncache buffer
-  val s2_forwardFromUncahce = shiftDataToHigh(io.s2_in.bits.paddr, io.s2_in.bits.data)
+  val s2_dataFromNc = shiftDataToHigh(io.s2_in.bits.paddr, io.s2_in.bits.data)
 
   // forward status check
   io.commonOut.s2_fullForward := ((~s2_forwardMask.asUInt).asUInt & io.s2_in.bits.mask) === 0.U && !io.fromLsq.forward.dataInvalid
@@ -138,21 +138,21 @@ class ForwardNetwork(implicit p: Parameters) extends XSModule with HasLoadHelper
   val s3_dataSelect  = RegEnable(s2_dataSelect, 0.U(s2_dataSelect.getWidth.W), io.s2_in.valid)
   val s3_dataSelectByOffset = RegEnable(s2_dataSelectByOffset, 0.U.asTypeOf(s2_dataSelectByOffset), io.s2_in.valid)
 
-  val s3_rawDataFromPipe = Wire(new LoadDataFromDcacheBundle)
-  s3_rawDataFromPipe.dcacheData := Mux(io.s2_in.bits.isNoncacheable, s2_forwardFromUncahce, io.fromDCache.bits.data)
-  s3_rawDataFromPipe.forwardDchan := s2_forwardFromTL && !io.s2_in.bits.isNoncacheable
-  s3_rawDataFromPipe.forwardDataDchan := s2_forwardFromTLData
-  s3_rawDataFromPipe.forwardMshr := s2_forwardFromMissQueue && !io.s2_in.bits.isNoncacheable
-  s3_rawDataFromPipe.forwardDataMshr := s2_forwardFromMissQueueData
-  s3_rawDataFromPipe.forwardResultValid := s2_forwardDataValid
+  val s2_rawDataFromPipe = Wire(new LoadDataFromDcacheBundle)
+  s2_rawDataFromPipe.dcacheData := Mux(io.s2_in.bits.isNoncacheable, s2_dataFromNc, io.fromDCache.bits.data)
+  s2_rawDataFromPipe.forwardDchan := s2_forwardFromTL && !io.s2_in.bits.isNoncacheable
+  s2_rawDataFromPipe.forwardDataDchan := s2_forwardFromTLData
+  s2_rawDataFromPipe.forwardMshr := s2_forwardFromMissQueue && !io.s2_in.bits.isNoncacheable
+  s2_rawDataFromPipe.forwardDataMshr := s2_forwardFromMissQueueData
+  s2_rawDataFromPipe.forwardResultValid := s2_forwardDataValid
 
-  s3_rawDataFromPipe.forwardMask := RegEnable(s2_forwardMask, io.s2_in.valid)
-  s3_rawDataFromPipe.forwardData := RegEnable(s2_forwardData, io.s2_in.valid)
-  s3_rawDataFromPipe.uop := RegEnable(io.s2_in.bits.uop, io.s2_in.valid)
-  s3_rawDataFromPipe.addrOffset  := RegEnable(io.s2_in.bits.paddr(3, 0), io.s2_in.valid)
+  s2_rawDataFromPipe.forwardMask := RegEnable(s2_forwardMask, io.s2_in.valid)
+  s2_rawDataFromPipe.forwardData := RegEnable(s2_forwardData, io.s2_in.valid)
+  s2_rawDataFromPipe.uop := RegEnable(io.s2_in.bits.uop, io.s2_in.valid)
+  s2_rawDataFromPipe.addrOffset  := RegEnable(io.s2_in.bits.paddr(3, 0), io.s2_in.valid)
 
-  val s3_mergedDataFromTL = RegEnable(s3_rawDataFromPipe.mergeTLData(), io.s2_in.valid)
-  val s3_mergedDataFromPipe = s3_rawDataFromPipe.mergeLsqFwdData(s3_mergedDataFromTL)
+  val s3_mergedDataFromTL = RegEnable(s2_rawDataFromPipe.mergeTLData(), io.s2_in.valid)
+  val s3_mergedDataFromPipe = s2_rawDataFromPipe.mergeLsqFwdData(s3_mergedDataFromTL)
 
   // truncate forward data and cache data to XLEN width to writeback
   val s3_forwardMaskClip = VecInit(List.fill(LdDataDup)(
@@ -172,8 +172,8 @@ class ForwardNetwork(implicit p: Parameters) extends XSModule with HasLoadHelper
   val s3_mergedDataFromTLDClip = VecInit(List.fill(LdDataDup)(
     RegEnable(Mux(
       io.s2_in.bits.paddr(3),
-      s3_rawDataFromPipe.mergeTLData()(VLEN - 1, 64),
-      s3_rawDataFromPipe.mergeTLData()(63, 0)
+      s2_rawDataFromPipe.mergeTLData()(VLEN - 1, 64),
+      s2_rawDataFromPipe.mergeTLData()(63, 0)
     ).asTypeOf(Vec(XLEN / 8, UInt(8.W))), io.s2_in.valid)
   ))
   val s3_mergedDataFromPipeClip = VecInit((0 until LdDataDup).map(i => {

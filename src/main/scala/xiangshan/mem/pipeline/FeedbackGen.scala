@@ -201,11 +201,6 @@ class FeedbackGen(implicit p: Parameters, params: MemUnitParams) extends XSModul
   // -------------------------------------------------------------------
   // stage 3
   // -------------------------------------------------------------------
-  val s3_writeback = Wire(DecoupledIO(new LsPipelineBundle))
-  s3_writeback.valid := io.s3_in.valid || RegNextN(io.fromLsq.mmioLdWriteback.valid && io.s0_in.bits.isMmio, 3, Some(false.B))
-  s3_writeback.bits.fromMemExuOutputBundle(RegNextN(io.fromLsq.mmioLdWriteback.bits, 3))
-  io.s3_in.ready := s3_writeback.ready
-
   // to Backend
   val s3_safeWakeup = RegEnable(s2_safeWakeup, io.s2_in.valid)
 
@@ -338,52 +333,127 @@ class FeedbackGen(implicit p: Parameters, params: MemUnitParams) extends XSModul
   io.toBackend.iqFeedback.feedbackSlow.bits.isLoad := io.s3_in.bits.isLoad
 
   // writeback
-  s3_writeback.ready := false.B
+  val s3_writeback = Wire(DecoupledIO(new LsPipelineBundle))
 
-  io.toBackend.writeback.zip(io.commonIn.s3_wbPort).foreach {
-    case (wb, chosen) =>
-      wb.valid := s3_writeback.valid && s3_writeback.bits.isLoad && chosen
-      wb.bits := s3_writeback.bits
-      wb.bits.feedbacked := (!s3_writeback.bits.isVector || s3_writeback.bits.needReplay && !io.toLsq.ready) && s3_feedbackNoWaiting
-      wb.bits.uop.rfWen := !io.toBackend.ldCancel.ld2Cancel && s3_writeback.bits.uop.rfWen
-      wb.bits.uop.flushPipe := false.B // use rollback
-      wb.bits.uop.replayInst := false.B // use rollback
-      when (io.s3_in.valid && chosen) {
-        s3_writeback.ready := wb.ready
-      }
+  /**
+    * Determine whether unit has a load execution (LdExe) and any load uop is MMIO.
+    * This block handles the writeback logic for MMIO loads and other types of loads.
+    */
+  if (params.hasLdExe && params.issueParams.map(x => MemIssueType.isMmio(x.issueType)).reduce(_||_)) {
+    /**
+      * Determine whether the uop is an MMIO load, the valid signal is set based on either the
+      * incoming valid signal or a delayed valid signal from the LSQ.
+      */
+    s3_writeback.valid := io.s3_in.valid ||
+      RegNextN(io.fromLsq.mmioLdWriteback.valid && io.s0_in.bits.isMmio, 3, Some(false.B))
+    when (io.s3_in.valid) {
+      s3_writeback.bits := io.s3_in.bits
+    } .otherwise {
+      s3_writeback.bits.fromMemExuOutputBundle(RegNextN(io.fromLsq.mmioLdWriteback.bits, 3))
+    }
+  } else {
+    s3_writeback.valid := io.s3_in.valid
+    s3_writeback.bits := io.s3_in.bits
+  }
+  io.s3_in.ready := s3_writeback.ready
+
+  s3_writeback.ready := false.B
+  /**
+   * Check whether unit supports load execution (LdExe).
+   * This block processes the writeback to the backend writeback ports.
+   */
+  if (params.hasLdExe) {
+    io.toBackend.writeback.zip(io.commonIn.s3_wbPort).zipWithIndex.foreach {
+      case ((wb, chosen), i) =>
+
+        /**
+         * Set the valid signal for the writeback port if the writeback is valid
+         * and the current port is selected (chosen).
+         */
+        wb.valid := s3_writeback.valid && s3_writeback.bits.isLoad && chosen
+        wb.bits := s3_writeback.bits
+       /**
+         * Depending on the type of issue, assign the appropriate data to the write-back.
+         * Vector data is assigned if the issue type is valid; otherwise, regular data is used.
+         */
+        if (params.wbParams(i).values.head.contains(MemIssueType.Vld)) {
+          wb.bits.data := io.commonIn.s3_vecData
+          wb.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_writeback.bits.uop.exceptionVec, VlduCfg)
+        } else {
+          wb.bits.data := io.commonIn.s3_data
+          wb.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_writeback.bits.uop.exceptionVec, LduCfg)
+        }
+
+        wb.bits.feedbacked := s3_feedbackNoWaiting &&
+          (!s3_writeback.bits.isVector || s3_writeback.bits.needReplay && !io.toLsq.ready)
+        wb.bits.uop.rfWen := !io.toBackend.ldCancel.ld2Cancel && s3_writeback.bits.uop.rfWen
+        wb.bits.uop.flushPipe := false.B // use rollback
+        wb.bits.uop.replayInst := false.B // use rollback
+
+        /**
+         * If the write-back is valid and this port is selected
+         */
+        when (s3_writeback.valid && chosen) {
+          s3_writeback.ready := wb.ready
+        }
+    }
   }
 
   // store writeback delay
-  val pipelineRegs = Seq.fill(TotalDelayCycles)(Module(new NewPipelineConnectPipe(new LsPipelineBundle)))
-  val wbPortRegs = DelayN(io.commonIn.s3_wbPort, TotalDelayCycles)
+  /**
+   * Determine whether unit has a store execution (StaExe), this block handles the store writeback
+   * and the propagation of data through the pipeline.
+   */
+  if (params.hasStaExe) {
+    val pipelineRegs = Seq.fill(TotalDelayCycles)(Module(new NewPipelineConnectPipe(new LsPipelineBundle)))
+    val wbPortRegs = DelayN(io.commonIn.s3_wbPort, TotalDelayCycles)
 
-  val exuOut = Wire(DecoupledIO(new LsPipelineBundle))
-  if (pipelineRegs.length > 0) {
-    pipelineRegs.head.io.in <> io.s3_in
-    pipelineRegs.head.io.in.valid := io.s3_in.valid && io.s3_in.bits.isStore
-    pipelineRegs.head.io.in.bits.uop.exceptionVec := ExceptionNO.selectByFu(io.s3_in.bits.uop.exceptionVec, StaCfg)
-    pipelineRegs.head.io.isFlush := io.s3_in.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
-    pipelineRegs.head.io.rightOutFire := pipelineRegs.head.io.out.fire
-    pipelineRegs.drop(1).zip(pipelineRegs.dropRight(1)).foreach {
-      case (sink, source) =>
-        val isFlush = source.io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
-        sink.io.in <> source.io.out
-        sink.io.isFlush := isFlush
-        sink.io.rightOutFire := sink.io.out.fire
-    }
-    exuOut <> pipelineRegs.last.io.out
-  } else {
-    exuOut <> io.s3_in
-  }
-
-  exuOut.ready := false.B
-  io.toBackend.writeback.zip(wbPortRegs).foreach {
-    case (wb, chosen) =>
-      wb.valid := exuOut.valid && chosen
-      wb.bits := exuOut.bits
-      wb.bits.data := DontCare
-      when (chosen && exuOut.bits.isStore) {
-        exuOut.ready := wb.ready
+    val exuOut = Wire(DecoupledIO(new LsPipelineBundle))
+    /**
+     * If there are pipeline registers (i.e., TotalDelayCycles > 0), process the pipeline stages.
+     */
+    if (pipelineRegs.length > 0) {
+      pipelineRegs.head.io.in.valid := s3_writeback.valid && s3_writeback.bits.isStore
+      pipelineRegs.head.io.in.bits := s3_writeback.bits
+      when (s3_writeback.bits.isStore) {
+        s3_writeback.ready := pipelineRegs.head.io.in.ready
       }
+
+      pipelineRegs.head.io.isFlush := io.s3_in.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
+      pipelineRegs.head.io.rightOutFire := pipelineRegs.head.io.out.fire
+      pipelineRegs.drop(1).zip(pipelineRegs.dropRight(1)).foreach {
+        case (sink, source) =>
+          val isFlush = source.io.out.bits.uop.robIdx.needFlush(io.fromCtrl.redirect)
+          sink.io.in <> source.io.out
+          sink.io.isFlush := isFlush
+          sink.io.rightOutFire := sink.io.out.fire
+      }
+      exuOut <> pipelineRegs.last.io.out
+    } else {
+      /**
+       * If there are no pipeline (i.e., a single stage), set the EXU output directly.
+       * The valid signal is set if it's store uop.
+       */
+      exuOut.valid := s3_writeback.valid && s3_writeback.bits.isStore
+      when (s3_writeback.bits.isStore) {
+        s3_writeback.ready := exuOut.ready
+      }
+    }
+
+    exuOut.ready := false.B
+    io.toBackend.writeback.zip(wbPortRegs).zipWithIndex.foreach {
+      case ((wb, chosen), i) =>
+        wb.valid := exuOut.valid && chosen
+        wb.bits := exuOut.bits
+        wb.bits.data := DontCare
+        if (params.wbParams(i).values.head.contains(MemIssueType.Vst)) {
+          wb.bits.uop.exceptionVec := ExceptionNO.selectByFu(exuOut.bits.uop.exceptionVec, VstuCfg)
+        } else {
+          wb.bits.uop.exceptionVec := ExceptionNO.selectByFu(exuOut.bits.uop.exceptionVec, StaCfg)
+        }
+        when (chosen && exuOut.bits.isStore) {
+          exuOut.ready := wb.ready
+        }
+    }
   }
 }

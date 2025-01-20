@@ -111,14 +111,6 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
     Seq(params.getWritebackPortByType(issueType)).filter(_.isDefined).map(pIdx => io.toBackend.writeback(pIdx.get))
   }
 
-  protected def zipIssueParams(): Seq[(DecoupledIO[LsPipelineBundle], MemIssueParams)] = {
-    io.fromBackend.issue.zip(params.issueParams)
-  }
-
-  protected def zipIssueTypes(): Seq[(DecoupledIO[LsPipelineBundle], Int)] = {
-    zipIssueParams().map(x => (x._1, x._2.issueType))
-  }
-
   def getReplayIssues() = getIssues(MemIssueType.Lqr)
 
   def getMisalignIssues() = getIssues(MemIssueType.Mb)
@@ -153,7 +145,7 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
 
   def getMmioIssues() = getIssues(MemIssueType.Mmio)
 
-  def getUncacheIssues() = getIssues(MemIssueType.Nc)
+  def getNcIssues() = getIssues(MemIssueType.Nc)
 
   private val hasLoadTrigger = params.hasLdExe && params.hasTrigger
   private val hasStoreTrigger = params.hasStaExe && params.hasTrigger
@@ -179,6 +171,7 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
   // select
   arbiter.io.in <> io.fromBackend.issue
   arbiter.io.out <> s0_selOut
+  s0_out <> s0_selOut
 
   io.fromBackend.issue.zip(params.issueParams).zipWithIndex.foreach {
     case ((issue, param), i) =>
@@ -233,7 +226,6 @@ class MemUnitImp(override val wrapper: MemUnit)(implicit p: Parameters, val para
   io.toBackend.wakeup.valid := false.B
   io.toBackend.wakeup.bits  := DontCare
 
-  s0_out <> s0_selOut
   when (io.toTlb.req.valid && s0_out.bits.isFirstIssue) {
     s0_out.bits.uop.debugInfo.tlbFirstReqTime := GTimer()
   }

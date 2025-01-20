@@ -186,13 +186,17 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   /**
    * Determine whether stage 0 (s0) can proceed to the next stage
-   * 1. If the instruction is a store uop
-   * 2. If the instruction operates on non-cacheable memory
-   * 3. If the data cache (DCache) is ready to accept a request
+   * 1. If the data cache (DCache) is ready to accept a request
    */
-  val s0_canGo = s0_out.bits.isStore || s0_out.bits.isNoncacheable || io.toDCache.req.ready
+  if (params.hasLdExe) {
+    s0_selOut.ready := io.toDCache.req.ready && s0_out.ready
+  }
 
-  s0_selOut.ready := s0_canGo && s1_in.ready
+  /**
+    * Determine whether s0 can proceed to the next stage.
+    * 1. issue accepted.
+    * 2. not mmio uop.
+    */
   s0_out.valid := s0_selOut.valid && !s0_selOut.bits.isMmio
 
   /**
@@ -206,7 +210,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     s0_out.bits.isNoncacheable
 
   // to Tlb
-  io.toTlb.req.valid := s0_out.valid && s0_canGo
+  io.toTlb.req.valid := s0_out.valid && io.toDCache.req.ready
   io.toTlb.req.bits.vaddr := s0_tlbVAddr
 
   /**
@@ -437,7 +441,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * 2. A real TLB miss is detected in s1 (`s1_tlbRealMiss`).
    * 3. An exception is present in s1 (`s1_hasException`).
    */
-  io.toDCache.s1_kill := s1_kill || s1_tlbRealMiss || s1_hasException
+  io.toDCache.s1_kill := s1_kill || s1_tlbRealMiss || s1_hasException || s1_in.bits.isStore
 
   io.toDCache.s1_paddr_dup_lsu := s1_paddrDupLsu
   io.toDCache.s1_paddr_dup_dcache := s1_paddrDupDCache
@@ -519,8 +523,10 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     /**
       * Determined whether update address valid:
       * Conditions:
-      * 1. The address is not misaligned or the misalignment is with 16 bytes (`!s1_in.bits.misalign || s1_in.bits.misalignWith16Bytes`).
-      * 2. The uop is not in the misalignment buffer, or it is the final split (`!s1_in.bits.isMisalignBuf || s1_in.bits.isFinalSplit`).
+      * 1. The address is not misaligned or the misalignment is with 16 bytes
+      *    (`!s1_in.bits.misalign || s1_in.bits.misalignWith16Bytes`).
+      * 2. The uop is not in the misalignment buffer, or it is the final split
+      *    (`!s1_in.bits.isMisalignBuf || s1_in.bits.isFinalSplit`).
       * 3. Alternatively, an exception is present (`s1_hasException`).
       */
     addrUpdate.bits.updateAddrValid := (!s1_in.bits.misalign || s1_in.bits.misalignWith16Bytes) &&
@@ -597,7 +603,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
 
   // from dcache
   val s2_dcacheShouldResp = !(s2_in.bits.tlbMiss || s2_hasException || s2_in.bits.delayedError ||
-    s2_actuallyUncache || s2_in.bits.isPrefetch)
+    s2_actuallyUncache || s2_in.bits.isPrefetch || s2_in.bits.isStore)
   XSError((s2_in.valid && s2_dcacheShouldResp && !io.fromDCache.resp.valid), "DCache response got lost")
 
   /**
@@ -824,7 +830,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
    * 6. The uop is not a memory-mapped I/O (MMIO) uop (`!s2_in.bits.mmio`).
    */
   val s2_misalign = !s2_in.bits.isVector && s2_misalignException && !s2_in.bits.misalignWith16Bytes &&
-    !exceptionGen.io.commonOut.s2_exceptionVecOut(breakPoint) && !s2_in.bits.mmio
+    !exceptionGen.io.commonOut.s2_exceptionVecOut(breakPoint) && !s2_in.bits.mmio &&
     !RegEnable(s1_triggerDebugMode, false.B, s1_out.fire)
 
   when (s2_in.bits.isStore) {
@@ -916,7 +922,8 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
   io.lsTopdownInfo.s2.paddr_valid := s2_out.fire && s2_out.bits.hasROBEntry && !s2_out.bits.tlbMiss
   io.lsTopdownInfo.s2.paddr_bits := s2_out.bits.paddr
   io.lsTopdownInfo.s2.first_real_miss := io.fromDCache.resp.bits.miss
-  io.lsTopdownInfo.s2.cache_miss_en := s2_out.fire && s2_out.bits.hasROBEntry && !s2_out.bits.tlbMiss && !s2_out.bits.missDbUpdated
+  io.lsTopdownInfo.s2.cache_miss_en := s2_out.fire && s2_out.bits.hasROBEntry &&
+    !s2_out.bits.tlbMiss && !s2_out.bits.missDbUpdated
 
   XSPerfAccumulate("s2_dcacheMiss", s2_out.fire && io.fromDCache.resp.bits.miss)
   XSPerfAccumulate("s2_dcacheFirstMiss", s2_out.fire && s2_out.bits.miss && s2_in.bits.isFirstIssue)
@@ -1148,6 +1155,7 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
     connectFn = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
       sink.valid := source.valid
       sink.bits := source.bits
+      source.ready := sink.ready
       sink.bits.data := 0.U
       sink.bits.cause := s3_misalignReplayCause
       sink.bits.uop.exceptionVec := exceptionGen.io.commonOut.s3_exceptionVecOut
@@ -1180,10 +1188,12 @@ class HyuImp(override val wrapper: MemUnit)(implicit p: Parameters, params: MemU
       Connection.connect(mod.io.s3_in, s3_in, None, "forwardNetwork s3")
 
       // data from DCache
-      mod.io.fromDCache := 0.U.asTypeOf(mod.io.fromDCache.cloneType)
-      if (params.hasLdExe) {
-        mod.io.fromDCache := io.fromDCache.resp
-      }
+      Connection.connect(
+        sink        = mod.io.fromDCache,
+        source      = io.fromDCache.resp,
+        connectFn   = None,
+        connectName = "Forward Network DCache response"
+      )
 
       // data from StoreQueue
       mod.io.fromLsq := 0.U.asTypeOf(mod.io.fromLsq.cloneType)

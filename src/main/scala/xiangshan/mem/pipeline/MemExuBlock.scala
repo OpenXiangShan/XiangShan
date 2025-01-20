@@ -338,7 +338,6 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       source.ready := sink.ready
       sink.bits.fromMemExuInputBundle(source.bits, isStore = true)
       sink.bits.isIq := true.B
-      sink.bits.isFirstIssue := true.B
     }),
     connectName = "StaUnits issues"
   )
@@ -440,26 +439,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
     connectName = "Fast replay resp"
   )
 
-  // mmio reqs: `Lsq` -> `MemUnit`
-  Connection.connect(
-    sinkSeq     = totalLdUnits.map(_.getMmioIssues()).flatten,
-    sourceSeq   = Seq(io.fromLsq.mmioLdWriteback),
-    connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[MemExuOutput]) => {
-      sink.valid := source.valid
-      source.ready := sink.ready
-      sink.bits.fromMemExuOutputBundle(source.bits)
-    }),
-    connectName = "Mmio writeback"
-  )
-
   // mmio load data: `Lsq` -> `MemUnit`
   totalLdUnits.map(_.io.fromLsq).filter(_.isDefined).foreach {
     case sink =>
-      Connection.connect(
-        sinkSeq     = Seq(sink.get.mmioLdWriteback),
-        sourceSeq   = Seq(io.fromLsq.mmioLdWriteback),
-        connectName = "MMIO writeback"
-      )
+      sink.get.mmioLdWriteback.valid := io.fromLsq.mmioLdWriteback.fire
+      sink.get.mmioLdWriteback.bits := io.fromLsq.mmioLdWriteback.bits
       sink.get.mmioLdData <> io.fromLsq.mmioLdData
   }
 
@@ -480,7 +464,7 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
 
   // nc reqs: `Lsq` -> `MemUnit`
   Connection.connect(
-    sinkSeq     = totalLdUnits.map(_.getUncacheIssues()).flatten,
+    sinkSeq     = totalLdUnits.map(_.getNcIssues()).flatten,
     sourceSeq   = io.fromLsq.ncOut,
     connectFn   = Some((sink: DecoupledIO[LsPipelineBundle], source: DecoupledIO[LsPipelineBundle]) => {
       sink <> source
@@ -767,8 +751,19 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       impl.io.fromBackend.issue.head.bits.fromMemExuInputBundle(Mux1H(
         stAtomics.zip(backendStaIssues).map(x => x._1 -> x._2.bits)
       ))
-      impl.io.fromBackend.issue.head.bits.isIq := true.B
       impl.io.fromBackend.issue.head.bits.isAtomic := true.B
+
+      memUnitStaIssues.zip(backendStaIssues).zip(stAtomics.zip(s_atomics)).zipWithIndex.foreach {
+        case (((sink, source), (atomics, amoState)), i) =>
+          when (atomics) {
+            source.ready := impl.io.fromBackend.issue.head.ready
+            sink.valid := false.B
+
+            state := amoState
+          }
+          XSError(atomics && stAtomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _),
+            "atomics issue connect fail!")
+      }
 
       // issue std: `Backend` -> `AtomicsUnit`
       val stdWritebacks = stdUnitImps.map(_.getStdWritebacks()).flatten
@@ -812,18 +807,6 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
         atomicsExceptionInfo(i).bits := impl.io.exceptionInfo.bits
       }
       io.atomicsExceptionInfo := atomicsExceptionInfo(i)
-  }
-
-  memUnitStaIssues.zip(backendStaIssues).zip(stAtomics.zip(s_atomics)).zipWithIndex.foreach {
-    case (((sink, source), (atomics, amoState)), i) =>
-      when (atomics) {
-        source.ready := amoUnitImps.head.io.fromBackend.issue.head.ready
-        sink.valid := false.B
-
-        state := amoState
-      }
-      XSError(atomics && stAtomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _),
-        "atomics issue connect fail!")
   }
 
   val atomicsException = RegInit(false.B)
@@ -892,7 +875,8 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
 
   // store misalign buffer will overwrite store writeback port 0
   val memUnitVstWritebacks = totalStaUnits.map(_.getVstWritebacks()).flatten
-  val storeMisalignCanWriteBack = !mmioStWriteback.valid && !memUnitStaWritebacks.head.valid && !memUnitVstWritebacks.head.valid
+  val storeMisalignCanWriteBack = !mmioStWriteback.valid &&
+    !memUnitStaWritebacks.head.valid && !memUnitVstWritebacks.head.valid
   storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
   storeMisalignBuffer.io.storeOutValid := memUnitStaWritebacks.head.valid
   storeMisalignBuffer.io.storeVecOutValid := memUnitVstWritebacks.head.valid
@@ -904,11 +888,11 @@ class MemExuBlockImp(wrapper: MemExuBlock) extends LazyModuleImp(wrapper)
       source.ready := sink.ready
 
       if (i == 0) {
-        when (mmioStWriteback.valid && !source.valid) {
+        when (storeMisalignBuffer.io.writeBack.valid && storeMisalignCanWriteBack) {
+          sink <> storeMisalignBuffer.io.writeBack
+        } .elsewhen (mmioStWriteback.valid && !source.valid) {
           sink <> mmioStWriteback
           mmioStWriteback.ready := true.B
-        } .elsewhen (storeMisalignCanWriteBack) {
-          sink <> storeMisalignBuffer.io.writeBack
         }
       }
   }

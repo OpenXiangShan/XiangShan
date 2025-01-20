@@ -83,7 +83,7 @@ class PriorityArbiter(issueTypes: Seq[Int])(implicit p: Parameters) extends Orde
     }
   }
 
-  private def needCheckPF(_type: Int): Boolean = {
+  private def needCheckPrefetch(_type: Int): Boolean = {
     isOneOf(Seq(MemIssueType.Vld, MemIssueType.Ld, MemIssueType.Fr), _type)
   }
 
@@ -122,7 +122,7 @@ class PriorityArbiter(issueTypes: Seq[Int])(implicit p: Parameters) extends Orde
       val orderSel = orderChosenOH(i)
       if (needCheckLQRWithData(_type))
         chosen := orderSel && !hasLQRWithData(io.in.zip(issueTypes).drop(i))
-      else if (needCheckPF(_type))
+      else if (needCheckPrefetch(_type))
         chosen := orderSel && !hasHighConfPF(io.in.zip(issueTypes).drop(i))
       else
         chosen := orderSel
