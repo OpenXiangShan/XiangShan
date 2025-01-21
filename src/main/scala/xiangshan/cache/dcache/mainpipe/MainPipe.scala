@@ -637,7 +637,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
       Mux(s3_req.word_idx === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
     )
-    val l_select = !s3_cas_fail && s1_req.word_idx === i.U
+    val l_select = !s3_cas_fail && s3_req.word_idx === i.U
     val h_select = !s3_cas_fail && s3_req.cmd === M_XA_CASQ &&
       (if (i % 2 == 1) s3_req.word_idx === (i - 1).U else false.B)
     s3_cas_data_merged(i) := mergePutData(
