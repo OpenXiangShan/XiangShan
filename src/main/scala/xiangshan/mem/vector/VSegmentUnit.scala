@@ -428,11 +428,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)
   val misalignVaddrDup                = Mux(isFirstSplit, misalignLowVaddrDup, misalignHighVaddrDup)
   val tlbReqVaddr                     = Mux(isMisalignReg, misalignVaddr, vaddr)
-   //latch vaddr
-   when(state === s_tlb_req && !isMisalignReg){
+  //latch vaddr
+  when(state === s_tlb_req && !isMisalignReg){
     latchVaddr := vaddr(VAddrBits - 1, 0)
     latchVaddrDup := vaddr(VAddrBits - 1, 0)
-   }
+  }
   /**
    * tlb req and tlb resq
    */
