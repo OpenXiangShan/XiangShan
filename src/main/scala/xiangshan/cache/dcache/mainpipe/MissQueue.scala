@@ -285,6 +285,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val state = RegInit(s_idle)
   val state_next = WireInit(state)
   val req = RegEnable(io.req.bits, io.req.fire)
+  val nderr = RegInit(false.B)
 
   state := state_next
 
@@ -292,6 +293,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     is(s_idle) {
       when (io.req.fire) {
         state_next := s_sreq
+        nderr := false.B
       }
     }
     is(s_sreq) {
@@ -302,6 +304,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     is(s_wresp) {
       when (io.resp_chanD.fire) {
         state_next := s_lsq_resp
+        nderr := io.resp_chanD.bits.denied || io.resp_chanD.bits.corrupt
       }
     }
     is(s_lsq_resp) {
@@ -325,6 +328,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.resp_to_lsq.valid := state === s_lsq_resp
   io.resp_to_lsq.bits.address := req.address
+  io.resp_to_lsq.bits.nderr   := nderr
 
   assert(!(state =/= s_idle && io.req.valid))
   assert(!(state =/= s_wresp && io.resp_chanD.valid))

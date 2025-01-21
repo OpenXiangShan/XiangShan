@@ -598,6 +598,7 @@ class CMOReq(implicit p: Parameters) extends Bundle {
 
 class CMOResp(implicit p: Parameters) extends Bundle {
   val address = UInt(64.W)
+  val nderr   = Bool()
 }
 
 // used by load unit
