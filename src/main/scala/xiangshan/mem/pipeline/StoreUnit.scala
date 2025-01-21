@@ -465,7 +465,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
-  val toMisalignBufferValid = RegEnable(s1_valid && s1_mis_align && !s1_frm_mabuf, false.B, s1_fire)
+  val toMisalignBufferValid = RegEnable(s1_valid && s1_mis_align && !s1_frm_mabuf, false.B, s1_fire) && !s2_exception
   io.misalign_buf.valid := toMisalignBufferValid
   io.misalign_buf.bits  := s2_in
   io.misalign_buf.bits.mmio := s2_mmio
