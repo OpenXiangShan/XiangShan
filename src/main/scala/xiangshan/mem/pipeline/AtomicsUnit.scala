@@ -104,7 +104,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val vaddr = rs1
 
   val is_mmio = Reg(Bool())
-  val is_nc = RegInit(false.B)
   val isForVSnonLeafPTE = Reg(Bool())
 
   // dcache response data
@@ -263,7 +262,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       trigger                  := triggerAction
 
       when (!io.dtlb.resp.bits.miss) {
-        is_nc := Pbmt.isNC(io.dtlb.resp.bits.pbmt(0))
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
         when (!addrAligned || triggerDebugMode || triggerBreakpoint) {
           // NOTE: when addrAligned or trigger fire, do not need to wait tlb actually
@@ -288,7 +286,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st || pmp.ld || pmp.mmio
+    val exception_pa_mmio_nc = pmp.mmio || Pbmt.isIO(pbmtReg) || Pbmt.isNC(pbmtReg)
+    val exception_pa = pmp.st || pmp.ld || exception_pa_mmio_nc
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -298,8 +297,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       state := Mux(sbuffer_empty, s_cache_req, s_wait_flush_sbuffer_resp);
     }
     // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || (pmp.ld || pmp.mmio) && isLr
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || (pmp.ld || pmp.mmio) && !isLr
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) ||
+      (pmp.ld || exception_pa_mmio_nc) && isLr
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
+      (pmp.ld || exception_pa_mmio_nc) && !isLr
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
