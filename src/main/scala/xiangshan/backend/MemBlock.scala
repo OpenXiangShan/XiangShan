@@ -1908,7 +1908,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
-  io.inner_hc_perfEvents <> io.outer_hc_perfEvents
+  io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
 
   // vector segmentUnit
   vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
