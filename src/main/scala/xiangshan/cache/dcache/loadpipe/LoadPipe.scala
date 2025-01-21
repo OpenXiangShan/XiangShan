@@ -184,7 +184,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_is_prefetch = s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
   val s1_vaddr_update = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
+  val s1_vaddr_update_dup = Cat(s1_req.vaddr_dup(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_dcache(blockOffBits - 1, 0))
   val s1_vaddr = Mux(s1_load128Req, Cat(s1_vaddr_update(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update)
+  val s1_vaddr_dup = Mux(s1_load128Req, Cat(s1_vaddr_update_dup(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update_dup)
   val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
@@ -307,6 +309,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
   io.banked_data_read.bits.addr := s1_vaddr
+  io.banked_data_read.bits.addr_dup := s1_vaddr_dup
   io.banked_data_read.bits.kill := io.lsu.s1_kill_data_read
   io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
   io.banked_data_read.bits.bankMask := s1_bank_oh

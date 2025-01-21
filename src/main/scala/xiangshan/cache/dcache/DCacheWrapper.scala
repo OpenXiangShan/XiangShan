@@ -368,6 +368,7 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val vaddr  = UInt(VAddrBits.W)
+  val vaddr_dup = UInt(VAddrBits.W)
   val data   = UInt(VLEN.W)
   val mask   = UInt((VLEN/8).W)
   val id     = UInt(reqIdWidth.W)
