@@ -151,6 +151,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       // TODO: add ECC interface of L2
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      core.module.io.l2_hint.bits.isGrantData := l2top.module.io.l2_hint.bits.isGrantData
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
@@ -167,6 +168,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
+      core.module.io.l2_hint.bits.isGrantData := l2top.module.io.l2_hint.bits.isGrantData
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid

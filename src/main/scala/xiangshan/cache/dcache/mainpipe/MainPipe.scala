@@ -425,6 +425,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_replay = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) || io.replace_block // miss_req in s2 but refill data is invalid, can block 1 cycle
+  when (s2_valid && s2_req.miss) {
+    assert(!s2_req_miss_without_data)
+    assert(!s2_can_go_to_mq_replay)
+  }
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   val s2_can_go_to_s3 = (s2_req.replace || s2_req.probe || (s2_req.miss && io.refill_info.valid && !io.replace_block) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))

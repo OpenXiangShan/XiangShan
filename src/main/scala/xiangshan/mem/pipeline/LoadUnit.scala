@@ -141,7 +141,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
    // val refill        = Flipped(ValidIO(new Refill))
-    val l2_hint       = Input(Valid(new L2ToL1Hint))
     val tlb_hint      = Flipped(new TlbHintReq)
     // fast wakeup
     // TODO: implement vector fast wakeup
