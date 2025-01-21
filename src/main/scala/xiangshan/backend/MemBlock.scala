@@ -1414,12 +1414,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     uncacheReq <> lsq.io.uncache.req
   }
   when (io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
-    uncacheResp <> lsq.io.uncache.resp
-    uncacheIdResp <> lsq.io.uncache.idResp
+    lsq.io.uncache.resp <> uncacheResp
+    lsq.io.uncache.idResp <> uncacheIdResp
   }.otherwise {
     when (uncacheState === s_scalar_uncache) {
-      uncacheResp <> lsq.io.uncache.resp
-      uncacheIdResp <> lsq.io.uncache.idResp
+      lsq.io.uncache.resp <> uncacheResp
+      lsq.io.uncache.idResp <> uncacheIdResp
     }
   }
   // delay dcache refill for 1 cycle for better timing

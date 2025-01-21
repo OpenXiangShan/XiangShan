@@ -1172,7 +1172,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
-  val s2_actually_uncache = (Pbmt.isPMA(s2_pbmt) && s2_tlb_hit && s2_pmp.mmio) || s2_in.nc || s2_in.mmio
+  val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && s2_tlb_hit && s2_pmp.mmio || s2_in.nc || s2_in.mmio
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_vecActive && (

@@ -41,7 +41,6 @@ trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters
 
   def INDEX_WIDTH = log2Up(UncacheBufferSize)
   def BLOCK_OFFSET = log2Up(XLEN / 8)
-  def getAlias(x: UInt) = x(BLOCK_OFFSET - 1, 0)
   def getBlockAddr(x: UInt) = x >> BLOCK_OFFSET
 }
 
