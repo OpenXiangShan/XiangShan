@@ -172,6 +172,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val enqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
   val deqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
   val stridePtr         = WireInit(0.U.asTypeOf(new VSegUPtr)) // for select stride/index
+  val stridePtrReg      = RegInit(0.U.asTypeOf(new VSegUPtr)) // for select stride/index
 
   val segmentIdx        = RegInit(0.U(elemIdxBits.W))
   val fieldIdx          = RegInit(0.U(fieldBits.W))
@@ -409,7 +410,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *************************************************************************/
 
   val indexStride                     = IndexAddr( // index for indexed instruction
-                                                    index = stride(stridePtr.value),
+                                                    index = stride(stridePtrReg.value),
                                                     flow_inner_idx = issueIndexIdx,
                                                     eew = issueEew
                                                   )
@@ -781,13 +782,16 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
 
   val fieldIdxWire      = WireInit(fieldIdx)
+  val segmentIdxWire    = WireInit(segmentIdx)
   val nextBaseVaddrWire = (baseVaddr + (fieldIdxWire << alignedType).asUInt)
 
   nextBaseVaddr  := RegEnable(nextBaseVaddrWire, 0.U, stateNext === s_tlb_req)
 
   // update stridePtr, only use in index
-  val strideOffset = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffset     = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffsetWire = Mux(isIndexed(issueInstType), segmentIdxWire >> issueMaxIdxInIndexLog2, 0.U)
   stridePtr       := deqPtr + strideOffset
+  stridePtrReg    := deqPtr + strideOffsetWire
 
   // update fieldIdx
   when(io.in.fire && !instMicroOpValid){ // init
@@ -807,13 +811,16 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   //update segmentIdx
   when(io.in.fire && !instMicroOpValid){
-    segmentIdx := 0.U
+    segmentIdxWire := 0.U
+    segmentIdx := segmentIdxWire
   }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)) &&
              segmentIdx =/= maxSegIdx){ // next segment, only if segment is active
 
-    segmentIdx := segmentIdx + 1.U
+    segmentIdxWire := segmentIdx + 1.U
+    segmentIdx := segmentIdxWire
   }.elsewhen(segmentInactiveFinish && segmentIdx =/= maxSegIdx){ // if segment is inactive, go to next segment
-    segmentIdx := segmentIdx + 1.U
+    segmentIdxWire := segmentIdx + 1.U
+    segmentIdx := segmentIdxWire
   }
 
 
