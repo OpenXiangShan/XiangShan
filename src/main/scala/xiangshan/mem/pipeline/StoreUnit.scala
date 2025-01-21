@@ -257,7 +257,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
-  
+
   io.stin.ready := s1_ready && s0_use_flow_rs
   io.vecstin.ready := s1_ready && s0_use_flow_vec
   io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
@@ -465,9 +465,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
-  val toMisalignBufferValid =  s2_mis_align && !s2_frm_mabuf
+  val toMisalignBufferValid = RegEnable(s1_valid && s1_mis_align && !s1_frm_mabuf, false.B, s1_fire)
   io.misalign_buf.valid := toMisalignBufferValid
   io.misalign_buf.bits  := s2_in
+  io.misalign_buf.bits.mmio := s2_mmio
   val misalignBufferNack = toMisalignBufferValid && !io.misalign_buf.ready
 
   // feedback tlb miss to RS in store_s2
@@ -598,7 +599,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_in(i).hasException := s3_exception
-      sx_in_vec(i)         := s3_in.isvec          
+      sx_in_vec(i)         := s3_in.isvec
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
