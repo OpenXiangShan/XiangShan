@@ -192,8 +192,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       io.fromPipeline(j).valid)).orR
   }
 
+  val mergePortMatrixWrap        = if(isVStore) mergePortMatrix else RegNext(mergePortMatrix)
+  val mergePortMatrixHasExcpWrap = if(isVStore) mergePortMatrixHasExcp else RegNext(mergePortMatrixHasExcp)
+  val mergedByPrevPortVecWrap    = if(isVStore) mergedByPrevPortVec else RegNext(mergedByPrevPortVec)
   if (backendParams.debugEn){
     dontTouch(mergePortMatrix)
+    dontTouch(mergePortMatrixHasExcp)
     dontTouch(mergedByPrevPortVec)
   }
 
@@ -228,15 +232,24 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
   val pipeValid        = io.fromPipeline.map(_.valid)
   val pipeBits         = io.fromPipeline.map(_.bits)
+  val pipeValidReg     = io.fromPipeline.map(x => RegNext(x.valid))
+  val pipeBitsReg      = io.fromPipeline.map(x => RegEnable(x.bits, x.valid))
   val wbElemIdx        = pipeBits.map(_.elemIdx)
   val wbMbIndex        = pipeBits.map(_.mBIndex)
-  val wbElemIdxInField = wbElemIdx.zip(wbMbIndex).map(x => x._1 & (entries(x._2).vlmax - 1.U))
+  val wbElemIdxInField = wbElemIdx.zip(wbMbIndex).map{x =>
+    val elemIdxInField = x._1 & (entries(x._2).vlmax - 1.U)
+    if(isVStore) elemIdxInField else RegNext(elemIdxInField)
+  }
+  val selBits          = if(isVStore) pipeBits else pipeBitsReg
 
   // this port have exception or merged port have exception
-  val portHasExcp       = mergePortMatrixHasExcp.map{_.reduce(_ || _)}
+  val portHasExcp       = mergePortMatrixHasExcpWrap.map{_.reduce(_ || _)}
 
-  for((pipewb, i) <- io.fromPipeline.zipWithIndex){
-    val entry               = entries(wbMbIndex(i))
+  for(i <- io.fromPipeline.indices){
+    val pipewbvalid         = if(isVStore) pipeValid(i) else pipeValidReg(i)
+    val pipewb              = if(isVStore) pipeBits(i)  else pipeBitsReg(i)
+    val pipeWbMbIndex       = pipewb.mBIndex
+    val entry               = entries(pipeWbMbIndex)
     val entryVeew           = entry.uop.vpu.veew
     val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
     val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR
@@ -245,9 +258,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entryVstart         = entry.vstart
     val entryElemIdx        = entry.elemIdx
 
-    val sel                    = selectOldest(mergePortMatrixHasExcp(i), pipeBits, wbElemIdxInField)
+    val sel                    = selectOldest(mergePortMatrixHasExcpWrap(i), selBits, wbElemIdxInField)
     val selPort                = sel._2
-    val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
+    val selElemInfield         = selPort(0).elemIdx & (entries(pipeWbMbIndex).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
     val selVaddr               = selPort(0).vaddr
     val selElemIdx             = selPort(0).elemIdx
@@ -262,7 +275,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val vstart                 = Mux(entryIsUS, selPort(0).vstart, selElemInfield)
 
     // select oldest port to raise exception
-    when((((entryElemIdx >= selElemIdx) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)) {
+    when((((entryElemIdx >= selElemIdx) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewbvalid && !mergedByPrevPortVecWrap(i)) {
       entry.uop.trigger     := selPort(0).trigger
       entry.elemIdx         := selElemIdx
       when(!entry.fof || vstart === 0.U){

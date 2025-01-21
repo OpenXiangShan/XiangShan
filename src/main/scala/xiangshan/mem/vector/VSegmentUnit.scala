@@ -172,6 +172,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val enqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
   val deqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
   val stridePtr         = WireInit(0.U.asTypeOf(new VSegUPtr)) // for select stride/index
+  val stridePtrReg      = RegInit(0.U.asTypeOf(new VSegUPtr)) // for select stride/index
 
   val segmentIdx        = RegInit(0.U(elemIdxBits.W))
   val fieldIdx          = RegInit(0.U(fieldBits.W))
@@ -245,6 +246,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val sbufferEmpty      = io.flush_sbuffer.empty
   val isEnqfof          = io.in.bits.uop.fuOpType === VlduType.vleff && io.in.valid
   val isEnqFixVlUop     = isEnqfof && io.in.bits.uop.vpu.lastUop
+  val nextBaseVaddr     = Wire(UInt(XLEN.W))
 
   // handle misalign sign
   val curPtr             = RegInit(false.B)
@@ -409,14 +411,15 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *************************************************************************/
 
   val indexStride                     = IndexAddr( // index for indexed instruction
-                                                    index = stride(stridePtr.value),
+                                                    index = stride(stridePtrReg.value),
                                                     flow_inner_idx = issueIndexIdx,
                                                     eew = issueEew
                                                   )
   val realSegmentOffset               = Mux(isIndexed(issueInstType),
                                             indexStride,
                                             segmentOffset)
-  val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
+
+  val vaddr                           = nextBaseVaddr + realSegmentOffset
 
   val misalignLowVaddr                = Cat(latchVaddr(latchVaddr.getWidth - 1, 3), 0.U(3.W))
   val misalignLowVaddrDup             = Cat(latchVaddrDup(latchVaddrDup.getWidth - 1, 3), 0.U(3.W))
@@ -500,24 +503,24 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b01".U -> 1.U,
       "b10".U -> 3.U,
       "b11".U -> 7.U
-    )) + tlbReqVaddr(4, 0)
+    )) + vaddr(4, 0)
 
     val addr_aligned = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
       "b00".U   -> true.B,                   //b
-      "b01".U   -> (tlbReqVaddr(0)    === 0.U), //h
-      "b10".U   -> (tlbReqVaddr(1, 0) === 0.U), //w
-      "b11".U   -> (tlbReqVaddr(2, 0) === 0.U)  //d
+      "b01".U   -> (vaddr(0)    === 0.U), //h
+      "b10".U   -> (vaddr(1, 0) === 0.U), //w
+      "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
 
-    notCross16ByteWire   := highAddress(4) === tlbReqVaddr(4)
-    isMisalignWire       := !addr_aligned
-    canHandleMisalign := !pmp.mmio && !triggerBreakpoint && !triggerDebugMode
-    exceptionVec(loadAddrMisaligned)  := isMisalignWire && isVSegLoad  && canTriggerException && !canHandleMisalign
-    exceptionVec(storeAddrMisaligned) := isMisalignWire && isVSegStore && canTriggerException && !canHandleMisalign
+    notCross16ByteWire   := highAddress(4) === vaddr(4)
+    isMisalignWire       := !addr_aligned && !isMisalignReg
+    canHandleMisalign    := !pmp.mmio && !triggerBreakpoint && !triggerDebugMode
+    exceptionVec(loadAddrMisaligned)  := isMisalignWire && isVSegLoad  && canTriggerException && pmp.mmio
+    exceptionVec(storeAddrMisaligned) := isMisalignWire && isVSegStore && canTriggerException && pmp.mmio
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
-                     triggerBreakpoint || triggerDebugMode || (isMisalignWire && !canHandleMisalign)
+                     triggerBreakpoint || triggerDebugMode || pmp.mmio
     exception_gpa := exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault)
     exception_pa  := pmp.st || pmp.ld || pmp.mmio
 
@@ -547,10 +550,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       instMicroOp.uop.trigger := triggerAction
     }
 
-    when(isMisalignWire && canHandleMisalign && !(exception_va || exception_gpa || exception_pa)) {
+    when(isMisalignWire && !(exception_va || exception_gpa || exception_pa)) {
       notCross16ByteReg := notCross16ByteWire
       isMisalignReg       := true.B
-      curPtr              := false.B
     }
   }
 
@@ -786,31 +788,49 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     splitPtr := deqPtr // initial splitPtr
   }
 
+
+  val fieldIdxWire      = WireInit(fieldIdx)
+  val segmentIdxWire    = WireInit(segmentIdx)
+  val nextBaseVaddrWire = (baseVaddr + (fieldIdxWire << alignedType).asUInt)
+
+  nextBaseVaddr  := RegEnable(nextBaseVaddrWire, 0.U, stateNext === s_tlb_req)
+
   // update stridePtr, only use in index
-  val strideOffset = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffset     = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffsetWire = Mux(isIndexed(issueInstType), segmentIdxWire >> issueMaxIdxInIndexLog2, 0.U)
   stridePtr       := deqPtr + strideOffset
+  stridePtrReg    := deqPtr + strideOffsetWire
 
   // update fieldIdx
   when(io.in.fire && !instMicroOpValid){ // init
-    fieldIdx := 0.U
+    fieldIdxWire := 0.U
+    fieldIdx := fieldIdxWire
   }.elsewhen(state === s_latch_and_merge_data && segmentActive ||
             (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)){ // only if segment is active
 
     /* next segment, only if segment complete */
-    fieldIdx := Mux(fieldIdx === maxNfields, 0.U, fieldIdx + 1.U)
+    fieldIdxWire := Mux(fieldIdx === maxNfields, 0.U, fieldIdx + 1.U)
+    fieldIdx := fieldIdxWire
   }.elsewhen(segmentInactiveFinish){ // segment is inactive, go to next segment
-    fieldIdx := 0.U
+    fieldIdxWire := 0.U
+    fieldIdx := fieldIdxWire
   }
+
+
   //update segmentIdx
   when(io.in.fire && !instMicroOpValid){
-    segmentIdx := 0.U
+    segmentIdxWire := 0.U
+    segmentIdx := segmentIdxWire
   }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)) &&
              segmentIdx =/= maxSegIdx){ // next segment, only if segment is active
 
-    segmentIdx := segmentIdx + 1.U
+    segmentIdxWire := segmentIdx + 1.U
+    segmentIdx := segmentIdxWire
   }.elsewhen(segmentInactiveFinish && segmentIdx =/= maxSegIdx){ // if segment is inactive, go to next segment
-    segmentIdx := segmentIdx + 1.U
+    segmentIdxWire := segmentIdx + 1.U
+    segmentIdx := segmentIdxWire
   }
+
 
   //update segmentOffset
   /* when segment is active or segment is inactive, increase segmentOffset */
@@ -819,6 +839,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
     segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew(1, 0), stride(stridePtr.value))
   }
+
 
   //update deqPtr
   when((state === s_finish) && !isEmpty(enqPtr, deqPtr)){
