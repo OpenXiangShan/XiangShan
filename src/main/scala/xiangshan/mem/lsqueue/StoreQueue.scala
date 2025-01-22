@@ -827,7 +827,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       when(io.uncache.resp.fire && !io.uncache.resp.bits.nc) {
         mmioState := s_wb
 
-        when (io.uncache.resp.bits.nderr) {
+        when (io.uncache.resp.bits.nderr || io.cmoOpResp.bits.nderr) {
           uncacheUop.exceptionVec(storeAccessFault) := true.B
         }
       }
@@ -849,7 +849,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  mmioReq.valid := mmioState === s_req
+  mmioReq.valid := mmioState === s_req && !LSUOpType.isCbo(uop(deqPtr).fuOpType)
   mmioReq.bits := DontCare
   mmioReq.bits.cmd  := MemoryOpConstants.M_XWR
   mmioReq.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
@@ -923,7 +923,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
   val cboMmioAddr = get_block_addr(cboMmioPAddr)
-  val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr))
+  val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))
   when (deqCanDoCbo) {
     // disable uncache channel
     io.uncache.req.valid := false.B
