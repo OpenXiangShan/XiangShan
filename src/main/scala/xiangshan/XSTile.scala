@@ -127,8 +127,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
-    core.module.io.msiInfo := io.msiInfo
-    core.module.io.clintTime := io.clintTime
+    core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
+    l2top.module.io.msiInfo.fromTile := io.msiInfo
+    core.module.io.clintTime := l2top.module.io.clintTime.toCore
+    l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
     l2top.module.io.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
@@ -146,7 +148,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     //lower power
     l2top.module.io.l2_flush_en := core.module.io.l2_flush_en
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done
-    io.cpu_poff := core.module.io.power_down_en
+    io.cpu_poff := l2top.module.io.cpu_poff.toTile
+    l2top.module.io.cpu_poff.fromCore := core.module.io.power_down_en
     if (enableL2) {
       // TODO: add ECC interface of L2
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
