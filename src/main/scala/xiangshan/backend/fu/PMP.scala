@@ -459,11 +459,20 @@ trait PMPCheckMethod extends PMPConst {
 }
 
 class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
+  val cmode = Bool()
   val mode = UInt(2.W)
   val pmp = Vec(NumPMP, new PMPEntry())
   val pma = Vec(NumPMA, new PMPEntry())
 
+  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+    this.cmode := cmode
+    this.mode := mode
+    this.pmp := pmp
+    this.pma := pma
+  }
+
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+    this.cmode := true.B
     this.mode := mode
     this.pmp := pmp
     this.pma := pma
@@ -474,6 +483,12 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
+
+  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(cmode, mode, pmp, pma)
+    this.req := req
+    resp
+  }
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -497,6 +512,12 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = Output(new PMPConfig())
+
+  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(cmode, mode, pmp, pma)
+    req_apply(valid, addr)
+    resp
+  }
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -531,12 +552,44 @@ class PMPChecker
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
-  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  /* The KeyIDBits is used for memary encrypt, as part of address MSB,
+   * so (PMPKeyIDBits > 0) usually set with HasMEMencryption = true.
+   *
+   * Example:
+   * PAddrBits=48 & PMPKeyIDBits=5
+   * [47,46,45,44,43, 42,41,.......,1,0]
+   * {----KeyID----} {----RealPAddr----}
+   *
+   * The nonzero keyID is binding with Enclave/CVM(cmode=1) to select different memary encrypt key,
+   * and the OS/VMM/APP/VM(cmode=0) can only use zero as KeyID.
+   *
+   * So only the RealPAddr need PMP&PMA check.
+   */
+
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr(PMPAddrBits-PMPKeyIDBits-1, 0), req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr(PMPAddrBits-PMPKeyIDBits-1, 0), req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
-  val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
+  
+  def keyid_check(leaveHitMux: Boolean = false, valid: Bool = true.B, addr: UInt) = {
+    val resp = Wire(new PMPRespBundle)
+    val keyid_nz = if (PMPKeyIDBits > 0) addr(PMPAddrBits-1, PMPAddrBits-PMPKeyIDBits) =/= 0.U else false.B
+    resp.ld := keyid_nz && !io.check_env.cmode && (io.check_env.mode < 3.U)
+    resp.st := keyid_nz && !io.check_env.cmode && (io.check_env.mode < 3.U)
+    resp.instr := keyid_nz && !io.check_env.cmode && (io.check_env.mode < 3.U)
+    resp.mmio := false.B
+    resp.atomic := false.B
+    if (leaveHitMux) {
+      RegEnable(resp, valid)
+    } else {
+      resp
+    }
+  }
+
+  val resp_keyid = keyid_check(leaveHitMux, io.req.valid, req.addr)
+
+  val resp = if (pmpUsed) (resp_pmp | resp_pma | resp_keyid) else (resp_pma | resp_keyid)
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp

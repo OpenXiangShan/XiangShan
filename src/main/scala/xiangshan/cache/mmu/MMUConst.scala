@@ -258,10 +258,22 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = l2tlbParams.llptwsize + 1 + 1
+  val MemReqWidth = if (HasBitmapCheck) 2 *(l2tlbParams.llptwsize + 1 + 1) else (l2tlbParams.llptwsize + 1 + 1)
   val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
+
+  def ptwTranVec(flushMask: UInt): Vec[Bool] = {
+    val vec = Wire(Vec(tlbcontiguous, Bool()))
+    for (i <- 0 until tlbcontiguous) {
+      vec(i) := flushMask(i)
+    }
+    vec
+  }
+
+  def dupBitmapPPN(ppn1: UInt, ppn2: UInt) : Bool = {
+    ppn1(ppnLen-1, ppnLen-log2Up(XLEN)) === ppn2(ppnLen-1, ppnLen-log2Up(XLEN))
+  }
 
   def genPtwL1Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL1IdxLen - 1, 0)
