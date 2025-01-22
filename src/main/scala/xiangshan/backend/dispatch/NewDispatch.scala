@@ -19,18 +19,15 @@ package xiangshan.backend.dispatch
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.MemCoreTopDownIO
 import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
-import xiangshan.mem.mdp._
-import xiangshan.mem.{HasVLSUParameters, _}
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExuVec, IssueQueueIQWakeUpBundle}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTable
-import chisel3.util.experimental.decode._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.backend.datapath.DataConfig._
@@ -40,6 +37,9 @@ import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu.FuType.FuTypeOrR
 import xiangshan.backend.dispatch.Dispatch2IqFpImp
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
+import xiangshan.mem.MemCoreTopDownIO
+import xiangshan.mem.mdp._
+import xiangshan.mem.{HasVLSUParameters, _}
 
 
 // TODO delete trigger message from frontend to iq
