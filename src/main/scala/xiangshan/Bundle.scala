@@ -47,6 +47,7 @@ import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.trace._
+import xiangshan.mem.prefetch.PrefetchCtrl
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -576,16 +577,7 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
-  val l1I_pf_enable = Output(Bool())
-  val l2_pf_enable = Output(Bool())
-  val l1D_pf_enable = Output(Bool())
-  val l1D_pf_train_on_hit = Output(Bool())
-  val l1D_pf_enable_agt = Output(Bool())
-  val l1D_pf_enable_pht = Output(Bool())
-  val l1D_pf_active_threshold = Output(UInt(4.W))
-  val l1D_pf_active_stride = Output(UInt(6.W))
-  val l1D_pf_enable_stride = Output(Bool())
-  val l2_pf_store_only = Output(Bool())
+  val pf_ctrl = Output(new PrefetchCtrl)
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())

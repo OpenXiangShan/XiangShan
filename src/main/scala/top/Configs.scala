@@ -322,6 +322,7 @@ case class L2CacheConfig
         enableTagECC = true,
         enableDataECC = true,
         dataCheck = Some("oddparity"),
+        enablePoison = true,
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
