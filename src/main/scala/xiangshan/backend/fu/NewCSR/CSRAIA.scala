@@ -90,25 +90,69 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vstopi)
 
-  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, mie.asUInt(i))
+    }
+    regOut := reg & mask.asUInt
+  })
     .setAddr(0x30)
 
-  val miprios: Seq[CSRModule[_]] = (2 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle))
+  val miprio2 = Module(new CSRModule(s"Iprio2", new MIprio2Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, mie.asUInt(i+8))
+    }
+    regOut := reg & mask.asUInt
+  })
+    .setAddr(0x32)
+
+  val miprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle {
+      val mask = Wire(Vec(8, UInt(8.W)))
+      for (i <- 0 until 8) {
+        mask(i) := Fill(8, mie.asUInt(num*4+i))
+      }
+      regOut := reg & mask.asUInt
+    })
       .setAddr(0x30 + num)
   )
 
-  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, sie.asUInt(i))
+    }
+    regOut := reg & mask.asUInt
+  })
     .setAddr(0x30)
 
-  val siprios: Seq[CSRModule[_]] = (2 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle))
+  val siprio2 = Module(new CSRModule(s"Iprio2", new SIprio2Bundle) with HasIeBundle {
+    val mask = Wire(Vec(8, UInt(8.W)))
+    for (i <- 0 until 8) {
+      mask(i) := Fill(8, sie.asUInt(i+8))
+    }
+    regOut := reg & mask.asUInt
+  })
+    .setAddr(0x32)
+
+  val siprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle{
+      val mask = Wire(Vec(8, UInt(8.W)))
+      for (i <- 0 until 8) {
+        mask(i) := Fill(8, sie.asUInt(num*4+i))
+      }
+      regOut := reg & mask.asUInt
+    })
     .setAddr(0x30 + num)
   )
 
-  val miregiprios: Seq[CSRModule[_]] = Seq(miprio0) ++: miprios
+  val miregiprios: Seq[CSRModule[_]] = Seq(miprio0, miprio2) ++: miprios
 
-  val siregiprios: Seq[CSRModule[_]] = Seq(siprio0) ++: siprios
+  val siregiprios: Seq[CSRModule[_]] = Seq(siprio0, siprio2) ++: siprios
+
+  val iregiprios = miregiprios ++ siregiprios
 
   val aiaCSRMods = Seq(
     miselect,
@@ -214,6 +258,26 @@ class Iprio0Bundle extends CSRBundle {
   val PrioMTI  = RW(63, 56).withReset(0.U)
 }
 
+class MIprio2Bundle extends CSRBundle {
+  val PrioSEI   = RW(15,  8).withReset(0.U)
+  val PrioVSEI  = RW(23, 16).withReset(0.U)
+  val PrioMEI   = RO(31, 24).withReset(0.U)
+  val PrioSGEI  = RW(39, 32).withReset(0.U)
+  val PrioLCOFI = RW(47, 40).withReset(0.U)
+  val Prio14    = RW(55, 48).withReset(0.U)
+  val Prio15    = RW(63, 56).withReset(0.U)
+}
+
+class SIprio2Bundle extends CSRBundle {
+  val PrioSEI   = RO(15,  8).withReset(0.U)
+  val PrioVSEI  = RW(23, 16).withReset(0.U)
+  val PrioMEI   = RW(31, 24).withReset(0.U)
+  val PrioSGEI  = RW(39, 32).withReset(0.U)
+  val PrioLCOFI = RW(47, 40).withReset(0.U)
+  val Prio14    = RW(55, 48).withReset(0.U)
+  val Prio15    = RW(63, 56).withReset(0.U)
+}
+
 class CSRToAIABundle extends Bundle {
   private final val AddrWidth = 12
 
@@ -272,4 +336,9 @@ trait HasIregSink { self: CSRModule[_] =>
     val sireg = UInt(XLEN.W)
     val vsireg = UInt(XLEN.W)
   }))
+}
+
+trait HasIeBundle { self: CSRModule[_] =>
+  val mie = IO(Input(new MieBundle))
+  val sie = IO(Input(new SieBundle))
 }

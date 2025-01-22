@@ -519,6 +519,15 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod.w.wdata := wdata
   }
 
+  iregiprios.foreach { mod =>
+    mod match {
+      case m: HasIeBundle =>
+        m.mie := mie.regOut
+        m.sie := sie.regOut
+      case _ =>
+    }
+  }
+
   mhartid.hartid := this.io.fromTop.hartId
 
   cfgs.zipWithIndex.foreach { case (mod, i) =>
