@@ -359,7 +359,8 @@ class XiangShan(object):
             "smstateen/rvh_test.bin",
             "zacas/zacas-riscv64-xs.bin",
             "Svpbmt/rvh_test.bin",
-            "Svnapot/svnapot-test.bin"
+            "Svnapot/svnapot-test.bin",
+            "Zawrs/Zawrs-zawrs.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
