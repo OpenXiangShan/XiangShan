@@ -36,7 +36,7 @@ import xiangshan._
 import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
-  val retAddr = UInt(VAddrBits.W)
+  val retAddr = PrunedAddr(VAddrBits)
   val ctr     = UInt(RasCtrSize.W) // layer of nested call functions
   def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
@@ -97,7 +97,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   override val meta_size = WireInit(0.U.asTypeOf(new RASMeta)).getWidth
 
   object RASEntry {
-    def apply(retAddr: UInt, ctr: UInt): RASEntry = {
+    def apply(retAddr: PrunedAddr, ctr: UInt): RASEntry = {
       val e = Wire(new RASEntry)
       e.retAddr := retAddr
       e.ctr     := ctr
@@ -109,7 +109,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val io = IO(new Bundle {
       val spec_push_valid = Input(Bool())
       val spec_pop_valid  = Input(Bool())
-      val spec_push_addr  = Input(UInt(VAddrBits.W))
+      val spec_push_addr  = Input(PrunedAddr(VAddrBits))
       // for write bypass between s2 and s3
 
       val s2_fire        = Input(Bool())
@@ -118,13 +118,13 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val s3_meta        = Input(new RASInternalMeta)
       val s3_missed_pop  = Input(Bool())
       val s3_missed_push = Input(Bool())
-      val s3_pushAddr    = Input(UInt(VAddrBits.W))
-      val spec_pop_addr  = Output(UInt(VAddrBits.W))
+      val s3_pushAddr    = Input(PrunedAddr(VAddrBits))
+      val spec_pop_addr  = Output(PrunedAddr(VAddrBits))
 
       val commit_valid      = Input(Bool())
       val commit_push_valid = Input(Bool())
       val commit_pop_valid  = Input(Bool())
-      val commit_push_addr  = Input(UInt(VAddrBits.W))
+      val commit_push_addr  = Input(PrunedAddr(VAddrBits))
       val commit_meta_TOSW  = Input(new RASPtr)
       // for debug purpose only
       val commit_meta_ssp = Input(UInt(log2Up(RasSize).W))
@@ -137,7 +137,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val redirect_meta_TOSW = Input(new RASPtr)
       val redirect_meta_TOSR = Input(new RASPtr)
       val redirect_meta_NOS  = Input(new RASPtr)
-      val redirect_callAddr  = Input(UInt(VAddrBits.W))
+      val redirect_callAddr  = Input(PrunedAddr(VAddrBits))
 
       val ssp  = Output(UInt(log2Up(RasSize).W))
       val sctr = Output(UInt(RasCtrSize.W))
@@ -152,8 +152,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val debug = new RASDebug
     })
 
-    val commit_stack = RegInit(VecInit(Seq.fill(RasSize)(RASEntry(0.U, 0.U))))
-    val spec_queue   = RegInit(VecInit(Seq.fill(rasSpecSize)(RASEntry(0.U, 0.U))))
+    val commit_stack = RegInit(VecInit(Seq.fill(RasSize)(RASEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
+    val spec_queue   = RegInit(VecInit(Seq.fill(rasSpecSize)(RASEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
     val spec_nos     = RegInit(VecInit(Seq.fill(rasSpecSize)(RASPtr(false.B, 0.U))))
 
     val nsp = RegInit(0.U(log2Up(rasSize).W))
@@ -430,7 +430,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
 
     def specPush(
-        retAddr:     UInt,
+        retAddr:     PrunedAddr,
         currentSsp:  UInt,
         currentSctr: UInt,
         currentTOSR: RASPtr,
@@ -755,14 +755,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val spec_debug = stack.debug
   XSDebug(io.s2_fire(2), "----------------RAS----------------\n")
-  XSDebug(io.s2_fire(2), " TopRegister: 0x%x\n", stack.spec_pop_addr)
+  XSDebug(io.s2_fire(2), " TopRegister: 0x%x\n", stack.spec_pop_addr.toUInt)
   XSDebug(io.s2_fire(2), "  index       addr           ctr           nos (spec part)\n")
   for (i <- 0 until RasSpecSize) {
     XSDebug(
       io.s2_fire(2),
       "  (%d)   0x%x      %d       %d",
       i.U,
-      spec_debug.spec_queue(i).retAddr,
+      spec_debug.spec_queue(i).retAddr.toUInt,
       spec_debug.spec_queue(i).ctr,
       spec_debug.spec_nos(i).value
     )
@@ -777,7 +777,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       io.s2_fire(2),
       "  (%d)   0x%x      %d",
       i.U,
-      spec_debug.commit_stack(i).retAddr,
+      spec_debug.commit_stack(i).retAddr.toUInt,
       spec_debug.commit_stack(i).ctr
     )
     XSDebug(io.s2_fire(2) && i.U === stack.ssp, "   <----ssp")

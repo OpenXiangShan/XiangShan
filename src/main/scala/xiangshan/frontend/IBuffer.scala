@@ -50,7 +50,7 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
   val inst             = UInt(32.W)
-  val pc               = UInt(VAddrBits.W)
+  val pc               = PrunedAddr(VAddrBits)
   val foldpc           = UInt(MemPredPCWidth.W)
   val pd               = new PreDecodeInfo
   val pred_taken       = Bool()
@@ -83,7 +83,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
     cf.instr                             := inst
-    cf.pc                                := pc
+    cf.pc                                := pc.toUInt
     cf.foldpc                            := foldpc
     cf.exceptionVec                      := 0.U.asTypeOf(ExceptionVec())
     cf.exceptionVec(instrPageFault)      := IBufferExceptionType.isPF(this.exceptionType)
@@ -444,7 +444,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   XSDebug(io.in.fire, "Enque:\n")
   XSDebug(io.in.fire, p"MASK=${Binary(io.in.bits.valid)}\n")
   for (i <- 0 until PredictWidth) {
-    XSDebug(io.in.fire, p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
+    XSDebug(io.in.fire, p"PC=${Hexadecimal(io.in.bits.pc(i).toUInt)} ${Hexadecimal(io.in.bits.instrs(i))}\n")
   }
 
   for (i <- 0 until DecodeWidth) {

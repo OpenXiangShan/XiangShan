@@ -53,7 +53,7 @@ class SCResp(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 }
 
 class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
-  val pc        = UInt(VAddrBits.W)
+  val pc        = PrunedAddr(VAddrBits)
   val ghist     = UInt(HistoryLength.W)
   val mask      = Vec(numBr, Bool())
   val oldCtrs   = Vec(numBr, SInt(ctrBits.W))
@@ -91,7 +91,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   def getFoldedHistoryInfo = Set(idxFhInfo).filter(_._1 > 0)
 
-  def getIdx(pc: UInt, allFh: AllFoldedHistories) =
+  def getIdx(pc: PrunedAddr, allFh: AllFoldedHistories) =
     if (histLen > 0) {
       val idx_fh = allFh.getHistWithInfo(idxFhInfo).folded_hist
       // require(idx_fh.getWidth == log2Ceil(nRows))
@@ -212,7 +212,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val u = io.update
   XSDebug(
     io.req.valid,
-    p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+    p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc.toUInt)}, " +
       p"s0_idx=${s0_idx}\n"
   )
   XSDebug(
@@ -222,7 +222,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   )
   XSDebug(
     io.update.mask.reduce(_ || _),
-    p"update Table: pc:${Hexadecimal(u.pc)}, " +
+    p"update Table: pc:${Hexadecimal(u.pc.toUInt)}, " +
       p"tageTakens:${u.tagePreds}, taken:${u.takens}, oldCtr:${u.oldCtrs}\n"
   )
 }
@@ -346,8 +346,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
       scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire(3))
 
-      val pred     = s2_scPreds(s2_chooseBit)
-      val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
+      val pred = s2_scPreds(s2_chooseBit)
+      // FIXME: This looks strange. Maybe we don't need this anymore.
+      val debug_pc = Cat(debug_pc_s2.toUInt, w.U, 0.U(instOffsetBits.W))
       when(s2_provideds(w)) {
         s2_sc_used(w) := true.B
         s2_unconf(w)  := !s2_sumAboveThresholds(s2_chooseBit)

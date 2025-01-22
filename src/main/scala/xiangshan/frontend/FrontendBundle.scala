@@ -33,9 +33,9 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
   // fast path: Timing critical
-  val startAddr     = UInt(VAddrBits.W)
-  val nextlineStart = UInt(VAddrBits.W)
-  val nextStartAddr = UInt(VAddrBits.W)
+  val startAddr     = PrunedAddr(VAddrBits)
+  val nextlineStart = PrunedAddr(VAddrBits)
+  val nextStartAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx    = new FtqPtr
   val ftqOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
@@ -60,14 +60,14 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
     this
   }
   override def toPrintable: Printable =
-    p"[start] ${Hexadecimal(startAddr)} [next] ${Hexadecimal(nextlineStart)}" +
-      p"[tgt] ${Hexadecimal(nextStartAddr)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
+    p"[start] ${Hexadecimal(startAddr.toUInt)} [next] ${Hexadecimal(nextlineStart.toUInt)}" +
+      p"[tgt] ${Hexadecimal(nextStartAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
       p" offset: ${ftqOffset.bits}\n"
 }
 
 class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val startAddr      = UInt(VAddrBits.W)
-  val nextlineStart  = UInt(VAddrBits.W)
+  val startAddr      = PrunedAddr(VAddrBits)
+  val nextlineStart  = PrunedAddr(VAddrBits)
   val ftqIdx         = new FtqPtr
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
@@ -91,14 +91,14 @@ class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with Has
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
-  val pc         = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
   val ftqIdx     = new FtqPtr
   val ftqOffset  = UInt(log2Ceil(PredictWidth).W)
   val misOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val cfiOffset  = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target     = UInt(VAddrBits.W)
-  val jalTarget  = UInt(VAddrBits.W)
+  val target     = PrunedAddr(VAddrBits)
+  val jalTarget  = PrunedAddr(VAddrBits)
   val instrRange = Vec(PredictWidth, Bool())
 }
 
@@ -246,7 +246,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val triggered        = Vec(PredictWidth, TriggerAction())
   val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
-  val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc           = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
 }
@@ -497,20 +497,20 @@ class AllFoldedHistories(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters)
 class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extends XSBundle {
   def tagBits = VAddrBits - idxBits - instOffsetBits
 
-  val tag    = UInt(tagBits.W)
-  val idx    = UInt(idxBits.W)
-  val offset = UInt(instOffsetBits.W)
+  val tag = UInt(tagBits.W)
+  val idx = UInt(idxBits.W)
+//  val offset = UInt(instOffsetBits.W)
 
-  def fromUInt(x:   UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
-  def getTag(x:     UInt) = fromUInt(x).tag
-  def getIdx(x:     UInt) = fromUInt(x).idx
-  def getBank(x:    UInt) = if (banks > 1) getIdx(x)(log2Up(banks) - 1, 0) else 0.U
-  def getBankIdx(x: UInt) = if (banks > 1) getIdx(x)(idxBits - 1, log2Up(banks)) else getIdx(x)
+  def fromUInt(x:   PrunedAddr): TableAddr = x.asTypeOf(PrunedAddr(VAddrBits)).asTypeOf(this)
+  def getTag(x:     PrunedAddr): UInt      = fromUInt(x).tag
+  def getIdx(x:     PrunedAddr): UInt      = fromUInt(x).idx
+  def getBank(x:    PrunedAddr): UInt      = if (banks > 1) getIdx(x)(log2Up(banks) - 1, 0) else 0.U
+  def getBankIdx(x: PrunedAddr): UInt      = if (banks > 1) getIdx(x)(idxBits - 1, log2Up(banks)) else getIdx(x)
 }
 
 trait BasicPrediction extends HasXSParameter {
   def cfiIndex: ValidUndirectioned[UInt]
-  def target(pc: UInt): UInt
+  def target(pc: PrunedAddr): PrunedAddr
   def lastBrPosOH:    Vec[Bool]
   def brTaken:        Bool
   def shouldShiftVec: Vec[Bool]
@@ -536,10 +536,10 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
 
   val slot_valids = Vec(totalSlot, Bool())
 
-  val targets         = Vec(totalSlot, UInt(VAddrBits.W))
-  val jalr_target     = UInt(VAddrBits.W) // special path for indirect predictors
+  val targets         = Vec(totalSlot, PrunedAddr(VAddrBits))
+  val jalr_target     = PrunedAddr(VAddrBits) // special path for indirect predictors
   val offsets         = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
-  val fallThroughAddr = UInt(VAddrBits.W)
+  val fallThroughAddr = PrunedAddr(VAddrBits)
   val fallThroughErr  = Bool()
   val multiHit        = Bool()
 
@@ -599,7 +599,7 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
 
   def brTaken = (br_valids zip br_taken_mask).map { case (a, b) => a && b && hit }.reduce(_ || _)
 
-  def target(pc: UInt): UInt =
+  def target(pc: PrunedAddr): PrunedAddr =
     if (isNotS3) {
       selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
     } else {
@@ -611,7 +611,7 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
   //
   // This exposes internal targets for timing optimization,
   // since usually targets are generated quicker than taken
-  def allTarget(pc: UInt): Vec[UInt] =
+  def allTarget(pc: PrunedAddr): Vec[PrunedAddr] =
     VecInit(targets :+ fallThroughAddr :+ (pc + (FetchWidth * 4).U))
 
   def fallThruError: Bool = hit && fallThroughErr
@@ -638,8 +638,8 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
 
   def fromFtbEntry(
       entry:            FTBEntry,
-      pc:               UInt,
-      last_stage_pc:    Option[Tuple2[UInt, Bool]] = None,
+      pc:               PrunedAddr,
+      last_stage_pc:    Option[Tuple2[PrunedAddr, Bool]] = None,
       last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None
   ) = {
     slot_valids          := entry.brSlots.map(_.valid) :+ entry.tailSlot.valid
@@ -672,21 +672,21 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val TOSW    = new RASPtr
   val TOSR    = new RASPtr
   val NOS     = new RASPtr
-  val topAddr = UInt(VAddrBits.W)
+  val topAddr = PrunedAddr(VAddrBits)
 }
 
 //
 class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle
     with HasBPUConst with BPUUtils {
-  val pc          = Vec(numDup, UInt(VAddrBits.W))
+  val pc          = Vec(numDup, PrunedAddr(VAddrBits))
   val valid       = Vec(numDup, Bool())
   val hasRedirect = Vec(numDup, Bool())
   val ftq_idx     = new FtqPtr
   val full_pred   = Vec(numDup, new FullBranchPrediction(isNotS3))
 
-  def target(pc:     UInt)      = VecInit(full_pred.map(_.target(pc)))
-  def targets(pc:    Vec[UInt]) = VecInit(pc.zipWithIndex.map { case (pc, idx) => full_pred(idx).target(pc) })
-  def allTargets(pc: Vec[UInt]) = VecInit(pc.zipWithIndex.map { case (pc, idx) => full_pred(idx).allTarget(pc) })
+  def target(pc:     PrunedAddr)      = VecInit(full_pred.map(_.target(pc)))
+  def targets(pc:    Vec[PrunedAddr]) = VecInit(pc.zipWithIndex.map { case (pc, idx) => full_pred(idx).target(pc) })
+  def allTargets(pc: Vec[PrunedAddr]) = VecInit(pc.zipWithIndex.map { case (pc, idx) => full_pred(idx).allTarget(pc) })
   def cfiIndex       = VecInit(full_pred.map(_.cfiIndex))
   def lastBrPosOH    = VecInit(full_pred.map(_.lastBrPosOH))
   def brTaken        = VecInit(full_pred.map(_.brTaken))
@@ -700,7 +700,7 @@ class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) exten
   def getAllTargets = allTargets(pc)
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[pc] ${Hexadecimal(pc(0))}\n")
+    XSDebug(cond, p"[pc] ${Hexadecimal(pc(0).toUInt)}\n")
     full_pred(0).display(cond)
   }
 }
@@ -741,7 +741,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val pc        = UInt(VAddrBits.W)
+  val pc        = PrunedAddr(VAddrBits)
   val spec_info = new SpeculativeInfo
   val ftb_entry = new FTBEntry()
 
@@ -755,7 +755,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry         = Bool()
   val meta              = UInt(MaxMetaLength.W)
-  val full_target       = UInt(VAddrBits.W)
+  val full_target       = PrunedAddr(VAddrBits)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)
 
