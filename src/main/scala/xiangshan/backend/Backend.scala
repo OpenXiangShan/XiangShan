@@ -297,6 +297,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     x._1.valid := x._2.wen && x._2.vlWen
     x._1.bits := x._2.addr
   })
+  ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsZero := vlFromIntIsZero
+  ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
+  ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromVfIsZero := vlFromVfIsZero
+  ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   ctrlBlock.io.csrCtrl <> intExuBlock.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
