@@ -17,6 +17,7 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.FtqPtr
+import CSRConst._
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCircularQueuePtrHelper with HasCriticalErrors
@@ -51,8 +52,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val rs1  = Imm_Z().getRS1(imm)
   val imm5 = Imm_Z().getImm5(imm)
   val csri = ZeroExt(imm5, XLEN)
-
-  import CSRConst._
 
   private val isEcall  = CSROpType.isSystemOp(func) && addr === privEcall
   private val isEbreak = CSROpType.isSystemOp(func) && addr === privEbreak
