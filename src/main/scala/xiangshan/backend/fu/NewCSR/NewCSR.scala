@@ -1534,37 +1534,36 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffHCSRState.vsatp       := vsatp.rdata.asUInt
     diffHCSRState.vsscratch   := vsscratch.rdata.asUInt
 
-    val platformIRPMeipChange = !platformIRP.MEIP &&  RegNext(platformIRP.MEIP) ||
-                                 platformIRP.MEIP && !RegNext(platformIRP.MEIP) ||
-                                !fromAIA.meip     &&  RegNext(fromAIA.meip)     ||
-                                 fromAIA.meip     && !RegNext(fromAIA.meip)
+    val platformIRPMeipChange = !platformIRP.MEIP &&  RegNext(platformIRP.MEIP) || platformIRP.MEIP && !RegNext(platformIRP.MEIP)
     val platformIRPMtipChange = !platformIRP.MTIP &&  RegNext(platformIRP.MTIP) || platformIRP.MTIP && !RegNext(platformIRP.MTIP)
     val platformIRPMsipChange = !platformIRP.MSIP &&  RegNext(platformIRP.MSIP) || platformIRP.MSIP && !RegNext(platformIRP.MSIP)
-    val platformIRPSeipChange = !platformIRP.SEIP &&  RegNext(platformIRP.SEIP) ||
-                                 platformIRP.SEIP && !RegNext(platformIRP.SEIP) ||
-                                !fromAIA.seip     &&  RegNext(fromAIA.seip)     ||
-                                 fromAIA.seip     && !RegNext(fromAIA.seip)
+    val platformIRPSeipChange = !platformIRP.SEIP &&  RegNext(platformIRP.SEIP) || platformIRP.SEIP && !RegNext(platformIRP.SEIP)
     val platformIRPStipChange = !sstcIRGen.o.STIP &&  RegNext(sstcIRGen.o.STIP) || sstcIRGen.o.STIP && !RegNext(sstcIRGen.o.STIP)
     val platformIRPVseipChange = !platformIRP.VSEIP &&  RegNext(platformIRP.VSEIP) ||
                                   platformIRP.VSEIP && !RegNext(platformIRP.VSEIP) ||
                                  !hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt) &&  RegNext(hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt)) ||
                                   hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt) && !RegNext(hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt))
     val platformIRPVstipChange = !sstcIRGen.o.VSTIP && RegNext(sstcIRGen.o.VSTIP) || sstcIRGen.o.VSTIP && !RegNext(sstcIRGen.o.VSTIP)
-    val lcofiReqChange         = !lcofiReq && RegNext(lcofiReq) || lcofiReq && !RegNext(lcofiReq)
+    val fromAIAMeipChange = !fromAIA.meip && RegNext(fromAIA.meip) || fromAIA.meip && !RegNext(fromAIA.meip)
+    val fromAIASeipChange = !fromAIA.seip && RegNext(fromAIA.seip) || fromAIA.seip && !RegNext(fromAIA.seip)
+    val lcofiReqChange = !lcofiReq && RegNext(lcofiReq) || lcofiReq && !RegNext(lcofiReq)
 
     val diffNonRegInterruptPendingEvent = DifftestModule(new DiffNonRegInterruptPendingEvent)
     diffNonRegInterruptPendingEvent.coreid           := hartId
     diffNonRegInterruptPendingEvent.valid            := platformIRPMeipChange || platformIRPMtipChange || platformIRPMsipChange ||
                                                         platformIRPSeipChange || platformIRPStipChange ||
                                                         platformIRPVseipChange || platformIRPVstipChange ||
+                                                        fromAIAMeipChange || fromAIASeipChange ||
                                                         lcofiReqChange
-    diffNonRegInterruptPendingEvent.platformIRPMeip  := platformIRP.MEIP || fromAIA.meip
+    diffNonRegInterruptPendingEvent.platformIRPMeip  := platformIRP.MEIP
     diffNonRegInterruptPendingEvent.platformIRPMtip  := platformIRP.MTIP
     diffNonRegInterruptPendingEvent.platformIRPMsip  := platformIRP.MSIP
-    diffNonRegInterruptPendingEvent.platformIRPSeip  := platformIRP.SEIP || fromAIA.seip
+    diffNonRegInterruptPendingEvent.platformIRPSeip  := platformIRP.SEIP
     diffNonRegInterruptPendingEvent.platformIRPStip  := sstcIRGen.o.STIP
     diffNonRegInterruptPendingEvent.platformIRPVseip := platformIRP.VSEIP || hgeip.rdata.asUInt(hstatus.regOut.VGEIN.asUInt)
     diffNonRegInterruptPendingEvent.platformIRPVstip := sstcIRGen.o.VSTIP
+    diffNonRegInterruptPendingEvent.fromAIAMeip := fromAIA.meip
+    diffNonRegInterruptPendingEvent.fromAIASeip := fromAIA.seip
     diffNonRegInterruptPendingEvent.localCounterOverflowInterruptReq  := mip.regOut.LCOFIP.asBool
 
     val diffMhpmeventOverflowEvent = DifftestModule(new DiffMhpmeventOverflowEvent)
