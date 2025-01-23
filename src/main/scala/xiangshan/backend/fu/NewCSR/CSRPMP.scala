@@ -22,7 +22,7 @@ trait CSRPMP { self: NewCSR =>
   )
 
   // every pmpcfg has 8 cfgs
-  val cfgs: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMP).map(num =>
+  val pmpcfgs: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMP).map(num =>
     Module(new CSRModule(s"Pmp$num"+"cfg", new PMPCfgBundle) {
       when (w.wen && (!(!w.wdata(0).asBool && w.wdata(1).asBool))) {  // when R=0 W=1, reserved
         reg.W := w.wdata(1).asBool
@@ -51,7 +51,7 @@ trait CSRPMP { self: NewCSR =>
     pmpCSRMods.map(csr => csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt).iterator
   )
 
-  private val pmpCfgRead = Cat(cfgs.map(_.rdata(7, 0)).reverse)
+  private val pmpCfgRead = Cat(pmpcfgs.map(_.rdata(7, 0)).reverse)
 
   pmpCSRMods.foreach { mod =>
     mod match {
