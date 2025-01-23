@@ -230,14 +230,18 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val entries = Reg(Vec(UncacheBufferSize, new UncacheEntry))
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
-  val fence = RegInit(Bool(), false.B)
   val s_idle :: s_inflight :: s_wait_return :: Nil = Enum(3)
   val uState = RegInit(s_idle)
 
   // drain buffer
   val empty = Wire(Bool())
   val f1_needDrain = Wire(Bool())
-  val do_uarch_drain = RegNext(f1_needDrain)
+  val do_uarch_drain = RegInit(false.B)
+  when((f1_needDrain || io.flush.valid) && !empty){
+    do_uarch_drain := true.B
+  }.otherwise(empty){
+    do_uarch_drain := false.B
+  }
 
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
