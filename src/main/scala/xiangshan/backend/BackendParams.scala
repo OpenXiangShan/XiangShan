@@ -179,7 +179,7 @@ case class BackendParams(
 
   def getFpWbArbiterParams: WbArbiterParams = {
     val fpWbCfgs: Seq[FpWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeFp)).map(_.asInstanceOf[FpWB])
-    datapath.WbArbiterParams(fpWbCfgs, vfPregParams, this)
+    datapath.WbArbiterParams(fpWbCfgs, fpPregParams, this)
   }
 
   def getV0WbArbiterParams: WbArbiterParams = {
