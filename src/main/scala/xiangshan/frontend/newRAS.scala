@@ -710,8 +710,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val do_recover  = redirect.valid
   val recover_cfi = redirect.bits.cfiUpdate
 
-  val retMissPred  = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isRet
-  val callMissPred = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isCall
+  val retMissPred  = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isRet && recover_cfi.pd.valid
+  val callMissPred = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isCall && recover_cfi.pd.valid
   // when we mispredict a call, we must redo a push operation
   // similarly, when we mispredict a return, we should redo a pop
   stack.redirect_valid     := do_recover
