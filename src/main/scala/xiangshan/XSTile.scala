@@ -103,7 +103,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
-      val cpu_poff = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
@@ -115,11 +114,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
+      val cpu_power_down = Output(Bool())
+      val l2_flush_done = Output(Bool())
     })
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
-    dontTouch(io.cpu_poff)
+    dontTouch(io.cpu_power_down)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -144,9 +145,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
 
     //lower power
-    l2top.module.io.l2_flush_en := core.module.io.l2_flush_en
-    core.module.io.l2_flush_done := l2top.module.io.l2_flush_done
-    io.cpu_poff := core.module.io.power_down_en
+    l2top.module.io.l2Flush.foreach{_ := core.module.io.l2_flush_en}
+    core.module.io.l2_flush_done := l2top.module.io.l2FlushDone.getOrElse(false.B)
+    io.cpu_power_down := core.module.io.power_down_en
+    io.l2_flush_done := l2top.module.io.l2FlushDone.getOrElse(false.B)
+
     if (enableL2) {
       // TODO: add ECC interface of L2
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl

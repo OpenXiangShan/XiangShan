@@ -159,8 +159,23 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
-    core_with_l2.module.clock := clock
-    core_with_l2.module.reset := reset
+    //low power clock/reset
+    val ppuReset = Wire(Bool())
+    val wfiClockEn = withClockAndReset(soc_clock, soc_reset) {RegInit(true.B)}
+
+    val ppuClockEn = WireDefault(true.B)
+    val resetTile = reset.asBool || ppuReset
+    val cpuClockEn = wfiClockEn  && ppuClockEn | io.chi.rx.snp.flitpend
+
+    dontTouch(ppuClockEn)
+    dontTouch(ppuReset)
+    dontTouch(wfiClockEn)
+    dontTouch(cpuClockEn)
+
+//    core_with_l2.module.clock := clock
+//    core_with_l2.module.reset := reset
+    core_with_l2.module.clock := ClockGate(false.B, cpuClockEn, clock)
+    core_with_l2.module.reset := resetTile.asAsyncReset
     core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
     core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
@@ -180,6 +195,54 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
     io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
     io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+
+    /* Low power logic include:
+     1. Interrupt sources collect
+     2. Core low power state 
+     3. WFI clock gating state
+     4. PPU Module 
+     */
+    //Interrupt sources
+    val msip  = clint.head(0)
+    val mtip  = clint.head(1)
+    val meip  = plic.head(0)
+    val seip  = plic.last(0)
+    val nmi_31 = nmi.head(0)
+    val nmi_43 = nmi.head(1)
+    val msi_info_vld = wrapper.u_imsic_bus_top.module.o_msi_info_vld
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
+
+    //Core Low Power state 
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sPOFFREQ :: Nil = Enum(4)
+    val lpState = withClockAndReset(soc_clock, resetTile.asAsyncReset) {RegInit(sIDLE)}
+    val l2FlushDone = core_with_l2.module.io.l2_flush_done
+    val corePD = core_with_l2.module.io.cpu_power_down
+    val isWFI = core_with_l2.module.io.cpu_halt
+    lpState :=  lpStateNext(lpState, corePD, l2FlushDone, isWFI)
+
+    //WFI clock Gating state
+    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+    val wfiState = withClockAndReset(soc_clock, soc_reset) {RegInit(sNORMAL)}
+    val flitpend = io.chi.rx.snp.flitpend
+    wfiState := WfiStateNext(wfiState, isWFI, corePD, flitpend, intSrc)
+
+    if (WFIClockGate) {
+      wfiClockEn := !(wfiState === sGCLOCK)
+    }else {
+      wfiClockEn := true.B
+    }
+      
+    //PPU-module
+    if (EnablePPU) {
+      val ppu = withClockAndReset(soc_clock, soc_reset_sync)(Module(new PPU))
+      ppu.io.coreActive := ~(lpState === sPOFFREQ)
+      ppu.io.coreWakeReq := intSrc.orR //TODO constraint to external interrupt only
+      ppuClockEn := ppu.io.coreClken
+      ppuReset := ppu.io.coreReset
+    } else {
+      ppuClockEn := true.B
+      ppuReset := false.B
+    }
 
     EnableClintAsyncBridge match {
       case Some(param) =>
