@@ -25,6 +25,7 @@ import utility.ChiselDB
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.cache.mmu._
+import xiangshan.frontend.BrType
 import xiangshan.frontend.icache._
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst {
@@ -1092,7 +1093,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.valid   := wb_valid
   checkFlushWb.bits.pc := wb_pc
   checkFlushWb.bits.pd := wb_pd
-  checkFlushWb.bits.pd.zipWithIndex.map { case (instr, i) => instr.valid := wb_instr_valid(i) }
+  checkFlushWb.bits.pd.zipWithIndex.map { case (instr, i) =>
+    instr.valid  := wb_instr_valid(i)
+    instr.isRVC  := wb_instr_valid(i) & wb_pd(i).isRVC
+    instr.isCall := wb_instr_valid(i) & wb_pd(i).isCall
+    instr.isRet  := wb_instr_valid(i) & wb_pd(i).isRet
+    instr.brType := Mux(wb_instr_valid(i), wb_pd(i).brType, BrType.notCFI)
+  }
   checkFlushWb.bits.ftqIdx          := wb_ftq_req.ftqIdx
   checkFlushWb.bits.ftqOffset       := wb_ftq_req.ftqOffset.bits
   checkFlushWb.bits.misOffset.valid := ParallelOR(wb_check_result_stage2.fixedMissPred) || wb_half_flush
