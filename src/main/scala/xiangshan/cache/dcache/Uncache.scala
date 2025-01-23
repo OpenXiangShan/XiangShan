@@ -239,7 +239,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val do_uarch_drain = RegInit(false.B)
   when((f1_needDrain || io.flush.valid) && !empty){
     do_uarch_drain := true.B
-  }.otherwise(empty){
+  }.elsewhen(empty){
+    do_uarch_drain := false.B
+  }.otherwise{
     do_uarch_drain := false.B
   }
 
