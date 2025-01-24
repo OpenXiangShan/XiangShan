@@ -159,8 +159,33 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
-    core_with_l2.module.clock := clock
-    core_with_l2.module.reset := reset
+    //low power clock/reset
+    val wfiGateClock = withClockAndReset(soc_clock, soc_reset) {RegInit(true.B)}
+    val ppuClockEn = WireDefault(true.B)
+
+    /* Core+L2 reset when:
+     1. normal reset from SoC 
+     2. PPU initial reset during Power on/off flow -> ppuReset
+     */
+    val ppuReset = Wire(Bool())
+    val cpuReset = reset.asBool || ppuReset
+
+    /* Core+L2 clock Enable when:
+     1. PPU clock is enabled and NOT disabled during Power on/off flow -> ppuClockEn
+        a. on Power off flow clock disabled in order: Clock->Isolation->Reset 
+        b. on Power  on flow clock enableed in order: Isolation->Clock->Reset 
+     2. if PPU enable clock (Core+L2 in normal state) and wfi is NOT gating Clock 
+     3. the cycle of Flitpend valid in rx.snp channel  
+     */
+    val cpuClockEn = !wfiGateClock && ppuClockEn | io.chi.rx.snp.flitpend
+
+    dontTouch(ppuReset)
+    dontTouch(ppuClockEn)
+    dontTouch(wfiGateClock)
+    dontTouch(cpuClockEn)
+
+    core_with_l2.module.clock := ClockGate(false.B, cpuClockEn, clock)
+    core_with_l2.module.reset := cpuReset.asAsyncReset
     core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
     core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
@@ -180,6 +205,69 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
     io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
     io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+
+
+    /* Low power logic include:
+     1. Interrupt sources collect
+     2. Core low power state 
+     3. WFI clock gating state
+     4. PPU Module 
+     */
+    //Interrupt sources
+    val msip  = clint.head(0)
+    val mtip  = clint.head(1)
+    val meip  = plic.head(0)
+    val seip  = plic.last(0)
+    val nmi_31 = nmi.head(0)
+    val nmi_43 = nmi.head(1)
+    val msi_info_vld = wrapper.u_imsic_bus_top.module.o_msi_info_vld
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
+
+    /*CPU Low Power state
+     1. Low power state is triggered by <core_with_l2.module.io.cpu_power_down>, an CSR bit for power down
+     2. wait L2 flush done
+     3. wait Core to wfi 
+     3. when enter sPOWERREQ, Invalid <coreAcitve> to PPU to power down CPU   
+     */
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sPOFFREQ :: Nil = Enum(4)
+    val lpState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
+    val l2FlushDone = core_with_l2.module.io.l2_flush_done
+    val corePD = core_with_l2.module.io.cpu_power_down
+    val isWFI = core_with_l2.module.io.cpu_halt
+    lpState :=  lpStateNext(lpState, corePD, l2FlushDone, isWFI)
+
+    /*WFI clock Gating state
+     1. works only when lpState is IDLE means Core+L2 works in normal state
+     2. when Core is in wfi state, core+l2 clock is gated
+     3. only reset/interrupt/snoop could recover core+l2 clock 
+    */
+    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+    val wfiState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
+    wfiState := WfiStateNext(wfiState, isWFI, corePD, io.chi.rx.snp.flitpend, intSrc)
+
+    if (WFIClockGate) {
+      wfiGateClock := (wfiState === sGCLOCK)
+    }else {
+      wfiGateClock := false.B
+    }
+      
+    /*PPU-module 
+     1. Power down trigged when <coreActive> is false.B
+     2. Power on trigged by interrupt
+     3. Generate power down sequence: Clock(disable)->Isolation->Reset
+     4. Generate power on sequence: Isolation->Clock(enable)-> Reset
+     */
+    if (EnablePPU) {
+      val ppu = withClockAndReset(soc_clock, soc_reset_sync)(Module(new PPU))
+      ppu.io.coreActive := ~(lpState === sPOFFREQ)
+      ppu.io.coreWakeReq := intSrc.orR //TODO use external interrupt only
+      ppu.io.nPOWERACK := true.B
+      ppuClockEn := ppu.io.coreClken
+      ppuReset := ppu.io.coreReset
+    } else {
+      ppuClockEn := true.B
+      ppuReset := false.B
+    }
 
     EnableClintAsyncBridge match {
       case Some(param) =>
