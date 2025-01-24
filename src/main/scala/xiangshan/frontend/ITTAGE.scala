@@ -501,7 +501,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   )
   update.full_target := RegEnable(
     io.update.bits.full_target,
-    io.update.valid && (u_meta.provider.valid || io.update.bits.mispred_mask(numBr))
+    io.update.valid // not using mispred_mask, because mispred_mask timing is bad
   )
   update.cfi_idx.bits := RegEnable(io.update.bits.cfi_idx.bits, io.update.valid && io.update.bits.cfi_idx.valid)
   update.ghist        := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
