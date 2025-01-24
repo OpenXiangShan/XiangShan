@@ -13,16 +13,22 @@ class PPU extends Module {
 
     // Outputs
     val coreReset = Output(Bool())  // Core reset output
-    val coreIsolate = Output(Bool()) // Core isolation output 
-    val corePowerOff = Output(Bool()) // Core power off output 
-    val coreClken = Output(Bool())  // Core clock enable output 
+    val coreIsolate = Output(Bool()) // Core isolation output
+    val corePowerOff = Output(Bool()) // Core power off output
+    val coreClken = Output(Bool())  // Core clock enable output
     val coreHWstat = Output(UInt(8.W)) // Core hardware status output (POFF, PON, etc.)
+    // Physical
+    val nPOWERUP = Output(Bool())
+    val nISOLATE = Output(Bool())
+    val nPOWERACK = Input(Bool())
   })
 
   dontTouch(io.coreIsolate)
   dontTouch(io.corePowerOff)
   dontTouch(io.coreHWstat)
-
+  dontTouch(io.nPOWERUP)
+  dontTouch(io.nPOWERACK)
+  dontTouch(io.nISOLATE)
   // FSM states
   val POFF     = "b00000001".U(8.W)  
   val POFF_CLK = "b00000010".U(8.W)  
@@ -36,12 +42,12 @@ class PPU extends Module {
   val sPOFF :: sPOFF_CLK :: sPOFF_ISO :: sPOFF_RST :: sPON_WAIT :: sPON_ISO :: sPON_RST :: sPON :: Nil = Enum(8) 
   val state = RegInit(sPON)
 
-  // Configurable delays in clock cycles (use appropriate values for custom design)
-  val PON_DLY_CLKEN_ISO = 70.U(32.W) // PowerOn delay for clockEn -> Isolate
-  val PON_DLY_ISO_RST = 70.U(32.W)   // PowerOn delay for Isolate -> Reset 
-  val PON_DLY_ISO_CLKEN = 70.U(32.W) // PowerOff delay for Isolate -> clockEn
-  val PON_DLY_CLKEN_RST = 70.U(32.W) // PowerOff delay for clockEn -> Reset
-  val PON_DLY_POWER_STABLE = 70.U(32.W) // PowerOff delay for clockEn -> Reset
+  // Configurable delays in clock cycles @2.5GHz (use appropriate values for custom design)
+  val PON_DLY_CLKEN_ISO = 7000.U(32.W) // PowerOn delay for clockEn -> Isolate
+  val PON_DLY_ISO_RST = 7000.U(32.W)   // PowerOn delay for Isolate -> Reset 
+  val PON_DLY_ISO_CLKEN = 7000.U(32.W) // PowerOff delay for Isolate -> clockEn
+  val PON_DLY_CLKEN_RST = 7000.U(32.W) // PowerOff delay for clockEn -> Reset
+  val PON_DLY_POWER_STABLE = 7000.U(32.W) // PowerOff delay for clockEn -> Reset
 
   // Delay counters (in clock cycles)
   val delayCounter = RegInit(0.U(32.W)) 
@@ -106,7 +112,7 @@ class PPU extends Module {
       }
     }
     is(sPON_WAIT) {
-      when(delayCounter === 0.U) {
+      when((delayCounter === 0.U) || io.nPOWERACK) {
         // Step 1: Set nIsolateReg = 1 to Disable isolation
         nIsolateReg := true.B
         delayCounter := PON_DLY_ISO_CLKEN
@@ -137,6 +143,6 @@ class PPU extends Module {
   }
 
   //PCSM signals used to control power
-  val nPOWERUP = RegNextN(nPowerUpReg, 5, Some(true.B))
-  val nISOLATE = RegNextN(nIsolateReg, 5, Some(true.B))
+  io.nPOWERUP := RegNextN(nPowerUpReg, 5, Some(true.B))
+  io.nISOLATE := RegNextN(nIsolateReg, 5, Some(true.B))
 }
