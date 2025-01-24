@@ -158,7 +158,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   when(canEnq) {
     connectSamePort(req, reqSelBits)
     req.portIndex := reqSelPort
-    req_valid := true.B
+    req_valid := !req.hasException
   }
   val cross4KBPageEnq = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
