@@ -1153,8 +1153,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && extra_flag_access
-    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && !extra_flag_access
+    prefetcherMonitor.io.validity.good_prefetch := RegNext(extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && extra_flag_access)
+    prefetcherMonitor.io.validity.bad_prefetch := RegNext(extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && !extra_flag_access)
   }
 
   // write extra meta
@@ -1344,10 +1344,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
-  prefetcherMonitor.io.timely.total_prefetch := ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _)
-  prefetcherMonitor.io.timely.late_hit_prefetch := ldu.map(_.io.prefetch_info.naive.late_hit_prefetch).reduce(_ || _)
-  prefetcherMonitor.io.timely.late_miss_prefetch := missQueue.io.prefetch_info.naive.late_miss_prefetch
-  prefetcherMonitor.io.timely.prefetch_hit := PopCount(ldu.map(_.io.prefetch_info.naive.prefetch_hit))
+  prefetcherMonitor.io.timely.total_prefetch := RegNext(ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _))
+  prefetcherMonitor.io.timely.late_hit_prefetch := RegNext(ldu.map(_.io.prefetch_info.naive.late_hit_prefetch).reduce(_ || _))
+  prefetcherMonitor.io.timely.late_miss_prefetch := RegNext(missQueue.io.prefetch_info.naive.late_miss_prefetch)
+  prefetcherMonitor.io.timely.prefetch_hit := RegNext(PopCount(ldu.map(_.io.prefetch_info.naive.prefetch_hit)))
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
   XSPerfAccumulate("useless_prefetch", ldu.map(_.io.prefetch_info.naive.total_prefetch).reduce(_ || _) && !(ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _)))
   XSPerfAccumulate("useful_prefetch", ldu.map(_.io.prefetch_info.naive.useful_prefetch).reduce(_ || _))
