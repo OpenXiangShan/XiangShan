@@ -507,7 +507,7 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
 class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
   (L3CacheConfig("3MB", inclusive = false, banks = 1, ways = 6)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
-    ++ WithNKBL1D(64, ways = 8)
+    ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
       AlwaysBasicDiff = true,
