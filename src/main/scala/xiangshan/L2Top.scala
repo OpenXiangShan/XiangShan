@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
+import device.MsiInfoBundle
 import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2}
@@ -162,7 +163,15 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromTile = Input(UInt(64.W))
         val toCore = Output(UInt(64.W))
       }
+      val msiInfo = new Bundle() {
+        val fromTile = Input(ValidIO(new MsiInfoBundle))
+        val toCore = Output(ValidIO(new MsiInfoBundle))
+      }
       val cpu_halt = new Bundle() {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
+      }
+      val cpu_poff = new Bundle() {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
@@ -188,6 +197,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromTile = Input(Bool())
         val toCore = Output(Bool())
       }
+      val clintTime = new Bundle {
+        val fromTile = Input(ValidIO(UInt(64.W)))
+        val toCore = Output(ValidIO(UInt(64.W)))
+      }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
@@ -207,10 +220,13 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
+    io.msiInfo.toCore := io.msiInfo.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
+    io.cpu_poff.toTile := io.cpu_poff.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     io.l2_flush_done := true.B //TODO connect CoupleedL2
     io.l3Miss.toCore := io.l3Miss.fromTile
+    io.clintTime.toCore := io.clintTime.fromTile
     // trace interface
     val traceToTile = io.traceCoreInterface.toTile
     val traceFromCore = io.traceCoreInterface.fromCore
