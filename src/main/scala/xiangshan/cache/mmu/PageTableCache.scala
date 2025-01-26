@@ -532,7 +532,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spHitLevel = spHitData.level.getOrElse(0.U)
 
   val check_res = Wire(new PageCacheRespBundle)
-  check_res.l3.map(_.apply(l3Hit.get, l3Pre.get, l3HitPPN.get))
+  check_res.l3.map(_.apply(l3Hit.get, l3Pre.get, l3HitPPN.get, l3HitPbmt.get))
   check_res.l2.apply(l2Hit, l2Pre, l2HitPPN, l2HitPbmt)
   check_res.l1.apply(l1Hit, l1Pre, l1HitPPN, l1HitPbmt, ecc = l1eccError)
   check_res.l0.apply(l0Hit, l0Pre, l0HitPPN, l0HitPbmt, l0HitPerm, l0eccError, valid = l0HitValid)
