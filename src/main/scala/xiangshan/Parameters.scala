@@ -569,6 +569,7 @@ case class DebugOptions
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
+  PerfLevel: String = "VERBOSE",
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
