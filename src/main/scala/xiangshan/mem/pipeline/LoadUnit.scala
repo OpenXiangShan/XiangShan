@@ -1202,9 +1202,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   // * if pbmt =/= 0, mmio is up to pbmt; otherwise, it's up to pmp
+  val s2_tlb_hit = RegNext(!io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid)
   val s2_mmio = !s2_prf &&
     !s2_exception && !s2_in.tlbMiss &&
-    Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio)
+    Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
   val s2_uncache = !s2_prf && !s2_exception && !s2_in.tlbMiss && s2_actually_uncache
 
   val s2_full_fwd      = Wire(Bool())

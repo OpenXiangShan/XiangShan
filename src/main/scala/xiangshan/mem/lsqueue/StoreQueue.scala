@@ -294,15 +294,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val commitCount = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val scommit = GatedRegNext(io.rob.scommit)
   val mmioReq = Wire(chiselTypeOf(io.uncache.req))
+  val ncWaitRespPtrReg = RegInit(0.U(uncacheIdxBits.W)) // it's valid only in non-outstanding situation
   val ncReq = Wire(chiselTypeOf(io.uncache.req))
   val ncResp = Wire(chiselTypeOf(io.uncache.resp))
   val ncDoReq = Wire(Bool())
+  val ncSlaveAck = Wire(Bool())
+  val ncSlaveAckMid = Wire(UInt(uncacheIdxBits.W))
   val ncDoResp = Wire(Bool())
   val ncReadNextTrigger = Mux(io.uncacheOutstanding, ncDoReq, ncDoResp)
-  // ncDoReq is double RegNexted, as ubuffer data write takes 3 cycles.
-  // TODO lyq: to eliminate coupling by passing signals through ubuffer
-  val ncDeqTrigger = Mux(io.uncacheOutstanding, RegNext(RegNext(ncDoReq)), ncDoResp)
-  val ncPtr = Mux(io.uncacheOutstanding, RegNext(RegNext(io.uncache.req.bits.id)), io.uncache.resp.bits.id)
+  val ncDeqTrigger = Mux(io.uncacheOutstanding, ncSlaveAck, ncDoResp)
+  val ncPtr = Mux(io.uncacheOutstanding, ncSlaveAckMid, ncWaitRespPtrReg)
 
   // store can be committed by ROB
   io.rob.mmio := DontCare
@@ -874,6 +875,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     is(nc_idle) {
       when(nc(rptr0) && allocated(rptr0) && committed(rptr0) && !mmio(rptr0) && !isVec(rptr0)) {
         ncState := nc_req
+        ncWaitRespPtrReg := rptr0
       }
     }
     is(nc_req) {
@@ -894,6 +896,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   ncDoReq := io.uncache.req.fire && io.uncache.req.bits.nc
   ncDoResp := ncResp.fire
+  ncSlaveAck := io.uncache.idResp.valid && io.uncache.idResp.bits.nc
+  ncSlaveAckMid := io.uncache.idResp.bits.mid
 
   ncReq.valid := ncState === nc_req
   ncReq.bits := DontCare

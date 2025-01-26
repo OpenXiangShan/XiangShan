@@ -540,11 +540,18 @@ class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
   }
 }
 
+class UncacheIdResp(implicit p: Parameters) extends DCacheBundle {
+  val mid = UInt(uncacheIdxBits.W)
+  val sid = UInt(UncacheBufferIndexWidth.W)
+  val is2lq = Bool()
+  val nc = Bool()
+}
+
 class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data      = UInt(XLEN.W)
   val data_delayed = UInt(XLEN.W)
-  val id        = UInt(uncacheIdxBits.W) // resp identified signals
+  val id        = UInt(UncacheBufferIndexWidth.W) // resp identified signals
   val nc        = Bool() // resp identified signals
   val is2lq     = Bool() // resp identified signals
   val miss      = Bool()
@@ -565,6 +572,7 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
 class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new UncacheWordReq)
+  val idResp = Flipped(ValidIO(new UncacheIdResp))
   val resp = Flipped(DecoupledIO(new UncacheWordResp))
 }
 
