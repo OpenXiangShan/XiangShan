@@ -273,21 +273,24 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           isCrossPage := false.B
           needFlushPipe := false.B
         }
-      }
-      when (io.writeBack.fire && (!isCrossPage || globalMMIO || globalException)) {
-        bufferState := s_idle
-        req_valid := false.B
-        curPtr := 0.U
-        unSentStores := 0.U
-        unWriteStores := 0.U
-        globalException := false.B
-        globalMMIO := false.B
-        isCrossPage := false.B
-        needFlushPipe := false.B
-      } .elsewhen(io.writeBack.fire && isCrossPage) {
-        bufferState := s_block
-      } .otherwise {
-        bufferState := s_wb
+
+      }.otherwise {
+        when (io.writeBack.fire && (!isCrossPage || globalMMIO || globalException)) {
+          bufferState := s_idle
+          req_valid := false.B
+          curPtr := 0.U
+          unSentStores := 0.U
+          unWriteStores := 0.U
+          globalException := false.B
+          globalMMIO := false.B
+          isCrossPage := false.B
+          needFlushPipe := false.B
+        } .elsewhen(io.writeBack.fire && isCrossPage) {
+          bufferState := s_block
+        } .otherwise {
+          bufferState := s_wb
+        }
+
       }
     }
 
