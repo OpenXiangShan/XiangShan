@@ -1,3 +1,18 @@
+/***************************************************************************************
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
@@ -25,9 +40,9 @@ abstract class PvtBundle(implicit p: Parameters) extends XSBundle with HasPvtCon
 abstract class PvtModule(implicit p: Parameters) extends XSModule with HasPvtConst
 
 trait HasPvtConst extends HasXSParameter {
-    val PvtTagLen = log2Up(IntLogicRegs) max log2Up(FpLogicRegs) max log2Up(VecLogicRegs)
-    val EntryNum = 32
-    val ReadPortNum = 16
+    val PvtTagLen = PhyRegIdxWidth
+    val EntryNum = MaxPhyRegs
+    val ReadPortNum = 8
     val WritePortNum = backendParams.LduCnt
 }
 
@@ -43,7 +58,7 @@ class PvtIO(implicit p: Parameters) extends PvtBundle{
     val flush = Input(Bool())
     val full = Output(Bool())
     val writeFail = Vec(WritePortNum, Output(Bool()))
-    val pvtLdestUpdate = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
+    val pvtUpdate = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
 }
 
 class Pvt(implicit p: Parameters) extends PvtModule{
@@ -52,25 +67,27 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     val PvtTable = RegInit(VecInit.fill(EntryNum)(0.U.asTypeOf(new PvtEntry)))
     val PvtTableNext = WireInit(PvtTable)
     io.writeFail := VecInit.fill(WritePortNum)(false.B)
-    io.readPorts.foreach(_.data := 0.U)
-    
+
     //write
     io.writePorts.zipWithIndex.foreach{ case (w, i) =>
         val windex = w.addr(log2Ceil(EntryNum)-1, 0)
-        //todo: same tag different ld?
+        //todo: same tag different ld
         when (!PvtTable(windex).valid && w.wen){
+            // can not find match entry, create a new entry
             PvtTableNext(windex).value := w.data
             PvtTableNext(windex).tag := w.addr
             PvtTableNext(windex).valid := true.B
         }.elsewhen(PvtTable(windex).valid && w.wen){
-            io.writeFail(i) := true.B
+            // already exist a match entry, update entry
+            PvtTableNext(windex).value := w.data
+            PvtTableNext(windex).tag := w.addr
         }
     }
 
     // pvt wb update
-    for ((update, i) <- io.pvtLdestUpdate.zipWithIndex) {
-        when (PvtTable(update(log2Ceil(EntryNum)-1, 0)).valid && 
-            (PvtTable(update(log2Ceil(EntryNum)-1, 0)).tag === update)) {
+    for ((update, i) <- io.pvtUpdate.zipWithIndex) {
+        when (PvtTable(update(log2Ceil(EntryNum)-1, 0)).valid &&
+          (PvtTable(update(log2Ceil(EntryNum)-1, 0)).tag === update)) {
             PvtTableNext(update(log2Ceil(EntryNum)-1, 0)) := 0.U.asTypeOf(new PvtEntry)
         }
     }
@@ -80,8 +97,9 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     // pvt read
     for ((r, i) <- io.readPorts.zipWithIndex) {
         val rindex = r.addr(log2Ceil(EntryNum)-1, 0)
-        when (PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr && r.valid) {
-            r.data := PvtTable(rindex).value
+        r.data := PvtTable(rindex).value
+        when (r.valid) {
+            assert(PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr, s"Pvt readports $i read a invalid entry")
         }
     }
 
@@ -90,5 +108,4 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     }
 
     io.full := PvtTable.map(_.valid).reduce(_ && _)
-    
 }

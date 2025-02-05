@@ -77,7 +77,7 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
 class LvpPredict(implicit p: Parameters) extends XSBundle {
   val Predictvalue = Output(UInt(XLEN.W))
   val Predict = Output(Bool())
-  val ldest = Output(UInt(LogicRegsWidth.W))
+  val pdest = Output(UInt(PhyRegIdxWidth.W))
   val rfWen = Output(Bool())
   val fpWen = Output(Bool())
   val vecWen = Output(Bool())
@@ -1001,7 +1001,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.torename.zipWithIndex.foreach{ case (lvpTorename, i) =>
     lvpTorename.Predictvalue := lvp.io.PredictValue(i)
     lvpTorename.Predict := lvp.io.Predict(i)
-    lvpTorename.ldest := io.fromload(i).bits.ldest
+    lvpTorename.pdest := io.fromload(i).bits.pdest
     lvpTorename.rfWen := io.fromload(i).bits.rfWen
     lvpTorename.fpWen := io.fromload(i).bits.fpWen
     lvpTorename.vecWen := io.fromload(i).bits.vecWen

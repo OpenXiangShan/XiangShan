@@ -36,11 +36,11 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
         MixedVec(iq.exuBlockParams.map(exu => Input(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
       )).flatten
     )
-    val pvtData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
-    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
-      MixedVec(iq.exuBlockParams.map(exu => Input(Vec(exu.numRegSrc, UInt(XLEN.W)))))
-    )).flatten
-  )
+    val pvtData: MixedVec[MixedVec[UInt]] = MixedVec(
+      Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq =>
+        MixedVec(iq.exuBlockParams.map(exu => Input(UInt(exu.srcDataBitsMax.W))))
+      )).flatten
+    )
   }
 
   class ToExus extends Bundle {
@@ -83,7 +83,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fromExus: Seq[ValidIO[ExuBypassBundle]] = (io.fromExus.int ++ io.fromExus.fp ++ io.fromExus.vf ++ io.fromExus.mem).flatten.toSeq
   private val toExus: Seq[DecoupledIO[ExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf ++ io.toExus.mem).flatten.toSeq
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
-  private val fromDPsPvtData: Seq[Vec[UInt]] = io.fromDataPath.pvtData.flatten.toSeq
+  private val fromDPsPvtData: Seq[UInt] = io.fromDataPath.pvtData.flatten
   private val immInfo = io.fromDataPath.immInfo
 
   println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
@@ -177,7 +177,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm),
-          readPvt        -> fromDPsPvtData(exuIdx)(srcIdx)
+          readPvt        -> fromDPsPvtData(exuIdx)
         )
       )
     }

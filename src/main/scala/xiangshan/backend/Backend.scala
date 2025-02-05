@@ -45,10 +45,10 @@ import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.issue.{Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
+import xiangshan.backend.issue.{IntScheduler, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo, LvpPredict}
+import xiangshan.frontend.{FtqPtr, FtqRead, LvpPredict, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable
@@ -319,8 +319,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
   ctrlBlock.io.fromlvp := io.fromlvp
-  ctrlBlock.io.pvtread <> dataPath.io.pvtRead
+  ctrlBlock.io.intPvtRead <> intScheduler.io.pvtRead
+  ctrlBlock.io.fpPvtRead <> fpScheduler.io.pvtRead
+  ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
+  ctrlBlock.io.intSrcPred <> intScheduler.io.srcPred
+  ctrlBlock.io.fpSrcPred <> fpScheduler.io.srcPred
 
   val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
   intWriteBackDelayed.zip(wbDataPath.io.toIntPreg).map{ case (sink, source) =>
@@ -450,6 +454,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.vlWriteBackInfo.vlFromVfIsZero := vlFromVfIsZero
   memScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   memScheduler.io.fromOg2Resp.get := og2ForVector.io.toMemIQOg2Resp
+  memScheduler.io.srcPred.map(x => x.map(x1 => x1.map(x2 => x2.pred := DontCare)))
+  memScheduler.io.pvtRead.map(x => x.map(x1 => x1.data := DontCare))
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -475,6 +481,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfScheduler.io.vlWriteBackInfo.vlFromVfIsZero := vlFromVfIsZero
   vfScheduler.io.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   vfScheduler.io.fromOg2Resp.get := og2ForVector.io.toVfIQOg2Resp
+  vfScheduler.io.srcPred.map(x => x.map(x1 => x1.map(x2 => x2.pred := DontCare)))
+  vfScheduler.io.pvtRead.map(x => x.map(x1 => x1.data := DontCare))
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush

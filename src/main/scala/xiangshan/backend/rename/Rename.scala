@@ -38,8 +38,10 @@ import xiangshan.backend.fu.NewCSR.CSROoORead
 import xiangshan.backend.{Pvt, PvtReadPort}
 import xiangshan.frontend.LvpPredict
 import xiangshan.backend.PvtReadPort
+
 import scala.annotation.meta.param
 import freechips.rocketchip.formal.MonitorDirection.Cover.flip
+import xiangshan.backend.issue.{FpScheduler, IntScheduler}
 import yunsuan.{VfaluType, VipuType}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
@@ -81,9 +83,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val v0_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val vl_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Input(Bool()))
-    val intSrcPred = Vec(RenameWidth, Vec(2, Flipped(new RatPredPort)))
-    val fpSrcPred = Vec(RenameWidth, Vec(3, Flipped(new RatPredPort)))
-    val vecSrcPred = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatPredPort)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
     // for snapshots
@@ -104,8 +103,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val fromlvp = Vec(backendParams.LduCnt, Flipped(new LvpPredict))
     val pvtfull = Output(Bool())
     val pvtWriteFail = Vec(backendParams.LduCnt, Output(Bool()))
-    val pvtreadports = Vec(backendParams.numPvtReadPort, new PvtReadPort)
-    val pvtLdestUpdate = Vec(RenameWidth, Output(UInt(LogicRegsWidth.W)))
+    val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
+    val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
+    val pvtUpdate = Vec(RenameWidth, Output(UInt(LogicRegsWidth.W)))
   })
 
   dontTouch(io.pvtfull)
@@ -143,19 +143,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //pvt update
   pvt.io.writePorts.zip(io.fromlvp).foreach{ case (w, lvp) =>
     w.wen := lvp.Predict && !pvt.io.full
-    w.addr := lvp.ldest
+    w.addr := lvp.pdest
     w.data := lvp.Predictvalue
   }
-  //todo
+  // todo: apply flush pipe feature
   pvt.io.flush := false.B
   // pvt read
-  pvt.io.readPorts.zip(io.pvtreadports).foreach{ case(r, p) =>
-    r <> p
-  }
-  pvt.io.pvtLdestUpdate.zip(io.in.map(_.bits.ldest)).foreach { case(sink, source) =>
-    sink := source
-  }
-  io.pvtLdestUpdate := io.in.map(_.bits.ldest)
+  pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
+  io.fpPvtRead.flatten.foreach(_.data := DontCare)
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
@@ -375,6 +370,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
+    pvt.io.pvtUpdate.zip(uops.map(_.pdest)).zip(io.in.map(_.valid)).foreach{ case ((sink, source), valid) =>
+      sink := Mux(valid, source, 0.U)
+    }
+    io.pvtUpdate.zip(uops.map(_.pdest)).zip(io.in.map(_.valid)).foreach{ case ((sink, source), valid) =>
+      sink := Mux(valid, source, 0.U)
+    }
+
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !io.in(0).valid || canOut
 
@@ -421,20 +423,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(io.fpReadPorts(i)(2), io.vecReadPorts(i)(2)))
     uops(i).psrc(3) := io.v0ReadPorts(i)(0)
     uops(i).psrc(4) := io.vlReadPorts(i)(0)
-    // lsrc predict signal
-    uops(i).lsrcPred(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intSrcPred(i)(0).pred, io.fpSrcPred(i)(0).pred, io.vecSrcPred(i)(0).pred))
-    uops(i).lsrcPred(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intSrcPred(i)(1).pred, io.fpSrcPred(i)(1).pred, io.vecSrcPred(i)(1).pred))
-    uops(i).lsrcPred(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(io.fpSrcPred(i)(2).pred, io.vecSrcPred(i)(2).pred))
-    uops(i).lsrcPred(3) := false.B
-    uops(i).lsrcPred(4) := false.B
-
-    // find src pred
-    io.intSrcPred(i)(0).addr := Mux(SrcType.isXp(uops(i).srcType(0)), uops(i).lsrc(0), 0.U)
-    io.intSrcPred(i)(1).addr := Mux(SrcType.isXp(uops(i).srcType(1)), uops(i).lsrc(1), 0.U)
-    io.fpSrcPred(i)(0).addr := Mux(SrcType.isFp(uops(i).srcType(0)), uops(i).lsrc(0), 0.U)
-    io.fpSrcPred(i)(1).addr := Mux(SrcType.isFp(uops(i).srcType(1)), uops(i).lsrc(1), 0.U)
-    io.fpSrcPred(i)(2).addr := Mux(SrcType.isFp(uops(i).srcType(2)), uops(i).lsrc(2), 0.U)
-    io.vecSrcPred(i).foreach(_.addr := DontCare)
 
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
@@ -574,7 +562,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
 
   // psrc(n) + pdest(1)
-  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
+  val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i + 1).W)))))
   require(io.in(0).bits.srcType.size == io.in(0).bits.numSrc)
   private val pdestLoc = io.in.head.bits.srcType.size // 2 vector src: v0, vl&vtype
   println(s"[Rename] idx of pdest in bypassCond $pdestLoc")

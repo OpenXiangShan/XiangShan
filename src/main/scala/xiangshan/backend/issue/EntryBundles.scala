@@ -95,6 +95,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
+    val pvtData               = UInt(XLEN.W)
     val payload               = new DynInst()
   }
 
@@ -383,6 +384,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.imm.foreach(_                         := entryReg.imm.get)
     entryUpdate.payload                               := entryReg.payload
+    entryUpdate.pvtData                               := entryReg.pvtData
     if (params.isVecMemIQ) {
       entryUpdate.status.vecMem.get := entryReg.status.vecMem.get
     }

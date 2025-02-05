@@ -8,10 +8,13 @@ import utility.HasPerfEvents
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.PvtReadPort
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
+import xiangshan.backend.rename.{BusyTable, RatPredPort, VlBusyTable}
+import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
 import xiangshan.backend.regcache.RegCacheTagTable
@@ -89,6 +92,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val vlWriteBackDelayed = MixedVec(Vec(backendParams.numPregWb(VlData()),
     new RfWritePortWithConfig(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth)))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
+  val srcPred = Vec(params.issueBlockParams.length, Vec(params.issueBlockParams.map(_.numEnq).max, Vec(3, Flipped(new RatPredPort))))
+  val pvtRead = Vec(params.issueBlockParams.length, Vec(params.issueBlockParams.map(_.numEnq).max, Flipped(new PvtReadPort)))
 
   val vlWriteBackInfo = new Bundle {
     val vlFromIntIsZero  = Input(Bool())
@@ -152,6 +157,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     with HasXSParameter
 {
   val io = IO(new SchedulerIO())
+
+  dontTouch(io.srcPred)
 
   // alias
   private val iqWakeUpInMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
@@ -241,6 +248,13 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       iq.io.ldCancel := io.ldCancel
     else
       iq.io.ldCancel := 0.U.asTypeOf(io.ldCancel)
+  }
+
+  // issuequeue to scheduler src pred
+  //io.srcPred.map( x => x.map( x1 => x1.map(x2 => x2.addr := DontCare)))
+  issueQueues.zip(io.srcPred).zip(io.pvtRead).foreach { case((iq, pred), read) =>
+    pred <> iq.io.srcPred
+    read <> iq.io.pvtRead
   }
 
   // connect the vl writeback informatino to the issue queues

@@ -24,7 +24,9 @@ import utility.ParallelPriorityMux
 import utility.GatedValidRegNext
 import utility.XSError
 import xiangshan._
+import xiangshan.backend.issue.{FpScheduler, IntScheduler}
 import xiangshan.frontend.LvpPredict
+
 import java.lang.reflect.Parameter
 
 abstract class RegType
@@ -47,7 +49,7 @@ class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
 }
 
 class RatPredPort(implicit p: Parameters) extends XSBundle {
-  val addr = Input(UInt(log2Ceil(IntLogicRegs).W))
+  val addr = Input(UInt(PhyRegIdxWidth.W))
   val pred = Output(Bool())
 }
 
@@ -234,9 +236,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val v0RenamePorts = Vec(RenameWidth, Input(new RatWritePort(V0LogicRegs)))
     val vlReadPorts = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     val vlRenamePorts = Vec(RenameWidth, Input(new RatWritePort(VlLogicRegs)))
-    val intSrcPred = Vec(RenameWidth, Vec(2, new RatPredPort))
-    val fpSrcPred = Vec(RenameWidth, Vec(3, new RatPredPort))
-    val vecSrcPred = Vec(RenameWidth, Vec(numVecRatPorts, new RatPredPort))
+    val intSrcPred = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
+    val fpSrcPred = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
 
     val int_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
@@ -248,7 +249,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val fromlvp = Vec(backendParams.LduCnt, Flipped(new LvpPredict))
     val pvtfull = Input(Bool())
     val pvtWriteFail = Vec(backendParams.LduCnt, Input(Bool()))
-    val pvtLdestUpdate = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
+    val pvtUpdate = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
 
     // for debug assertions
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
@@ -274,13 +275,13 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   dontTouch(io.fromlvp)
   dontTouch(io.pvtfull)
   dontTouch(io.pvtWriteFail)
-  dontTouch(io.intSrcPred)
-  dontTouch(io.fpSrcPred)
+//  dontTouch(io.intSrcPred)
+//  dontTouch(io.fpSrcPred)
 
   // set predict table
-  val intPdt = RegInit(VecInit(Seq.fill(IntLogicRegs)(false.B)))
+  val intPdt = RegInit(VecInit(Seq.fill(IntPhyRegs)(false.B)))
   val intPdtNext = WireInit(intPdt)
-  val fpPdt = RegInit(VecInit(Seq.fill(FpLogicRegs)(false.B)))
+  val fpPdt = RegInit(VecInit(Seq.fill(IntPhyRegs)(false.B)))
   val fpPdtNext = WireInit(fpPdt)
   dontTouch(intPdt)
   dontTouch(fpPdt)
@@ -288,16 +289,16 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   io.fromlvp.zipWithIndex.foreach{ case (lvp, i) =>
     when (lvp.Predict && !io.pvtfull && !io.pvtWriteFail(i)) {
       when (lvp.rfWen) {
-        intPdtNext(lvp.ldest) := true.B
+        intPdtNext(lvp.pdest) := true.B
       }.elsewhen (lvp.fpWen) {
-        fpPdtNext(lvp.ldest) := true.B
+        fpPdtNext(lvp.pdest) := true.B
       }/*.elsewhen (lvp.vecWen) {
         vecPdt(lvp.pdest) := true.B
       }*/
     }
   }
-  // pvt writeback update 
-  io.pvtLdestUpdate.zipWithIndex.foreach { case (addr, i) =>
+  // update predict bit
+  io.pvtUpdate.zipWithIndex.foreach { case (addr, i) =>
     intPdtNext(addr) := false.B
     fpPdtNext(addr) := false.B
   }
@@ -305,20 +306,19 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   fpPdt := fpPdtNext
 
   // readports predict
-  io.intSrcPred.zipWithIndex.foreach {
-    case (predict, i) =>
-      predict(0).pred := intPdt(predict(0).addr)
-      predict(1).pred := intPdt(predict(1).addr)
+  io.intSrcPred.zipWithIndex.foreach { case (predict1, i) =>
+      predict1.zipWithIndex.foreach { case (predict2, j) =>
+        predict2.zipWithIndex.foreach { case (predict3, k) =>
+          predict3.pred := intPdt(predict3.addr)
+        }
+      }
   }
-  io.fpSrcPred.zipWithIndex.foreach {
-    case (predict, i) =>
-      predict(0).pred := fpPdt(predict(0).addr)
-      predict(1).pred := fpPdt(predict(1).addr)
-      predict(2).pred := fpPdt(predict(2).addr)
-  }
-  io.vecSrcPred.zipWithIndex.foreach {
-    case (predict, i) =>
-      predict.foreach(_.pred := DontCare)
+  io.fpSrcPred.zipWithIndex.foreach { case (predict1, i) =>
+    predict1.zipWithIndex.foreach { case (predict2, j) =>
+      predict2.zipWithIndex.foreach { case (predict3, k) =>
+        predict3.pred := fpPdt(predict3.addr)
+      }
+    }
   }
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)

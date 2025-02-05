@@ -32,7 +32,7 @@ import xiangshan.backend.dispatch.{CoreDispatchTopDownIO}
 import xiangshan.backend.dispatch.NewDispatch
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
+import xiangshan.backend.rename.{RatPredPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components, LvpPredict}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -639,7 +639,9 @@ class CtrlBlockImp(
   rat.io.fromlvp := io.fromlvp
   rat.io.pvtfull := rename.io.pvtfull
   rat.io.pvtWriteFail := rename.io.pvtWriteFail
-  rat.io.pvtLdestUpdate := rename.io.pvtLdestUpdate
+  rat.io.pvtUpdate := rename.io.pvtUpdate
+  io.intSrcPred <> rat.io.intSrcPred
+  io.fpSrcPred <> rat.io.fpSrcPred
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
@@ -658,10 +660,6 @@ class CtrlBlockImp(
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.v0ReadPorts := VecInit(rat.io.v0ReadPorts.map(x => VecInit(x.data)))
   rename.io.vlReadPorts := VecInit(rat.io.vlReadPorts.map(x => VecInit(x.data)))
-  // reg pred
-  rename.io.intSrcPred <> rat.io.intSrcPred
-  rename.io.fpSrcPred <> rat.io.fpSrcPred
-  rename.io.vecSrcPred <> rat.io.vecSrcPred
   // reg old pdest
   rename.io.int_need_free := rat.io.int_need_free
   rename.io.int_old_pdest := rat.io.int_old_pdest
@@ -684,7 +682,8 @@ class CtrlBlockImp(
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
   rename.io.fromlvp := io.fromlvp
-  rename.io.pvtreadports <> io.pvtread
+  rename.io.intPvtRead <> io.intPvtRead
+  rename.io.fpPvtRead <> io.fpPvtRead
 
   val renameOut = Wire(chiselTypeOf(rename.io.out))
   renameOut <> rename.io.out
@@ -963,6 +962,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val busy = Bool()
   })
 
+  val intSrcPred = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
+  val fpSrcPred = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
+
   val toVecExcpMod = Output(new Bundle {
     val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
     val excpInfo = ValidIO(new VecExcpInfo)
@@ -995,7 +997,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
   val fromlvp = Vec(params.LduCnt, Flipped(new LvpPredict))
-  val pvtread = Vec(params.numPvtReadPort, new PvtReadPort)
+  val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
+  val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

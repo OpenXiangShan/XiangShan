@@ -112,7 +112,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 class LoadToIfu(implicit p: Parameters) extends XSBundle {
   val loadvalue = Output(UInt(XLEN.W))
   val loadpc    = Output(UInt(VAddrBits.W))
-  val ldest     = Output(UInt(LogicRegsWidth.W))
+  val pdest     = Output(UInt(LogicRegsWidth.W))
   val rfWen     = Output(Bool())
   val fpWen     = Output(Bool())
   val vecWen    = Output(Bool())
@@ -1765,24 +1765,22 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_ldout_valid  = s3_mmio_req.valid ||
                         s3_out.valid && RegNext(!s2_out.isvec && !s2_out.isFrmMisAlignBuf)
   val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
-  io.ldout.valid       := s3_ldout_valid
+  val ldoutValid      = s3_mmio.valid || (s3_out.valid && !s3_vecout.isvec && !s3_frm_mabuf)
   io.ldout.bits        := s3_ld_wb_meta
-  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
-  io.ldout.bits.uop.rfWen := s3_rfWen
-  io.ldout.bits.uop.fpWen := s3_fpWen
-  io.ldout.bits.uop.pdest := s3_pdest
+  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
+
+  io.ldout.valid       := ldoutValid
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
 
   //to lvp
-  io.toifu.valid := (s3_mmio.valid ||
-                          (s3_out.valid && !s3_vecout.isvec && !s3_mis_align && !s3_frm_mabuf))
+  io.toifu.valid := ldoutValid
   io.toifu.bits.loadpc := DontCare
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-  io.toifu.bits.ldest := io.ldin.bits.uop.ldest
-  io.toifu.bits.rfWen := io.ldin.bits.uop.rfWen
-  io.toifu.bits.fpWen := io.ldin.bits.uop.fpWen
-  io.toifu.bits.vecWen := io.ldin.bits.uop.vecWen
-
+  io.toifu.bits.pdest := RegEnable(s3_ld_wb_meta.uop.pdest, ldoutValid)
+  io.toifu.bits.rfWen := s3_ld_wb_meta.uop.rfWen
+  io.toifu.bits.fpWen := s3_ld_wb_meta.uop.fpWen
+  io.toifu.bits.vecWen := s3_ld_wb_meta.uop.vecWen
+  
   io.ldout.bits.isFromLoadUnit := true.B
   io.ldout.bits.uop.fuType := Mux(
                                   s3_valid && s3_isvec,

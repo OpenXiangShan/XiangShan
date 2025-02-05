@@ -1,3 +1,18 @@
+/***************************************************************************************
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 package xiangshan.frontend
 
 import org.chipsalliance.cde.config.Parameters
@@ -63,6 +78,7 @@ class Lvp(implicit p: Parameters) extends LvpModule{
                 LvpTableNext(index).confidence := 0.U
             }.otherwise {
                 // if match, update confidence
+                // todo: flush when value mismatch
                 LvpTableNext(index).confidence := Mux(valueMatch, (Mux(confidentEnough, LvpTable(index).confidence, LvpTable(index).confidence + 1.U)), 0.U)
                 LvpTableNext(index).value := Mux(!valueMatch, load.loadvalue, LvpTable(index).value)
             }
@@ -73,8 +89,8 @@ class Lvp(implicit p: Parameters) extends LvpModule{
             PredictValue(i) := 0.U
         }
         // delay 2 cycle to avoid writeback signal clear predict table
-        io.Predict(i) := RegNext(Predict(i))
-        io.PredictValue(i) := RegNext(PredictValue(i))
+        io.Predict(i) := Predict(i)
+        io.PredictValue(i) := PredictValue(i)
     }
     LvpTable := LvpTableNext
 }

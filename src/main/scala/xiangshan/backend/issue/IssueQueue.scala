@@ -7,6 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne, XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.PvtReadPort
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
@@ -15,6 +16,7 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Bundles.VSew
+import xiangshan.backend.rename.RatPredPort
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 import utility.PerfCCT
@@ -77,6 +79,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
+  val srcPred = Vec(params.numEnq, Vec(3, Flipped(new RatPredPort)))
+  val pvtRead = Vec(params.numEnq, Flipped(new PvtReadPort))
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
@@ -271,6 +275,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val compEntryEnqSelVec = Option.when(params.hasCompAndSimp)(Wire(Vec(params.numEnq, UInt(params.numComp.W))))
   val othersEntryEnqSelVec = Option.when(params.isAllComp || params.isAllSimp)(Wire(Vec(params.numEnq, UInt((params.numEntries - params.numEnq).W))))
   val simpAgeDetectRequest = Option.when(params.hasCompAndSimp)(Wire(Vec(params.numDeq + params.numEnq, UInt(params.numSimp.W))))
+
   simpAgeDetectRequest.foreach(_ := 0.U.asTypeOf(simpAgeDetectRequest.get))
 
   // when vf exu (with og2) wake up int/mem iq (without og2), the wakeup signals should delay 1 cycle
@@ -296,6 +301,24 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
 
+  //dontTouch(io.srcPred)
+  //dontTouch(io.pvtRead)
+
+  // find src pred
+  for (i <- 0 until params.numEnq) {
+    for (j <- 0 until io.srcPred(i).length) {
+      io.srcPred(i)(j).addr := io.enq(i).bits.psrc(j)
+    }
+  }
+  // we assume that no more than 1 src is pred
+  io.pvtRead.zipWithIndex.foreach { case (read, readIdx) =>
+    val predVec = io.srcPred(readIdx).map(x => x.pred)
+    val needPvt = predVec.reduce(_ || _)
+    val pvtIdx = PriorityEncoder(predVec)
+    read.valid := needPvt && io.enq(readIdx).valid
+    read.addr := io.enq(readIdx).bits.psrc(pvtIdx)
+  }
+
   /**
     * Connection of [[entries]]
     */
@@ -308,12 +331,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
-        //enq.bits.status.srcStatus(j).psrcPred                   := s0_enqBits(enqIdx).psrcPred(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
                                                                           SrcState.rdy,
-                                                                          (Mux(s0_enqBits(enqIdx).lsrcPred(j), SrcState.rdy, s0_enqBits(enqIdx).srcState(j))))
+                                                                          Mux(io.srcPred(enqIdx)(j).pred, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
@@ -322,7 +344,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                        (s0_enqBits(enqIdx).lsrcPred(j) && SrcType.isReg(s0_enqBits(enqIdx).srcType(j)))      -> DataSource.pvt
+                                                                        io.srcPred(enqIdx)(j).pred                                                            -> DataSource.pvt
                                                                       ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
@@ -341,6 +363,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.deqPortIdx                                := 0.U
       enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm)
       enq.bits.payload                                          := s0_enqBits(enqIdx)
+      enq.bits.pvtData                                          := io.pvtRead(enqIdx).data
     }
     entriesIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp                                                   := io.og0Resp(i)
@@ -792,9 +815,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       rf.foreach(_.addr := psrc)
       rf.foreach(_.srcType := srcType)
     }
-    deq.bits.pvtIdx.zip(deqEntryVec(i).bits.payload.lsrc).foreach { case (pvt, lsrc) =>
-      pvt := lsrc
-    }
+    deq.bits.pvtData := deqEntryVec(i).bits.pvtData
     deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case (sink, source) =>
       sink := source
     }

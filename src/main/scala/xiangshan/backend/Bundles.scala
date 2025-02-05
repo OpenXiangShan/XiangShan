@@ -218,7 +218,6 @@ object Bundles {
     val srcState        = Vec(numSrc, SrcState())
     val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
-    val lsrcPred        = Vec(numSrc, Bool())
     val pdest           = UInt(PhyRegIdxWidth.W)
     // reg cache
     val useRegCache     = Vec(backendParams.numIntRegSrc, Bool())
@@ -515,7 +514,7 @@ object Bundles {
 
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
-    val pvtIdx = Vec(backendParams.numSrc, UInt(LogicRegsWidth.W))
+    val pvtData = UInt(exuParams.srcDataBitsMax.W)
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
     val addrOH = UInt(iqParams.numEntries.W)

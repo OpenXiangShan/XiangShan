@@ -60,7 +60,7 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
   io.readPorts
   .lazyZip(IntRegCache.io.readPorts.lazyZip(MemRegCache.io.readPorts))
   .lazyZip(IntRegCacheAgeTimer.io.readPorts.lazyZip(MemRegCacheAgeTimer.io.readPorts))
-  .foreach{ case (r_in, (r_int, r_mem), (r_int_at, r_mem_at)) => 
+  .foreach{ case (r_in, (r_int, r_mem), (r_int_at, r_mem_at)) =>
     val in_addr = RegEnable(r_in.addr, r_in.ren)
     val int_ren = GatedValidRegNext(r_in.ren & ~r_in.addr(RegCacheIdxWidth - 1))
     val mem_ren = GatedValidRegNext(r_in.ren & r_in.addr(RegCacheIdxWidth - 1))

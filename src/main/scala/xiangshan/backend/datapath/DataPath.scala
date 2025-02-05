@@ -110,9 +110,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
   private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
-  dontTouch(io.pvtRead)
-  dontTouch(io.toBypassNetworkPvtData)
-
+  //dontTouch(io.toBypassNetworkPvtData)
+    
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
@@ -482,44 +481,30 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
     readPorts
   }
-  def IssueBundle2PvtReadPort(issue: DecoupledIO[IssueQueueIssueBundle]): Vec[PvtReadPort] = {
-    val readPorts = Wire(Vec(issue.bits.exuParams.numIntSrc, new PvtReadPort()))
-    readPorts.zipWithIndex.foreach{ case (r, idx) =>
-      r.valid  := issue.valid && issue.bits.common.dataSources(idx).readPvt
-      r.addr := issue.bits.pvtIdx(idx)
-      r.data := DontCare
-    }
-    readPorts
-  }
 
-  private val pvtReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2PvtReadPort(_))
-  private val pvtReadData = io.pvtRead.map(_.data)
+  val pvtReadData = io.fromIntIQ.flatten.map(x => x.bits.pvtData)
 
-  io.pvtRead.zip(pvtReadReq).foreach{ case (r, req) =>
-    r.valid := req.valid
-    r.addr := req.addr
-  }
-
-  val s1_PvtReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
-  s1_PvtReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
-  s1_PvtReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten
+  val s1_PvtReadData: MixedVec[MixedVec[UInt]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src(0).cloneType)))))
+  s1_PvtReadData.foreach(_.foreach(_ := 0.U))
+  s1_PvtReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1)
     .zip(pvtReadData).foreach{ case (s1_data, rdata) =>
       s1_data := rdata
     }
 
-  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++ 
+  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++
                                 fromMemIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
   private val regCacheReadData = regCache.io.readPorts.map(_.data)
 
   println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
   require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
 
-  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) => 
+  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) =>
     r.ren := req.ren
     r.addr := req.addr
   }
 
-  io.toBypassNetworkPvtData := s1_PvtReadData
+  val needPvt = fromIntIQ.flatten.map(_.bits.common.dataSources.map(_.readPvt).reduce(_ || _)).reduce(_ || _)
+  io.toBypassNetworkPvtData := RegEnable(s1_PvtReadData, needPvt)
 
   val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   s1_RCReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
@@ -998,8 +983,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
-  val pvtRead = Vec(params.numPvtReadPort, Flipped(new PvtReadPort))
-
   val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
   )
@@ -1009,9 +992,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
       MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
     )).flatten
   )
-  val toBypassNetworkPvtData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
+  val toBypassNetworkPvtData: MixedVec[MixedVec[UInt]] = MixedVec(
     Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq =>
-      MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(XLEN.W)))))
+      MixedVec(iq.exuBlockParams.map(exu => Output(UInt(exu.srcDataBitsMax.W))))
     )).flatten
   )
 
