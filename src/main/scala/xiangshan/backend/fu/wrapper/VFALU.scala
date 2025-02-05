@@ -407,7 +407,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(allFFlagsEn)
     dontTouch(fflagsRedMask)
   }
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum) & fflagsRedMask(4*numVecModule - 1, 1),
+  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum && !outVecCtrl.lastUop) & fflagsRedMask(4*numVecModule - 1, 1),
     lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
