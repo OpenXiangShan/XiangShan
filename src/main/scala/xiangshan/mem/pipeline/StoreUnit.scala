@@ -21,14 +21,15 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{Pbmt, TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DCacheStoreIO, DcacheStoreRequestIO, HasDCacheParameters, MemoryOpConstants, StorePrefetchReq}
 

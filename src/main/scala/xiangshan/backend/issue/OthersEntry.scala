@@ -11,7 +11,8 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{SqPtr, LqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReq
 
 
 class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {

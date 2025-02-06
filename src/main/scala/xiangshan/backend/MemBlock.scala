@@ -29,6 +29,8 @@ import device.MsiInfoBundle
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
@@ -36,17 +38,16 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.backend.fu.util.{HasCSRConst, SdtrigExt}
-import xiangshan.cache._
-import xiangshan.cache.mmu._
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import xiangshan.backend.fu.NewCSR.TriggerUtil
+import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.mem._
 import xiangshan.mem.mdp._
-import xiangshan.frontend.HasInstrMMIOConst
+import xiangshan.mem.Bundles._
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
-import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.cache._
+import xiangshan.cache.mmu._
 import system.SoCParamsKey
-import xiangshan.backend.fu.NewCSR.TriggerUtil
-import xiangshan.ExceptionNO._
-import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units

@@ -27,6 +27,7 @@ import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 

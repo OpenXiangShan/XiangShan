@@ -19,18 +19,19 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.BufferParams
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
-import xiangshan.ExceptionNO._
-import xiangshan.mem._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.datapath.NewPipelineConnect
-import freechips.rocketchip.diplomacy.BufferParams
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
 
 class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val data             = UInt(VLEN.W)
