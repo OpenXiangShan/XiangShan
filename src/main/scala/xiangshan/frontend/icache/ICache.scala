@@ -271,7 +271,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
       shouldReset = true,
       holdRead = true,
       singlePort = true,
-      withClockGate = true
+      withClockGate = false // enable signal timing is bad, no gating here
     ))
 
     // meta connection
@@ -431,7 +431,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
         shouldReset = true,
         holdRead = true,
         singlePort = true,
-        withClockGate = false // enable signal timing is bad, no gating here
+        withClockGate = true
       ))
 
       // read
