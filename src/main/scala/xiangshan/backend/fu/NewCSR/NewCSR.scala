@@ -13,7 +13,6 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rob.RobPtr
@@ -938,6 +937,15 @@ class NewCSR(implicit val p: Parameters) extends Module
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange
 
+  /**
+   * Look up id in vsMapS and sMapVS.
+   * If id is in vsMapS, use vsMapS(id) when under VS mode,
+   *                         id under other modes
+   * Else If id is in sMapVS, use 0 when under VS mode,
+   *                              id under modes except VS
+   * Else, use id as read address
+   * Use read address to look up rdata in csrRwMap
+   */
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
       ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> rdata
