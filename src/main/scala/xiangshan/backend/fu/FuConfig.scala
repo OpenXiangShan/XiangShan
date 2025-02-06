@@ -5,11 +5,11 @@ import chisel3._
 import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
-import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{IntToFP, IntFPToVec}
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.mem.Std
 
 /**
   *
