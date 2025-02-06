@@ -425,9 +425,10 @@ case class XSCoreParameters
     )
   }
 
+  val FPHighPerf = true
   val fpSchdParams = {
     implicit val schdType: SchedulerType = FpScheduler()
-    SchdBlockParams(Seq(
+    val IQBase = Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("FEX0", Seq(FaluCfg, FcvtCfg, F2vCfg, FmacCfg), Seq(FpWB(port = 0, 0), IntWB(port = 0, 2), VfWB(port = 3, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
         ExeUnitParams("FEX1", Seq(FdivCfg), Seq(FpWB(port = 3, 1)), Seq(Seq(FpRD(2, 1)), Seq(FpRD(5, 1)))),
@@ -439,7 +440,12 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("FEX4", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 2, 0), IntWB(port = 2, 1)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
-    ),
+    )
+    val IQAppend = IssueBlockParams(Seq(
+      ExeUnitParams("FEX5", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 6, 0), IntWB(port = 2, 2)), Seq(Seq(FpRD(11, 0)), Seq(FpRD(12, 0)), Seq(FpRD(13, 0)))),
+    ), numEntries = 18, numEnq = 2, numComp = 14)
+    val IQTotal = if (FPHighPerf) IQBase :+ IQAppend else IQBase
+      SchdBlockParams(IQTotal,
       numPregs = fpPreg.numEntries,
       numDeqOutside = 0,
       schdType = schdType,
@@ -515,16 +521,21 @@ case class XSCoreParameters
   def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
 
   def iqWakeUpParams = {
+    val FPWakeUpConfigBase = WakeUpConfig(
+      Seq("FEX0", "FEX2", "FEX4") ->
+      Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4")
+    )
+    val FPWakeUpConfigHighPerf = WakeUpConfig(
+      Seq("FEX0", "FEX2", "FEX4", "FEX5") ->
+      Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4", "FEX5")
+    )
+    val FPWakeUpConfig = if (FPHighPerf) FPWakeUpConfigHighPerf else FPWakeUpConfigBase
     Seq(
       WakeUpConfig(
         Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2") ->
         Seq("ALU0", "BJU0", "ALU1", "BJU1", "ALU2", "BJU2", "ALU3", "BJU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1")
       ),
-      // TODO: add load -> fp slow wakeup
-      WakeUpConfig(
-        Seq("FEX0", "FEX2", "FEX4") ->
-        Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4")
-      ),
+      FPWakeUpConfig,
     ).flatten
   }
 
