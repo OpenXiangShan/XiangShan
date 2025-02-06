@@ -22,16 +22,17 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
-import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.Pbmt
+import xiangshan.cache.{AtomicWordIO, HasDCacheParameters, MemoryOpConstants}
+import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
+import difftest._
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule
   with MemoryOpConstants

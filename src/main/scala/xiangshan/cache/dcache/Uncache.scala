@@ -16,18 +16,18 @@
 
 package xiangshan.cache
 
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
 import utils._
 import utility._
-import xiangshan._
-import xiangshan.mem._
-import coupledL2.MemBackTypeMM
-import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import xiangshan._
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
 import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
+import coupledL2.{MemBackTypeMM, MemPageTypeNC}
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
 
@@ -134,7 +134,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool() // uncache -> L2
   val waitSame = Bool()
   val waitReturn = Bool() // uncache -> LSQ
-  
+
   def init: Unit = {
     valid := false.B
     inflight := false.B
@@ -148,12 +148,12 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def isWaitSame(): Bool = valid && waitSame
   def can2Bus(): Bool = valid && !inflight && !waitSame && !waitReturn
   def can2Lsq(): Bool = valid && waitReturn
-  
+
   def setValid(x: Bool): Unit = { valid := x}
   def setInflight(x: Bool): Unit = { inflight := x}
   def setWaitReturn(x: Bool): Unit = { waitReturn := x }
   def setWaitSame(x: Bool): Unit = { waitSame := x}
-  
+
   def updateUncacheResp(): Unit = {
     assert(inflight, "The request was not sent and a response was received")
     inflight := false.B
@@ -271,7 +271,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   def canMergePrimary(x: UncacheWordReq, e: UncacheEntry): Bool = {
     // vaddr same, properties same
-    getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) && 
+    getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) &&
       x.cmd === e.cmd && x.nc && e.nc &&
       x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
       continueAndAlign(x.mask | e.mask)
@@ -515,7 +515,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val (f1_fwdDataTmp, f1_fwdMaskTmp) = doMerge(f1_flyData, f1_flyMask, f1_idleData, f1_idleMask)
     val f1_fwdMask = shiftMaskToHigh(f1_fwdPAddr, f1_fwdMaskTmp).asTypeOf(Vec(VDataBytes, Bool()))
     val f1_fwdData = shiftDataToHigh(f1_fwdPAddr, f1_fwdDataTmp).asTypeOf(Vec(VDataBytes, UInt(8.W)))
-    // paddr match and mismatch judge 
+    // paddr match and mismatch judge
     val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), f1_fwdPAddr))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
