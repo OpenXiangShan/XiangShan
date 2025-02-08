@@ -27,7 +27,6 @@ import xiangshan.backend.rob.{RobPtr, RobLsqIO}
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
-import xiangshan.backend.HasMemBlockParameters
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
 
