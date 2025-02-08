@@ -33,6 +33,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend._
+import freechips.rocketchip.diplomacy.ValName
 
 case class ICacheParameters(
     nSets:               Int = 256,
@@ -241,7 +242,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
   )
 
   val tagArrays = (0 until 2) map { bank =>
-    val tagArray = Module(new SRAMTemplate(
+    val icacheTagArray = Module(new SRAMTemplate(
       new ICacheMetaEntry(),
       set = nSets / 2,
       way = nWays,
@@ -252,26 +253,26 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray {
 
     // meta connection
     if (bank == 0) {
-      tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      tagArray.io.r.req.bits.apply(setIdx = bank_0_idx(highestIdxBit, 1))
-      tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(
+      icacheTagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
+      icacheTagArray.io.r.req.bits.apply(setIdx = bank_0_idx(highestIdxBit, 1))
+      icacheTagArray.io.w.req.valid := write_bank_0
+      icacheTagArray.io.w.req.bits.apply(
         data = write_meta_bits,
         setIdx = io.write.bits.virIdx(highestIdxBit, 1),
         waymask = io.write.bits.waymask
       )
     } else {
-      tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      tagArray.io.r.req.bits.apply(setIdx = bank_1_idx(highestIdxBit, 1))
-      tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(
+      icacheTagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
+      icacheTagArray.io.r.req.bits.apply(setIdx = bank_1_idx(highestIdxBit, 1))
+      icacheTagArray.io.w.req.valid := write_bank_1
+      icacheTagArray.io.w.req.bits.apply(
         data = write_meta_bits,
         setIdx = io.write.bits.virIdx(highestIdxBit, 1),
         waymask = io.write.bits.waymask
       )
     }
 
-    tagArray
+    icacheTagArray
   }
 
   val read_set_idx_next = RegEnable(io.read.bits.vSetIdx, 0.U.asTypeOf(io.read.bits.vSetIdx), io.read.fire)
@@ -380,7 +381,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
 
   val dataArrays = (0 until nWays).map { way =>
     (0 until ICacheDataBanks).map { bank =>
-      val sramBank = Module(new SRAMTemplateWithFixedWidth(
+      val icacheSramBank = Module(new SRAMTemplateWithFixedWidth(
         UInt(ICacheDataEntryBits.W),
         set = nSets,
         width = ICacheDataSRAMWidth,
@@ -390,19 +391,19 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray {
       ))
 
       // read
-      sramBank.io.r.req.valid := io.read(bank % 4).valid && masks(way)(bank)
-      sramBank.io.r.req.bits.apply(setIdx =
+      icacheSramBank.io.r.req.valid := io.read(bank % 4).valid && masks(way)(bank)
+      icacheSramBank.io.r.req.bits.apply(setIdx =
         Mux(lineSel(bank), io.read(bank % 4).bits.vSetIdx(1), io.read(bank % 4).bits.vSetIdx(0))
       )
       // write
-      sramBank.io.w.req.valid := io.write.valid && io.write.bits.waymask(way).asBool
-      sramBank.io.w.req.bits.apply(
+      icacheSramBank.io.w.req.valid := io.write.valid && io.write.bits.waymask(way).asBool
+      icacheSramBank.io.w.req.bits.apply(
         data = writeEntries(bank),
         setIdx = io.write.bits.virIdx,
         // waymask is invalid when way of SRAMTemplate <= 1
         waymask = 0.U
       )
-      sramBank
+      icacheSramBank
     }
   }
 
@@ -684,7 +685,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
   io.read.req.map(_.ready := !io.write.valid)
 
   val srams = (0 until PortNumber) map { bank =>
-    val sramBank = Module(new SRAMTemplate(
+    val icachePartWaySramBank = Module(new SRAMTemplate(
       gen,
       set = nSets / 2,
       way = pWay,
@@ -693,18 +694,18 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
       singlePort = true
     ))
 
-    sramBank.io.r.req.valid := io.read.req(bank).valid
-    sramBank.io.r.req.bits.apply(setIdx = io.read.req(bank).bits.ridx)
+    icachePartWaySramBank.io.r.req.valid := io.read.req(bank).valid
+    icachePartWaySramBank.io.r.req.bits.apply(setIdx = io.read.req(bank).bits.ridx)
 
-    if (bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx
-    else sramBank.io.w.req.valid           := io.write.valid && io.write.bits.wbankidx
-    sramBank.io.w.req.bits.apply(
+    if (bank == 0) icachePartWaySramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx
+    else icachePartWaySramBank.io.w.req.valid           := io.write.valid && io.write.bits.wbankidx
+    icachePartWaySramBank.io.w.req.bits.apply(
       data = io.write.bits.wdata,
       setIdx = io.write.bits.widx,
       waymask = io.write.bits.wmask.asUInt
     )
 
-    sramBank
+    icachePartWaySramBank
   }
 
   io.read.req.map(_.ready := !io.write.valid && srams.map(_.io.r.req.ready).reduce(_ && _))
@@ -724,7 +725,7 @@ class SRAMTemplateWithFixedWidth[T <: Data](
     holdRead:    Boolean = false,
     singlePort:  Boolean = false,
     bypassWrite: Boolean = false
-) extends Module {
+)(implicit valName: ValName) extends Module {
 
   val dataBits  = gen.getWidth
   val bankNum   = math.ceil(dataBits.toDouble / width.toDouble).toInt

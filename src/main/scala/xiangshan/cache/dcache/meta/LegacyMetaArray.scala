@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
+import freechips.rocketchip.diplomacy.ValName
 
 // basic building blocks for L1 DCache
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
@@ -50,7 +51,7 @@ class L1MetaWriteReq(implicit p: Parameters) extends L1MetaReadReq {
 }
 
 
-class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule {
+class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters, valName: ValName) extends DCacheModule {
   val rstVal = onReset()
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
@@ -124,7 +125,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   }
 }
 
-class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {
+class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters, valName: ValName) extends DCacheModule {
   def onReset = L1Metadata(0.U, ClientMetadata.onReset, 0.U)
 
   val metaBits = onReset.getWidth
@@ -137,7 +138,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     val errors = Output(Vec(numReadPorts, ValidIO(new L1CacheErrorInfo)))
   })
   val meta = Seq.fill(numReadPorts) {
-    Module(new L1MetadataArray(() => onReset))
+    Module(new L1MetadataArray(() => onReset)(p, ValName(s"${valName.name}_meta")))
   }
 
   for (w <- 0 until numReadPorts) {

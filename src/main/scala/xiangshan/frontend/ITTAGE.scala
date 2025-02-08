@@ -23,6 +23,7 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import xiangshan._
+import freechips.rocketchip.diplomacy.ValName
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 
@@ -194,7 +195,7 @@ class ITTageTable(
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   val s1_valid         = RegNext(s0_valid)
 
-  val table = Module(new FoldedSRAMTemplate(
+  val ittage_table = Module(new FoldedSRAMTemplate(
     new ITTageEntry,
     set = nRows,
     width = foldedWidth,
@@ -202,12 +203,12 @@ class ITTageTable(
     holdRead = true,
     singlePort = true,
     useBitmask = true
-  ))
+  )(ValName(s"ittage_table_${tableIdx}")))
 
-  table.io.r.req.valid       := io.req.fire
-  table.io.r.req.bits.setIdx := s0_idx
+  ittage_table.io.r.req.valid       := io.req.fire
+  ittage_table.io.r.req.bits.setIdx := s0_idx
 
-  val table_read_data = table.io.r.resp.data(0)
+  val table_read_data = ittage_table.io.r.resp.data(0)
 
   val s1_req_rhit = table_read_data.valid && table_read_data.tag === s1_tag
 
@@ -250,7 +251,7 @@ class ITTageTable(
     Mux(io.update.valid, updateNoUsBitmask, Mux(useful_can_reset, updateUsBitmask, updateNoBitmask))
   )
 
-  table.io.w.apply(
+  ittage_table.io.w.apply(
     valid = io.update.valid || useful_can_reset,
     data = update_wdata,
     setIdx = Mux(useful_can_reset, resetSet, update_idx),
@@ -260,7 +261,7 @@ class ITTageTable(
 
   // Power-on reset
   val powerOnResetState = RegInit(true.B)
-  when(table.io.r.req.ready) {
+  when(ittage_table.io.r.req.ready) {
     // When all the SRAM first reach ready state, we consider power-on reset is done
     powerOnResetState := false.B
   }

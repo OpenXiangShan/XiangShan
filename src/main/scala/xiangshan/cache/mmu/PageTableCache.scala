@@ -207,7 +207,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l2h = Reg(Vec(l2tlbParams.l2Size, UInt(2.W)))
 
   // l1: level 1 non-leaf pte
-  val l1 = Module(new SplittedSRAM(
+  val l1ptw = Module(new SplittedSRAM(
     l1EntryType,
     set = l2tlbParams.l1nSets,
     way = l2tlbParams.l1nWays,
@@ -234,7 +234,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // l0: level 0 leaf pte of 4KB pages
-  val l0 = Module(new SplittedSRAM(
+  val l0ptw = Module(new SplittedSRAM(
     l0EntryType,
     set = l2tlbParams.l0nSets,
     way = l2tlbParams.l0nWays,
@@ -384,8 +384,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer,l2tlbParams.l1nWays,l2tlbParams.l1nSets)
   val (l1Hit, l1HitPPN, l1HitPbmt, l1Pre, l1eccError) = {
     val ridx = genPtwL1SetIdx(vpn_search)
-    l1.io.r.req.valid := stageReq.fire
-    l1.io.r.req.bits.apply(setIdx = ridx)
+    l1ptw.io.r.req.valid := stageReq.fire
+    l1ptw.io.r.req.bits.apply(setIdx = ridx)
     val vVec_req = getl1vSet(vpn_search)
     val hVec_req = getl1hSet(vpn_search)
 
@@ -396,7 +396,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       onlyStage1 -> onlyStage1,
       onlyStage2 -> onlyStage2
     ))
-    val data_resp = DataHoldBypass(l1.io.r.resp.data, stageDelay_valid_1cycle)
+    val data_resp = DataHoldBypass(l1ptw.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
@@ -441,8 +441,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val ptwl0replace = ReplacementPolicy.fromString(l2tlbParams.l0Replacer,l2tlbParams.l0nWays,l2tlbParams.l0nSets)
   val (l0Hit, l0HitData, l0Pre, l0eccError) = {
     val ridx = genPtwL0SetIdx(vpn_search)
-    l0.io.r.req.valid := stageReq.fire
-    l0.io.r.req.bits.apply(setIdx = ridx)
+    l0ptw.io.r.req.valid := stageReq.fire
+    l0ptw.io.r.req.bits.apply(setIdx = ridx)
     val vVec_req = getl0vSet(vpn_search)
     val hVec_req = getl0hSet(vpn_search)
 
@@ -453,7 +453,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       onlyStage1 -> onlyStage1,
       onlyStage2 -> onlyStage2
     ))
-    val data_resp = DataHoldBypass(l0.io.r.resp.data, stageDelay_valid_1cycle)
+    val data_resp = DataHoldBypass(l0ptw.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
@@ -666,10 +666,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   spRefillPerf.map(_ := false.B)
 
   // refill
-  l1.io.w.req <> DontCare
-  l0.io.w.req <> DontCare
-  l1.io.w.req.valid := false.B
-  l0.io.w.req.valid := false.B
+  l1ptw.io.w.req <> DontCare
+  l0ptw.io.w.req <> DontCare
+  l1ptw.io.w.req.valid := false.B
+  l0ptw.io.w.req.valid := false.B
 
   val memRdata = refill.ptes
   val memPtes = (0 until (l2tlbParams.blockBytes/(XLEN/8))).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
@@ -767,7 +767,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       pbmte,
       io.csr_dup(1).vsatp.mode
     )
-    l1.io.w.apply(
+    l1ptw.io.w.apply(
       valid = true.B,
       setIdx = refillIdx,
       data = wdata,
@@ -811,7 +811,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       pbmte,
       io.csr_dup(0).vsatp.mode
     )
-    l0.io.w.apply(
+    l0ptw.io.w.apply(
       valid = true.B,
       setIdx = refillIdx,
       data = wdata,

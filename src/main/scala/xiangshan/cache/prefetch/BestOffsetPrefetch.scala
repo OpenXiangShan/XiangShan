@@ -166,32 +166,32 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
+  val l1dRrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
 
   val wAddr = io.w.bits
-  rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
-  rrTable.io.w.req.bits.setIdx := idx(wAddr)
-  rrTable.io.w.req.bits.data(0).valid := true.B
-  rrTable.io.w.req.bits.data(0).tag := tag(wAddr)
+  l1dRrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
+  l1dRrTable.io.w.req.bits.setIdx := idx(wAddr)
+  l1dRrTable.io.w.req.bits.data(0).valid := true.B
+  l1dRrTable.io.w.req.bits.data(0).tag := tag(wAddr)
 
   val rAddr = io.r.req.bits.addr - (io.r.req.bits.testOffset << log2Up(blockBytes))
   val rData = Wire(rrTableEntry())
-  rrTable.io.r.req.valid := io.r.req.fire
-  rrTable.io.r.req.bits.setIdx := idx(rAddr)
-  rData := rrTable.io.r.resp.data(0)
+  l1dRrTable.io.r.req.valid := io.r.req.fire
+  l1dRrTable.io.r.req.bits.setIdx := idx(rAddr)
+  rData := l1dRrTable.io.r.resp.data(0)
 
   val rwConflict = io.w.fire && io.r.req.fire// && idx(wAddr) === idx(rAddr)
   // when (rwConflict) {
-  //   rrTable.io.r.req.valid := false.B
+  //   l1dRrTable.io.r.req.valid := false.B
   // }
   // when (RegNext(rwConflict)) {
   //   rData.valid := true.B
   //   rData.tag := RegNext(tag(wAddr))
   // }
 
-  io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
+  io.w.ready := l1dRrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(rrTable.io.r.req.fire)
+  io.r.resp.valid := RegNext(l1dRrTable.io.r.req.fire)
   io.r.resp.bits.testOffset := RegNext(io.r.req.bits.testOffset)
   io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
   io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))

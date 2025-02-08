@@ -60,8 +60,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
 
-  // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(
+  // val sc_table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val sc_table = Module(new SRAMTemplate(
     SInt(ctrBits.W),
     set = nRows,
     way = 2 * TageBanks,
@@ -96,8 +96,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val s1_pc           = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_unhashed_idx = s1_pc >> instOffsetBits
 
-  table.io.r.req.valid       := io.req.valid
-  table.io.r.req.bits.setIdx := s0_idx
+  sc_table.io.r.req.valid       := io.req.valid
+  sc_table.io.r.req.bits.setIdx := s0_idx
 
   val update_wdata        = Wire(Vec(numBr, SInt(ctrBits.W))) // correspond to physical bridx
   val update_wdata_packed = VecInit(update_wdata.map(Seq.fill(2)(_)).reduce(_ ++ _))
@@ -144,7 +144,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     Mux(mask, data, 0.U.asTypeOf(data))
   }
   val conflict_prediction_data = conflict_data_bypass.sliding(2, 2).toSeq.map(VecInit(_))
-  val per_br_ctrs_unshuffled   = table.io.r.resp.data.sliding(2, 2).toSeq.map(VecInit(_))
+  val per_br_ctrs_unshuffled   = sc_table.io.r.resp.data.sliding(2, 2).toSeq.map(VecInit(_))
   val per_br_ctrs = VecInit((0 until numBr).map(i =>
     Mux1H(
       UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
@@ -160,7 +160,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   io.resp.ctrs := Mux(use_conflict_data, conflict_br_ctrs, per_br_ctrs)
 
-  table.io.w.apply(
+  sc_table.io.w.apply(
     valid = (io.update.mask.reduce(_ || _) && !write_conflict) || can_write,
     data = Mux(can_write, conflict_buffer_data, update_wdata_packed),
     setIdx = Mux(can_write, conflict_buffer_idx, update_idx),

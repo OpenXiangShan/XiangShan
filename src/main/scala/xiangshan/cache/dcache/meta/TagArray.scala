@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utility.{SRAMTemplate, XSPerfAccumulate}
 import xiangshan.cache.CacheInstrucion._
+import freechips.rocketchip.diplomacy.ValName
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
@@ -64,19 +65,19 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
     rst_cnt := rst_cnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
+  val l1d_tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
   val ecc_array = TagEccParam.map {
     case _ =>
-      val ecc = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
+      val l1d_tag_ecc = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
       shouldReset = false, holdRead = false, singlePort = true))
-    ecc
+    l1d_tag_ecc
   }
 
   val wen = rst || io.write.valid
-  tag_array.io.w.req.valid := wen
-  tag_array.io.w.req.bits.apply(
+  l1d_tag_array.io.w.req.valid := wen
+  l1d_tag_array.io.w.req.bits.apply(
     setIdx = waddr,
     data = wdata,
     waymask = VecInit(wmask).asUInt
@@ -100,10 +101,10 @@ class TagArray(implicit p: Parameters) extends AbstractTagArray {
   // tag read
   val ren = io.read.fire
 
-  tag_array.io.r.req.valid := ren
-  tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
-  io.resp := tag_array.io.r.resp.data
-  XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
+  l1d_tag_array.io.r.req.valid := ren
+  l1d_tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
+  io.resp := l1d_tag_array.io.r.resp.data
+  XSPerfAccumulate("part_tag_read_counter", l1d_tag_array.io.r.req.valid)
 
   val ecc_ren = io.ecc_read.fire
   ecc_array match {

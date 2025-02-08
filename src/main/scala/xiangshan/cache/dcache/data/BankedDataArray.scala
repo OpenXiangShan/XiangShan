@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdge
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 import scala.math.max
+import freechips.rocketchip.diplomacy.ValName
 
 class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
   val addr = Vec(LoadPipelineWidth, Bits(PAddrBits.W))
@@ -83,7 +84,7 @@ class DataSRAMBankWriteReq(implicit p: Parameters) extends DCacheBundle {
 }
 
 // wrap a sram
-class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCacheModule {
+class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters, valName: ValName) extends DCacheModule {
   val io = IO(new Bundle() {
     val w = new Bundle() {
       val en = Input(Bool())
@@ -148,7 +149,7 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
 }
 
 // wrap data rows of 8 ways
-class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
+class DataSRAMBank(index: Int)(implicit p: Parameters, valName: ValName) extends DCacheModule {
   val io = IO(new Bundle() {
     val w = Input(new DataSRAMBankWriteReq)
 
@@ -312,7 +313,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
 
-  val data_banks = List.tabulate(DCacheSetDiv)( k => List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new DataSRAM(i,j)))))
+  val data_banks = List.tabulate(DCacheSetDiv)( k => List.tabulate(DCacheBanks)(i => List.tabulate(DCacheWays)(j => Module(new DataSRAM(i,j)(p, ValName("l1d_data_sram"))))))
   // ecc_banks also needs to be changed to two-dimensional to align with data_banks
   val ecc_banks = DataEccParam.map {
     case _ =>
@@ -320,13 +321,13 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         List.tabulate(DCacheWays)(j =>
           List.tabulate(DCacheBanks)(i =>
             Module(new SRAMTemplate(
-                Bits(eccBits.W),
-                set = DCacheSets / DCacheSetDiv,
-                way = 1,
-                shouldReset = false,
-                holdRead = false,
-                singlePort = true
-            ))
+              Bits(eccBits.W),
+              set = DCacheSets / DCacheSetDiv,
+              way = 1,
+              shouldReset = false,
+              holdRead = false,
+              singlePort = true
+            )(ValName("l1d_data_ecc")))
       )))
       ecc
   }
@@ -693,7 +694,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
 
-  val data_banks = List.fill(DCacheSetDiv)(List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i))))
+  val data_banks = List.fill(DCacheSetDiv)(List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i)(p, ValName("l1d_data_sram")))))
   val ecc_banks = DataEccParam.map {
     case _ =>
       val ecc = List.fill(DCacheSetDiv)(List.fill(DCacheBanks)(
@@ -704,7 +705,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
           shouldReset = false,
           holdRead = false,
           singlePort = true
-        ))
+        )(ValName("l1d_data_ecc")))
       ))
       ecc
   }

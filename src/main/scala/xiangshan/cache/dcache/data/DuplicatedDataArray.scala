@@ -24,8 +24,9 @@ import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdge
 import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 
 import scala.math.max
+import freechips.rocketchip.diplomacy.ValName
 
-class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
+class DuplicatedDataArray(implicit p: Parameters, valName: ValName) extends AbstractDataArray {
   val singlePort = true
   val readHighPriority = false
 
@@ -73,7 +74,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         shouldReset = false,
         holdRead = false,
         singlePort = singlePort
-      ))
+      )(ValName(s"${valName.name}_data_array")))
     }
 
     for (w <- 0 until nWays) {
@@ -121,7 +122,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         shouldReset = false,
         holdRead = false,
         singlePort = singlePort
-      ))
+      )(ValName(s"${valName.name}_ecc_array")))
       ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)
       ecc_array.io.w.req.bits.apply(
         setIdx = waddr,

@@ -20,11 +20,8 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import utility.XSDebug
 import xiangshan.L1CacheErrorInfo
-
-import scala.math.max
 
 
 class L1DataReadReq(implicit p: Parameters) extends DCacheBundle {

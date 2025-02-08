@@ -68,13 +68,13 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
-    sram.io.r.req.valid       := io.ren(i)
-    sram.io.r.req.bits.setIdx := io.raddr(i)
-    io.rdata(i)               := sram.io.r.resp.data(0)
-    sram.io.w.req.valid       := io.wen
-    sram.io.w.req.bits.setIdx := io.waddr
-    sram.io.w.req.bits.data   := VecInit(io.wdata)
+    val ftq_sram = Module(new SRAMTemplate(gen, FtqSize))
+    ftq_sram.io.r.req.valid       := io.ren(i)
+    ftq_sram.io.r.req.bits.setIdx := io.raddr(i)
+    io.rdata(i)                   := ftq_sram.io.r.resp.data(0)
+    ftq_sram.io.w.req.valid       := io.wen
+    ftq_sram.io.w.req.bits.setIdx := io.waddr
+    ftq_sram.io.w.req.bits.data   := VecInit(io.wdata)
   }
 
 }

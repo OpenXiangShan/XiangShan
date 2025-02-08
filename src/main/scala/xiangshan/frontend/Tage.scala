@@ -337,7 +337,7 @@ class TageTable(
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
-  val table_banks = Seq.fill(nBanks)(
+  val tage_table_banks = Seq.fill(nBanks)(
     Module(new FoldedSRAMTemplate(
       new TageEntry,
       set = bankSize,
@@ -353,8 +353,8 @@ class TageTable(
   val s0_bank_req_1h   = get_bank_mask(s0_idx)
 
   for (b <- 0 until nBanks) {
-    table_banks(b).io.r.req.valid       := io.req.fire && s0_bank_req_1h(b)
-    table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+    tage_table_banks(b).io.r.req.valid       := io.req.fire && s0_bank_req_1h(b)
+    tage_table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
   }
 
   us.io.r.req.valid       := io.req.fire
@@ -365,11 +365,11 @@ class TageTable(
   val s1_tag                        = RegEnable(s0_tag, io.req.fire)
   val s1_pc                         = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_bank_req_1h                = RegEnable(s0_bank_req_1h, io.req.fire)
-  val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
+  val s1_bank_has_write_on_this_req = RegEnable(VecInit(tage_table_banks.map(_.io.w.req.valid)), io.req.valid)
 
   val resp_invalid_by_write = Wire(Bool())
 
-  val tables_r = table_banks.map(_.io.r.resp.data)                               // s1
+  val tables_r = tage_table_banks.map(_.io.r.resp.data)                               // s1
   val unconfs  = tables_r.map(r => VecInit(r.map(e => WireInit(unconf(e.ctr))))) // do unconf cal in parallel
   val hits =
     tables_r.map(r =>
@@ -428,7 +428,7 @@ class TageTable(
   // val silent_update_from_wrbypass = Wire(Bool())
 
   for (b <- 0 until nBanks) {
-    table_banks(b).io.w.apply(
+    tage_table_banks(b).io.w.apply(
       valid = per_bank_update_way_mask(b).orR && update_req_bank_1h(b),
       data = per_bank_update_wdata(b),
       setIdx = update_idx_in_bank,
@@ -438,16 +438,16 @@ class TageTable(
 
   // Power-on reset
   val powerOnResetState = RegInit(true.B)
-  when(us.io.r.req.ready && table_banks.map(_.io.r.req.ready).reduce(_ && _)) {
+  when(us.io.r.req.ready && tage_table_banks.map(_.io.r.req.ready).reduce(_ && _)) {
     // When all the SRAM first reach ready state, we consider power-on reset is done
     powerOnResetState := false.B
   }
   // Do not use table banks io.r.req.ready directly
-  // All the us & table_banks are single port SRAM, ready := !wen
+  // All the us & tage_table_banks are single port SRAM, ready := !wen
   // We do not want write request block the whole BPU pipeline
   io.req.ready := !powerOnResetState
 
-  val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
+  val bank_conflict = (0 until nBanks).map(b => tage_table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_ || _)
   XSPerfAccumulate(f"tage_table_bank_conflict", bank_conflict)
 
   val update_u_idx = update_idx
@@ -555,12 +555,12 @@ class TageTable(
       val pidx = get_phy_br_idx(update_unhashed_idx, li)
       XSPerfAccumulate(
         f"tage_table_bank_${b}_br_li_${li}_updated",
-        table_banks(b).io.w.req.valid && table_banks(b).io.w.req.bits.waymask.get(pidx)
+        tage_table_banks(b).io.w.req.valid && tage_table_banks(b).io.w.req.bits.waymask.get(pidx)
       )
       val pi = i
       XSPerfAccumulate(
         f"tage_table_bank_${b}_br_pi_${pi}_updated",
-        table_banks(b).io.w.req.valid && table_banks(b).io.w.req.bits.waymask.get(pi)
+        tage_table_banks(b).io.w.req.valid && tage_table_banks(b).io.w.req.bits.waymask.get(pi)
       )
     }
   }
