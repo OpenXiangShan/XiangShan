@@ -32,8 +32,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
-import xiangshan.cache.{CMOReq, CMOResp}
+import xiangshan.cache.{CMOReq, CMOResp, DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import difftest._
 import difftest.common.DifftestMem
 

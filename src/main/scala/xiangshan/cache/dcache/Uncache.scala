@@ -26,8 +26,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientN
 import xiangshan._
 import xiangshan.mem._
 import xiangshan.mem.Bundles._
-import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
-import coupledL2.{MemBackTypeMM, MemPageTypeNC}
+import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
 
