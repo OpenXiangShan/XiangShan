@@ -36,15 +36,16 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
+import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
 import xiangshan.backend.fu.util.{HasCSRConst, SdtrigExt}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
 import xiangshan.backend.datapath.NewPipelineConnect
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 import xiangshan.cache._
 import xiangshan.cache.mmu._

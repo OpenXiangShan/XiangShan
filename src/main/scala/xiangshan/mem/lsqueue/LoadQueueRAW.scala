@@ -16,17 +16,18 @@
 
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.cache._
-import xiangshan.frontend.FtqPtr
-import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.frontend.FtqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters

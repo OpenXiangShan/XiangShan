@@ -16,15 +16,16 @@
 
 package xiangshan.mem.prefetch
 
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
-import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.backend._
+import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.Bundles.{LdPrefetchTrainBundle, StPrefetchTrainBundle}
+import xiangshan.cache.mmu.TlbRequestIO
 import coupledL2.PrefetchCtrlFromCore
 
 class PrefetchCtrl(implicit p: Parameters) extends XSBundle {

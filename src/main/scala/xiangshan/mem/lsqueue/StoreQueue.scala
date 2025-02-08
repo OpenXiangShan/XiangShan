@@ -17,24 +17,24 @@
 
 package xiangshan.mem
 
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest._
-import difftest.common.DifftestMem
-import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
-import xiangshan.cache.{CMOReq, CMOResp}
+import xiangshan.ExceptionNO._
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
-import xiangshan.ExceptionNO._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.{CMOReq, CMOResp, DCacheLineIO, DCacheWordIO, MemoryOpConstants}
+import difftest._
+import difftest.common.DifftestMem
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
