@@ -1297,7 +1297,11 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     val onlyS2_hit = s2.hit(vpn, vmid)
     // allstage and onlys1 hit
     val s1vpn = Cat(s1.entry.tag, s1.addr_low)
-    val level = s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)
+    val level = Mux(this.s2xlate === onlyStage1,
+                  s1.entry.level.getOrElse(0.U),
+                  // when allStage, level is the smaller one of stage1 and stage2
+                  // e.g. stage1 is 1GB page, stage2 is 2MB page，then level is 2MB
+                  s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U))
 
     val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
     for (i <- 0 until 3) {
