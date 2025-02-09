@@ -459,14 +459,6 @@ class Sbuffer(implicit p: Parameters)
           merge_need_uarch_drain := true.B
         }
       }
-      XSDebug(
-        mergeVec(entryIdx) && reqvtag =/= vtag(entryIdx),
-        "reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
-        reqvtag << OffsetWidth,
-        reqptag << OffsetWidth,
-        vtag(entryIdx) << OffsetWidth,
-        ptag(entryIdx) << OffsetWidth
-      )
     })
   }
 
@@ -496,6 +488,18 @@ class Sbuffer(implicit p: Parameters)
         assert(debug_insertIdx === insertIdx)
       })
     }
+    // XSDebug of mergeWordReq
+    (0 until StoreBufferSize).map(entryIdx => {
+      XSDebug(
+        accessValid && canMerge(i) &&
+          mergeVec(i)(entryIdx) && invtags(i) =/= vtag(entryIdx),
+        "reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
+        invtags(i) << OffsetWidth,
+        inptags(i) << OffsetWidth,
+        vtag(entryIdx) << OffsetWidth,
+        ptag(entryIdx) << OffsetWidth
+      )
+    })
   }
 
 
