@@ -519,14 +519,14 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
     ).asUInt.orR
-    when(f1_tagMismatchVec(i)) {
-      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
-        f1_ptagMatches.asUInt,
-        RegEnable(f0_vtagMatches.asUInt, f0_fwdValid),
-        RegEnable(forward.vaddr, f0_fwdValid),
-        RegEnable(forward.paddr, f0_fwdValid)
-      )
-    }
+    XSDebug(
+      f1_tagMismatchVec(i),
+      "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
+      f1_ptagMatches.asUInt,
+      RegEnable(f0_vtagMatches.asUInt, f0_fwdValid),
+      RegEnable(forward.vaddr, f0_fwdValid),
+      RegEnable(forward.paddr, f0_fwdValid)
+    )
     // response
     forward.addrInvalid := false.B // addr in ubuffer is always ready
     forward.dataInvalid := false.B // data in ubuffer is always ready
