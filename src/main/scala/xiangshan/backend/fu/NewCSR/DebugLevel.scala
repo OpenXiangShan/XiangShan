@@ -43,9 +43,9 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tdata2)
 
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
-    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasdebugModeBundle {
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle {
       when(wen){
-        reg := wdata.writeTdata1(debugMode, chainable).asUInt
+        reg := wdata.writeTdata1(canWriteDmode, chainable).asUInt
       }
     })
   )
@@ -131,10 +131,10 @@ class Tdata1Bundle extends CSRBundle{
     res.ACTION
   }
 
-  def writeTdata1(debugMode: Bool, chainable: Bool): Tdata1Bundle = {
+  def writeTdata1(canWriteDmode: Bool, chainable: Bool): Tdata1Bundle = {
     val res = Wire(new Tdata1Bundle)
     res := this.asUInt
-    val dmode = this.DMODE.asBool && debugMode
+    val dmode = this.DMODE.asBool && canWriteDmode
     res.TYPE := this.TYPE.legalize.asUInt
     res.DMODE := dmode
     when(this.TYPE.isLegal) {
@@ -320,8 +320,8 @@ trait HasTdataSink { self: CSRModule[_] =>
     val tdata2 = UInt(XLEN.W)
   }))
 }
-trait HasdebugModeBundle { self: CSRModule[_] =>
-  val debugMode = IO(Input(Bool()))
+trait HasTriggerBundle { self: CSRModule[_] =>
+  val canWriteDmode = IO(Input(Bool()))
   val chainable = IO(Input(Bool()))
 }
 
