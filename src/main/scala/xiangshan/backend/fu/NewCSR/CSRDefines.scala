@@ -144,6 +144,11 @@ object CSRDefines {
     val Dirty = Value(3.U)
   }
 
+  object BMAField extends CSREnum with WARLApply {
+    val ResetBMA = Value(0.U)
+    val TestBMA = Value("h4000000".U)
+  }
+
   object XLENField extends CSREnum with ROApply {
     val XLEN32 = Value(1.U)
     val XLEN64 = Value(2.U)
