@@ -51,7 +51,6 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     val req = Flipped(Decoupled(new ProbeReq))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val pipe_resp = Input(Valid(new ProbeResp))
-    val lrsc_locked_block = Input(Valid(UInt()))
     val id = Input(UInt(log2Up(cfg.nProbeEntries).W))
 
     // the block we are probing
@@ -84,16 +83,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  val lrsc_blocked = Mux(
-    io.req.fire,
-    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(io.req.bits.addr),
-    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr)
-  )
-
   when (state === s_pipe_req) {
-    // Note that probe req will be blocked in the next cycle if a lr updates lrsc_locked_block addr
-    // in this way, we can RegNext(lrsc_blocked) for better timing
-    io.pipe_req.valid := !RegNext(lrsc_blocked)
+    io.pipe_req.valid := true.B
 
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
@@ -120,7 +111,6 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   // perfoemance counters
   XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire)
   XSPerfAccumulate("probe_penalty", state =/= s_invalid)
-  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr))
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
@@ -129,8 +119,6 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   val io = IO(new Bundle {
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
     val pipe_req  = DecoupledIO(new MainPipeReq)
-    val lrsc_locked_block = Input(Valid(UInt()))
-    val update_resv_set = Input(Bool())
   })
 
   val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries))
@@ -178,25 +166,14 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     entry.io.pipe_resp.valid := io.pipe_req.fire
     entry.io.pipe_resp.bits.id := io.pipe_req.bits.id
 
-    entry.io.lrsc_locked_block := io.lrsc_locked_block
-
     entry
   }
 
   // delay probe req for 1 cycle
   val selected_req_valid = RegInit(false.B)
   val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire)
-  val selected_lrsc_blocked = Mux(
-    pipe_req_arb.io.out.fire,
-    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(pipe_req_arb.io.out.bits.addr),
-    io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(selected_req_bits.addr) && selected_req_valid
-  )
-  val resvsetProbeBlock = RegNext(io.update_resv_set || selected_lrsc_blocked)
-  // When we update update_resv_set, block all probe req in the next cycle
-  // It should give Probe reservation set addr compare an independent cycle,
-  // which will lead to better timing
   pipe_req_arb.io.out.ready := !selected_req_valid || io.pipe_req.fire
-  io.pipe_req.valid := selected_req_valid && !resvsetProbeBlock
+  io.pipe_req.valid := selected_req_valid
   io.pipe_req.bits := selected_req_bits
   when(io.pipe_req.fire){
     selected_req_valid := false.B
@@ -220,7 +197,6 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
 // io.pipe_req.bits.dump(io.pipe_req.fire)
 
-  XSDebug(io.lrsc_locked_block.valid, "lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   XSPerfAccumulate("ProbeL1DCache", io.mem_probe.fire)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
