@@ -15,7 +15,8 @@ object HardenXSPerfAccumulate {
 
   def apply[T <: Data](
                         name: String,
-                        perfCnt: T
+                        perfCnt: T,
+                        wire: Boolean = false // perfCnt direct connection
                       ): Unit = {
     if (enabled) {
       val id = register(perfCnt, name)
@@ -30,7 +31,10 @@ object HardenXSPerfAccumulate {
       counter := Mux(perfClean, 0.U, next_counter)
 
       val probe = WireInit(0.U(64.W))
-      probe := counter
+      if (wire)
+        probe := perfCnt.asTypeOf(UInt(64.W))
+      else
+        probe := counter
       BoringUtils.addSource(probe, name)
     }
   }
