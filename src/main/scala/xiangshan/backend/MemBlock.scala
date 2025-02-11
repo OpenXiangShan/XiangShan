@@ -48,6 +48,7 @@ import system.SoCParamsKey
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.ExceptionNO._
 import utility.ChiselMapWithSpecDivide
+import xiangshan.frontend.tracertl.TraceMemAddrFeeder
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -419,13 +420,24 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       }
       l1Prefetcher
   }
+
   // load prefetch to l1 Dcache
+  val l1PfReqArb = Module(new Arbiter(new L1PrefetchReq, 2))
+  l1_pf_req <> l1PfReqArb.io.out
   l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
+    case Some(pf) => l1PfReqArb.io.in(0) <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
     case None =>
-      l1_pf_req.valid := false.B
-      l1_pf_req.bits := DontCare
+      l1PfReqArb.io.in(0).valid := false.B
+      l1PfReqArb.io.in(0).bits := DontCare
   }
+  if (env.TraceRTLMode) {
+    val traceMemAddrFeeder = Module(new TraceMemAddrFeeder)
+    l1PfReqArb.io.in(1) <> traceMemAddrFeeder.io.req
+  } else {
+    l1PfReqArb.io.in(1).valid := false.B
+    l1PfReqArb.io.in(1).bits := DontCare
+  }
+
   val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))

@@ -16,6 +16,8 @@
 package xiangshan.frontend.tracertl
 
 import chisel3._
+import chisel3.util.experimental.BoringUtils.tapAndRead
+import chisel3.reflect.DataMirror.isVisible
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{DebugOptionsKey, XSTileKey}
 import xiangshan.backend.fu.FuType
@@ -62,38 +64,15 @@ object TraceRTLDontCare {
 }
 
 
-object TraceFastSimArthi {
-  val nonEliminatedFuType = Seq(
+object TraceFastSimOoO {
+  val needOoOFuType = Seq(
     FuType.jmp, FuType.brh, FuType.csr, // cfi
     FuType.ldu, FuType.stu, FuType.mou, // ls
-    FuType.vldu, FuType.vstu, FuType.vsegldu, FuType.vsegstu // vls
+    // FuType.vldu, FuType.vstu, FuType.vsegldu, FuType.vsegstu // vls
   )
 
-  def fuTypeCheck(fuType: UInt)(implicit p: Parameters): Bool = {
-    !FuTypeOrR(fuType, nonEliminatedFuType)
-  }
-
-  def apply(fuType: UInt)(implicit p: Parameters): Bool = {
-    val env = p(DebugOptionsKey)
-    val xsParam = p(XSTileKey).head
-    if (env.TraceRTLMode) {
-      xsParam.TraceEliminateArthi.B &&
-      TraceFastSim.fastSimEnable() &&
-      fuTypeCheck(fuType)
-    } else {
-      false.B
-    }
-  }
-
-  def apply()(implicit p: Parameters): Bool = {
-    val env = p(DebugOptionsKey)
-    val xsParam = p(XSTileKey).head
-    if (env.TraceRTLMode) {
-      xsParam.TraceEliminateArthi.B &&
-      TraceFastSim.fastSimEnable()
-    } else {
-      false.B
-    }
+  def needOoO(fuType: UInt)(implicit p: Parameters): Bool = {
+    FuTypeOrR(fuType, needOoOFuType)
   }
 }
 
@@ -107,5 +86,17 @@ object TraceFastSimDRAM {
     } else {
       false.B
     }
+  }
+}
+
+object TraceBoringUtils {
+  val signalMap = scala.collection.mutable.Map[String, UInt]()
+
+  def addSource(source: UInt, name: String): Unit = {
+    signalMap(name) = source
+  }
+  def addSink(name: String): UInt = {
+    val source = signalMap(name)
+    if (isVisible(source)) source else tapAndRead(source)
   }
 }

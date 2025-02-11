@@ -29,7 +29,7 @@ import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.FuType
-import xiangshan.frontend.tracertl.TraceFastSimArthi
+import xiangshan.frontend.tracertl.TraceFastSimOoO
 
 case class DispatchParameters
 (
@@ -350,30 +350,30 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     val doesNotNeedExec = io.fromRename(i).bits.eliminatedMove
-    val traceEliminateArthi = io.fromRename(i).bits.traceDynaInfo.eliminateArthi
-    io.toIntDq0.needAlloc(i) := io.fromRename(i).valid && isIntDq0(i) && !doesNotNeedExec && toIntDq0Valid(i) && !traceEliminateArthi
+    val traceEliminateOoO = io.fromRename(i).bits.traceDynaInfo.eliminateOoO
+    io.toIntDq0.needAlloc(i) := io.fromRename(i).valid && isIntDq0(i) && !doesNotNeedExec && toIntDq0Valid(i) && !traceEliminateOoO
     io.toIntDq0.req(i).valid := io.fromRename(i).valid && isIntDq0(i) && !doesNotNeedExec && toIntDq0Valid(i) &&
-      canEnterDpq && dqCanAccept && !traceEliminateArthi
+      canEnterDpq && dqCanAccept && !traceEliminateOoO
     io.toIntDq0.req(i).bits := updatedUop(i)
 
-    io.toIntDq1.needAlloc(i) := io.fromRename(i).valid && isIntDq1(i) && !doesNotNeedExec && toIntDq1Valid(i) && !traceEliminateArthi
+    io.toIntDq1.needAlloc(i) := io.fromRename(i).valid && isIntDq1(i) && !doesNotNeedExec && toIntDq1Valid(i) && !traceEliminateOoO
     io.toIntDq1.req(i).valid := io.fromRename(i).valid && isIntDq1(i) && !doesNotNeedExec && toIntDq1Valid(i) &&
-      canEnterDpq && dqCanAccept && !traceEliminateArthi
+      canEnterDpq && dqCanAccept && !traceEliminateOoO
     io.toIntDq1.req(i).bits := updatedUop(i)
 
-    io.toFpDq.needAlloc(i) := io.fromRename(i).valid && isFp(i) && !traceEliminateArthi
+    io.toFpDq.needAlloc(i) := io.fromRename(i).valid && isFp(i) && !traceEliminateOoO
     io.toFpDq.req(i).valid := io.fromRename(i).valid && isFp(i) &&
-      canEnterDpq && dqCanAccept && !traceEliminateArthi
+      canEnterDpq && dqCanAccept && !traceEliminateOoO
     io.toFpDq.req(i).bits := updatedUop(i)
 
-    io.toVecDq.needAlloc(i)  := io.fromRename(i).valid && isVec(i) && !traceEliminateArthi
+    io.toVecDq.needAlloc(i)  := io.fromRename(i).valid && isVec(i) && !traceEliminateOoO
     io.toVecDq.req(i).valid  := io.fromRename(i).valid && isVec(i) &&
-      canEnterDpq && dqCanAccept && !traceEliminateArthi
+      canEnterDpq && dqCanAccept && !traceEliminateOoO
     io.toVecDq.req(i).bits   := updatedUop(i)
 
-    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i) && !traceEliminateArthi
+    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i) && !traceEliminateOoO
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isMem(i) &&
-      canEnterDpq && dqCanAccept && !traceEliminateArthi
+      canEnterDpq && dqCanAccept && !traceEliminateOoO
     io.toLsDq.req(i).bits   := updatedUop(i)
 
     //delete trigger message from frontend

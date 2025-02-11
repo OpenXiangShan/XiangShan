@@ -17,6 +17,7 @@ package xiangshan.frontend.tracertl
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
 import xiangshan.frontend.BranchPredictionRedirect
@@ -50,8 +51,16 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceDriverIO())
   dontTouch(io)
 
+  // when fastSim instruction is drained, but fastSim memory address is not drained
+  // block the fetch
+  // val fastSimMemAddrFinish = TraceBoringUtils.addSink("TraceMemAddrFeederFinished").asBool
+  val fastSimMemAddrFinish = WireInit(true.B)
+  BoringUtils.addSink(fastSimMemAddrFinish, "TraceMemAddrFeederFinished")
+  val firstInstFastSim = PriorityMux(io.traceInsts.map(_.valid), io.traceInsts.map(_.bits.fastSimulation(0).asBool))
+
   val pcMismatch = io.out.recv.bits.instNum === 0.U
-  io.out.block := pcMismatch
+  io.out.block := pcMismatch || (!firstInstFastSim && !fastSimMemAddrFinish)
+  XSPerfAccumulate("FastSimMemAddrBlock", (!firstInstFastSim && !fastSimMemAddrFinish))
 
   val finalRange = io.traceRange & io.ifuRange
 

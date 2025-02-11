@@ -31,7 +31,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.tracertl.TraceFastSimArthi
+import xiangshan.frontend.tracertl.TraceFastSimOoO
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -191,7 +191,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
 
-    inst.bits.traceDynaInfo.eliminateArthi := false.B
+    inst.bits.traceDynaInfo.eliminateOoO := false.B
     if (env.TraceRTLMode) {
       inst.bits.exceptionVec := 0.U.asTypeOf(inst.bits.exceptionVec)
       when (inst.bits.traceInfo.hasException) {
@@ -199,7 +199,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       }
 
       if (TraceEliminateArthi) {
-        when (TraceFastSimArthi()) {
+        when (inst.bits.traceInfo.isFastSim) {
           // how to
           inst.bits.lsrc.foreach(_ := 0.U)
           inst.bits.ldest := 0.U
@@ -209,7 +209,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
           inst.bits.v0Wen := false.B
           inst.bits.vlWen := false.B
 
-          inst.bits.traceDynaInfo.eliminateArthi := TraceFastSimArthi(inst.bits.fuType)
+          inst.bits.traceDynaInfo.eliminateOoO := !TraceFastSimOoO.needOoO(inst.bits.fuType)
         }
       }
     }

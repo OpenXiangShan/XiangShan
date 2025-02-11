@@ -34,8 +34,10 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val branchTaken = UInt(8.W)
   val exception = UInt(8.W)
 
+  val fastSimulation = UInt(8.W)
   val InstID = UInt(64.W)
 
+  def isFastSim = fastSimulation(0)
   def arthiSrc0 = memoryAddrVA
   def arthiSrc1 = memoryAddrPA
   def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
@@ -150,6 +152,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte branch_type,
        |  output byte branch_taken,
        |  output byte exception,
+       |  output byte fast_simulaiton,
        |  output longint InstID,
        |  input  byte idx,
        |);
@@ -166,7 +169,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
              |      ${destName}_${i}_target, ${destName}_${i}_inst,
              |      ${destName}_${i}_memoryType, ${destName}_${i}_memorySize,
              |      ${destName}_${i}_branchType, ${destName}_${i}_branchTaken,
-             |      ${destName}_${i}_exception,
+             |      ${destName}_${i}_exception, ${destName}_${i}_fastSimulation,
              |      ${destName}_${i}_InstID,
              |      $i);
              |""".stripMargin

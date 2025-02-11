@@ -35,5 +35,5 @@ class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
 }
 
 class TraceDynaInfo(implicit p: Parameters) extends TraceBundle {
-  val eliminateArthi = Bool()
+  val eliminateOoO = Bool() // no need OoO execution
 }
