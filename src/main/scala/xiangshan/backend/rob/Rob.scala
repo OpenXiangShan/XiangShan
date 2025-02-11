@@ -956,6 +956,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
   XSPerfAccumulate("clock_cycle", 1.U)
   HardenXSPerfAccumulate("clock_cycle", 1.U)
+  HardenXSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
   XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
@@ -1032,13 +1033,52 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
 
   io.commits.commitValid.zip(commitDebugUop).zipWithIndex.map{
     case ((v, uop), i) =>
+      val srcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
+      uop.ctrl.srcType.zip(uop.ctrl.lsrc).zip(srcValid.zipWithIndex).foreach{
+        case ((srctype, lsrc), (svalid, i)) =>
+          svalid := Mux(FuType.isFpExu(uop.ctrl.fuType), srctype === SrcType.fp,
+            srctype === SrcType.reg && lsrc =/= 0.U && i.U =/= 2.U)
+      }
+      HardenXSPerfAccumulate(s"isCommit_$i", v && io.commits.isCommit, true)
+      HardenXSPerfAccumulate(s"cf_$i", GTimer(), true)
+      HardenXSPerfAccumulate(s"pc_$i", uop.cf.pc, true)
+      HardenXSPerfAccumulate(s"instr_$i", uop.cf.instr, true)
+      HardenXSPerfAccumulate(s"fuType_$i", uop.ctrl.fuType, true)
+      HardenXSPerfAccumulate(s"fuOpType_$i", uop.ctrl.fuOpType, true)
+      HardenXSPerfAccumulate(s"fpu_$i", uop.ctrl.fpu.asUInt, true)
+      HardenXSPerfAccumulate(s"FetchCacheLine_$i", uop.debugInfo.fetchCacheTime, true)
+      HardenXSPerfAccumulate(s"ProcessCacheCompletion_$i", uop.debugInfo.cacheCompTime, true)
+      HardenXSPerfAccumulate(s"Fetch_$i", uop.debugInfo.fetchTime, true)
+      HardenXSPerfAccumulate(s"Decode_$i", uop.debugInfo.decodeTime, true)
+      HardenXSPerfAccumulate(s"Rename_$i", uop.debugInfo.renameTime, true)
+      HardenXSPerfAccumulate(s"BlockFromROB_$i", uop.debugInfo.block_from_rob.asUInt, true)
+      HardenXSPerfAccumulate(s"BlockFromDPQ_$i", uop.debugInfo.block_from_dpq.asUInt, true)
+      HardenXSPerfAccumulate(s"BlockFromSerial_$i", uop.debugInfo.block_from_serial.asUInt, true)
+      HardenXSPerfAccumulate(s"BlockFromRF_$i", uop.debugInfo.block_from_intrf.asUInt | uop.debugInfo.block_from_fprf.asUInt, true)
+      HardenXSPerfAccumulate(s"BlockFromLQ_$i", uop.debugInfo.block_from_lq.asUInt, true)
+      HardenXSPerfAccumulate(s"BlockFromSQ_$i", uop.debugInfo.block_from_sq.asUInt, true)
+      HardenXSPerfAccumulate(s"EliminatedMove_$i", uop.debugInfo.eliminatedMove, true)
+      HardenXSPerfAccumulate(s"Dispatch_$i", uop.debugInfo.dispatchTime, true)
+      HardenXSPerfAccumulate(s"EnqRS_$i", uop.debugInfo.enqRsTime, true)
+      HardenXSPerfAccumulate(s"InsertReadyList_$i", uop.debugInfo.readyIssueTime, true)
+      HardenXSPerfAccumulate(s"Select_$i", uop.debugInfo.selectTime, true)
+      HardenXSPerfAccumulate(s"Issue_$i", uop.debugInfo.issueTime, true)
+      HardenXSPerfAccumulate(s"Complete_$i", uop.debugInfo.writebackTime, true)
+      HardenXSPerfAccumulate(s"Commit_$i", GTimer(), true)
+      HardenXSPerfAccumulate(s"ROB_$i", uop.robIdx.value, true)
+      HardenXSPerfAccumulate(s"LQ_$i", uop.lqIdx.value, true)
+      HardenXSPerfAccumulate(s"SQ_$i", uop.sqIdx.value, true)
+      HardenXSPerfAccumulate(s"RS_$i", uop.debugInfo.rsIdx, true)
+      HardenXSPerfAccumulate(s"FU_$i", uop.debugInfo.fuIdx, true)
+      HardenXSPerfAccumulate(s"SRC0_$i", uop.psrc(0), true)
+      HardenXSPerfAccumulate(s"SRC1_$i", uop.psrc(1), true)
+      HardenXSPerfAccumulate(s"SRC2_$i", uop.psrc(2), true)
+      HardenXSPerfAccumulate(s"DST_$i", uop.pdest, true)
+      HardenXSPerfAccumulate(s"SRCTYPE0_$i", srcValid(0), true)
+      HardenXSPerfAccumulate(s"SRCTYPE1_$i", srcValid(1), true)
+      HardenXSPerfAccumulate(s"SRCTYPE2_$i", srcValid(2), true)
+      /*
       when(v && io.commits.isCommit) {
-        val srcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
-        uop.ctrl.srcType.zip(uop.ctrl.lsrc).zip(srcValid.zipWithIndex).foreach{
-          case ((srctype, lsrc), (svalid, i)) =>
-            svalid := Mux(FuType.isFpExu(uop.ctrl.fuType), srctype === SrcType.fp,
-              srctype === SrcType.reg && lsrc =/= 0.U && i.U =/= 2.U)
-        }
         printf(cf"${GTimer()}: system.switch_cpus: T0 : 0x${uop.cf.pc}%x : 0x${Hexadecimal(uop.cf.instr)}" +
           p" : ${uop.ctrl.fuType}_${uop.ctrl.fuOpType}_${uop.ctrl.fpu.asUInt} : _" +
           p" : FetchCacheLine=${uop.debugInfo.fetchCacheTime} : ProcessCacheCompletion=${uop.debugInfo.cacheCompTime}" +
@@ -1065,6 +1105,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
           "\n"
         )
       }
+      */
   }
 
   if (env.EnableDifftest) {
