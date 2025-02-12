@@ -333,7 +333,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).replayInst := false.B // set by IQ or MemQ
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := false.B
-    uops(i).ftqLastOffset := uops(i).ftqOffset
+    uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -389,7 +389,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
-        uops(i).ftqLastOffset := uops(i + 1).ftqLastOffset
       }
     }.elsewhen(needRobFlags(i)) {
       uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))(1)
