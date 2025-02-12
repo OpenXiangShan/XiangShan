@@ -988,7 +988,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l0v := l0v & ~(l0hhit & l0vmidhit & l0vpnhit & l0flushMask)
         spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
-        l0v := l0v & ~(l0hhit & l0vmidhit & ~spg & spasidhit & l0vpnhit & l0flushMask)
+        l0v := l0v & ~(l0hhit & l0vmidhit & ~l0g & l0asidhit & l0vpnhit & l0flushMask)
         spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = true.B))).asUInt)
       }
     }
