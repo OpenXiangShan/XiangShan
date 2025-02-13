@@ -383,7 +383,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
 
   io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    instrValid(i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)
+    instrValid(i) && fixedRange(i) && (pd.isRet || pd.isJal || pd.isJalr || takenIdx === i.U && predTaken && !pd.notCFI)
   })
 
   /** second check: faulse prediction fault and target fault */
