@@ -1287,7 +1287,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
 
   private val deqNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isWritebacked
-  private val deqStdNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).stdWritebacked
+  // private val deqStdNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).stdWritebacked
+  private val deqStdNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isStdWritebacked
   private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
   private val deqHeadInfo = debug_microOp(deqPtr.value)
   val deqUopCommitType = debug_microOp(deqPtr.value).commitType

@@ -39,6 +39,7 @@ import xiangshan.backend.trace._
 
 import scala.collection.immutable.Nil
 import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 
 
@@ -65,7 +66,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val loadWaitBit = Bool()    // for perfEvents
     val eliminatedMove = Bool() // for perfEvents
     // data end
-    
+
     // trace
     val traceBlockInPipe = new TracePipe(log2Up(RenameWidth * 2))
     // status begin
@@ -91,8 +92,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // trace_begin
     val traceInfo = new TraceInstrBundle()
 
-    def isWritebacked: Bool = !uopNum.orR && stdWritebacked
+    def isStdWritebacked: Bool = stdWritebacked || TraceRTLChoose(false.B, traceInfo.isFastSim)
     def isUopWritebacked: Bool = !uopNum.orR
+    def isWritebacked: Bool = !uopNum.orR && isStdWritebacked
 
   }
 
@@ -129,6 +131,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_end
     val dirtyFs = Bool()
     val dirtyVs = Bool()
+
+    val traceInfo = new TraceInstrBundle()
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: DynInst): Unit = {
@@ -161,7 +165,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
-    robCommitEntry.commit_w := (robEntry.uopNum === 0.U) && (robEntry.stdWritebacked === true.B)
+    // robCommitEntry.commit_w := (robEntry.uopNum === 0.U) && (robEntry.stdWritebacked === true.B)
+    robCommitEntry.commit_w := robEntry.isWritebacked
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe
     robCommitEntry.rfWen := robEntry.rfWen
@@ -188,6 +193,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
     robCommitEntry.debug_pdest.foreach(_ := robEntry.debug_pdest.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
+
+    robCommitEntry.traceInfo := robEntry.traceInfo
   }
 }
 

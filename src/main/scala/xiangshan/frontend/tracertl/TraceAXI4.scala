@@ -159,7 +159,7 @@ class TraceAXI4Xbar(
         // origin: seq.map(_.contains(addr)).reduce(_ || _)
         // addr is not used, changed to fastSimEnable
         val imFastSimSeq = TraceAddressRange.imTraceFastSim(seq)
-        val fastSimEnable = TraceFastSimDRAM()
+        val fastSimEnable = TraceFastSimMemory()
         ~(imFastSimSeq.B ^ fastSimEnable)
       }
     })

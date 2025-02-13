@@ -35,7 +35,7 @@ import xiangshan.mem.AddPipelineReg
 import xiangshan.mem.prefetch._
 import xiangshan.mem.trace._
 import xiangshan.mem.LqPtr
-import xiangshan.frontend.tracertl.{TraceFastSim, TraceBoringUtils}
+import xiangshan.frontend.tracertl.TraceFastSimMemory
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -656,7 +656,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
-  val fastSimMode = TraceFastSim.fastSimEnable()
+  val fastSimMode = TraceFastSimMemory()
   val pftEntryFull = GatedValidRegNext(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry))
   when(pftEntryFull || fastSimMode) {
     // can accept prefetch req
@@ -905,8 +905,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   // TODO: repalce addSource with tapAndRead
-  TraceBoringUtils.addSource(Cat(primary_ready_vec).orR.asUInt, "MSHRFullBlockTracePrf")
-  // BoringUtils.addSource(Cat(primary_ready_vec).orR, "MSHRFullBlockTracePrf")
+  val mshrPrimaryFull = WireInit(!Cat(primary_ready_vec).orR)
+  BoringUtils.addSource(mshrPrimaryFull, "MSHRFullBlockTracePrf")
 
   val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
@@ -1144,6 +1144,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
   XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
   XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
+
+  val fastSimMode = TraceFastSimMemory()
+  XSPerfAccumulate("FastSimAcceptReqNum", io.req.fire && !io.req.bits.cancel && fastSimMode)
 
   val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
 

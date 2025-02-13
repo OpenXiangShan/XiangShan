@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.{DebugOptionsKey, XSTileKey}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.FuType.FuTypeOrR
+import chisel3.util.experimental.BoringUtils
 
 // From HX's NewCSR utility
 object ChiselRecordForField {
@@ -67,7 +68,7 @@ object TraceRTLDontCare {
 object TraceFastSimOoO {
   val needOoOFuType = Seq(
     FuType.jmp, FuType.brh, FuType.csr, // cfi
-    FuType.ldu, FuType.stu, FuType.mou, // ls
+    // FuType.ldu, FuType.stu, FuType.mou, // ls
     // FuType.vldu, FuType.vstu, FuType.vsegldu, FuType.vsegstu // vls
   )
 
@@ -76,13 +77,16 @@ object TraceFastSimOoO {
   }
 }
 
-object TraceFastSimDRAM {
+object TraceFastSimMemory {
   def apply()(implicit p: Parameters): Bool = {
     val env = p(DebugOptionsKey)
     val xsParam = p(XSTileKey).head
+
+    val fastSimFinish = WireInit(true.B)
+    BoringUtils.addSink(fastSimFinish, "TraceFastSimMemoryFinish")
     if (env.TraceRTLMode) {
-      xsParam.TraceEliminateDRAM.B &&
-      TraceFastSim.fastSimEnable()
+      xsParam.TraceEliminateMemory.B && !fastSimFinish
+      // TraceFastSim.fastSimEnable()
     } else {
       false.B
     }

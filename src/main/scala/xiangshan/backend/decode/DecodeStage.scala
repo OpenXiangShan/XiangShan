@@ -200,7 +200,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
       if (TraceEliminateArthi) {
         when (inst.bits.traceInfo.isFastSim) {
-          // how to
           inst.bits.lsrc.foreach(_ := 0.U)
           inst.bits.ldest := 0.U
           inst.bits.rfWen := false.B

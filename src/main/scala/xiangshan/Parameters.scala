@@ -357,7 +357,7 @@ case class XSCoreParameters
 
   // TraceRTLMode
   TraceEliminateArthi: Boolean = true,
-  TraceEliminateDRAM: Boolean = true
+  TraceEliminateMemory: Boolean = true
 ){
   def vlWidth = log2Up(VLEN) + 1
 
@@ -881,7 +881,7 @@ trait HasXSParameter {
   def TraceDummyFixCycleDivSqrt = false
   def TraceDummyFixCycleIntDiv = false
   def TraceEliminateArthi = coreParams.TraceEliminateArthi
-  def TraceEliminateDRAM = coreParams.TraceEliminateDRAM
+  def TraceEliminateMemory = coreParams.TraceEliminateMemory
 
 
   def PCntIncrStep: Int = 6

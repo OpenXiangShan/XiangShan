@@ -53,14 +53,18 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
 
   // when fastSim instruction is drained, but fastSim memory address is not drained
   // block the fetch
-  // val fastSimMemAddrFinish = TraceBoringUtils.addSink("TraceMemAddrFeederFinished").asBool
+  // val fastSimMemAddrFinish = TraceBoringUtils.addSink("TraceFastSimMemoryFinish").asBool
   val fastSimMemAddrFinish = WireInit(true.B)
-  BoringUtils.addSink(fastSimMemAddrFinish, "TraceMemAddrFeederFinished")
   val firstInstFastSim = PriorityMux(io.traceInsts.map(_.valid), io.traceInsts.map(_.bits.fastSimulation(0).asBool))
+  BoringUtils.addSink(fastSimMemAddrFinish, "TraceFastSimMemoryFinish")
+  // BoringUtils.addSource(firstInstFastSim, "TraceFastSimInstFinish")
 
   val pcMismatch = io.out.recv.bits.instNum === 0.U
   io.out.block := pcMismatch || (!firstInstFastSim && !fastSimMemAddrFinish)
-  XSPerfAccumulate("FastSimMemAddrBlock", (!firstInstFastSim && !fastSimMemAddrFinish))
+  XSPerfAccumulate("FastSimMemoryBlock", !firstInstFastSim && !fastSimMemAddrFinish)
+  XSPerfAccumulate("FastSimFetchBlock", firstInstFastSim && fastSimMemAddrFinish)
+  XSPerfAccumulate("FastSimFetchCycle", firstInstFastSim)
+  XSPerfAccumulate("FastSimMemoryCycle", !fastSimMemAddrFinish)
 
   val finalRange = io.traceRange & io.ifuRange
 
