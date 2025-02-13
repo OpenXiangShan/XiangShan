@@ -27,6 +27,7 @@ import utility.CircularQueuePtr
 import difftest.trace.Trace
 import xiangshan.backend.datapath.DataConfig.VAddrBits
 import xiangshan.backend.fu.NewCSR.CSRConfig.PAddrWidth
+import utility.{XSPerfAccumulate, TimeOutAssert}
 
 
 // TODO: change BoringUtils.addSink to BoringUtils.tapAndRead
@@ -44,24 +45,52 @@ class TraceMemAddrIO(implicit p: Parameters) extends TraceBundle {
 class TraceMemAddrFeeder(implicit p: Parameters) extends TraceModule with HasL1PrefetchHelper {
   val ReqQueueSize = 12
   val ReqWriteWidth = 4
+  val ReReqSize = 4
 
   val io = IO(new TraceMemAddrIO)
 
-  // val block = WireInit(false.B)
-  // BoringUtils.addSink(block, "MSHRFullBlockTracePrf")
-  val block = TraceBoringUtils.addSink("MSHRFullBlockTracePrf")
+  val block = WireInit(false.B)
+  BoringUtils.addSink(block, "MSHRFullBlockTracePrf")
 
   val reqQue = Reg(Vec(ReqQueueSize, new TraceMemAddrBundle))
+  // when missqueue block, load unit pipe
   val validVec = RegInit(VecInit(Seq.fill(ReqQueueSize)(false.B)))
   val readPtr = RegInit(0.U.asTypeOf(new TraceMAFeaderPtr(ReqQueueSize)))
   val writePtr = RegInit(0.U.asTypeOf(new TraceMAFeaderPtr(ReqQueueSize)))
 
-  // read from reqQue to io.req
-  io.req.valid := validVec(readPtr.value) && !block
-  io.req.bits := fromAddrToL1PrefetchReq(reqQue(readPtr.value))
-  when (io.req.fire) {
+  val reReqQue = Reg(Vec(ReqQueueSize, new TraceMemAddrBundle))
+  val reReqValid = RegInit(VecInit(Seq.fill(ReqQueueSize)(false.B)))
+  val reReqNoNone = RegInit(VecInit(Seq.fill(ReqQueueSize)(false.B)))
+  val reReqPtr = RegInit(0.U.asTypeOf(new TraceMAFeaderPtr(ReqQueueSize)))
+  val lastBlock = RegNext(block)
+
+  val reqArb = Module(new Arbiter(new TraceMemAddrBundle, 2))
+  reqArb.io.in(0).valid := reReqValid(reReqPtr.value)
+  reqArb.io.in(0).bits := reReqQue(reReqPtr.value)
+  reqArb.io.in(1).valid := validVec(readPtr.value)
+  reqArb.io.in(1).bits := reqQue(readPtr.value)
+
+  reqArb.io.out.ready := io.req.ready && !block
+  io.req.valid := reqArb.io.out.valid && !block
+  io.req.bits := fromAddrToL1PrefetchReq(reqArb.io.out.bits)
+
+  // update reqQue
+  when (reqArb.io.in(1).fire) {
     readPtr := readPtr + 1.U
     validVec(readPtr.value) := false.B
+  }
+
+  // update reReqQue
+  when (!lastBlock && block) {
+    reReqPtr := reReqPtr - ReReqSize.U
+    for (i <- 0 until ReReqSize) {
+      reReqValid(reReqPtr.value - i.U) := reReqNoNone(reReqPtr.value - i.U)
+    }
+  }
+  when (reqArb.io.out.fire) {
+    reReqNoNone(reReqPtr.value) := true.B
+    reReqValid(reReqPtr.value) := false.B
+    reReqQue(reReqPtr.value) := reqArb.io.out.bits
   }
 
   // read from dpi-c to reqQue
@@ -69,8 +98,8 @@ class TraceMemAddrFeeder(implicit p: Parameters) extends TraceModule with HasL1P
   // set finished init to false.
   // when fastSim fisnished or not enabled, dpic will return 0, then finished will be set to true
   val finished = RegInit(false.B)
-  // TraceBoringUtils.addSource(finished, "TraceMemAddrFeederFinished")
-  BoringUtils.addSource(finished, "TraceMemAddrFeederFinished")
+  // TraceBoringUtils.addSource(finished, "TraceFastSimMemoryFinish")
+  BoringUtils.addSource(finished, "TraceFastSimMemoryFinish")
 
   val helper = Module(new TraceMemAddrFeederHelper(ReqWriteWidth))
   helper.clock := clock
@@ -87,6 +116,18 @@ class TraceMemAddrFeeder(implicit p: Parameters) extends TraceModule with HasL1P
       }
     }
   }
+
+  XSPerfAccumulate("TraceMemAddrFeederReqFireRaw", io.req.fire)
+  XSPerfAccumulate("TraceMemAddrFeederReqFirePure", reqArb.io.in(1).fire)
+  XSPerfAccumulate("TraceMemAddrFeederReqFireReReq", reqArb.io.in(0).fire)
+  XSPerfAccumulate("TraceMemAddrFeederReqBlock", validVec(readPtr.value) && block)
+
+  val debug_startWork = RegInit(false.B)
+  when (reqArb.io.in(1).fire || debug_startWork) {
+    debug_startWork := true.B
+  }
+  TimeOutAssert(debug_startWork && reqArb.io.in(1).valid && !reqArb.io.in(1).fire, 10000, "TraceMemAddrFeederReqBlockTimeOut")
+  TimeOutAssert(debug_startWork && reqArb.io.in(1).valid && readPtr.value === RegNext(readPtr.value), 10000, "TraceMemAddrFeederReadPtrBlockTimeOut")
 
   def fromAddrToL1PrefetchReq(m: TraceMemAddrBundle): L1PrefetchReq = {
     val req = Wire(new L1PrefetchReq)
