@@ -1134,14 +1134,21 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.breakPoint                   := debugMod.io.out.breakPoint
   trapEntryDEvent.in.criticalErrorStateEnterDebug := debugMod.io.out.criticalErrorStateEnterDebug
 
-  tdata1RegVec.foreach { mod =>
-    mod match {
-      case m: HasdebugModeBundle =>
-        m.debugMode := debugMode
+  for(idx <- 0 until TriggerNum) {
+    val tdata1Pre = Wire(new Tdata1Bundle)
+    val mcontrol6Pre = Wire(new Mcontrol6)
+    tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
+    mcontrol6Pre := tdata1Pre.DATA.asUInt
+    val canWriteDmode = WireInit(false.B)
+    canWriteDmode := (if(idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    tdata1RegVec(idx) match {
+      case m: HasTriggerBundle =>
+        m.canWriteDmode := canWriteDmode
         m.chainable := debugMod.io.out.newTriggerChainIsLegal
       case _ =>
     }
   }
+
   tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
     mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
     mod1.w.wdata  := wdata
