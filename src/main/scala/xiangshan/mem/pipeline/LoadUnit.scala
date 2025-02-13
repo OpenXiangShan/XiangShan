@@ -232,7 +232,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_fullva    = Wire(UInt(XLEN.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
   val s0_is128bit      = Wire(Bool())
-  val s0_misalign_wakeup_fire = s0_misalign_select && s0_can_go && io.misalign_ldin.bits.misalignNeedWakeUp
+  val s0_misalign_wakeup_fire = s0_misalign_select && s0_can_go &&
+    io.dcache.req.ready &&
+    io.misalign_ldin.bits.misalignNeedWakeUp
 
   // flow source bundle
   class FlowSource extends Bundle {
