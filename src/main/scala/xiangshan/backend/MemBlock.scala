@@ -424,18 +424,20 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // load prefetch to l1 Dcache
   val l1PfReqArb = Module(new Arbiter(new L1PrefetchReq, 2))
   l1_pf_req <> l1PfReqArb.io.out
+  val L1PfReqArbTracePort = 0
+  val L1PfReqArbPftPort = 1
   l1PrefetcherOpt match {
-    case Some(pf) => l1PfReqArb.io.in(0) <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
+    case Some(pf) => l1PfReqArb.io.in(L1PfReqArbPftPort) <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
     case None =>
-      l1PfReqArb.io.in(0).valid := false.B
-      l1PfReqArb.io.in(0).bits := DontCare
+      l1PfReqArb.io.in(L1PfReqArbPftPort).valid := false.B
+      l1PfReqArb.io.in(L1PfReqArbPftPort).bits := DontCare
   }
   if (env.TraceRTLMode) {
     val traceMemAddrFeeder = Module(new TraceMemAddrFeeder)
-    l1PfReqArb.io.in(1) <> traceMemAddrFeeder.io.req
+    l1PfReqArb.io.in(L1PfReqArbTracePort) <> traceMemAddrFeeder.io.req
   } else {
-    l1PfReqArb.io.in(1).valid := false.B
-    l1PfReqArb.io.in(1).bits := DontCare
+    l1PfReqArb.io.in(L1PfReqArbTracePort).valid := false.B
+    l1PfReqArb.io.in(L1PfReqArbTracePort).bits := DontCare
   }
 
   val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
