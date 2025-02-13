@@ -147,9 +147,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     )
   )
 
-    val s0_alignTpye = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
+    val s0_alignType = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
   // exception check
-  val s0_addr_aligned = LookupTree(s0_alignTpye, List(
+  val s0_addr_aligned = LookupTree(s0_alignType, List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (s0_vaddr(0) === 0.U),   //h
     "b10".U   -> (s0_vaddr(1,0) === 0.U), //w
@@ -160,7 +160,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s0_isMisalign = Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
   val s0_addr_low = s0_vaddr(4, 0)
-  val s0_addr_Up_low = LookupTree(s0_alignTpye, List(
+  val s0_addr_Up_low = LookupTree(s0_alignType, List(
     "b00".U -> 0.U,
     "b01".U -> 1.U,
     "b10".U -> 3.U,
@@ -234,7 +234,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignTpye(1,0)), s0_mask)
+  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
@@ -396,7 +396,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
   io.lsq.bits.isvec := s1_out.isvec || s1_frm_mab_vec
-  io.lsq.bits.updateAddrValid := (!s1_in.isMisalign || s1_in.misalignWith16Byte) && (!s1_frm_mabuf || s1_in.isFinalSplit) || s1_exception
+  val s1_alignWith16Byte = !s1_in.isMisalign || s1_in.misalignWith16Byte
+  io.lsq.bits.updateAddrValid := Mux(
+    s1_frm_mabuf,
+    // If the store is from misalignBuf, the final split should update SQ
+    s1_in.isFinalSplit,
+    // Otherwise it is not from misalignBuf, update SQ when
+    // (1) it resides within aligned 16B range,
+    // (2) or it is a cbo and has no restriction with alignment.
+    s1_alignWith16Byte || s1_isCbo,
+  ) || s1_exception // Always update SQ when exception happens
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_in.uop.robIdx.needFlush(io.redirect))
   io.dcache.s1_paddr := s1_paddr
