@@ -1283,12 +1283,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     !s2_in.misalignNeedWakeUp
 
   // need allocate new entry
-  val s2_can_query = !s2_mem_amb &&
-                     !s2_tlb_miss &&
-                     !s2_fwd_fail &&
-                     !s2_frm_mabuf &&
-                     !s2_fast_rep &&
-                     s2_troublem
+  val s2_can_query = !((s2_dcache_fast_rep || s2_nuke) && !s2_in.misalignNeedWakeUp) && s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && s2_full_fwd
 
