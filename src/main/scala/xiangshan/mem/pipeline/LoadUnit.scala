@@ -152,8 +152,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
     // prefetch
-    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
@@ -183,7 +183,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
     // schedule error query
-    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
 
     // queue-based replay
     val replay       = Flipped(Decoupled(new LsPipelineBundle))

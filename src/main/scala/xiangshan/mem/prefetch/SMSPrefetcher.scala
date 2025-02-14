@@ -33,7 +33,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.{LdPrefetchTrainBundle, StPrefetchTrainBundle}
+import xiangshan.mem.Bundles.{LsPrefetchTrainBundle}
 import xiangshan.mem.trace._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.cache.HasDCacheParameters
@@ -1115,8 +1115,8 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val io = IO(new Bundle() {
     // train input
     // hybrid load store
-    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
-    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
     // filter out
     val train_req = ValidIO(new PrefetchReqBundle())
   })
@@ -1148,7 +1148,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   val ld_reorder = reorder(io.ld_in)
   val st_reorder = reorder(io.st_in)
-  val reqs_ls = ld_reorder.map(_.bits.asPrefetchReqBundle()) ++ st_reorder.map(_.bits.asPrefetchReqBundle())
+  val reqs_ls = ld_reorder.map(_.bits.toPrefetchReqBundle()) ++ st_reorder.map(_.bits.toPrefetchReqBundle())
   val reqs_vls = ld_reorder.map(_.valid) ++ st_reorder.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))

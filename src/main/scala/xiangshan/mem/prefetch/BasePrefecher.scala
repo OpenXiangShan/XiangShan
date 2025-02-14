@@ -24,7 +24,7 @@ import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.{LdPrefetchTrainBundle, StPrefetchTrainBundle}
+import xiangshan.mem.Bundles.{LsPrefetchTrainBundle}
 import xiangshan.cache.mmu.TlbRequestIO
 import coupledL2.PrefetchCtrlFromCore
 
@@ -61,8 +61,8 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
 }
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
-  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
-  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
+  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
+  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())
