@@ -16,7 +16,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.mem.Bundles.MemWaitUpdateReq
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -1069,7 +1069,7 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
   // TODO: is still needed?
   val checkWait = new Bundle {
     val stIssuePtr = Input(new SqPtr)
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+    val MemWaitUpdateReqBundle = Flipped(new MemWaitUpdateReqBundle)
   }
   val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 

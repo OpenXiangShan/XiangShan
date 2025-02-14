@@ -418,12 +418,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
   memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
   memScheduler.io.fromMem.get.stIssuePtr := io.mem.stIssuePtr
-  require(memScheduler.io.fromMem.get.memWaitUpdateReq.robIdx.length == io.mem.stIn.length)
-  memScheduler.io.fromMem.get.memWaitUpdateReq.robIdx.zip(io.mem.stIn).foreach { case (sink, source) =>
+  require(memScheduler.io.fromMem.get.MemWaitUpdateReqBundle.robIdx.length == io.mem.stIn.length)
+  memScheduler.io.fromMem.get.MemWaitUpdateReqBundle.robIdx.zip(io.mem.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits  := source.bits.robIdx
   }
-  memScheduler.io.fromMem.get.memWaitUpdateReq.sqIdx := DontCare // TODO
+  memScheduler.io.fromMem.get.MemWaitUpdateReqBundle.sqIdx := DontCare // TODO
   memScheduler.io.fromDataPath.resp := dataPath.io.toMemIQ
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
