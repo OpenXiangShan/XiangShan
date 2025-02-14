@@ -1284,13 +1284,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   // TODO: frontend does not need this many rob commit channels
   private val robCommitPtr: FtqPtr = WireInit(FtqPtr(false.B, 0.U))
+  dontTouch(robCommitPtr)
   when(io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
     robCommitPtr := ParallelPriorityMux(
       io.fromBackend.rob_commits.map(_.valid).reverse,
       io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse
     )
   }
-  backendCommit := commitPtr =/= ifuWbPtr && !may_have_stall_from_bpu && isAfter(robCommitPtr, commitPtr)
+  backendCommit := commitPtr < robCommitPtr
   when(backendCommit) {
     commitPtr_write      := commitPtrPlus1
     commitPtrPlus1_write := commitPtrPlus1 + 1.U
