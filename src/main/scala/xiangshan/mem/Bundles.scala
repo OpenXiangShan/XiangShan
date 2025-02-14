@@ -219,6 +219,7 @@ object Bundles {
   class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     // load inst replay informations
     val rep_info = new LoadToLsqReplayIO
+    val nc_with_data = Bool() // nc access with data
     // queue entry data, except flag bits, will be updated if writeQueue is true,
     // valid bit in LqWriteBundle will be ignored
     val data_wen_dup = Vec(6, Bool()) // dirty reg dup
