@@ -147,6 +147,9 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def isWaitSame(): Bool = valid && waitSame
   def can2Bus(): Bool = valid && !inflight && !waitSame && !waitReturn
   def can2Lsq(): Bool = valid && waitReturn
+  def canMerge(): Bool = valid && !inflight
+  def isFwdOld(): Bool = valid && (inflight || waitReturn)
+  def isFwdNew(): Bool = valid && !inflight && !waitReturn
 
   def setValid(x: Bool): Unit = { valid := x}
   def setInflight(x: Bool): Unit = { inflight := x}
@@ -268,17 +271,19 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     res
   }
 
-  def canMergePrimary(x: UncacheWordReq, e: UncacheEntry): Bool = {
+  def canMergePrimary(x: UncacheWordReq, e: UncacheEntry, eid: UInt): Bool = {
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) &&
       x.cmd === e.cmd && x.nc && e.nc &&
       x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
-      continueAndAlign(x.mask | e.mask)
+      continueAndAlign(x.mask | e.mask) &&
+    // not receiving uncache response, not waitReturn -> no wake-up signal in these cases
+      !(mem_grant.fire && mem_grant.bits.source === eid || states(eid).isWaitReturn())
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
     // old entry is not inflight and senting
-    !states(eid).isInflight() && !(q0_canSent && q0_canSentIdx === eid)
+    states(eid).canMerge() && !(q0_canSent && q0_canSentIdx === eid)
   }
 
   /******************************************************************
@@ -326,7 +331,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   sizeForeach(i => {
     val valid = e0_req_valid && states(i).isValid()
     val isAddrMatch = addrMatch(e0_req, entries(i))
-    val canMerge1 = canMergePrimary(e0_req, entries(i))
+    val canMerge1 = canMergePrimary(e0_req, entries(i), i.U)
     val canMerge2 = canMergeSecondary(i.U)
     e0_rejectVec(i) := valid && isAddrMatch && !canMerge1
     e0_mergeVec(i) := valid && isAddrMatch && canMerge1 && canMerge2
@@ -489,8 +494,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     /* f0 */
     // vaddr match
     val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
-    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).inflight)
-    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && !states(i).inflight)
+    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdOld)
+    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdNew)
     // ONLY for fast use to get better timing
     val f0_flyMaskFast = shiftMaskToHigh(
       forward.vaddr,
