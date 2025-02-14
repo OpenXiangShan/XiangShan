@@ -87,7 +87,9 @@ case class SoCParameters
   UseXSNoCDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  IMSICUseHalf: Boolean = false ,
+  UseDMInTop:   Boolean = false
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
@@ -140,6 +142,8 @@ trait HasSoCParameter {
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
+  val IMSICUseHalf = soc.IMSICUseHalf
+  val UseDMInTop = soc.UseDMInTop
 }
 
 trait HasPeripheralRanges {

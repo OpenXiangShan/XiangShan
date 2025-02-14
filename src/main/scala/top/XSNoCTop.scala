@@ -36,11 +36,13 @@ import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
 import difftest.common.DifftestWiring
 import difftest.util.Profile
+import freechips.rocketchip.jtag.JTAGIO
+import top.TopMain.config
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
   override lazy val desiredName: String = "XSTop"
-
+  private val MSI_INFO_WIDTH = 11
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "freechips,rocketchip-unknown"
@@ -135,6 +137,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
           val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
         })
       }
+      //differentiate imsic version
+      val msiinfo = if (IMSICUseHalf) Some((new Bundle {
+        val vld_req = Input(Bool())
+        val data = Input(UInt(MSI_INFO_WIDTH.W))
+        val vld_ack = Output(Bool())
+      })) else None
+      val dm = if (UseDMInTop) Some(Flipped(new JTAGIO(hasTRSTn = false))) else None
     })
     // imsic axi4lite io
     val imsic_axi4lite = wrapper.u_imsic_bus_top.module.axi4lite.map(x => IO(chiselTypeOf(x)))
