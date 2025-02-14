@@ -147,6 +147,14 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
           }), tail)
+        case "--imsic-use-half" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseHalf = true)
+          }), tail)
+        case "--dm-in-top" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(UseDMInTop = true)
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
