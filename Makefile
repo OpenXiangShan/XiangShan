@@ -77,6 +77,16 @@ ifeq ($(IMSIC_USE_TL),1)
 COMMON_EXTRA_ARGS += --imsic-use-tl
 endif
 
+# IMSIC use half component
+ifeq ($(IMSIC_USE_HALF),1)
+COMMON_EXTRA_ARGS += --imsic-use-half
+endif
+
+# embed debug module in top
+ifeq ($(DM_IN_TOP),1)
+COMMON_EXTRA_ARGS += --dm-in-top
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
