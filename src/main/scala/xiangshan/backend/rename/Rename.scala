@@ -172,7 +172,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val crossFtqNumVec = Wire(Vec(RenameWidth, Bool()))
   // identify cross odd ftqentry
   val oddFtqVec = Wire(Vec(RenameWidth, Bool()))
-  val fusionValidVec = isFusionVec.zip(io.fusionCross2FtqVec).map { case (isFusion, cross2Ftq) => isFusion & cross2Ftq }
+  val fusionValidVec = isFusionVec.zip(io.fusionCross2FtqVec).map { case (isFusion, cross2Ftq) => isFusion & !cross2Ftq }
     for (i <- 0 until RenameWidth) {
     if (i == 0) {
       crossFtqNumVec(i) := canRobCompressVec(i) && isLastFtqVec(i)
