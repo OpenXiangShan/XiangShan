@@ -75,7 +75,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val needFlush = Bool()
-    val crossFtqCommit = Bool() // 59 bit
+    val crossFtqCommit = UInt(2.W) // 59 bit
     // status end
 
     // debug_begin
@@ -113,7 +113,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val fpWen = Bool()
     val rfWen = Bool()
     val needFlush = Bool()
-    val crossFtqCommit = Bool()
+    val crossFtqCommit = UInt(2.W)
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
     // debug_begin
