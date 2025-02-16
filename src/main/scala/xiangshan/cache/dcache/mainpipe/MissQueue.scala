@@ -814,6 +814,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.word_idx := req.word_idx
   io.main_pipe_req.bits.amo_data := req.amo_data
   io.main_pipe_req.bits.amo_mask := req.amo_mask
+  io.main_pipe_req.bits.amo_cmp  := req.amo_cmp
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
