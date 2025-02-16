@@ -580,7 +580,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     dontTouch(ptr)
   }
   val validEntries  = distanceBetween(bpuPtr, commitPtr)
-  val backendCommit = Wire(Bool())
+  val readyToCommit = Wire(Bool())
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
   // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
@@ -608,7 +608,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U || backendCommit
+  val new_entry_ready = validEntries < FtqSize.U || readyToCommit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp     = io.fromBpu.resp.bits.s2
@@ -1284,21 +1284,23 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   // TODO: frontend does not need this many rob commit channels
   private val robCommitPtr: FtqPtr = WireInit(FtqPtr(false.B, 0.U))
-  dontTouch(robCommitPtr)
-  when(io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
+  private val backendCommit = io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)
+  when(backendCommit) {
     robCommitPtr := ParallelPriorityMux(
       io.fromBackend.rob_commits.map(_.valid).reverse,
       io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse
     )
   }
-  backendCommit := commitPtr < robCommitPtr
-  when(backendCommit) {
+  private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, backendCommit)
+  private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
+  readyToCommit := commitPtr < committedPtr
+  when(readyToCommit) {
     commitPtr_write      := commitPtrPlus1
     commitPtrPlus1_write := commitPtrPlus1 + 1.U
   }
   // frontend commit is one cycle later than backend commit because reading srams needs one cycle
-  val s2_commitPtr     = RegEnable(commitPtr, backendCommit)
-  val s2_backendCommit = RegNext(backendCommit, init = false.B)
+  val s2_commitPtr     = RegEnable(commitPtr, readyToCommit)
+  val s2_readyToCommit = RegNext(readyToCommit, init = false.B)
 
   /**
     *************************************************************************************
@@ -1306,7 +1308,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     *************************************************************************************
     */
   val mmioReadPtr    = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = isAfter(commitPtr, mmioReadPtr) || commitPtr === mmioReadPtr && backendCommit
+  val mmioLastCommit = isAfter(commitPtr, mmioReadPtr) || commitPtr === mmioReadPtr && readyToCommit
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
@@ -1317,30 +1319,30 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       RegEnable(newest_entry_target, newest_entry_target_modified),
       RegNext(ftq_pc_mem.io.commPtrPlus1_rdata.startAddr)
     )
-  ftq_pd_mem.io.ren.get.last := backendCommit
+  ftq_pd_mem.io.ren.get.last := readyToCommit
   ftq_pd_mem.io.raddr.last   := commitPtr.value
   val s2_commitPd = ftq_pd_mem.io.rdata.last
-  ftq_redirect_mem.io.ren.get.last := backendCommit
+  ftq_redirect_mem.io.ren.get.last := readyToCommit
   ftq_redirect_mem.io.raddr.last   := commitPtr.value
   val s2_commitSpecMeta = ftq_redirect_mem.io.rdata.last
-  ftq_meta_1r_sram.io.ren(0)   := backendCommit
+  ftq_meta_1r_sram.io.ren(0)   := readyToCommit
   ftq_meta_1r_sram.io.raddr(0) := commitPtr.value
   val s2_commitMeta     = ftq_meta_1r_sram.io.rdata(0).meta
   val s2_commitFtbEntry = ftq_meta_1r_sram.io.rdata(0).ftb_entry
 
   val s1_commitCfi = WireInit(cfiIndex_vec(commitPtr.value))
-  val s2_commitCfi = RegEnable(s1_commitCfi, backendCommit)
+  val s2_commitCfi = RegEnable(s1_commitCfi, readyToCommit)
 
-  val s2_commitMispredict: Vec[Bool] = RegEnable(mispredict_vec(commitPtr.value), backendCommit)
+  val s2_commitMispredict: Vec[Bool] = RegEnable(mispredict_vec(commitPtr.value), readyToCommit)
   val s1_commitHit   = entry_hit_status(commitPtr.value)
-  val s2_commitHit   = RegEnable(s1_commitHit, backendCommit)
-  val s2_commitStage = RegEnable(pred_stage(commitPtr.value), backendCommit)
+  val s2_commitHit   = RegEnable(s1_commitHit, readyToCommit)
+  val s2_commitStage = RegEnable(pred_stage(commitPtr.value), readyToCommit)
   val s2_commitValid = s2_commitHit === h_hit || s2_commitCfi.valid // hit or taken
 
   val to_bpu_hit = s1_commitHit === h_hit || s1_commitHit === h_false_hit
   switch(bpu_ftb_update_stall) {
     is(0.U) {
-      when(s1_commitCfi.valid && !to_bpu_hit && backendCommit) {
+      when(s1_commitCfi.valid && !to_bpu_hit && readyToCommit) {
         bpu_ftb_update_stall := 2.U // 2-cycle stall
       }
     }
@@ -1361,7 +1363,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfHistogram("bpu_update_latency", update_latency, io.toBpu.update.valid, 0, 64, 2)
 
   io.toBpu.update       := DontCare
-  io.toBpu.update.valid := s2_commitValid && s2_backendCommit
+  io.toBpu.update.valid := s2_commitValid && s2_readyToCommit
   val update = io.toBpu.update.bits
   update.false_hit   := s2_commitHit === h_false_hit
   update.pc          := s2_commitPcBundle.startAddr
@@ -1437,7 +1439,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val addIntoHist =
       ((s2_commitHit === h_hit) && inFtbEntry) || (!(s2_commitHit === h_hit) && i.U === s2_commitCfi.bits && isBr && s2_commitCfi.valid)
     XSDebug(
-      s2_backendCommit && isCfi,
+      s2_readyToCommit && isCfi,
       p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
         p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
         p"startAddr(${Hexadecimal(s2_commitPcBundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
@@ -1457,7 +1459,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     ftqBranchTraceDB.log(
       data = logbundle /* hardware of type T */,
-      en = isWriteFTQTable.orR && s2_backendCommit && isCfi,
+      en = isWriteFTQTable.orR && s2_readyToCommit && isCfi,
       site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
       clock = clock,
       reset = reset
@@ -1588,7 +1590,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // --------------------------- Debug --------------------------------
   // XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
   XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
-  XSDebug(s2_backendCommit, p"deq! [ptr] $s2_commitPtr\n")
+  XSDebug(s2_readyToCommit, p"deq! [ptr] $s2_commitPtr\n")
   XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [ifuWbPtr] $ifuWbPtr [commPtr] $commitPtr\n")
   XSDebug(
     true.B,
@@ -1596,7 +1598,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n"
   )
   XSDebug(
-    s2_backendCommit,
+    s2_readyToCommit,
     p"[deq info] cfiIndex: $s2_commitCfi, $s2_commitPcBundle, target: ${Hexadecimal(s2_commitTarget)}\n"
   )
 
