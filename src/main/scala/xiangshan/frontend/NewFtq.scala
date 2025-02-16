@@ -1291,7 +1291,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse
     )
   }
-  private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, backendCommit)
+  private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, FtqPtr(false.B, 0.U), backendCommit)
   private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
   readyToCommit := commitPtr < committedPtr
   when(readyToCommit) {
