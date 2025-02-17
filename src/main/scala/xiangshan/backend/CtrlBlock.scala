@@ -726,6 +726,7 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVec := io.toDispatch.wbPregsVec
   dispatch.io.wbPregsV0 := io.toDispatch.wbPregsV0
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
+  dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.robHeadNotReady := rob.io.headNotReady
   dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
@@ -892,6 +893,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val wbPregsVec = Vec(backendParams.numPregWb(VecData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsV0 = Vec(backendParams.numPregWb(V0Data()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val vlWriteBackInfo = new Bundle {
+      val vlFromIntIsZero  = Input(Bool())
+      val vlFromIntIsVlmax = Input(Bool())
+      val vlFromVfIsZero   = Input(Bool())
+      val vlFromVfIsVlmax  = Input(Bool())
+    }
   }
   val toDataPath = new Bundle {
     val flush = ValidIO(new Redirect)
