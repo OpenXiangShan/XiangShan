@@ -77,6 +77,7 @@ case class SoCParameters
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
     "B" -> 7,
+    "C" -> 7,
     "E.b" -> 11
   ),
   NumHart: Int = 64,
