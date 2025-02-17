@@ -139,7 +139,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-    val MemWaitUpdateReqBundle = Flipped(new MemWaitUpdateReqBundle)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }) else None
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
@@ -435,7 +435,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case (imp: IssueQueueMemAddrImp, i) =>
       imp.io.memIO.get.feedbackIO.head := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO.head)
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
-      imp.io.memIO.get.checkWait.MemWaitUpdateReqBundle := io.fromMem.get.MemWaitUpdateReqBundle
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
     case _ =>
   }
 
@@ -443,7 +443,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case (imp: IssueQueueMemAddrImp, i) =>
       imp.io.memIO.get.feedbackIO.head := io.fromMem.get.staFeedback(i)
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
-      imp.io.memIO.get.checkWait.MemWaitUpdateReqBundle := io.fromMem.get.MemWaitUpdateReqBundle
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
     case _ =>
   }
 
@@ -452,7 +452,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       imp.io.memIO.get.feedbackIO.head := io.fromMem.get.hyuFeedback.head
       imp.io.memIO.get.feedbackIO(1) := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO(1))
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
-      imp.io.memIO.get.checkWait.MemWaitUpdateReqBundle := io.fromMem.get.MemWaitUpdateReqBundle
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
       // TODO: refactor ditry code
       imp.io.deqDelay(1).ready := false.B
       io.toDataPathAfterDelay(idx)(1).valid := false.B
@@ -524,7 +524,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       //imp.io.memIO.get.feedbackIO.head := io.fromMem.get.vstuFeedback.head // only vector store replay
       // maybe not used
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
-      imp.io.memIO.get.checkWait.MemWaitUpdateReqBundle := io.fromMem.get.MemWaitUpdateReqBundle
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
       imp.io.wakeupFromWB.zip(
         wakeupFromIntWBVec.zipWithIndex.filter(x => imp.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++
         wakeupFromFpWBVec.zipWithIndex.filter(x => imp.params.needWakeupFromFpWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++

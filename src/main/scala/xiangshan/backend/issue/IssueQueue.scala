@@ -1069,7 +1069,7 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
   // TODO: is still needed?
   val checkWait = new Bundle {
     val stIssuePtr = Input(new SqPtr)
-    val MemWaitUpdateReqBundle = Flipped(new MemWaitUpdateReqBundle)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }
   val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 
