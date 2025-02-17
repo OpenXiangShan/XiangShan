@@ -101,7 +101,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = LoadPipelineWidth
+    numCamPort = LoadPipelineWidth,
+    enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
+    paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
