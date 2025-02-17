@@ -40,49 +40,50 @@ object Bundles {
   class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     with HasDCacheParameters
     with HasVLSUParameters {
-    val uop                 = new DynInst
-    val vaddr               = UInt(VAddrBits.W)
-    val fullva              = UInt(XLEN.W)
-    val vaNeedExt           = Bool()
-    val paddr               = UInt(PAddrBits.W)
-    val gpaddr              = UInt(XLEN.W)
-    val mask                = UInt((VLEN/8).W)
-    val data                = UInt((VLEN+1).W)
-    val wlineflag           = Bool() // store write the whole cache line
-    val miss                = Bool()
-    val tlbMiss             = Bool()
-    val ptwBack             = Bool()
-    val af                  = Bool()
-    val nc                  = Bool()
-    val mmio                = Bool()
-    val memBackTypeMM       = Bool() // 1: main memory, 0: IO
-    val atomic              = Bool()
-    val hasException        = Bool()
-    val isHyper             = Bool()
-    val isForVSnonLeafPTE   = Bool()
-    val isPrefetch          = Bool()
-    val isHWPrefetch        = Bool()
-    val forwardMask         = Vec(VLEN/8, Bool())
-    val forwardData         = Vec(VLEN/8, UInt(8.W))
-    val ldCancel            = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
+    val uop = new DynInst
+    val vaddr = UInt(VAddrBits.W)
+    val fullva = UInt(XLEN.W)
+    val vaNeedExt = Bool()
+    val paddr = UInt(PAddrBits.W)
+    val gpaddr = UInt(XLEN.W)
+    val mask = UInt((VLEN/8).W)
+    val data = UInt((VLEN+1).W)
+    val wlineflag = Bool() // store write the whole cache line
+    val miss = Bool()
+    val tlbMiss = Bool()
+    val ptwBack = Bool()
+    val af = Bool()
+    val nc = Bool()
+    val mmio = Bool()
+    val memBackTypeMM = Bool() // 1: main memory, 0: IO
+    val atomic = Bool()
+    val hasException = Bool()
+    val isHyper = Bool()
+    val isForVSnonLeafPTE = Bool()
+    val isPrefetch = Bool()
+    val isHWPrefetch = Bool()
+    val forwardMask = Vec(VLEN/8, Bool())
+    val forwardData = Vec(VLEN/8, UInt(8.W))
+    val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
     // val func                = UInt(6.W)
 
     // vector
-    val isvec               = Bool()
-    val isLastElem          = Bool()
-    val is128bit            = Bool()
+    val isvec = Bool()
+    val isLastElem = Bool()
+    val is128bit = Bool()
     val uop_unit_stride_fof = Bool()
-    val usSecondInv         = Bool()
-    val elemIdx             = UInt(elemIdxBits.W)
-    val alignedType         = UInt(alignTypeBits.W)
-    val mbIndex             = UInt(max(vlmBindexBits, vsmBindexBits).W)
-    val reg_offset          = UInt(vOffsetBits.W)
-    val elemIdxInsideVd     = UInt(elemIdxBits.W)
-    val vecActive           = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
-    val is_first_ele        = Bool()
-    val vecBaseVaddr        = UInt(VAddrBits.W)
-    val vecVaddrOffset      = UInt(VAddrBits.W)
-    val vecTriggerMask      = UInt((VLEN/8).W)
+    val usSecondInv = Bool()
+    val elemIdx = UInt(elemIdxBits.W)
+    val alignedType = UInt(alignTypeBits.W)
+    val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
+    val reg_offset = UInt(vOffsetBits.W)
+    val elemIdxInsideVd = UInt(elemIdxBits.W)
+    val is_first_ele = Bool()
+    val vecBaseVaddr = UInt(VAddrBits.W)
+    val vecVaddrOffset = UInt(VAddrBits.W)
+    val vecTriggerMask = UInt((VLEN/8).W)
+    // 1: vector active element or scala mem operation, 0: vector not active element
+    val vecActive = Bool()
     // val flowPtr             = new VlflowPtr() // VLFlowQueue ptr
     // val sflowPtr            = new VsFlowPtr() // VSFlowQueue ptr
     // val rob_idx_valid       = Vec(2,Bool())
@@ -91,33 +92,33 @@ object Bundles {
     // val offset              = Vec(2,UInt(4.W))
 
     // replay
-    val isLoadReplay        = Bool()
-    val isFastPath          = Bool()
-    val isFastReplay        = Bool()
-    val replayCarry         = new ReplayCarry(nWays)
-    val isFirstIssue        = Bool()
-    val hasROBEntry         = Bool()
-    val mshrid              = UInt(log2Up(cfg.nMissEntries).W)
-    val handledByMSHR       = Bool()
+    val isLoadReplay = Bool()
+    val isFastPath = Bool()
+    val isFastReplay = Bool()
+    val replayCarry = new ReplayCarry(nWays)
+    val isFirstIssue = Bool()
+    val hasROBEntry = Bool()
+    val mshrid = UInt(log2Up(cfg.nMissEntries).W)
+    val handledByMSHR= Bool()
     val replacementUpdated  = Bool()
-    val missDbUpdated       = Bool()
-    val forward_tlDchannel  = Bool()
+    val missDbUpdated = Bool()
+    val forward_tlDchannel = Bool()
     val dcacheRequireReplay = Bool()
-    val delayedLoadError    = Bool()
-    val lateKill            = Bool()
-    val feedbacked          = Bool()
-    val schedIndex          = UInt(log2Up(LoadQueueReplaySize).W)
-    val tlbNoQuery          = Bool()
+    val delayedLoadError = Bool()
+    val lateKill = Bool()
+    val feedbacked = Bool()
+    val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
+    val tlbNoQuery = Bool()
 
     // misalign
-    val isFrmMisAlignBuf    = Bool()
-    val isMisalign          = Bool()
-    val isFinalSplit        = Bool()
-    val misalignWith16Byte  = Bool()
-    val misalignNeedWakeUp  = Bool()
-    val updateAddrValid     = Bool()
+    val isFrmMisAlignBuf = Bool()
+    val isMisalign = Bool()
+    val isFinalSplit = Bool()
+    val misalignWith16Byte = Bool()
+    val misalignNeedWakeUp = Bool()
+    val updateAddrValid = Bool()
 
-    def isSWPrefetch        = isPrefetch && !isHWPrefetch
+    def isSWPrefetch: Bool = isPrefetch && !isHWPrefetch
   }
 
   class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -131,15 +132,15 @@ object Bundles {
       }
       connectSamePort(this, inputReg)
       this.meta_prefetch := DontCare
-      this.meta_access   := DontCare
+      this.meta_access := DontCare
     }
 
     def toPrefetchReqBundle(): PrefetchReqBundle = {
       val res = Wire(new PrefetchReqBundle)
-      res.vaddr       := this.vaddr
-      res.paddr       := this.paddr
-      res.pc          := this.uop.pc
-      res.miss        := this.miss
+      res.vaddr := this.vaddr
+      res.paddr := this.paddr
+      res.pc := this.uop.pc
+      res.miss := this.miss
       res.pfHitStream := isFromStream(this.meta_prefetch)
       res
     }
