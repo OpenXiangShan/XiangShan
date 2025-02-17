@@ -24,7 +24,7 @@ import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.{LsPrefetchTrainBundle}
+import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import coupledL2.PrefetchCtrlFromCore
 

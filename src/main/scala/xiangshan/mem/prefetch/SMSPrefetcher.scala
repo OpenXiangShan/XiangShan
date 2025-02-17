@@ -33,7 +33,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.{LsPrefetchTrainBundle}
+import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.trace._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.cache.HasDCacheParameters
