@@ -141,14 +141,16 @@ trait PMAMethod extends PMAConst {
    * 0x00_311f_0000  0x00_311f_FFFF  64KB   PCIE3_CFG       RW
    * 0x00_3120_0000  0x00_3120_FFFF  64KB   SYSCFG          RW
    * 0x00_3121_0000  0x00_3130_FFFF  1MB    DATA_CPU_BRIDGE RW
-   * 0x00_3131_0000  0x00_37FF_FFFF         Reserved
+   * 0x00_3131_0000  0x00_3131_FFFF  1MB    UParam          RW
+   * 0x00_3132_0000  0x00_37FF_FFFF         Reserved
    * 0x00_3800_0000  0x00_3800_FFFF  64KB   CLINT (In cpu)  RW
    * 0x00_3801_0000  0x00_3801_FFFF         Reserved
    * 0x00_3802_0000  0x00_3802_0FFF  4KB    Debug (In cpu)  RW
    * 0x00_3802_1000  0x00_38FF_FFFF         Reserved
    * 0x00_3900_0000  0x00_3900_0FFF  4KB    CacheCtrl       RW
    * 0x00_3900_1000  0x00_3900_1FFF  4KB    Core Reset      RW
-   * 0x00_3900_2000  0x00_3BFF_FFFF         Reserved
+   * 0x00_3902_0000  0x00_3902_FFFF  64KB   DSECtrlUnit     RW
+   * 0x00_3903_0000  0x00_3BFF_FFFF         Reserved
    * 0x00_3C00_0000  0x00_3FFF_FFFF         PLIC (In cpu)   RW
    * 0x00_4000_0000  0x00_4FFF_FFFF  256MB  PCIe0           RW
    * 0x00_5000_0000  0x00_5FFF_FFFF  256MB  PCIe1           RW
@@ -198,7 +200,7 @@ trait PMAMethod extends PMAConst {
     addPMA(0x38020000L, a = 1)
     addPMA(0x38010000L, a = 1, w = true, r = true)
     addPMA(0x38000000L, a = 1)
-    addPMA(0x31310000L, a = 1, w = true, r = true)
+    addPMA(0x31320000L, a = 1, w = true, r = true)
     addPMA(0x30000000L, a = 1)
     addPMA(0x20000000L, a = 1, x = true, r = true)
     addPMA(0x10000000L, a = 1)
