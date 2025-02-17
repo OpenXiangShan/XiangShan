@@ -98,7 +98,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
       // schedule error query
-      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
 
       // queue-based replay
       val replay       = Flipped(Decoupled(new LsPipelineBundle))
@@ -125,7 +125,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val issue           = Valid(new MemExuInput)
       val lsq             = ValidIO(new LsPipelineBundle)
       val lsq_replenish   = Output(new LsPipelineBundle())
-      val stld_nuke_query = Valid(new StoreNukeQueryIO)
+      val stld_nuke_query = Valid(new StoreNukeQueryBundle)
       val st_mask_out     = Valid(new StoreMaskBundle)
       val debug_ls        = Output(new DebugLsInfoBundle)
     }
@@ -141,8 +141,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val s0_prefetch_spec = Output(Bool())
     val s1_prefetch_spec = Output(Bool())
     // prefetch
-    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
     val correctMissTrain          = Input(Bool())
