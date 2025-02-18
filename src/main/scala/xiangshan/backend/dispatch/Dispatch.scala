@@ -203,9 +203,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     updatedUop(i).debugInfo.block_from_dpq := block_from_dpq_record(i)
     updatedUop(i).debugInfo.block_from_serial := block_from_serial_record(i)
 
-    block_from_rob_record(i) := !io.enqRob.canAccept
-    block_from_dpq_record(i) := !io.toIntDq.canAccept || !io.toFpDq.canAccept || !io.toLsDq.canAccept
-    block_from_serial_record(i) := !thisCanActualOut(i)
+    block_from_rob_record(i) := !io.enqRob.canAccept && io.fromRename(i).valid
+    block_from_dpq_record(i) := (!io.toIntDq.canAccept || !io.toFpDq.canAccept || !io.toLsDq.canAccept) && io.fromRename(i).valid
+    block_from_serial_record(i) := !thisCanActualOut(i) && io.fromRename(i).valid
 
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept

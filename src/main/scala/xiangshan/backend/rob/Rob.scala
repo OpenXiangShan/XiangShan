@@ -818,7 +818,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // store data writeback logic mark store as data_writebacked
   for (wb <- stdWriteback) {
     when(RegNext(wb.valid)) {
-      store_data_writebacked(RegNext(wb.bits.uop.robIdx.value)) := true.B
+      val wbIdx = RegNext(wb.bits.uop.robIdx.value)
+      store_data_writebacked(wbIdx) := true.B
+      debug_microOp(wbIdx).debugInfo.enqRsTime_std := RegNext(wb.bits.uop.debugInfo.enqRsTime_std)
+      debug_microOp(wbIdx).debugInfo.readyIssueTime_std := RegNext(wb.bits.uop.debugInfo.readyIssueTime_std)
+      debug_microOp(wbIdx).debugInfo.selectTime_std := RegNext(wb.bits.uop.debugInfo.selectTime_std)
+      debug_microOp(wbIdx).debugInfo.issueTime_std := RegNext(wb.bits.uop.debugInfo.issueTime_std)
+      debug_microOp(wbIdx).debugInfo.writebackTime_std := GTimer()
     }
   }
 
@@ -1032,6 +1038,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wpc(i) := SignExt(commitDebugUop(i).cf.pc, XLEN)
   }
 
+  def max(a: UInt, b: UInt):UInt = {
+    Mux(a > b, a, b)
+  }
+
   io.commits.commitValid.zip(commitDebugUop).zipWithIndex.map{
     case ((v, uop), i) =>
       val srcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
@@ -1060,11 +1070,11 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       HardenXSPerfAccumulate(s"BlockFromSQ_$i", uop.debugInfo.block_from_sq.asUInt, true)
       HardenXSPerfAccumulate(s"EliminatedMove_$i", uop.debugInfo.eliminatedMove, true)
       HardenXSPerfAccumulate(s"Dispatch_$i", uop.debugInfo.dispatchTime, true)
-      HardenXSPerfAccumulate(s"EnqRS_$i", uop.debugInfo.enqRsTime, true)
-      HardenXSPerfAccumulate(s"InsertReadyList_$i", uop.debugInfo.readyIssueTime, true)
-      HardenXSPerfAccumulate(s"Select_$i", uop.debugInfo.selectTime, true)
-      HardenXSPerfAccumulate(s"Issue_$i", uop.debugInfo.issueTime, true)
-      HardenXSPerfAccumulate(s"Complete_$i", uop.debugInfo.writebackTime, true)
+      HardenXSPerfAccumulate(s"EnqRS_$i", max(uop.debugInfo.enqRsTime, uop.debugInfo.enqRsTime_std), true)
+      HardenXSPerfAccumulate(s"InsertReadyList_$i", max(uop.debugInfo.readyIssueTime, uop.debugInfo.readyIssueTime_std), true)
+      HardenXSPerfAccumulate(s"Select_$i", max(uop.debugInfo.selectTime, uop.debugInfo.selectTime_std), true)
+      HardenXSPerfAccumulate(s"Issue_$i", max(uop.debugInfo.issueTime, uop.debugInfo.issueTime_std), true)
+      HardenXSPerfAccumulate(s"Complete_$i", max(uop.debugInfo.writebackTime, uop.debugInfo.writebackTime_std), true)
       HardenXSPerfAccumulate(s"Commit_$i", GTimer(), true)
       HardenXSPerfAccumulate(s"ROB_$i", uop.robIdx.value, true)
       HardenXSPerfAccumulate(s"LQ_$i", uop.lqIdx.value, true)
