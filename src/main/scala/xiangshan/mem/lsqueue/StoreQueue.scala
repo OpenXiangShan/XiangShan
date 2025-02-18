@@ -141,6 +141,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val pStoreQueueSize = WireInit(StoreQueueSize.U((log2Up(StoreQueueSize + 1)).W))
   ExcitingUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
+  XSError(pStoreQueueSize <= 2.U, "StoreQueue size must be larger than 2\n")
   val allowEnqueue = validCount <= (pStoreQueueSize - 2.U)
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
