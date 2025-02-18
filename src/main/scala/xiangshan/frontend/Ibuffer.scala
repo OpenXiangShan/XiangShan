@@ -118,6 +118,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val pIBufSize = WireInit(IBufSize.U(log2Up(IBufSize + 1).W))
   ExcitingUtils.addSink(pIBufSize, "DSE_IBUFSIZE")
+  XSError(pIBufSize < PredictWidth.U, "IBufSize should be larger than PredictWidth\n")
   val numAfterEnq = validEntries +& numEnq
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
   allowEnq := (pIBufSize - PredictWidth.U) >= nextValidEntries

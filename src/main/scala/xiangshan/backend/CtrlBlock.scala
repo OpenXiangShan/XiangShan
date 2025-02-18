@@ -272,6 +272,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   ExcitingUtils.addSink(pFpDqSize, "DSE_FPDQSIZE")
   ExcitingUtils.addSink(pLsDqSize, "DSE_LSDQSIZE")
 
+  XSError(pIntDqSize <= RenameWidth.U, "Int DQ size should be larger than RenameWidth")
+  XSError(pFpDqSize <= RenameWidth.U, "Fp DQ size should be larger than RenameWidth")
+  XSError(pLsDqSize <= RenameWidth.U, "Ls DQ size should be larger than RenameWidth")
+
   intDq.io.psize := pIntDqSize
   fpDq.io.psize := pFpDqSize
   lsDq.io.psize := pLsDqSize

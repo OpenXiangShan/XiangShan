@@ -113,6 +113,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val pLoadQueueSize = WireInit(LoadQueueSize.U)
   ExcitingUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+  XSError(pLoadQueueSize <= 2.U, "LoadQueue size must be larger than 2\n")
 
   println("LoadQueue: size:" + pLoadQueueSize)
 

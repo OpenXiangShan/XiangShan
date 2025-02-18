@@ -170,4 +170,7 @@ emu-run:
 simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
+dse:
+	$(MAKE) -C ./dse-driver 
+
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
