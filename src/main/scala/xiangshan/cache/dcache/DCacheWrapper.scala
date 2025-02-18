@@ -129,6 +129,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   // banked dcache support
   val DCacheSetDiv = 1
   val DCacheSets = cacheParams.nSets
+  val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8 // hardcoded
   val DCacheDupNum = 16
