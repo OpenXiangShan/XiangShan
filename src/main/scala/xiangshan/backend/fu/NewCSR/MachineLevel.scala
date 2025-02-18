@@ -15,10 +15,27 @@ import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
+import xiangshan.backend.fu.util.CSRConst._
 
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
+  // Machine level Custom Read/Write
+  val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
+    val mbmc_lock = reg.BME.asBool
+    if (!HasBitmapCheckDefault) {
+      reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+      reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
+      reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
+    } else {
+      reg.BME := 1.U
+      reg.CMODE := 0.U
+      reg.BMA := BMAField.TestBMA
+    }
+    reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
+  })
+    .setAddr(Mbmc))  else  None
+
   val mstatus = Module(new MstatusModule)
     .setAddr(CSRs.mstatus)
 
@@ -417,7 +434,8 @@ trait MachineLevel { self: NewCSR =>
     mncause,
     mnstatus,
     mnscratch,
-  ) ++ mhpmevents ++ mhpmcounters
+  ) ++ mhpmevents ++ mhpmcounters ++ (if (HasBitmapCheck) Seq(mbmc.get) else Seq())
+
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
@@ -427,6 +445,13 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
+}
+
+class MbmcBundle extends  CSRBundle {
+  val BMA  = BMAField(63,6,null).withReset(BMAField.ResetBMA)
+  val BME  = RW(2).withReset(0.U)
+  val BCLEAR = RW(1).withReset(0.U)
+  val CMODE  = RW(0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {
