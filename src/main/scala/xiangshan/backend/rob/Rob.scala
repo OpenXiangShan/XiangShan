@@ -251,8 +251,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Update the ftqOffset to correctly notify the frontend which instructions have been committed.
   // Instructions in multiple Ftq entries compressed to one RobEntry do not occur.
   for (i <- 0 until CommitWidth) {
-    val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt).asUInt) + rawInfo(i).ftqOffset
-    commitInfo(i).ftqOffset := Mux(CommitType.isFused(rawInfo(i).commitType), rawInfo(i).ftqOffset, lastOffset)
+    commitInfo(i).ftqOffset := 0.U
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
   }
 
   // data for debug
@@ -972,10 +972,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
+  private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
-    req => FuType.isStore(req.bits.fuType)
-  })
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
   for (i <- 0 until RobSize) {
@@ -1216,7 +1214,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
-  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit) +& fuseCommitCnt
+  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit)
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
   when(isCommitReg){
@@ -1469,10 +1467,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
+    val dt_hasStore = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
+        dt_hasStore(allocatePtrVec(i).value) := io.enq.req(i).bits.stdwriteNeed
       }
     }
     for (wb <- exuWBs) {
@@ -1489,6 +1489,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val exuOut = dt_exuDebug(ptr)
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
+      val hasStore = dt_hasStore(ptr)
 
       val difftest = DifftestModule(new DiffInstrCommit(MaxPhyRegs), delay = 3, dontCare = true)
       val dt_skip = Mux(eliminatedMove, false.B, exuOut.isSkipDiff)
@@ -1497,13 +1498,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.valid := io.commits.commitValid(i) && io.commits.isCommit
       difftest.skip := dt_skip
       difftest.isRVC := isRVC
+      difftest.hasStore := hasStore
       difftest.rfwen := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.debug_ldest.get =/= 0.U
       difftest.fpwen := io.commits.commitValid(i) && uop.fpWen
       difftest.wpdest := commitInfo.debug_pdest.get
       difftest.wdest := commitInfo.debug_ldest.get
-      difftest.nFused := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+      difftest.nFused := commitInfo.instrSize - 1.U
       when(difftest.valid) {
-        assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
+        assert(commitInfo.instrSize >= 1.U)
       }
       if (env.EnableDifftest) {
         val uop = commitDebugUop(i)
