@@ -36,6 +36,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   // ))
   val sd = LazyModule(new AXI4DummySD(Seq(AddressSet(0x40002000L, 0xfff))))
   val intrGen = LazyModule(new AXI4IntrGenerator(Seq(AddressSet(0x40070000L, 0x0000ffffL))))
+  val uparam = LazyModule(new AXI4UParam(Seq(AddressSet(0x31310000L, 0xffff))))
 
   val axiBus = AXI4Xbar()
 
@@ -44,6 +45,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
   flash.node := axiBus
   sd.node := axiBus
   intrGen.node := axiBus
+  uparam.node := axiBus
 
   axiBus := node
 
