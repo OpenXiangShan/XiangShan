@@ -334,6 +334,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).crossFtq := false.B
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
+    uops(i).stdwriteNeed := false.B
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -389,14 +390,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
+        uops(i).stdwriteNeed := uops(i + 1).stdwriteNeed
       }
     }.elsewhen(needRobFlags(i)) {
       uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
       uops(i).crossFtq := uops(i).crossFtqCommit(1) || (uops(i).crossFtqCommit(0) && !isLastFtqVec(i))
+      uops(i).stdwriteNeed := FuType.isStore(uops(i).fuType)
     }
     if (i < RenameWidth - 1){
       when(!needRobFlags(i)) {
         uops(i).commitType := uops(i + 1).commitType
+        // for store/load/brh/jmp need to flush pipe if compress rob should store the last predecodeinfo
+        uops(i).preDecodeInfo.isRVC := uops(i + 1).preDecodeInfo.isRVC
       }
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR

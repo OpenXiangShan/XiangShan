@@ -181,7 +181,8 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
-    val ftqLastOffset   = UInt(log2Up(PredictWidth).W)
+    val ftqLastOffset   = UInt(log2Up(PredictWidth).W) // store ftqoffset before channge in rename
+    val stdwriteNeed    = Bool()
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
