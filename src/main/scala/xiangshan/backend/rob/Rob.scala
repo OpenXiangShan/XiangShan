@@ -1467,10 +1467,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
+    val dt_hasStore = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
+        dt_hasStore(allocatePtrVec(i).value) := io.enq.req(i).bits.stdwriteNeed
       }
     }
     for (wb <- exuWBs) {
@@ -1487,6 +1489,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val exuOut = dt_exuDebug(ptr)
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
+      val hasStore = dt_hasStore(ptr)
 
       val difftest = DifftestModule(new DiffInstrCommit(MaxPhyRegs), delay = 3, dontCare = true)
       val dt_skip = Mux(eliminatedMove, false.B, exuOut.isSkipDiff)
@@ -1495,6 +1498,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.valid := io.commits.commitValid(i) && io.commits.isCommit
       difftest.skip := dt_skip
       difftest.isRVC := isRVC
+      difftest.hasStore := hasStore
       difftest.rfwen := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.debug_ldest.get =/= 0.U
       difftest.fpwen := io.commits.commitValid(i) && uop.fpWen
       difftest.wpdest := commitInfo.debug_pdest.get
