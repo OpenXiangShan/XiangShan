@@ -917,8 +917,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncResp.bits <> io.uncache.resp.bits
   when (ncDeqTrigger) {
     allocated(ncPtr) := false.B
-    XSDebug("nc fire: ptr %d\n", ncPtr)
   }
+  XSDebug(ncDeqTrigger,"nc fire: ptr %d\n", ncPtr)
 
   mmioReq.ready := io.uncache.req.ready
   ncReq.ready := io.uncache.req.ready && !mmioReq.valid
