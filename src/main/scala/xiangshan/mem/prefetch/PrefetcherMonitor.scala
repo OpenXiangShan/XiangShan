@@ -7,7 +7,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.{LdPrefetchTrainBundle, StPrefetchTrainBundle}
+import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 
 trait HasPrefetcherMonitorHelper {
   val TIMELY_CHECK_INTERVAL = 1000
