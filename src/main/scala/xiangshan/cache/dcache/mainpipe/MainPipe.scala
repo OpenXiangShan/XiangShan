@@ -335,14 +335,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val tag_resp = encTag_resp.map(encTag => encTag(tagBits - 1, 0))
   val s1_meta_valids = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_errors = wayMap((w: Int) => s1_meta_valids(w) && dcacheParameters.tagCode.decode(encTag_resp(w)).error).asUInt
-  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr) && !s1_tag_errors(w)).asUInt
+  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
+  val s1_tag_ecc_eq_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && s1_meta_valids(w)).asUInt
-  val s1_tag_match = ParallelORR(s1_tag_match_way)
+  val s1_tag_ecc_match_way = wayMap((w: Int) => s1_tag_ecc_eq_way(w) && s1_meta_valids(w)).asUInt
+  val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
-  val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
-  val s1_flag_error = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
-  val s1_extra_meta = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
+  val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
+  val s1_flag_error = ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
+  val s1_extra_meta = ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
   io.pseudo_tag_error_inj_done := s1_fire && s1_meta_valids.orR
 
   XSPerfAccumulate("probe_unused_prefetch", s1_req.probe && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
@@ -368,7 +370,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
-  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
+  val s1_way_en = Mux(
+    RegEnable(!io.pseudo_error.valid, false.B, s1_fire),
+    Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way),
+    Mux(ParallelORR(s1_tag_match_way), s1_tag_match_way, s1_repl_way_en)
+  )
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
   val s1_tag = s1_hit_tag
