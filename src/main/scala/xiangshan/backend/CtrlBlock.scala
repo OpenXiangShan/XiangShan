@@ -171,7 +171,9 @@ class CtrlBlockImp(
       intScheWbData ++ fpScheWbData ++ staScheWbData
     } else if (isFpSche) {
       intScheWbData ++ fpScheWbData ++ staScheWbData
-    }  else if (isMemVload) {
+    } else if (isStaSche) {
+      intScheWbData ++ fpScheWbData ++ staScheWbData
+    } else if (isMemVload) {
       memVloadWbData
     } else {
       Seq(x)
