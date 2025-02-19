@@ -371,7 +371,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
   val s1_way_en = Mux(
-    RegEnable(!io.pseudo_error.valid, false.B, s1_fire),
+    RegEnable(!io.pseudo_error.valid, false.B, s0_fire),
     Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way),
     Mux(ParallelORR(s1_tag_match_way), s1_tag_match_way, s1_repl_way_en)
   )
