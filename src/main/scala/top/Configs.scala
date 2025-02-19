@@ -29,7 +29,6 @@ import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
-import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
@@ -96,15 +95,6 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreBufferThreshold = 3,
         IssueQueueSize = 10,
         IssueQueueCompEntrySize = 4,
-        dpParams = DispatchParameters(
-          IntDqSize = 12,
-          FpDqSize = 12,
-          LsDqSize = 12,
-          IntDqDeqWidth = 8,
-          FpDqDeqWidth = 6,
-          VecDqDeqWidth = 6,
-          LsDqDeqWidth = 6
-        ),
         intPreg = IntPregParams(
           numEntries = 64,
           numRead = None,

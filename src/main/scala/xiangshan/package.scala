@@ -971,10 +971,6 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
-    // dispatch queue full
-    val IntDqStall = Value("IntDqStall")
-    val FpDqStall = Value("FpDqStall")
-    val LsDqStall = Value("LsDqStall")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")

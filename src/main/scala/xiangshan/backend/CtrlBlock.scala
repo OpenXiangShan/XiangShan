@@ -28,7 +28,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
+import xiangshan.backend.dispatch.{CoreDispatchTopDownIO}
 import xiangshan.backend.dispatch.NewDispatch
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
@@ -80,12 +80,10 @@ class CtrlBlockImp(
     "trace"     -> TraceGroupNum
   ))
 
-  private val numPcMemReadForExu = params.numPcReadPort
   private val numPcMemRead = pcMemRdIndexes.maxIdx
 
   // now pcMem read for exu is moved to PcTargetMem (OG0)
   println(s"pcMem read num: $numPcMemRead")
-  println(s"pcMem read num for exu: $numPcMemReadForExu")
 
   val io = IO(new CtrlBlockIO())
 

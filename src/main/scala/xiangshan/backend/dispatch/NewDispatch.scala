@@ -35,13 +35,16 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu.FuType.FuTypeOrR
-import xiangshan.backend.dispatch.Dispatch2IqFpImp
 import xiangshan.backend.regcache.{RCTagTableReadPort, RegCacheTagTable}
 import xiangshan.mem.MemCoreTopDownIO
 import xiangshan.mem.mdp._
 import xiangshan.mem.{HasVLSUParameters, _}
 
-
+class CoreDispatchTopDownIO extends Bundle {
+  val l2MissMatch = Input(Bool())
+  val l3MissMatch = Input(Bool())
+  val fromMem = Flipped(new MemCoreTopDownIO)
+}
 // TODO delete trigger message from frontend to iq
 class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with HasVLSUParameters {
   // std IQ donot need dispatch, only copy sta IQ, but need sta IQ's ready && std IQ's ready
