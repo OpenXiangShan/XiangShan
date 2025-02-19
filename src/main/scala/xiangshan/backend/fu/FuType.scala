@@ -134,7 +134,7 @@ object FuType extends OHEnumeration {
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
   val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
-  val blockBackCompress = Seq(brh, jmp, stu)
+  val blockBackCompress = Seq(brh, jmp)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
