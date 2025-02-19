@@ -164,15 +164,15 @@ class CtrlBlockImp(
     val canSameRobidxWbData = if(isVfSche) {
       i2vWbData ++ f2vWbData ++ vfScheWbData
     } else if(isi2v) {
-      intScheWbData ++ fpScheWbData ++ vfScheWbData ++ staScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
     } else if (isf2v) {
-      intScheWbData ++ fpScheWbData ++ vfScheWbData ++ staScheWbData
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
     } else if (isIntSche) {
-      intScheWbData ++ fpScheWbData ++ staScheWbData
+      intScheWbData ++ fpScheWbData
     } else if (isFpSche) {
-      intScheWbData ++ fpScheWbData ++ staScheWbData
-    } else if (isStaSche) {
-      intScheWbData ++ fpScheWbData ++ staScheWbData
+      intScheWbData ++ fpScheWbData
+//    } else if (isStaSche) {
+//      intScheWbData ++ fpScheWbData ++ staScheWbData
     } else if (isMemVload) {
       memVloadWbData
     } else {
