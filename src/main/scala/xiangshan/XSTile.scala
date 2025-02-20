@@ -46,7 +46,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_l3_pf_port = memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
   val tl_uncache = l2top.inner.mmio_port
-  // val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
+  val sep_dm_opt = l2top.inner.sep_dm_port_opt
   val beu_int_source = l2top.inner.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.inner.clint_int_node

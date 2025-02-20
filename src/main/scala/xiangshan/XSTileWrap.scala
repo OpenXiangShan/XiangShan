@@ -21,6 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
+import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
 import device.{IMSICAsync, MsiInfoBundle}
@@ -50,6 +51,18 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
+
+  // seperate DebugModule bus
+  val EnableDMAsync = EnableDMAsyncBridge.isDefined
+  println(s"SeperateDMBus = $SeperateDMBus")
+  println(s"EnableDMAsync = $EnableDMAsync")
+  // asynchronous bridge source node
+  val dmAsyncSourceOpt = Option.when(SeperateDMBus && EnableDMAsync)(LazyModule(new TLAsyncCrossingSource()))
+  dmAsyncSourceOpt.foreach(_.node := tile.sep_dm_opt.get)
+  // synchronous source node
+  val dmSyncSourceOpt = Option.when(SeperateDMBus && !EnableDMAsync)(TLTempNode())
+  dmSyncSourceOpt.foreach(_ := tile.sep_dm_opt.get)
+
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
@@ -123,6 +136,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       case None =>
         require(enableCHI)
         io.chi <> tile.module.io.chi.get
+    }
+
+    // Seperate DebugModule TL Async Queue Source
+    if (SeperateDMBus && EnableDMAsync) {
+      dmAsyncSourceOpt.get.module.clock := clock
+      dmAsyncSourceOpt.get.module.reset := soc_reset_sync
     }
 
     withClockAndReset(clock, reset_sync) {

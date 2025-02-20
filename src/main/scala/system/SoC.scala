@@ -96,8 +96,10 @@ case class SoCParameters
   UseXSNoCTop: Boolean = false,
   UseXSNoCDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
+  SeperateDMBus: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  EnableDMAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
@@ -148,13 +150,17 @@ trait HasSoCParameter {
 
   val NumIRSrc = soc.NumIRSrc
 
+  val SeperateDMBus = soc.SeperateDMBus
+
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
+  val EnableDMAsyncBridge = if (SeperateDMBus && soc.EnableDMAsyncBridge.isDefined)
+    soc.EnableDMAsyncBridge else None
 
   def HasMEMencryption = cvm.HasMEMencryption
-  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)) ,
-  "HasMEMencryption most set with KeyIDBits > 0")
+  require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)),
+    "HasMEMencryption most set with KeyIDBits > 0")
 }
 
 trait HasPeripheralRanges {
@@ -466,14 +472,22 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { pll_node := peripheralXbar.get }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
+  val debugModuleXbarOpt = Option.when(SeperateDMBus)(TLXbar())
   if (enableCHI) {
-    debugModule.debug.node := device_xbar.get
-    // TODO: l3_xbar
+    if (SeperateDMBus) {
+      debugModule.debug.node := debugModuleXbarOpt.get
+    } else {
+      debugModule.debug.node := device_xbar.get
+    }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
       error_xbar.get := sb2tl.node
     }
   } else {
-    debugModule.debug.node := peripheralXbar.get
+    if (SeperateDMBus) {
+      debugModule.debug.node := debugModuleXbarOpt.get
+    } else {
+      debugModule.debug.node := peripheralXbar.get
+    }
     debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
       l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
     }
