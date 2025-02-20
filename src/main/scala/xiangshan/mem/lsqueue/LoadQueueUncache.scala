@@ -81,7 +81,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     */
   val needFlushReg = RegInit(false.B)
   val needFlush = req_valid && req.uop.robIdx.needFlush(io.redirect)
-  val flush = (needFlush && uncacheState===s_idle) || (io.uncache.resp.fire && needFlushReg)
+  val flush = WireInit(false.B)
   when(flush){
     needFlushReg := false.B
   }.elsewhen(needFlush){
@@ -123,27 +123,35 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   )
   switch (uncacheState) {
     is (s_idle) {
-      when (canSendReq) {
+      when (needFlush) {
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen (canSendReq) {
         uncacheState := s_req
       }
     }
     is (s_req) {
-      when (io.uncache.req.fire) {
+      when(needFlush){
+        uncacheState := s_idle
+        flush := true.B
+      }.elsewhen(io.uncache.req.fire) {
         uncacheState := s_resp
       }
     }
     is (s_resp) {
       when (io.uncache.resp.fire) {
-        when (needFlushReg) {
+        when (needFlush || needFlushReg) {
           uncacheState := s_idle
+          flush := true.B
         }.otherwise{
           uncacheState := s_wait
         }
       }
     }
     is (s_wait) {
-      when (writeback) {
+      when (needFlush || writeback) {
         uncacheState := s_idle
+        flush := true.B
       }
     }
   }
@@ -157,7 +165,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.slaveId.bits := slaveId
 
   /* uncahce req */
-  io.uncache.req.valid     := uncacheState === s_req
+  io.uncache.req.valid     := uncacheState === s_req && !needFlush
   io.uncache.req.bits      := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.data := DontCare
@@ -202,7 +210,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.ncOut.bits := DontCare
 
   when(req.nc){
-    io.ncOut.valid := (uncacheState === s_wait)
+    io.ncOut.valid := (uncacheState === s_wait) && !needFlush
     io.ncOut.bits := DontCare
     io.ncOut.bits.uop := selUop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -217,7 +225,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.is128bit := req.is128bit
     io.ncOut.bits.vecActive := req.vecActive
   }.otherwise{
-    io.mmioOut.valid := (uncacheState === s_wait)
+    io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
     io.mmioOut.bits := DontCare
     io.mmioOut.bits.uop := selUop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
