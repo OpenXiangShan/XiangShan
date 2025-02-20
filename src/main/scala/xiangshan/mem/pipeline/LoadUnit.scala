@@ -918,7 +918,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
   val s1_tlb_fast_miss    = io.tlb.resp.bits.fastMiss && io.tlb.resp.valid && s1_valid
-  val s1_pbmt             = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
+  val s1_tlb_hit          = !io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
+  val s1_pbmt             = Mux(s1_tlb_hit, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
   val s1_nc               = s1_in.nc
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
@@ -1205,7 +1206,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   // * if pbmt =/= 0, mmio is up to pbmt; otherwise, it's up to pmp
-  val s2_tlb_hit = RegNext(!io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid)
+  val s2_tlb_hit = RegNext(s1_tlb_hit)
   val s2_mmio = !s2_prf &&
     !s2_exception && !s2_in.tlbMiss &&
     Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
