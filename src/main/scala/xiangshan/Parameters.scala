@@ -23,7 +23,6 @@ import huancun._
 import system.SoCParamsKey
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
@@ -179,15 +178,6 @@ case class XSCoreParameters
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 24,
   IssueQueueCompEntrySize: Int = 16,
-  dpParams: DispatchParameters = DispatchParameters(
-    IntDqSize = 16,
-    FpDqSize = 16,
-    LsDqSize = 18,
-    IntDqDeqWidth = 8,
-    FpDqDeqWidth = 6,
-    VecDqDeqWidth = 6,
-    LsDqDeqWidth = 6,
-  ),
   intPreg: PregParams = IntPregParams(
     numEntries = 224,
     numRead = None,
@@ -421,7 +411,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = intPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.IntDqDeqWidth,
     )
   }
 
@@ -444,7 +433,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = fpPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.FpDqDeqWidth,
     )
   }
 
@@ -467,7 +455,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = vfPreg.dataCfg.dataWidth,
-      numUopIn = dpParams.VecDqDeqWidth,
     )
   }
 
@@ -508,7 +495,6 @@ case class XSCoreParameters
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = rfDataWidth,
-      numUopIn = dpParams.LsDqDeqWidth,
     )
   }
 
@@ -771,7 +757,7 @@ trait HasXSParameter {
   def maxElemPerVreg: Int = coreParams.maxElemPerVreg
 
   def IntRefCounterWidth = log2Ceil(RobSize)
-  def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
+  def LSQEnqWidth = RenameWidth
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
   def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
   def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
@@ -786,7 +772,6 @@ trait HasXSParameter {
   def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   def VlsQueueSize = coreParams.VlsQueueSize
-  def dpParams = coreParams.dpParams
 
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max

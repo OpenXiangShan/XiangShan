@@ -14,7 +14,6 @@ case class SchdBlockParams(
   numDeqOutside   : Int,
   schdType        : SchedulerType,
   rfDataWidth     : Int,
-  numUopIn        : Int,
 ) {
   var backendParam: BackendParams = null
 
@@ -85,11 +84,6 @@ case class SchdBlockParams(
   def numWriteVfRf: Int = issueBlockParams.map(_.numWriteVfRf).sum
 
   def numNoDataWB: Int = issueBlockParams.map(_.numNoDataWB).sum
-
-  def numPcReadPort = {
-    val bjIssueQueues = issueBlockParams.filter(x => (x.JmpCnt + x.BrhCnt + x.FenceCnt) > 0)
-    if (bjIssueQueues.map(x => x.numEnq).sum > 0) numUopIn else 0
-  }
 
   def needOg2Resp: Boolean = isVfSchd || isMemSchd && issueBlockParams.map(_.needOg2Resp).reduce(_ || _)
 

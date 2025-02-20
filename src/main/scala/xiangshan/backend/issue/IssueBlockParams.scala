@@ -128,8 +128,6 @@ case class IssueBlockParams(
   
   def writeVType: Boolean = exuBlockParams.map(_.writeVType).reduce(_ || _)
 
-  def numPcReadPort: Int = (if (needPc) 1 else 0) * numEnq
-
   def numWriteIntRf: Int = exuBlockParams.count(_.writeIntRf)
 
   def numWriteFpRf: Int = exuBlockParams.count(_.writeFpRf)
