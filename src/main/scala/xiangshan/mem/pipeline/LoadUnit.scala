@@ -1301,7 +1301,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_real_exceptionVec(loadAddrMisaligned) := s2_out.isMisalign && s2_check_mmio
   s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
     s2_fwd_frm_d_chan && s2_d_corrupt ||
-    s2_fwd_frm_mshr && s2_mshr_corrupt
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
 
