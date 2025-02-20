@@ -108,9 +108,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val counter_filter_query = new CounterFilterQueryBundle
     val counter_filter_enq = new ValidIO(new CounterFilterDataBundle())
-
-    // miss queue cancel the miss request
-    val mq_enq_cancel = Input(Bool())
   })
 
   assert(RegNext(io.meta_read.ready))

@@ -1494,8 +1494,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.cmoOpReq <> missQueue.io.cmo_req
   io.cmoOpResp <> missQueue.io.cmo_resp
 
-  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
-
   XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
   XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)
 
