@@ -71,6 +71,15 @@ trait HasMemBlockParameters extends HasXSParameter {
   val MisalignWBPort = 1
   val UncacheWBPort  = 2
   val NCWBPorts = Seq(1, 2)
+
+  val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 2) // (load + hyu + stream pf, store, sms+l2bop)
+  val DTlbSize = TlbSubSizeVec.sum
+  val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
+  val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
+  val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
+  val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
 }
 
 abstract class MemBlockBundle(implicit val p: Parameters) extends Bundle with HasMemBlockParameters
@@ -652,11 +661,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
-  val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 2) // (load + hyu + stream pf, store, sms+l2bop)
-  val DTlbSize = TlbSubSizeVec.sum
-  val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
-  val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -1149,9 +1153,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.cmoOpResp <> dcache.io.cmoOpResp
 
   // Prefetcher
-  val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
-  val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
-  val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
   prefetcherOpt match {
   case Some(pf) =>
     dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
