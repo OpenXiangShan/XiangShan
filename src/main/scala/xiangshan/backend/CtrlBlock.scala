@@ -608,6 +608,8 @@ class CtrlBlockImp(
       val cross1Ftq = decodePipeRename(i).bits.lastInFtqEntry || decodePipeRename(i + 1).bits.lastInFtqEntry
       rename.io.in(i + 1).bits.lastInFtqEntry := cross1Ftq
       rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
+      // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
+      rename.io.in(i + 1).bits.isMove := false.B
       rename.io.in(i).bits.lastInFtqEntry := false.B
       rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
