@@ -16,7 +16,7 @@ import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
 import xiangshan.backend.regcache.RegCacheTagTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, SqPtr, LqPtr}
-import xiangshan.mem.Bundles.MemWaitUpdateReq
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 sealed trait SchedulerType
 
@@ -139,7 +139,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }) else None
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
