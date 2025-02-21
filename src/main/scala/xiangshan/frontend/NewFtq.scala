@@ -518,8 +518,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   topdown_stage                  := io.fromBpu.resp.bits.topdown_info
   io.toIfu.req.bits.topdown_info := topdown_stage
 
-  val ifuRedirected = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
-
   // io.fromBackend.ftqIdxAhead: bju(BjuCnt) + ldReplay + exception
   val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i))) // only bju
   val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum - 1, 0)
@@ -1155,13 +1153,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     toBpuCfi.target := toBpuCfi.topAddr
   }
 
-  when(ifuRedirectReg.valid) {
-    ifuRedirected(ifuRedirectReg.bits.ftqIdx.value) := true.B
-  }.elsewhen(RegNext(pdWb.valid)) {
-    // if pdWb and no redirect, set to false
-    ifuRedirected(last_cycle_bpu_in_ptr.value) := false.B
-  }
-
   // **********************************************************************
   // ***************************** to backend *****************************
   // **********************************************************************
@@ -1658,7 +1649,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftb_modified_entry =
     u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified || ftbEntryGen.is_strong_bias_modified)
   val ftb_modified_entry_new_br               = u(ftbEntryGen.is_new_br)
-  val ftb_modified_entry_ifu_redirected       = u(ifuRedirected(do_commit_ptr.value))
   val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
   val ftb_modified_entry_br_full              = ftb_modified_entry && ftbEntryGen.is_br_full
   val ftb_modified_entry_strong_bias          = ftb_modified_entry && ftbEntryGen.is_strong_bias_modified
