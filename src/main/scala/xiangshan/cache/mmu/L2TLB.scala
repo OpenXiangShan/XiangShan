@@ -1,6 +1,8 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2021-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
+* Copyright (c) 2024-2025 Institute of Information Engineering, Chinese Academy of Sciences
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -78,8 +80,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val sfence_tmp = DelayN(io.sfence, 1)
   val csr_tmp    = DelayN(io.csr.tlb, 1)
-  val sfence_dup = Seq.fill(9)(RegNext(sfence_tmp))
-  val csr_dup = Seq.fill(8)(RegNext(csr_tmp)) // TODO: add csr_modified?
+  val sfence_dup = Seq.fill(if (HasBitmapCheck) 11 else 9)(RegNext(sfence_tmp))
+  val csr_dup = Seq.fill(if (HasBitmapCheck) 10 else 8)(RegNext(csr_tmp)) // TODO: add csr_modified?
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
@@ -89,9 +91,32 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed
 
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(3)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
+  val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck) 4 else 3)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
-  pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
+  if (HasBitmapCheck) {
+    pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, ModeS, pmp.io.pmp, pmp.io.pma))
+  } else {
+    pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma)) 
+  }
+
+  // add bitmapcheck
+  val bitmap = Option.when(HasBitmapCheck)(Module(new Bitmap))
+  val bitmapcache = Option.when(HasBitmapCheck)(Module(new BitmapCache))
+
+  if (HasBitmapCheck) {
+    bitmap.foreach { Bitmap =>
+      Bitmap.io.csr := csr_dup(8)
+      Bitmap.io.sfence := sfence_dup(9)
+      bitmapcache.foreach { BitmapCache =>
+        // connect bitmap and bitmapcache
+        BitmapCache.io.req <> Bitmap.io.cache.req
+        Bitmap.io.cache.resp <> BitmapCache.io.resp
+        BitmapCache.io.refill <> Bitmap.io.refill
+        BitmapCache.io.csr := csr_dup(9)
+        BitmapCache.io.sfence := sfence_dup(10)
+      }
+    }
+  }
 
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
@@ -123,6 +148,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
+
+  if (HasBitmapCheck) {
+    // connect ptwcache and bitmap sleep-wakeup port
+    cache.io.bitmap_wakeup.get <> bitmap.get.io.wakeup
+  }
 
   // hptw arb input port
   val InHptwArbPTWPort = 0
@@ -217,19 +247,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   arb2.io.out.ready := cache.io.req.ready
 
+  // Instructs requests from cache need go to LLPTW for processing
+  val toFsm_toLLPTW = if (HasBitmapCheck) cache.io.resp.bits.toFsm.bitmapCheck.get.toLLPTW else false.B
 
   val mq_arb = Module(new Arbiter(new L2TlbWithHptwIdBundle, 2))
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
     !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptwReq && // hptw reqs are not sent to missqueue
     (cache.io.resp.bits.bypassed || (
-      ((!cache.io.resp.bits.toFsm.l1Hit || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
-      || (cache.io.resp.bits.toFsm.l1Hit && !llptw.io.in.ready) // send to llptw, llptw is full
+      (((!cache.io.resp.bits.toFsm.l1Hit && !toFsm_toLLPTW) || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
+      || ((cache.io.resp.bits.toFsm.l1Hit || toFsm_toLLPTW) && !llptw.io.in.ready) // send to llptw, llptw is full
     ))
 
   mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
   mq_arb.io.in(0).bits.isHptwReq := false.B
   mq_arb.io.in(0).bits.hptwId :=  DontCare
-  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l1Hit
+  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l1Hit || toFsm_toLLPTW
   mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
   mq_arb.io.in(1).bits.isHptwReq := false.B
   mq_arb.io.in(1).bits.hptwId := DontCare
@@ -245,11 +277,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   llptw.io.in.valid := cache.io.resp.valid &&
     !cache.io.resp.bits.hit &&
-    cache.io.resp.bits.toFsm.l1Hit &&
+    (toFsm_toLLPTW || cache.io.resp.bits.toFsm.l1Hit) &&
     !cache.io.resp.bits.bypassed &&
     !cache.io.resp.bits.isHptwReq
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
   llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
+  if (HasBitmapCheck) {
+    llptw.io.in.bits.bitmapCheck.get.jmp_bitmap_check := cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check
+    llptw.io.in.bits.bitmapCheck.get.ptes := cache.io.resp.bits.toFsm.bitmapCheck.get.ptes
+    llptw.io.in.bits.bitmapCheck.get.cfs := cache.io.resp.bits.toFsm.bitmapCheck.get.cfs
+    llptw.io.in.bits.bitmapCheck.get.hitway := cache.io.resp.bits.toFsm.bitmapCheck.get.hitway
+  }
   llptw.io.sfence := sfence_dup(1)
   llptw.io.csr := csr_dup(1)
   val llptw_stage1 = Reg(Vec(l2tlbParams.llptwsize, new PtwMergeResp()))
@@ -271,7 +309,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     (!cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw.io.req.ready,
     (cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw_resp_arb.io.in(HptwRespArbCachePort).ready,
     cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    (cache.io.resp.bits.toFsm.l1Hit && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
+    ((toFsm_toLLPTW || cache.io.resp.bits.toFsm.l1Hit) && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
     (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) -> mq_arb.io.in(0).ready
   ))
 
@@ -279,7 +317,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l1Hit &&
     !cache.io.resp.bits.bypassed &&
     !cache.io.resp.bits.isFirst &&
-    !cache.io.resp.bits.isHptwReq
+    !cache.io.resp.bits.isHptwReq &&
+    !toFsm_toLLPTW
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   if (EnableSv48) {
     ptw.io.req.bits.l3Hit.get := cache.io.resp.bits.toFsm.l3Hit.get
@@ -288,6 +327,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   ptw.io.req.bits.stage1Hit := cache.io.resp.bits.toFsm.stage1Hit
   ptw.io.req.bits.stage1 := cache.io.resp.bits.stage1
+  if (HasBitmapCheck) {
+    ptw.io.req.bits.bitmapCheck.get.jmp_bitmap_check := cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check
+    ptw.io.req.bits.bitmapCheck.get.pte := cache.io.resp.bits.toFsm.bitmapCheck.get.pte
+    ptw.io.req.bits.bitmapCheck.get.cfs := cache.io.resp.bits.toFsm.bitmapCheck.get.cfs
+    ptw.io.req.bits.bitmapCheck.get.SPlevel := cache.io.resp.bits.toFsm.bitmapCheck.get.SPlevel
+  }
   ptw.io.sfence := sfence_dup(7)
   ptw.io.csr := csr_dup(6)
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
@@ -303,6 +348,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw.io.req.bits.l1Hit := cache.io.resp.bits.toHptw.l1Hit
   hptw.io.req.bits.ppn := cache.io.resp.bits.toHptw.ppn
   hptw.io.req.bits.bypassed := cache.io.resp.bits.toHptw.bypassed
+  if (HasBitmapCheck) {
+    hptw.io.req.bits.bitmapCheck.get <> cache.io.resp.bits.toHptw.bitmapCheck.get
+  }
   hptw.io.sfence := sfence_dup(8)
   hptw.io.csr := csr_dup(7)
   // mem req
@@ -324,6 +372,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   def from_hptw(id: UInt) = {
     id === l2tlbParams.llptwsize.U + 1.U
   }
+  def from_bitmap(id: UInt) = {
+    (id > l2tlbParams.llptwsize.U + 1.U) && (id < MemReqWidth.U)
+  }
   val waiting_resp = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
   val flush_latch = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
   val hptw_bypassed = RegInit(false.B)
@@ -337,11 +388,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_mem.req_mask := waiting_resp.take(l2tlbParams.llptwsize)
   ptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize)
   hptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize + 1)
-
-  val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 3))
+  if (HasBitmapCheck) {
+    bitmap.get.io.mem.req_mask := waiting_resp.slice(MemReqWidth - (l2tlbParams.llptwsize + 2), MemReqWidth)
+  }
+  val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), if (HasBitmapCheck) 4 else 3))
   mem_arb.io.in(0) <> ptw.io.mem.req
   mem_arb.io.in(1) <> llptw_mem.req
   mem_arb.io.in(2) <> hptw.io.mem.req
+  if (HasBitmapCheck) {
+    mem_arb.io.in(3) <> bitmap.get.io.mem.req
+  }
   mem_arb.io.out.ready := mem.a.ready && !flush
 
   // // assert, should not send mem access at same addr for twice.
@@ -390,6 +446,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val mem_resp_from_llptw = from_llptw(mem.d.bits.source)
   val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
+  val mem_resp_from_bitmap = from_bitmap(mem.d.bits.source)
   when (mem.d.valid) {
     assert(mem.d.bits.source < MemReqWidth.U)
     refill_data(refill_helper._4) := mem.d.bits.data
@@ -400,7 +457,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
-  val resp_pte = VecInit((0 until MemReqWidth).map(i =>
+  val resp_pte = VecInit((0 until (if (HasBitmapCheck) MemReqWidth / 2 else MemReqWidth)).map(i =>
     if (i == l2tlbParams.llptwsize + 1) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_hptw) }
     else if (i == l2tlbParams.llptwsize) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_ptw) }
     else { Mux(llptw_mem.buffer_it(i), get_part(refill_data, req_addr_low(i)), RegEnable(get_part(refill_data, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data, req_addr_low(i))), llptw_mem.buffer_it(i))) }
@@ -409,12 +466,51 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // save eight ptes for each id when sector tlb
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
-  val resp_pte_sector = VecInit((0 until MemReqWidth).map(i =>
+  val resp_pte_sector = VecInit((0 until (if (HasBitmapCheck) MemReqWidth / 2 else MemReqWidth)).map(i =>
     if (i == l2tlbParams.llptwsize + 1) {RegEnable(refill_data_tmp, 0.U.asTypeOf(refill_data_tmp), mem_resp_done && mem_resp_from_hptw) }
     else if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, 0.U.asTypeOf(refill_data_tmp), mem_resp_done && mem_resp_from_ptw) }
     else { Mux(llptw_mem.buffer_it(i), refill_data, RegEnable(refill_data, 0.U.asTypeOf(refill_data), llptw_mem.buffer_it(i))) }
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
+
+  if (HasBitmapCheck) {
+    // add bitmap arb
+    bitmap.foreach { Bitmap =>
+      val bitmap_arb = Module(new Arbiter(new bitmapReqBundle(), 3))
+      bitmap_arb.io.in(0) <> ptw.io.bitmap.get.req
+      bitmap_arb.io.in(1) <> llptw.io.bitmap.get.req
+      bitmap_arb.io.in(2) <> hptw.io.bitmap.get.req
+      bitmap_arb.io.out.ready := Bitmap.io.req.ready
+
+      Bitmap.io.req <> bitmap_arb.io.out
+
+      // connect bitmap resp to PTW
+      val bitmapresp_to_llptw = from_llptw(Bitmap.io.resp.bits.id)
+      val bitmapresp_to_hptw = from_hptw(Bitmap.io.resp.bits.id)
+      val bitmapresp_to_ptw = from_ptw(Bitmap.io.resp.bits.id)
+
+      Bitmap.io.resp.ready := (llptw.io.bitmap.get.resp.ready && bitmapresp_to_llptw) || (hptw.io.bitmap.get.resp.ready && bitmapresp_to_hptw) || (ptw.io.bitmap.get.resp.ready && bitmapresp_to_ptw)
+
+      // bitmap -> llptw ptw hptw
+      llptw.io.bitmap.get.resp.valid := Bitmap.io.resp.valid && bitmapresp_to_llptw
+      hptw.io.bitmap.get.resp.valid := Bitmap.io.resp.valid && bitmapresp_to_hptw
+      ptw.io.bitmap.get.resp.valid := Bitmap.io.resp.valid && bitmapresp_to_ptw
+
+      // add ptw、hptw、llptw with bitmap resp connect
+      ptw.io.bitmap.get.resp.bits := Bitmap.io.resp.bits
+      hptw.io.bitmap.get.resp.bits := Bitmap.io.resp.bits
+      llptw.io.bitmap.get.resp.bits := Bitmap.io.resp.bits
+
+      // mem -> bitmap
+      Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap
+      Bitmap.io.mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
+      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
+    }
+
+    // ptwcache -> hptw llptw
+    hptw.io.l0_way_info.get := cache.io.l0_way_info.get
+    llptw.io.l0_way_info.get := cache.io.l0_way_info.get
+  }
 
   // mem -> llptw
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
@@ -431,7 +527,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_ptw = mem_resp_from_ptw
   val refill_from_hptw = mem_resp_from_hptw
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
-  val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source) && !hptw_bypassed
+  val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !hptw_bypassed
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
@@ -491,6 +587,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.pmp.resp <> pmp_check(1).resp
   pmp_check(2).req <> hptw.io.pmp.req
   hptw.io.pmp.resp <> pmp_check(2).resp
+  if (HasBitmapCheck) {
+    pmp_check(3).req <> bitmap.get.io.pmp.req
+    bitmap.get.io.pmp.resp <> pmp_check(3).resp
+  }
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
 
@@ -512,6 +612,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.hptw.resp.bits.h_resp := hptw_resp_arb.io.out.bits.resp
   hptw_resp_arb.io.out.ready := true.B
 
+  val cfsValue = Option.when(HasBitmapCheck)(llptw_out.bits.bitmapCheck.get.cfs)
+
   // Timing: Maybe need to do some optimization or even add one more cycle
   for (i <- 0 until PtwWidth) {
     mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U && !cache.io.resp.bits.isHptwReq
@@ -527,8 +629,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
       llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id),
       contiguous_pte_to_merge_ptwResp(
-        resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, 
-        true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf
+        if (HasBitmapCheck) Mux(llptw_out.bits.bitmapCheck.get.jmp_bitmap_check, llptw_out.bits.bitmapCheck.get.ptes.asUInt, resp_pte_sector(llptw_out.bits.id).asUInt) else resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af,
+        true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf,
+        cfs = cfsValue.getOrElse(VecInit(Seq.fill(tlbcontiguous)(false.B)))
       )
     )
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
@@ -575,7 +678,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // not_super means that this is a normal page
   // valididx(i) will be all true when super page to be convenient for l1 tlb matching
-  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, s2xlate: UInt, mPBMTE: Bool, hPBMTE: Bool, not_super: Boolean = true, gpf: Bool) : PtwMergeResp = {
+  def contiguous_pte_to_merge_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean, s2xlate: UInt, mPBMTE: Bool, hPBMTE: Bool, not_super: Boolean = true, gpf: Bool, cfs : Vec[Bool]) : PtwMergeResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val ptw_merge_resp = Wire(new PtwMergeResp())
     val hasS2xlate = s2xlate =/= noS2xlate
@@ -592,6 +695,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
       ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U, pbmte) || !pte_in.isLeaf())
       ptw_resp.af := (if (!af_first) pte_in.isPf(0.U, pbmte) else true.B) && (af || (Mux(s2xlate === allStage, false.B, pte_in.isAf()) && !(hasS2xlate && gpf)))
+      ptw_resp.cf := cfs(ptw_resp.ppn(sectortlbwidth - 1, 0))
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)
@@ -629,7 +733,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && n_equal && perm_equal && v_equal && af_equal && pf_equal) || !pte.not_super) && !pte.not_merge
+      val cf_equal = if (HasBitmapCheck) pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf else true.B
+      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && n_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B

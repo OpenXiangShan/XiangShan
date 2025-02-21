@@ -41,6 +41,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
+  case CVMParamskey => CVMParameters()
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
@@ -411,6 +412,28 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
+class CVMCompile extends Config((site, here, up) => {
+  case CVMParamskey => up(CVMParamskey).copy(
+    KeyIDBits = 5,
+    HasMEMencryption = true,
+    HasDelayNoencryption = false
+  )
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasBitmapCheck = true,
+    HasBitmapCheckDefault = false))
+})
+
+class CVMTestCompile extends Config((site, here, up) => {
+  case CVMParamskey => up(CVMParamskey).copy(
+    KeyIDBits = 5,
+    HasMEMencryption = true,
+    HasDelayNoencryption = true
+  )
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasBitmapCheck =true,
+    HasBitmapCheckDefault = true))
+})
+
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   L3CacheConfig("512KB", inclusive = false)
     ++ L2CacheConfig("256KB", inclusive = true)
@@ -435,6 +458,16 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
+)
+
+class CVMConfig(n: Int = 1) extends Config(
+  new CVMCompile
+    ++ new DefaultConfig(n)
+)
+
+class CVMTestConfig(n: Int = 1) extends Config(
+  new CVMTestCompile
+    ++ new DefaultConfig(n)
 )
 
 class WithCHI extends Config((_, _, _) => {

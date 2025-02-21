@@ -34,6 +34,9 @@ trait HasCSRConst {
   val PmacfgBase    = 0x7C0
   val PmaaddrBase   = 0x7C8 // 64 entry at most
 
+  // Machine level Bitmap Check(Custom Read/Write)
+  val Mbmc = 0xBC2
+
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
   def privMNret  = 0x702.U
