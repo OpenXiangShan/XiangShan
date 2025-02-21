@@ -427,7 +427,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // q0 should judge whether wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
+      when(q0_canSentIdx =/= j.U && states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
         states(j).setWaitSame(true.B)
       }
     )
@@ -449,7 +449,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // remove state of wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))){
+      when(id =/= j.U && states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))){
         states(j).setWaitSame(false.B)
       }
     )
