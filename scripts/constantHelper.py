@@ -8,7 +8,7 @@ import math
 import time
 from datetime import datetime
 
-# usage: python3 constantHelper.py JSON_FILE_PATH
+# usage: python3 constantHelper.py JSON_FILE_PATH [BUILD_PATH]
 # 
 # an example json config file is as follow:
 # visit https://bosc.yuque.com/yny0gi/gr7hyo/oy3dagqi9v97p696 for detail
@@ -68,10 +68,19 @@ if XS_PROJECT_ROOT is None:
     print("Please set XS_PROJECT_ROOT first.")
     exit(1)
 DIFF_PATH = os.path.join(NOOP_HOME, "ready-to-run", "riscv64-nemu-interpreter-so")
-# BUILD_PATH = os.path.join(NOOP_HOME, "build")
-BUILD_PATH = os.path.join(os.path.join(XS_PROJECT_ROOT, "tutorial"), "p7-constantin")
-EMU_PATH = os.path.join(BUILD_PATH, "emu")
 
+# get arguments
+if sys.argv[1]:
+    JSON_FILE_PATH=sys.argv[1]
+else:
+    print("Please specify the json file path")
+    exit(1)
+if sys.argv[2]:
+    BUILD_PATH = sys.argv[2]
+else:
+    BUILD_PATH = os.path.join(NOOP_HOME, "build")
+
+EMU_PATH = os.path.join(BUILD_PATH, "emu")
 CONFIG_FILE_PREFIX = ".constant_result_"
 PERF_FILE_POSTFIX = "tmp"
 MAXVAL = (1 << 63) - 1
@@ -340,5 +349,5 @@ class Solution:
         print("opt constant for gene algrithom is ", list(globalMap)[0][0].obj, " fitness", int(list(globalMap)[0][1]))
 
 tid = datetime.now().strftime("%m%d%H%M")
-config = loadConfig(sys.argv[1], f"constantin_{tid}")
+config = loadConfig(JSON_FILE_PATH, f"constantin_{tid}")
 Solution(config).gene_cal()
