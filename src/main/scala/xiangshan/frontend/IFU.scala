@@ -739,12 +739,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(m_waitResp) {
       when(fromUncache.fire) {
         val isRVC      = fromUncache.bits.data(1, 0) =/= 3.U
-        val needResend = !isRVC && f3_paddrs(0)(2, 1) === 3.U
+        val exception  = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        val needResend = !isRVC && f3_paddrs(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
         mmio_state            := Mux(needResend, m_sendTLB, m_waitCommit)
         mmio_is_RVC           := isRVC
         f3_mmio_data(0)       := fromUncache.bits.data(15, 0)
         f3_mmio_data(1)       := fromUncache.bits.data(31, 16)
-        mmio_resend_exception := ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        mmio_resend_exception := exception
       }
     }
 
