@@ -750,11 +750,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
-  io.meta_read.valid := req.valid && !set_conflict
+  io.meta_read.valid := req.valid
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
   io.meta_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
-  io.tag_read.valid := req.valid && !set_conflict && !s0_req.replace
+  io.tag_read.valid := req.valid && !s0_req.replace
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
