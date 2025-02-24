@@ -116,7 +116,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     size = LoadQueueRARSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
-    enablePreAlloc = true,
+    enablePreAlloc = false,
     moduleName = "LoadQueueRAR freelist"
   ))
   freeList.io := DontCare
@@ -142,6 +142,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
+  require(LoadQueueRARSize == VirtualLoadQueueSize, "LoadQueueRARSize should be equal to VirtualLoadQueueSize for timing!")
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B

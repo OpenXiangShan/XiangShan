@@ -1286,12 +1286,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     !s2_in.misalignNeedWakeUp
 
   // need allocate new entry
-  val s2_can_query = !s2_mem_amb &&
-                     !s2_tlb_miss &&
-                     !s2_fwd_fail &&
-                     !s2_frm_mabuf &&
-                     !s2_fast_rep &&
-                     s2_troublem
+  val s2_can_query = !((s2_dcache_fast_rep || s2_nuke) && !s2_in.misalignNeedWakeUp) && s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && s2_full_fwd
 
@@ -1312,7 +1307,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_safe_writeback = s2_real_exception || s2_safe_wakeup || s2_vp_match_fail || s2_in.misalignNeedWakeUp
 
   // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
+  io.lsq.ldld_nuke_query.req.valid           := s2_valid
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
