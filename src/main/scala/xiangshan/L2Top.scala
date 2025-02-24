@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import chisel3.util.{Valid, ValidIO}
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
@@ -82,8 +83,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   ))
 
   val i_mmio_port = TLTempNode()
-  val icachectrl_port_opt = if(icacheParameters.cacheCtrlAddressOpt.nonEmpty) Option(TLTempNode()) else None
   val d_mmio_port = TLTempNode()
+  val icachectrl_port_opt = Option.when(icacheParameters.cacheCtrlAddressOpt.nonEmpty)(TLTempNode())
+  val sep_dm_port_opt = Option.when(SeperateDMBus)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform && !enableCHI, stat_latency = true)
@@ -142,11 +144,16 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   if (icacheParameters.cacheCtrlAddressOpt.nonEmpty) {
     icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }
+  if (SeperateDMBus) {
+    sep_dm_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
+  }
 
   // filter out in-core addresses before sent to mmio_port
   // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
-  private def mmioFilters: Seq[AddressSet] =
-    (icacheParameters.cacheCtrlAddressOpt ++ dcacheParameters.cacheCtrlAddressOpt).toSeq
+  private def mmioFilters: Seq[AddressSet] = p(DebugModuleKey).get.address +: (
+    icacheParameters.cacheCtrlAddressOpt ++
+    dcacheParameters.cacheCtrlAddressOpt
+  ).toSeq
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=

@@ -158,6 +158,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
+    misc.debugModuleXbarOpt.foreach(_ := core_with_l2(i).sep_dm_opt.get)
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
