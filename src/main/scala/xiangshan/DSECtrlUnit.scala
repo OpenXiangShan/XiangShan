@@ -103,6 +103,14 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val l3Sets1 = RegInit(p(SoCParamsKey).L3CacheParamsOpt.map(_.sets).getOrElse(0).U(64.W))
     val l3Sets = Wire(UInt(64.W))
 
+    val intPhyRegs0 = RegInit(NRPhyRegs.U(64.W))
+    val intPhyRegs1 = RegInit(NRPhyRegs.U(64.W))
+    val intPhyRegs = Wire(UInt(64.W))
+
+    val fpPhyRegs0 = RegInit((NRPhyRegs - 32).U(64.W))
+    val fpPhyRegs1 = RegInit((NRPhyRegs - 32).U(64.W))
+    val fpPhyRegs = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -138,7 +146,11 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x1A0 -> Seq(RegField(64, l2Sets0)),
       0x1A8 -> Seq(RegField(64, l2Sets1)),
       0x1B0 -> Seq(RegField(64, l3Sets0)),
-      0x1B8 -> Seq(RegField(64, l3Sets1))
+      0x1B8 -> Seq(RegField(64, l3Sets1)),
+      0x1C0 -> Seq(RegField(64, intPhyRegs0)),
+      0x1C8 -> Seq(RegField(64, intPhyRegs1)),
+      0x1D0 -> Seq(RegField(64, fpPhyRegs0)),
+      0x1D8 -> Seq(RegField(64, fpPhyRegs1)),
     )
 
     // Mux logic
@@ -154,6 +166,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     l3MSHRs := Mux(ctrlSel.orR, l3MSHRs1, l3MSHRs0)
     l2Sets := Mux(ctrlSel.orR, l2Sets1, l2Sets0)
     l3Sets := Mux(ctrlSel.orR, l3Sets1, l3Sets0)
+    intPhyRegs := Mux(ctrlSel.orR, intPhyRegs1, intPhyRegs0)
+    fpPhyRegs := Mux(ctrlSel.orR, fpPhyRegs1, fpPhyRegs0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -168,6 +182,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(l3MSHRs, "DSE_L3MSHRS")
     ExcitingUtils.addSource(l2Sets, "DSE_L2SETS")
     ExcitingUtils.addSource(l3Sets, "DSE_L3SETS")
+    ExcitingUtils.addSource(intPhyRegs, "DSE_INTFLSIZE")
+    ExcitingUtils.addSource(fpPhyRegs, "DSE_FPFLSIZE")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -185,6 +201,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(l3MSHRs <= L3MSHRs.U, "DSE parameter must not exceed L3MSHRs")
     assert(l2Sets <= p(XSCoreParamsKey).L2CacheParamsOpt.map(_.sets).getOrElse(0).U, "DSE parameter must not exceed L2Sets")
     assert(l3Sets <= p(SoCParamsKey).L3CacheParamsOpt.map(_.sets).getOrElse(0).U, "DSE parameter must not exceed L3Sets")
+    assert(intPhyRegs <= NRPhyRegs.U, "DSE parameter must not exceed NRPhyRegs")
+    assert(fpPhyRegs <= (NRPhyRegs - 32).U, "DSE parameter must not exceed fpPhyRegs")
 
 
     // core reset generation

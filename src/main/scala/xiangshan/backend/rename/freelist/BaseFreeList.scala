@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 
 
-abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule with HasResizeCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Input(Bool())
     val walk = Input(Bool())
@@ -37,15 +37,20 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     val freePhyReg = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
 
     val stepBack = Input(UInt(log2Up(CommitWidth + 1).W))
+
+    val psize = Input(UInt((PhyRegIdxWidth + 1).W))
   })
 
-  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
+  class FreeListPtr extends ResizeCircularQueuePtr[FreeListPtr](size)
 
   object FreeListPtr {
     def apply(f: Boolean, v: Int): FreeListPtr = {
       val ptr = Wire(new FreeListPtr)
+      ptr := DontCare
       ptr.flag := f.B
       ptr.value := v.U
+      ptr.psize.valid := false.B
+      ptr.psize.bits := 0.U
       ptr
     }
   }

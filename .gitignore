@@ -362,3 +362,6 @@ stack.info*
 
 !ready-to-run/*
 
+log
+output
+output.dot
