@@ -108,4 +108,8 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     }
 
     io.full := PvtTable.map(_.valid).reduce(_ && _)
+
+    XSPerfAccumulate("read_pvt_total", io.readPorts.map(r => r.valid.asUInt).reduce(_ + _))
+    XSPerfAccumulate("read_more_than1pvt", io.readPorts.map(r => r.valid.asUInt).reduce(_ + _) > 1.U)
+    XSPerfAccumulate("write_more_than1pvt", io.writePorts.map(w => w.wen.asUInt).reduce(_ + _) > 1.U)
 }

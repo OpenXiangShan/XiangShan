@@ -49,7 +49,7 @@ class LoadToLvp(implicit p: Parameters) extends LvpBundle{
 class LvpIO(implicit p: Parameters) extends LvpBundle{
     val fromload = Vec(backendParams.LduCnt, new LoadToLvp)
     val PredictValue = Vec(backendParams.LduCnt,Output(UInt(XLEN.W)))
-    val flush = Output(Bool())
+    val flush = Valid(new Redirect)
     val Predict = Vec(backendParams.LduCnt, Output(Bool()))
 }
 class Lvp(implicit p: Parameters) extends LvpModule{
@@ -59,8 +59,9 @@ class Lvp(implicit p: Parameters) extends LvpModule{
     val LvpTableNext = WireInit(LvpTable)
     //init 
     val PredictValue = RegInit(VecInit(Seq.fill(backendParams.LduCnt)(0.U(XLEN.W))))
-    io.flush := false.B
     val Predict = RegInit(VecInit(Seq.fill(backendParams.LduCnt)(false.B)))
+    val misPredict = RegInit(Predict)
+    io.flush := DontCare
     // VPE
     // temporarily don`t care same tag different load instruction
     io.fromload.zipWithIndex.foreach{ case (load, i) =>
@@ -71,7 +72,7 @@ class Lvp(implicit p: Parameters) extends LvpModule{
 
         when (load.loadvalid) {
             // write
-            when (!tagMatch) {
+            when (!tagMatch) {4
                 // if don`t match, create new entry
                 LvpTableNext(index).tag := load.pc(LvpTagLen-1, 0)
                 LvpTableNext(index).value := load.loadvalue
@@ -84,6 +85,7 @@ class Lvp(implicit p: Parameters) extends LvpModule{
             }
             Predict(i) := tagMatch && valueMatch && confidentEnough
             PredictValue(i) := Mux(tagMatch && valueMatch && confidentEnough, LvpTable(index).value, 0.U)
+            misPredict(i) := tagMatch && confidentEnough && !valueMatch
         }.otherwise {
             Predict(i) := false.B
             PredictValue(i) := 0.U
@@ -93,5 +95,7 @@ class Lvp(implicit p: Parameters) extends LvpModule{
         io.PredictValue(i) := PredictValue(i)
     }
     LvpTable := LvpTableNext
+    XSPerfAccumulate("predict",             io.Predict.reduce(_ || _))
+    XSPerfAccumulate("mispredict",          misPredict.reduce(_ || _))
 }
 
