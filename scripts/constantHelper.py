@@ -70,12 +70,12 @@ if XS_PROJECT_ROOT is None:
 DIFF_PATH = os.path.join(NOOP_HOME, "ready-to-run", "riscv64-nemu-interpreter-so")
 
 # get arguments
-if sys.argv[1]:
+if len(sys.argv) > 1:
     JSON_FILE_PATH=sys.argv[1]
 else:
     print("Please specify the json file path")
     exit(1)
-if sys.argv[2]:
+if len(sys.argv) > 2:
     BUILD_PATH = sys.argv[2]
 else:
     BUILD_PATH = os.path.join(NOOP_HOME, "build")
