@@ -427,7 +427,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // q0 should judge whether wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
+      when(q0_canSentIdx =/= j.U && states(j).isValid() && !states(j).isWaitReturn() && addrMatch(q0_entry, entries(j))){
         states(j).setWaitSame(true.B)
       }
     )
@@ -449,7 +449,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
     // remove state of wait same block
     (0 until UncacheBufferSize).map(j =>
-      when(states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))){
+      when(id =/= j.U && states(j).isValid() && states(j).isWaitSame() && addrMatch(entries(id), entries(j))){
         states(j).setWaitSame(false.B)
       }
     )
@@ -500,8 +500,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     /* f0 */
     // vaddr match
     val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
-    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdOld)
-    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdNew)
+    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdOld)
+    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(w).isFwdNew)
     // ONLY for fast use to get better timing
     val f0_flyMaskFast = shiftMaskToHigh(
       forward.vaddr,
