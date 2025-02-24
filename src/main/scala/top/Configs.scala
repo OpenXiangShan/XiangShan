@@ -457,7 +457,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n)
+    ++ new BaseConfig(n, true)
 )
 
 class CVMConfig(n: Int = 1) extends Config(
