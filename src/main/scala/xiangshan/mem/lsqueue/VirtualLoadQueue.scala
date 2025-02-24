@@ -246,32 +246,29 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
+    val need_rep = io.ldin(i).bits.rep_info.need_rep
+    val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      val need_rep = io.ldin(i).bits.rep_info.need_rep
-      val need_valid = io.ldin(i).bits.updateAddrValid
-
       when (!need_rep && need_valid && !io.ldin(i).bits.isvec) {
         committed(loadWbIndex) := true.B
-
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
       }
-
-      XSInfo(!need_rep && need_valid,
-        "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
-        io.ldin(i).bits.uop.lqIdx.asUInt,
-        io.ldin(i).bits.uop.pc,
-        io.ldin(i).bits.vaddr,
-        io.ldin(i).bits.paddr,
-        io.ldin(i).bits.mask,
-        io.ldin(i).bits.forwardData.asUInt,
-        io.ldin(i).bits.forwardMask.asUInt,
-        io.ldin(i).bits.mmio,
-        io.ldin(i).bits.isvec
-      )
     }
+    XSInfo(io.ldin(i).valid && !need_rep && need_valid,
+      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+      io.ldin(i).bits.uop.lqIdx.asUInt,
+      io.ldin(i).bits.uop.pc,
+      io.ldin(i).bits.vaddr,
+      io.ldin(i).bits.paddr,
+      io.ldin(i).bits.mask,
+      io.ldin(i).bits.forwardData.asUInt,
+      io.ldin(i).bits.forwardMask.asUInt,
+      io.ldin(i).bits.mmio,
+      io.ldin(i).bits.isvec
+    )
   }
 
   //  perf counter
