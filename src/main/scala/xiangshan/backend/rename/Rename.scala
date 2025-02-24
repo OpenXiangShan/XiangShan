@@ -152,6 +152,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
   io.fpPvtRead.flatten.foreach(_.data := DontCare)
 
+  XSPerfAccumulate("read_pvt_total", PopCount(io.intPvtRead.flatten.map(_.valid)))
+  XSPerfAccumulate("read_more_than1pvt", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
+  XSPerfAccumulate("write_pvt_total", PopCount(io.fromlvp.map(_.Predict)))
+  XSPerfAccumulate("write_more_than1pvt", PopCount(io.fromlvp.map(_.Predict)) > 1.U)
+
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {
     case Reg_I => x.rfWen

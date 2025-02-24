@@ -1007,6 +1007,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     lvpTorename.vecWen := io.fromload(i).bits.vecWen
   }
 
+  XSPerfAccumulate("lvp_mispredict_total", lvp.io.flush.valid)
+
   /** to backend */
   // f3_gpaddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := f3_toIbuffer_valid && Mux(

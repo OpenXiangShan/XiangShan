@@ -60,7 +60,7 @@ class Lvp(implicit p: Parameters) extends LvpModule{
     //init 
     val PredictValue = RegInit(VecInit(Seq.fill(backendParams.LduCnt)(0.U(XLEN.W))))
     val Predict = RegInit(VecInit(Seq.fill(backendParams.LduCnt)(false.B)))
-    val misPredict = RegInit(Predict)
+    val misPredict = RegInit(VecInit(Seq.fill(backendParams.LduCnt)(false.B)))
     io.flush := DontCare
     // VPE
     // temporarily don`t care same tag different load instruction
@@ -89,13 +89,13 @@ class Lvp(implicit p: Parameters) extends LvpModule{
         }.otherwise {
             Predict(i) := false.B
             PredictValue(i) := 0.U
+            misPredict(i) := false.B
         }
         // delay 2 cycle to avoid writeback signal clear predict table
         io.Predict(i) := Predict(i)
         io.PredictValue(i) := PredictValue(i)
+        io.flush.valid := misPredict.reduce(_ || _)
     }
     LvpTable := LvpTableNext
-    XSPerfAccumulate("predict",             io.Predict.reduce(_ || _))
-    XSPerfAccumulate("mispredict",          misPredict.reduce(_ || _))
 }
 
