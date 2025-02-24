@@ -57,6 +57,42 @@ object CircularShift {
   def apply(data: UInt): CircularShift = new CircularShift(data)
 }
 
+class ResizeCircularShift(data: UInt) {
+  private def helper(step: Int, isLeft: Boolean, width: Option[UInt] = None): UInt = {
+    if (step == 0) {
+      data
+    }
+    else {
+      val w = width.getOrElse(data.getWidth.U)
+      val effectiveStep = Mux(w === 0.U, 0.U, step.U % w)
+      val splitIndex = if (isLeft) {
+        w - effectiveStep
+      } else {
+        effectiveStep
+      }
+
+      // Create mask for the desired width
+      val mask = (1.U << w).asUInt - 1.U
+
+      // Perform shift operations and combine with bitwise OR, then mask to width
+      val part1 = (data << (w - splitIndex)).asUInt
+      val part2 = (data >> splitIndex).asUInt
+      ((part1 | part2) & mask).asUInt
+    }
+  }
+
+  def left(step: Int): UInt = helper(step, true)
+  def right(step: Int): UInt = helper(step, false)
+
+  // 新增的动态宽度方法
+  def leftWithWidth(step: Int, width: UInt): UInt = helper(step, true, Some(width))
+  def rightWithWidth(step: Int, width: UInt): UInt = helper(step, false, Some(width))
+}
+
+object ResizeCircularShift {
+  def apply(data: UInt): ResizeCircularShift = new ResizeCircularShift(data)
+}
+
 object WordShift {
   def apply(data: UInt, wordIndex: UInt, step: Int): UInt = (data << (wordIndex * step.U)).asUInt
 }

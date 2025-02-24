@@ -32,12 +32,15 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val headPtr = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
   XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val headPtrOHShift = CircularShift(headPtrOH)
+  val headPtrOHShift = ResizeCircularShift(headPtrOH)
   // may shift [0, RenameWidth] steps
-  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
+  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(i =>
+    headPtrOHShift.leftWithWidth(i, io.psize)
+  )
   val tailPtr = RegInit(FreeListPtr(false, size - 1))
 
   val doRename = io.canAllocate && io.doAllocate && !io.redirect && !io.walk
+  val doResize = io.psize =/= headPtr.psize.bits || io.psize =/= tailPtr.psize.bits
 
   /**
     * Allocation: from freelist (same as StdFreelist)
@@ -50,8 +53,9 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   // update head pointer
   val numAllocate = PopCount(io.allocateReq)
   val headPtrNext = headPtr + numAllocate
-  headPtr := Mux(doRename, headPtrNext, headPtr)
-  headPtrOH := Mux(doRename, headPtrOHVec(numAllocate), headPtrOH)
+  headPtr := Mux(doResize, headPtr.resize(0.U, io.psize), Mux(doRename, headPtrNext, headPtr))
+
+  headPtrOH := Mux(doResize, 1.U, Mux(doRename, headPtrOHVec(numAllocate), headPtrOH))
 
 
   /**
@@ -66,7 +70,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
 
   // update tail pointer
   val tailPtrNext = tailPtr + PopCount(io.freeReq)
-  tailPtr := tailPtrNext
+  tailPtr := Mux(doResize, tailPtr.resize(io.psize - 1.U, io.psize), tailPtrNext)
 
   val freeRegCnt = Mux(doRename, distanceBetween(tailPtrNext, headPtrNext), distanceBetween(tailPtrNext, headPtr))
   val freeRegCntReg = RegNext(freeRegCnt)

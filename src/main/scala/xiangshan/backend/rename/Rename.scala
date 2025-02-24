@@ -51,6 +51,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val intRefCounter = Module(new RefCounter(NRPhyRegs))
   val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
 
+  val pIntFreeListSize = WireInit(NRPhyRegs.U(log2Up(NRPhyRegs + 1).W))
+  val pFpFreeListSize = WireInit((NRPhyRegs - 32).U(log2Up(NRPhyRegs - 31).W))
+  ExcitingUtils.addSink(pIntFreeListSize, "DSE_INTFLSIZE")
+  ExcitingUtils.addSink(pFpFreeListSize, "DSE_FPFLSIZE")
+
+  intFreeList.io.psize := pIntFreeListSize
+  fpFreeList.io.psize := pFpFreeListSize
+
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
