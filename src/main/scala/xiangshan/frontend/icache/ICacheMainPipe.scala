@@ -520,7 +520,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s2_fetch_finish = !s2_should_fetch.reduce(_ || _)
 
   // also raise af if l2 corrupt is detected
-  private val s2_l2_exception = VecInit(s2_l2_corrupt.map(ExceptionType.fromECC(true.B, _)))
+  private val s2_l2_exception = VecInit(s2_l2_corrupt.map(ExceptionType.fromTilelink))
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb has the highest priority, then l2
