@@ -453,11 +453,11 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new DefaultConfig(1)
 )
 
-class DefaultConfig(n: Int = 1) extends Config(
+class DefaultConfig(n: Int = 1, hasMbist:Boolean = true) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n)
+    ++ new BaseConfig(n, hasMbist)
 )
 
 class CVMConfig(n: Int = 1) extends Config(
