@@ -85,13 +85,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val wAliasVxsat = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
       val VXSAT = RW(0)
     })))
-    val wAlisaVxrm = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
+    val wAliasVxrm = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
       val VXRM = RW(1, 0)
     })))
     val vxsat = IO(Output(Vxsat()))
     val vxrm  = IO(Output(Vxrm()))
 
-    for (wAlias <- Seq(wAliasVxsat, wAlisaVxrm)) {
+    for (wAlias <- Seq(wAliasVxsat, wAliasVxrm)) {
       for ((name, field) <- wAlias.wdataFields.elements) {
         reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
           wAlias.wen && field.asInstanceOf[CSREnumType].isLegal,
@@ -198,7 +198,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.fcsr   -> (fcsr.w            -> fcsr.rdata),
     CSRs.vstart -> (vstart.w          -> vstart.rdata),
     CSRs.vxsat  -> (vcsr.wAliasVxsat  -> vcsr.vxsat),
-    CSRs.vxrm   -> (vcsr.wAlisaVxrm   -> vcsr.vxrm),
+    CSRs.vxrm   -> (vcsr.wAliasVxrm   -> vcsr.vxrm),
     CSRs.vcsr   -> (vcsr.w            -> vcsr.rdata),
     CSRs.vl     -> (vl.w              -> vl.rdata),
     CSRs.vtype  -> (vtype.w           -> vtype.rdata),
