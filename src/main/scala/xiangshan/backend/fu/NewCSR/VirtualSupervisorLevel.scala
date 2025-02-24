@@ -20,6 +20,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsstatus = Module(
     new CSRModule("VSstatus", new SstatusBundle)
       with SretEventSinkBundle
+      with SretEventSDTSinkBundle
       with MretEventSinkBundle
       with MNretEventSinkBundle
       with DretEventSinkBundle
