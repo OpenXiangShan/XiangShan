@@ -69,6 +69,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         val out_mem = Output(Vec(RasSize, new RASEntry))
     })
 
+    val prasSize = WireInit(rasSize.U(log2Up(rasSize + 1).W))
+    ExcitingUtils.addSink(prasSize, "DSE_RASSIZE")
+
     val stack = Mem(RasSize, new RASEntry)
     val sp = RegInit(0.U(log2Up(rasSize).W))
     val topPtr = RegInit(0.U(log2Up(rasSize).W))
@@ -93,8 +96,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       stack(write_bypass_ptr) := write_bypass_entry
     }
 
-    def ptrInc(ptr: UInt) = Mux(ptr === (rasSize-1).U, 0.U, ptr + 1.U)
-    def ptrDec(ptr: UInt) = Mux(ptr === 0.U, (rasSize-1).U, ptr - 1.U)
+    def ptrInc(ptr: UInt) = Mux(ptr === prasSize - 1.U, 0.U, ptr + 1.U)
+    def ptrDec(ptr: UInt) = Mux(ptr === 0.U, prasSize - 1.U, ptr - 1.U)
 
     val spec_alloc_new = io.spec_new_addr =/= top_dup(0).retAddr || top_dup(0).ctr.andR
     val recover_alloc_new = io.recover_new_addr =/= io.recover_top.retAddr || io.recover_top.ctr.andR
@@ -184,7 +187,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
     }
     resetIdx := resetIdx + do_reset
-    when (resetIdx === (RasSize-1).U) {
+    when (resetIdx === prasSize - 1.U) {
       do_reset := false.B
     }
 

@@ -111,6 +111,10 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     val fpPhyRegs1 = RegInit((NRPhyRegs - 32).U(64.W))
     val fpPhyRegs = Wire(UInt(64.W))
 
+    val rasSize0 = RegInit(RasSize.U(64.W))
+    val rasSize1 = RegInit(RasSize.U(64.W))
+    val rasSize = Wire(UInt(64.W))
+
     val commit_valid = WireInit(false.B)
 
     io.max_epoch := max_epoch
@@ -151,6 +155,8 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       0x1C8 -> Seq(RegField(64, intPhyRegs1)),
       0x1D0 -> Seq(RegField(64, fpPhyRegs0)),
       0x1D8 -> Seq(RegField(64, fpPhyRegs1)),
+      0x1E0 -> Seq(RegField(64, rasSize0)),
+      0x1E8 -> Seq(RegField(64, rasSize1))
     )
 
     // Mux logic
@@ -168,6 +174,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     l3Sets := Mux(ctrlSel.orR, l3Sets1, l3Sets0)
     intPhyRegs := Mux(ctrlSel.orR, intPhyRegs1, intPhyRegs0)
     fpPhyRegs := Mux(ctrlSel.orR, fpPhyRegs1, fpPhyRegs0)
+    rasSize := Mux(ctrlSel.orR, rasSize1, rasSize0)
 
     // Bore to/from modules
     ExcitingUtils.addSource(robSize, "DSE_ROBSIZE")
@@ -184,6 +191,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     ExcitingUtils.addSource(l3Sets, "DSE_L3SETS")
     ExcitingUtils.addSource(intPhyRegs, "DSE_INTFLSIZE")
     ExcitingUtils.addSource(fpPhyRegs, "DSE_FPFLSIZE")
+    ExcitingUtils.addSource(rasSize, "DSE_RASSIZE")
 
     ExcitingUtils.addSink(commit_valid, "DSE_COMMITVALID")
 
@@ -203,6 +211,7 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
     assert(l3Sets <= p(SoCParamsKey).L3CacheParamsOpt.map(_.sets).getOrElse(0).U, "DSE parameter must not exceed L3Sets")
     assert(intPhyRegs <= NRPhyRegs.U, "DSE parameter must not exceed NRPhyRegs")
     assert(fpPhyRegs <= (NRPhyRegs - 32).U, "DSE parameter must not exceed fpPhyRegs")
+    assert(rasSize <= RasSize.U, "DSE parameter must not exceed RasSize")
 
 
     // core reset generation
