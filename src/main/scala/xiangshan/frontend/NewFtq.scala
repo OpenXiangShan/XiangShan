@@ -579,8 +579,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ptr := ifuPtr_write
     dontTouch(ptr)
   }
-  val validEntries  = distanceBetween(bpuPtr, commitPtr)
-  val readyToCommit = Wire(Bool())
+  val validEntries = distanceBetween(bpuPtr, commitPtr)
+
+  private val readyToCommit = Wire(Bool())
+  private val canCommit     = Wire(Bool())
+  private val shouldCommit  = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
   // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
@@ -704,6 +707,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     newest_entry_target                  := last_cycle_bpu_target
     newest_entry_ptr_modified            := true.B
     newest_entry_ptr                     := last_cycle_bpu_in_ptr
+
+    shouldCommit(last_cycle_bpu_in_idx) := true.B
   }
 
   // reduce fanout by delay write for a cycle
@@ -1239,6 +1244,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val notIfu                     = redirectVec.dropRight(1).map(r => r.valid).reduce(_ || _)
     val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, RedirectLevel.flushItself(r.level))
     val next                       = idx + 1.U
+
     bpuPtr := next
     copied_bpu_ptr.map(_ := next)
     ifuPtr_write      := next
@@ -1247,6 +1253,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifuPtrPlus2_write := idx + 3.U
     pfPtr_write       := next
     pfPtrPlus1_write  := idx + 2.U
+
+    when(flushItSelf) {
+      shouldCommit(idx.value)  := false.B
+      shouldCommit(next.value) := false.B
+    }
   }
 
   // only the valid bit is actually needed
@@ -1293,8 +1304,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   private val robCommitPtrReg: FtqPtr = RegEnable(robCommitPtr, FtqPtr(false.B, 0.U), backendCommit)
   private val committedPtr = Mux(backendCommit, robCommitPtr, robCommitPtrReg)
-  readyToCommit := commitPtr < committedPtr
-  when(readyToCommit) {
+  canCommit     := commitPtr < committedPtr
+  readyToCommit := canCommit && shouldCommit(commitPtr.value)
+  when(canCommit) {
     commitPtr_write      := commitPtrPlus1
     commitPtrPlus1_write := commitPtrPlus1 + 1.U
   }
@@ -1308,7 +1320,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     *************************************************************************************
     */
   val mmioReadPtr    = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = isAfter(commitPtr, mmioReadPtr) || commitPtr === mmioReadPtr && readyToCommit
+  val mmioLastCommit = isAfter(commitPtr, mmioReadPtr) || commitPtr === mmioReadPtr && canCommit
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
