@@ -1,6 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package device.standalone
+package device
 
 import chisel3._
 import chisel3.util.{ShiftRegister, ValidIO}
