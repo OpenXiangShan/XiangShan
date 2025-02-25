@@ -25,6 +25,7 @@ import system._
 import device._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
@@ -87,6 +88,40 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
+
+  // seperate DebugModule bus
+  val EnableDMAsync = EnableDMAsyncBridge.isDefined
+  // asynchronous bridge sink node
+  val dmAsyncSinkOpt = Option.when(SeperateDMBus && EnableDMAsync)(
+    LazyModule(new TLAsyncCrossingSink(EnableDMAsyncBridge.get))
+  )
+  dmAsyncSinkOpt.foreach(_.node := core_with_l2.dmAsyncSourceOpt.get.node)
+  // synchronous sink node
+  val dmSyncSinkOpt = Option.when(SeperateDMBus && !EnableDMAsync)(TLTempNode())
+  dmSyncSinkOpt.foreach(_ := core_with_l2.dmSyncSourceOpt.get)
+
+  // The Manager Node is only used to make IO. Standalone DM should be used for XSNoCTopConfig
+  val dm = Option.when(SeperateDMBus)(TLManagerNode(Seq(
+    TLSlavePortParameters.v1(
+      managers = Seq(
+        TLSlaveParameters.v1(
+          address = Seq(p(DebugModuleKey).get.address),
+          regionType = RegionType.UNCACHED,
+          supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+          supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+          supportsPutFull = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+          fifoId = Some(0)
+        )
+      ),
+      beatBytes = 8
+    )
+  )))
+  val dmXbar = Option.when(SeperateDMBus)(TLXbar())
+  dmAsyncSinkOpt.foreach(sink => dmXbar.get := sink.node)
+  dmSyncSinkOpt.foreach(sink => dmXbar.get := sink)
+  dm.foreach(_ := dmXbar.get)
+  // seperate debug module io
+  val io_dm = dm.map(x => InModuleBody(x.makeIOs()))
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
@@ -202,6 +237,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
         }
       case None =>
         io.chi <> core_with_l2.module.io.chi
+    }
+
+    // Seperate DebugModule TL Async Queue Sink
+    if (SeperateDMBus && EnableDMAsync) {
+      dmAsyncSinkOpt.get.module.clock := soc_clock
+      dmAsyncSinkOpt.get.module.reset := soc_reset_sync
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld

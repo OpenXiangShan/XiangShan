@@ -188,6 +188,10 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
+        case "--seperate-dm-bus" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDMBus = true)
+          }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>
