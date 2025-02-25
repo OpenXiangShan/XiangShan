@@ -27,4 +27,5 @@
 	url = https://github.com/OpenXiangShan/OpenLLC.git
 [submodule "src/main/resources/aia"]
 	path = src/main/resources/aia
-	url = https://github.com/OpenXiangShan/OpenAIA.git
+  # #url = https://github.com/OpenXiangShan/OpenAIA.git
+    url = https://github.com/OpenXiangShan/ChiselAIA.git
