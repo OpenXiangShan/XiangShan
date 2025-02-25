@@ -328,9 +328,15 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
     // 2. s2 is napot(64KB) and s1 is superpage(greater than or equal to 2MB)
     // 3. s1 is napot(64KB) and s2 is also napot(64KB)
-    this.n := (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.level.getOrElse(0.U) =/= 0.U) ||
+    val allStage_n = (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.level.getOrElse(0.U) =/= 0.U) ||
       (item.s2.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.level.getOrElse(0.U) =/= 0.U) ||
       (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.n.getOrElse(0.U) =/= 0.U)
+    this.n := MuxLookup(item.s2xlate, 2.U)(Seq(
+      onlyStage1 -> item.s1.entry.n.getOrElse(0.U),
+      onlyStage2 -> item.s2.entry.n.getOrElse(0.U),
+      allStage -> allStage_n,
+      noS2xlate -> item.s1.entry.n.getOrElse(0.U)
+    ))
     this.vmid := item.s1.entry.vmid.getOrElse(0.U)
     this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
@@ -1297,7 +1303,11 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     val onlyS2_hit = s2.hit(vpn, vmid)
     // allstage and onlys1 hit
     val s1vpn = Cat(s1.entry.tag, s1.addr_low)
-    val level = s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)
+    val level = Mux(this.s2xlate === onlyStage1,
+                  s1.entry.level.getOrElse(0.U),
+                  // when allStage, level is the smaller one of stage1 and stage2
+                  // e.g. stage1 is 1GB page, stage2 is 2MB page，then level is 2MB
+                  s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U))
 
     val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
     for (i <- 0 until 3) {

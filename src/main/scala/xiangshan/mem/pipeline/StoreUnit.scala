@@ -21,14 +21,15 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.mem.Bundles._
 import xiangshan.cache.mmu.{Pbmt, TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DCacheStoreIO, DcacheStoreRequestIO, HasDCacheParameters, MemoryOpConstants, StorePrefetchReq}
 
@@ -52,11 +53,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val feedback_slow   = ValidIO(new RSFeedback)
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
-    val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
+    val prefetch_train  = ValidIO(new LsPrefetchTrainBundle())
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
-    val stld_nuke_query = Valid(new StoreNukeQueryIO)
+    val stld_nuke_query = Valid(new StoreNukeQueryBundle)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
@@ -146,20 +147,25 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     )
   )
 
-    val s0_alignTpye = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
+  val s0_isCbo = s0_use_flow_rs && LSUOpType.isCboAll(s0_stin.uop.fuOpType)
+  // only simulation
+  val cbo_assert_flag = LSUOpType.isCboAll(s0_out.uop.fuOpType)
+  XSError(!s0_use_flow_rs && cbo_assert_flag && s0_valid, "cbo instruction selection error.")
+
+  val s0_alignType = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
   // exception check
-  val s0_addr_aligned = LookupTree(s0_alignTpye, List(
+  val s0_addr_aligned = LookupTree(s0_alignType, List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (s0_vaddr(0) === 0.U),   //h
     "b10".U   -> (s0_vaddr(1,0) === 0.U), //w
     "b11".U   -> (s0_vaddr(2,0) === 0.U)  //d
-  ))
+  )) || s0_isCbo
   // if vector store sends 128-bit requests, its address must be 128-aligned
   XSError(s0_use_flow_vec && s0_vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
 
   val s0_isMisalign = Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
   val s0_addr_low = s0_vaddr(4, 0)
-  val s0_addr_Up_low = LookupTree(s0_alignTpye, List(
+  val s0_addr_Up_low = LookupTree(s0_alignType, List(
     "b00".U -> 0.U,
     "b01".U -> 1.U,
     "b10".U -> 3.U,
@@ -233,7 +239,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignTpye(1,0)), s0_mask)
+  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
@@ -279,10 +285,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_is128bit     = s1_in.is128bit
 
   // mmio cbo decoder
-  val s1_isCbo   = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
-                   s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
-                   s1_in.uop.fuOpType === LSUOpType.cbo_inval ||
-                   s1_in.uop.fuOpType === LSUOpType.cbo_zero
+  val s1_isCbo   = RegEnable(s0_isCbo, s0_fire)
   val s1_vaNeedExt = io.tlb.resp.bits.excp(0).vaNeedExt
   val s1_isHyper   = io.tlb.resp.bits.excp(0).isHyper
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
@@ -326,6 +329,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromLoadStore.vaddr                 := s1_in.vaddr
   storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
   storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
+  storeTrigger.io.isCbo.get                           := s1_isCbo
 
   val s1_trigger_action = storeTrigger.io.toLoadStore.triggerAction
   val s1_trigger_debug_mode = TriggerAction.isDmode(s1_trigger_action)
@@ -468,9 +472,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
-  val toMisalignBufferValid =  s2_mis_align && !s2_frm_mabuf
+  val toMisalignBufferValid = s2_valid && GatedValidRegNext(s1_mis_align && !s1_frm_mabuf)
   io.misalign_buf.valid := toMisalignBufferValid
   io.misalign_buf.bits  := s2_in
+  io.misalign_buf.bits.hasException := s2_exception
   val misalignBufferNack = toMisalignBufferValid && !io.misalign_buf.ready
 
   // feedback tlb miss to RS in store_s2
@@ -546,7 +551,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s3_exception     = RegEnable(s2_exception, s2_fire)
 
   // store misalign will not writeback to rob now
-  when (s2_fire) { s3_valid := (!s2_mmio && !s2_isCbo_noZero || s2_exception) && !s2_out.isHWPrefetch && !s2_mis_align && !s2_frm_mabuf }
+  when (s2_fire) { s3_valid := (!s2_mmio && !s2_isCbo || s2_exception) && !s2_out.isHWPrefetch && !s2_mis_align && !s2_frm_mabuf }
   .elsewhen (s3_fire) { s3_valid := false.B }
   .elsewhen (s3_kill) { s3_valid := false.B }
 

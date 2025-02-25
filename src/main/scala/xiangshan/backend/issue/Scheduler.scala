@@ -12,10 +12,11 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
-import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr, LqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
 import xiangshan.backend.regcache.RegCacheTagTable
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, SqPtr, LqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 sealed trait SchedulerType
 
@@ -138,7 +139,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }) else None
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
@@ -306,10 +307,10 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // Connect each replace RCIdx to IQ
   if (params.needWriteRegCache) {
-    val iqReplaceRCIdxVec = issueQueues.filter(_.params.needWriteRegCache).flatMap{ iq => 
+    val iqReplaceRCIdxVec = issueQueues.filter(_.params.needWriteRegCache).flatMap{ iq =>
       iq.params.allExuParams.zip(iq.io.replaceRCIdx.get).filter(_._1.needWriteRegCache).map(_._2)
     }
-    iqReplaceRCIdxVec.zip(io.fromDataPath.replaceRCIdx.get).foreach{ case (iq, in) => 
+    iqReplaceRCIdxVec.zip(io.fromDataPath.replaceRCIdx.get).foreach{ case (iq, in) =>
       iq := in
     }
 

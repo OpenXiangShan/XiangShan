@@ -28,10 +28,6 @@ xs_coarse_rename_map = {
     'IntFlStall': 'MergeFreelistStall',
     'FpFlStall': 'MergeFreelistStall',
 
-    'IntDqStall': 'MergeCoreDQStall',
-    'FpDqStall': 'MergeCoreDQStall',
-    'LsDqStall': 'MergeMemDQStall',
-
     'LoadTLBStall': 'MergeLoad',
     'LoadL1Stall': 'MergeLoad',
     'LoadL2Stall': 'MergeLoad',
@@ -81,10 +77,6 @@ xs_fine_grain_rename_map = {
 
     'IntFlStall': 'MergeFreelistStall',
     'FpFlStall': 'MergeFreelistStall',
-
-    'IntDqStall': 'MergeDispatchQueueStall',
-    'FpDqStall': 'MergeDispatchQueueStall',
-    'LsDqStall': 'MergeDispatchQueueStall',
 
     'LoadTLBStall': 'DTlbStall',
     'LoadL1Stall': 'LoadL1Bound',
@@ -141,10 +133,6 @@ targets = {
 
     'IntFlStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: IntFlStall,\s+(\d+)',
     'FpFlStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FpFlStall,\s+(\d+)',
-
-    'IntDqStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: IntDqStall,\s+(\d+)',
-    'FpDqStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FpDqStall,\s+(\d+)',
-    'LsDqStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LsDqStall,\s+(\d+)',
 
     'LoadTLBStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadTLBStall,\s+(\d+)',
     'LoadL1Stall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadL1Stall,\s+(\d+)',

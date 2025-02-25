@@ -21,8 +21,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
@@ -32,10 +32,11 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
-import xiangshan.mem.mdp._
 
 class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   with HasDCacheParameters
@@ -151,8 +152,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
     // prefetch
-    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
@@ -182,7 +183,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
     // schedule error query
-    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+    val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
 
     // queue-based replay
     val replay       = Flipped(Decoupled(new LsPipelineBundle))
@@ -231,7 +232,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_fullva    = Wire(UInt(XLEN.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
   val s0_is128bit      = Wire(Bool())
-  val s0_misalign_wakeup_fire = s0_misalign_select && s0_can_go && io.misalign_ldin.bits.misalignNeedWakeUp
+  val s0_misalign_wakeup_fire = s0_misalign_select && s0_can_go &&
+    io.dcache.req.ready &&
+    io.misalign_ldin.bits.misalignNeedWakeUp
 
   // flow source bundle
   class FlowSource extends Bundle {
@@ -915,7 +918,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
   val s1_tlb_fast_miss    = io.tlb.resp.bits.fastMiss && io.tlb.resp.valid && s1_valid
-  val s1_pbmt             = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
+  val s1_tlb_hit          = !io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
+  val s1_pbmt             = Mux(s1_tlb_hit, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
   val s1_nc               = s1_in.nc
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
@@ -1202,7 +1206,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   // * if pbmt =/= 0, mmio is up to pbmt; otherwise, it's up to pmp
-  val s2_tlb_hit = RegNext(!io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid)
+  val s2_tlb_hit = RegNext(s1_tlb_hit)
   val s2_mmio = !s2_prf &&
     !s2_exception && !s2_in.tlbMiss &&
     Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
@@ -1298,7 +1302,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_real_exceptionVec(loadAddrMisaligned) := s2_out.isMisalign && s2_check_mmio
   s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
     s2_fwd_frm_d_chan && s2_d_corrupt ||
-    s2_fwd_frm_mshr && s2_mshr_corrupt
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
 
@@ -1514,7 +1518,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // forwrad last beat
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || io.misalign_ldin.valid || !io.dcache.req.ready
 
-  val s3_can_enter_lsq_valid = s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_nc_with_data && !s3_in.misalignNeedWakeUp
+  val s3_can_enter_lsq_valid = s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_in.misalignNeedWakeUp
   io.lsq.ldin.valid := s3_can_enter_lsq_valid
   // TODO: check this --by hx
   // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
@@ -1527,6 +1531,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.misalign_buf.bits  := s3_in
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
+  io.lsq.ldin.bits.nc_with_data := s3_nc_with_data
   io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
   io.lsq.ldin.bits.missDbUpdated := GatedValidRegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)

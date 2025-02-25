@@ -28,7 +28,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
+import xiangshan.backend.dispatch.{CoreDispatchTopDownIO}
 import xiangshan.backend.dispatch.NewDispatch
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
@@ -80,12 +80,10 @@ class CtrlBlockImp(
     "trace"     -> TraceGroupNum
   ))
 
-  private val numPcMemReadForExu = params.numPcReadPort
   private val numPcMemRead = pcMemRdIndexes.maxIdx
 
   // now pcMem read for exu is moved to PcTargetMem (OG0)
   println(s"pcMem read num: $numPcMemRead")
-  println(s"pcMem read num for exu: $numPcMemReadForExu")
 
   val io = IO(new CtrlBlockIO())
 
@@ -726,6 +724,7 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVec := io.toDispatch.wbPregsVec
   dispatch.io.wbPregsV0 := io.toDispatch.wbPregsV0
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
+  dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.robHeadNotReady := rob.io.headNotReady
   dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
@@ -892,6 +891,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val wbPregsVec = Vec(backendParams.numPregWb(VecData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsV0 = Vec(backendParams.numPregWb(V0Data()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val vlWriteBackInfo = new Bundle {
+      val vlFromIntIsZero  = Input(Bool())
+      val vlFromIntIsVlmax = Input(Bool())
+      val vlFromVfIsZero   = Input(Bool())
+      val vlFromVfIsVlmax  = Input(Bool())
+    }
   }
   val toDataPath = new Bundle {
     val flush = ValidIO(new Redirect)

@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend
+package xiangshan.mem
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
@@ -24,29 +24,32 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import coupledL2.{PrefetchRecv}
 import device.MsiInfoBundle
 import utils._
 import utility._
+import system.SoCParamsKey
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
-import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
-import xiangshan.backend.fu.util.{HasCSRConst, SdtrigExt}
-import xiangshan.cache._
-import xiangshan.cache.mmu._
+import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
+import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
+import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
+import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
-import xiangshan.frontend.HasInstrMMIOConst
+import xiangshan.mem.Bundles._
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
-import xiangshan.backend.datapath.NewPipelineConnect
-import system.SoCParamsKey
-import xiangshan.backend.fu.NewCSR.TriggerUtil
-import xiangshan.ExceptionNO._
-import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import xiangshan.cache._
+import xiangshan.cache.mmu._
+import coupledL2.{PrefetchRecv}
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -291,7 +294,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters
   with HasTlbConst
-  with HasCSRConst
   with SdtrigExt
 {
   val io = IO(new Bundle {
@@ -1288,25 +1290,35 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vec_isFirstIssue := true.B // TODO
   }
 
-  // mmio store writeback will use store writeback port 0
-  val mmioStout = WireInit(0.U.asTypeOf(lsq.io.mmioStout))
+  val sqOtherStout = WireInit(0.U.asTypeOf(DecoupledIO(new MemExuOutput)))
+  sqOtherStout.valid := lsq.io.mmioStout.valid || lsq.io.cboZeroStout.valid
+  sqOtherStout.bits  := Mux(lsq.io.cboZeroStout.valid, lsq.io.cboZeroStout.bits, lsq.io.mmioStout.bits)
+  assert(!(lsq.io.mmioStout.valid && lsq.io.cboZeroStout.valid), "Cannot writeback to mmio and cboZero at the same time.")
+
+  // Store writeback by StoreQueue:
+  //   1. cbo Zero
+  //   2. mmio
+  // Currently, the two should not be present at the same time, so simply make cbo zero a higher priority.
+  val otherStout = WireInit(0.U.asTypeOf(lsq.io.mmioStout))
   NewPipelineConnect(
-    lsq.io.mmioStout, mmioStout, mmioStout.fire,
+    sqOtherStout, otherStout, otherStout.fire,
     false.B,
-    Option("mmioStOutConnect")
+    Option("otherStoutConnect")
   )
-  mmioStout.ready := false.B
-  when (mmioStout.valid && !storeUnits(0).io.stout.valid) {
+  otherStout.ready := false.B
+  when (otherStout.valid && !storeUnits(0).io.stout.valid) {
     stOut(0).valid := true.B
-    stOut(0).bits  := mmioStout.bits
-    mmioStout.ready := true.B
+    stOut(0).bits  := otherStout.bits
+    otherStout.ready := true.B
   }
+  lsq.io.mmioStout.ready := sqOtherStout.ready
+  lsq.io.cboZeroStout.ready := sqOtherStout.ready
 
   // vec mmio writeback
   lsq.io.vecmmioStout.ready := false.B
 
   // miss align buffer will overwrite stOut(0)
-  val storeMisalignCanWriteBack = !mmioStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid
+  val storeMisalignCanWriteBack = !otherStout.valid && !storeUnits(0).io.stout.valid && !storeUnits(0).io.vecstout.valid
   storeMisalignBuffer.io.writeBack.ready := storeMisalignCanWriteBack
   storeMisalignBuffer.io.storeOutValid := storeUnits(0).io.stout.valid
   storeMisalignBuffer.io.storeVecOutValid := storeUnits(0).io.vecstout.valid
@@ -1811,8 +1823,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val Sv48 = satp.mode === 9.U
     val Sv39x4 = vsatp.mode === 8.U || hgatp.mode === 8.U
     val Sv48x4 = vsatp.mode === 9.U || hgatp.mode === 9.U
-    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < ModeM)
-    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < ModeM)
+    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < CSRConst.ModeM)
+    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < CSRConst.ModeM)
 
     val s2xlate = MuxCase(noS2xlate, Seq(
       !isVirt                                    -> noS2xlate,

@@ -16,18 +16,17 @@
 
 package xiangshan.cache
 
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
 import utils._
 import utility._
-import xiangshan._
-import xiangshan.mem._
-import coupledL2.MemBackTypeMM
-import coupledL2.MemPageTypeNC
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
-import coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
+import xiangshan._
+import xiangshan.mem._
+import xiangshan.mem.Bundles._
+import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
 
@@ -134,7 +133,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool() // uncache -> L2
   val waitSame = Bool()
   val waitReturn = Bool() // uncache -> LSQ
-  
+
   def init: Unit = {
     valid := false.B
     inflight := false.B
@@ -148,12 +147,15 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   def isWaitSame(): Bool = valid && waitSame
   def can2Bus(): Bool = valid && !inflight && !waitSame && !waitReturn
   def can2Lsq(): Bool = valid && waitReturn
-  
+  def canMerge(): Bool = valid && !inflight
+  def isFwdOld(): Bool = valid && (inflight || waitReturn)
+  def isFwdNew(): Bool = valid && !inflight && !waitReturn
+
   def setValid(x: Bool): Unit = { valid := x}
   def setInflight(x: Bool): Unit = { inflight := x}
   def setWaitReturn(x: Bool): Unit = { waitReturn := x }
   def setWaitSame(x: Bool): Unit = { waitSame := x}
-  
+
   def updateUncacheResp(): Unit = {
     assert(inflight, "The request was not sent and a response was received")
     inflight := false.B
@@ -230,14 +232,20 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val entries = Reg(Vec(UncacheBufferSize, new UncacheEntry))
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
-  val fence = RegInit(Bool(), false.B)
   val s_idle :: s_inflight :: s_wait_return :: Nil = Enum(3)
   val uState = RegInit(s_idle)
 
   // drain buffer
   val empty = Wire(Bool())
   val f1_needDrain = Wire(Bool())
-  val do_uarch_drain = RegNext(f1_needDrain)
+  val do_uarch_drain = RegInit(false.B)
+  when((f1_needDrain || io.flush.valid) && !empty){
+    do_uarch_drain := true.B
+  }.elsewhen(empty){
+    do_uarch_drain := false.B
+  }.otherwise{
+    do_uarch_drain := false.B
+  }
 
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
@@ -269,17 +277,19 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     res
   }
 
-  def canMergePrimary(x: UncacheWordReq, e: UncacheEntry): Bool = {
+  def canMergePrimary(x: UncacheWordReq, e: UncacheEntry, eid: UInt): Bool = {
     // vaddr same, properties same
-    getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) && 
+    getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) &&
       x.cmd === e.cmd && x.nc && e.nc &&
       x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
-      continueAndAlign(x.mask | e.mask)
+      continueAndAlign(x.mask | e.mask) &&
+    // not receiving uncache response, not waitReturn -> no wake-up signal in these cases
+      !(mem_grant.fire && mem_grant.bits.source === eid || states(eid).isWaitReturn())
   }
 
   def canMergeSecondary(eid: UInt): Bool = {
     // old entry is not inflight and senting
-    !states(eid).isInflight() && !(q0_canSent && q0_canSentIdx === eid)
+    states(eid).canMerge() && !(q0_canSent && q0_canSentIdx === eid)
   }
 
   /******************************************************************
@@ -327,7 +337,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   sizeForeach(i => {
     val valid = e0_req_valid && states(i).isValid()
     val isAddrMatch = addrMatch(e0_req, entries(i))
-    val canMerge1 = canMergePrimary(e0_req, entries(i))
+    val canMerge1 = canMergePrimary(e0_req, entries(i), i.U)
     val canMerge2 = canMergeSecondary(i.U)
     e0_rejectVec(i) := valid && isAddrMatch && !canMerge1
     e0_mergeVec(i) := valid && isAddrMatch && canMerge1 && canMerge2
@@ -490,8 +500,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     /* f0 */
     // vaddr match
     val f0_vtagMatches = sizeMap(w => addrMatch(entries(w).vaddr, forward.vaddr))
-    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).inflight)
-    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && !states(i).inflight)
+    val f0_flyTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdOld)
+    val f0_idleTagMatches = sizeMap(w => f0_vtagMatches(w) && f0_validMask(w) && f0_fwdValid && states(i).isFwdNew)
     // ONLY for fast use to get better timing
     val f0_flyMaskFast = shiftMaskToHigh(
       forward.vaddr,
@@ -515,7 +525,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val (f1_fwdDataTmp, f1_fwdMaskTmp) = doMerge(f1_flyData, f1_flyMask, f1_idleData, f1_idleMask)
     val f1_fwdMask = shiftMaskToHigh(f1_fwdPAddr, f1_fwdMaskTmp).asTypeOf(Vec(VDataBytes, Bool()))
     val f1_fwdData = shiftDataToHigh(f1_fwdPAddr, f1_fwdDataTmp).asTypeOf(Vec(VDataBytes, UInt(8.W)))
-    // paddr match and mismatch judge 
+    // paddr match and mismatch judge
     val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), f1_fwdPAddr))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid

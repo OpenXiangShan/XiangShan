@@ -22,16 +22,17 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.mmu._
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).VirtualLoadQueueSize
@@ -294,7 +295,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     // from load_s3
     val ldinBits = io.ldu.ldin(w).bits
-    buff.valid := io.ldu.ldin(w).valid && (ldinBits.nc || ldinBits.mmio) && !ldinBits.rep_info.need_rep
+    buff.valid := io.ldu.ldin(w).valid && (ldinBits.nc || ldinBits.mmio) && !ldinBits.rep_info.need_rep && !ldinBits.nc_with_data
     buff.bits := ldinBits
   }
 

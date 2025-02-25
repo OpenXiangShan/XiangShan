@@ -13,7 +13,6 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rob.RobPtr
@@ -938,6 +937,15 @@ class NewCSR(implicit val p: Parameters) extends Module
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange || frmChange
 
+  /**
+   * Look up id in vsMapS and sMapVS.
+   * If id is in vsMapS, use vsMapS(id) when under VS mode,
+   *                         id under other modes
+   * Else If id is in sMapVS, use 0 when under VS mode,
+   *                              id under modes except VS
+   * Else, use id as read address
+   * Use read address to look up rdata in csrRwMap
+   */
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
       ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> rdata
@@ -1134,14 +1142,21 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.breakPoint                   := debugMod.io.out.breakPoint
   trapEntryDEvent.in.criticalErrorStateEnterDebug := debugMod.io.out.criticalErrorStateEnterDebug
 
-  tdata1RegVec.foreach { mod =>
-    mod match {
-      case m: HasdebugModeBundle =>
-        m.debugMode := debugMode
+  for(idx <- 0 until TriggerNum) {
+    val tdata1Pre = Wire(new Tdata1Bundle)
+    val mcontrol6Pre = Wire(new Mcontrol6)
+    tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
+    mcontrol6Pre := tdata1Pre.DATA.asUInt
+    val canWriteDmode = WireInit(false.B)
+    canWriteDmode := (if(idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    tdata1RegVec(idx) match {
+      case m: HasTriggerBundle =>
+        m.canWriteDmode := canWriteDmode
         m.chainable := debugMod.io.out.newTriggerChainIsLegal
       case _ =>
     }
   }
+
   tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
     mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
     mod1.w.wdata  := wdata

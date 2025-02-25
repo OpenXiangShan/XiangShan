@@ -12,10 +12,11 @@ import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.vector.Bundles.VSew
+import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -304,8 +305,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
-                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U), 
-                                                                          SrcState.rdy, 
+                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
+                                                                          SrcState.rdy,
                                                                           s0_enqBits(enqIdx).srcState(j))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
@@ -1068,7 +1069,7 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
   // TODO: is still needed?
   val checkWait = new Bundle {
     val stIssuePtr = Input(new SqPtr)
-    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReqBundle)
   }
   val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
 
@@ -1177,7 +1178,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
       // MemAddrIQ also handle vector insts
       enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
-    
+
       val isFirstLoad           = s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get
       val isVleff               = s0_enqBits(i).vpu.isVleff
       enqData.blocked          := !isFirstLoad && isVleff

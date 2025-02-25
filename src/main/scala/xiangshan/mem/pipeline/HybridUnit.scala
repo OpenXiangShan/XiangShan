@@ -21,8 +21,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
@@ -31,10 +31,11 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.mem.mdp._
+import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbHintReq, TlbReq, TlbRequestIO, TlbResp}
-import xiangshan.mem.mdp._
 
 class HybridUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
@@ -97,7 +98,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
       // schedule error query
-      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryBundle)))
 
       // queue-based replay
       val replay       = Flipped(Decoupled(new LsPipelineBundle))
@@ -124,7 +125,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val issue           = Valid(new MemExuInput)
       val lsq             = ValidIO(new LsPipelineBundle)
       val lsq_replenish   = Output(new LsPipelineBundle())
-      val stld_nuke_query = Valid(new StoreNukeQueryIO)
+      val stld_nuke_query = Valid(new StoreNukeQueryBundle)
       val st_mask_out     = Valid(new StoreMaskBundle)
       val debug_ls        = Output(new DebugLsInfoBundle)
     }
@@ -140,8 +141,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val s0_prefetch_spec = Output(Bool())
     val s1_prefetch_spec = Output(Bool())
     // prefetch
-    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
     val correctMissTrain          = Input(Bool())
@@ -204,7 +205,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_rep_stall           = io.lsin.valid && isAfter(io.ldu_io.replay.bits.uop.robIdx, io.lsin.bits.uop.robIdx)
   private val SRC_NUM = 8
   private val Seq(
-    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx, 
+    super_rep_idx, fast_rep_idx, lsq_rep_idx, high_pf_idx,
     int_iss_idx, vec_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -984,7 +985,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // generate XLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
     s2_fwd_mask(i) := io.ldu_io.lsq.forward.forwardMask(i) || io.ldu_io.sbuffer.forwardMask(i) || io.ldu_io.vec_forward.forwardMask(i) || io.ldu_io.ubuffer.forwardMask(i)
-    s2_fwd_data(i) := 
+    s2_fwd_data(i) :=
       Mux(io.ldu_io.lsq.forward.forwardMask(i), io.ldu_io.lsq.forward.forwardData(i),
       Mux(io.ldu_io.vec_forward.forwardMask(i), io.ldu_io.vec_forward.forwardData(i),
       Mux(io.ldu_io.ubuffer.forwardMask(i), io.ldu_io.ubuffer.forwardData(i),

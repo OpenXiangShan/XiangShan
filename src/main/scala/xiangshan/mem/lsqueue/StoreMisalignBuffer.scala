@@ -22,17 +22,18 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.ExceptionNO._
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.cache._
-import xiangshan.frontend.FtqPtr
-import xiangshan.ExceptionNO._
-import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuConfig.StaCfg
 import xiangshan.backend.fu.FuType.isVStore
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
 
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -158,12 +159,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   when(canEnq) {
     connectSamePort(req, reqSelBits)
     req.portIndex := reqSelPort
-    req_valid := true.B
+    req_valid := !reqSelBits.hasException
   }
   val cross4KBPageEnq = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
     when(
-      reqSelValid &&
+      reqSelValid && !reqSelBits.hasException &&
       (isAfter(req.uop.robIdx, reqSelBits.uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSelBits.uop.robIdx) && req.uop.uopIdx > reqSelBits.uop.uopIdx)) &&
       bufferState === s_idle
     ) {

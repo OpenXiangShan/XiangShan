@@ -15,15 +15,16 @@
 ***************************************************************************************/
 package xiangshan.mem
 
+import org.chipsalliance.cde.config._
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config._
-import xiangshan._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.mem.Bundles._
+import xiangshan.cache._
 
 class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -100,7 +101,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
     numWDelay = 2,
-    numCamPort = LoadPipelineWidth
+    numCamPort = LoadPipelineWidth,
+    enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
+    paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
