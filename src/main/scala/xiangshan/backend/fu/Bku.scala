@@ -200,25 +200,26 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
 
   // AES
   val aesSboxIn  = ForwardShiftRows(src1Bytes, src2Bytes)
-  val aesSboxMid  = Reg(Vec(8, Vec(18, Bool())))
   val aesSboxOut  = Wire(Vec(8, UInt(8.W)))
-
   val iaesSboxIn = InverseShiftRows(src1Bytes, src2Bytes)
-  val iaesSboxMid  = Reg(Vec(8, Vec(18, Bool())))
   val iaesSboxOut = Wire(Vec(8, UInt(8.W)))
 
-  aesSboxOut.zip(aesSboxMid).zip(aesSboxIn)foreach { case ((out, mid), in) =>
-    when (io.regEnable) {
-      mid := SboxInv(SboxAesTop(in))
-    }
-    out := SboxAesOut(mid)
-  }
+  val isInvAes = func(1) // 0: Encryption, 1: Decryption
 
-  iaesSboxOut.zip(iaesSboxMid).zip(iaesSboxIn)foreach { case ((out, mid), in) =>
-    when (io.regEnable) {
-      mid := SboxInv(SboxIaesTop(in))
-    }
-    out := SboxIaesOut(mid)
+  (aesSboxIn lazyZip iaesSboxIn lazyZip aesSboxOut lazyZip iaesSboxOut).foreach {
+    case (fwdin, invIn, fwdOut, invOut) =>
+      val aesSBox1FwdOut = SboxAesTop(fwdin)
+      val aesSBox1InvOut = SboxIaesTop(invIn)
+
+      val aesSBox2In     = (aesSBox1FwdOut zip aesSBox1InvOut).map { case (fwd, inv) => Mux(isInvAes, inv, fwd) }
+      val aesSBox2Out    = Reg(Vec(18, Bool())) // 1 cycle delay
+      // val aesSBox2Out    = Wire(Vec(18, Bool())) // no delay
+      when (io.regEnable) {
+        aesSBox2Out := SboxInv(aesSBox2In)
+      }
+
+      fwdOut := SboxAesOut(aesSBox2Out)
+      invOut := SboxIaesOut(aesSBox2Out)
   }
 
   val aes64es = aesSboxOut.asUInt
