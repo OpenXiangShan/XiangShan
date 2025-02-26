@@ -36,7 +36,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
+import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil, PFEvent}
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}

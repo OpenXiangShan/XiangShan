@@ -30,7 +30,6 @@ import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{CoreDispatchTopDownIO}
 import xiangshan.backend.dispatch.NewDispatch
-import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}

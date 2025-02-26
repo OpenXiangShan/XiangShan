@@ -39,7 +39,7 @@ import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
 import utility.sram.SramHelper
 import xiangshan._
-import xiangshan.backend.fu.PFEvent
+import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
