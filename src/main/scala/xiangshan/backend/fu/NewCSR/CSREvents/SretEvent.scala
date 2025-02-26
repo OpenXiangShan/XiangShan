@@ -17,8 +17,12 @@ class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   // Todo: write sstatus instead of mstatus
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.MPRV, _.MDT, _.SDT))
   val hstatus = ValidIO((new HstatusBundle).addInEvent(_.SPV))
-  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.SDT))
+  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP))
   val targetPc = ValidIO(new TargetPCBundle)
+}
+
+class SretEventSDTOutput extends Bundle with EventOutputBase {
+  val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
 }
 
 class SretEventInput extends Bundle {
@@ -36,6 +40,8 @@ class SretEventInput extends Bundle {
 class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   val in = IO(new SretEventInput)
   val out = IO(new SretEventOutput)
+
+  val outSDT = IO(new SretEventSDTOutput)
 
   private val satp = in.satp
   private val vsatp = in.vsatp
@@ -80,6 +86,7 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   private val sretToU     = outPrivState.isModeHU
 
   out := DontCare
+  outSDT := DontCare
 
   out.privState.valid := valid
   out.targetPc .valid := valid
@@ -108,7 +115,9 @@ class SretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.vsstatus.bits.SPP       := PrivMode.U.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.vsstatus.bits.SIE       := in.vsstatus.SPIE
   out.vsstatus.bits.SPIE      := 1.U
-  out.vsstatus.bits.SDT       := Mux(sretToVU || sretInVS, 0.U, in.vsstatus.SDT.asBool) // clear SDT when return to VU or sret in vs
+
+  outSDT.vsstatus.valid       := valid && (sretToVU || sretInVS) // clear SDT when return to VU or sret in vs
+  outSDT.vsstatus.bits.SDT    := 0.U
 
   out.targetPc.bits.pc        := xepc
   out.targetPc.bits.raiseIPF  := instrAddrTransType.checkPageFault(xepc)
@@ -127,3 +136,12 @@ trait SretEventSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBund
 
   reconnectReg()
 }
+
+trait SretEventSDTSinkBundle extends EventSinkBundle { self: CSRModule[_ <: CSRBundle] =>
+  val retFromSSDT = IO(Flipped(new SretEventSDTOutput))
+
+  addUpdateBundleInCSREnumType(retFromSSDT.getBundleByName(self.modName.toLowerCase()))
+
+  reconnectReg()
+}
+
