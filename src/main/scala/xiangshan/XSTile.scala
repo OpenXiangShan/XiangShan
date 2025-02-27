@@ -58,6 +58,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.plic_int_sink :*= plic_int_node
   memBlock.debug_int_sink := debug_int_node
   memBlock.nmi_int_sink := nmi_int_node
+  memBlock.beu_int_sink := beu_int_source
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
