@@ -1171,7 +1171,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   val s2_un_misalign_exception =  s2_vecActive &&
                                   (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_exception_vec, LduCfg, Seq(loadAddrMisaligned)).asUInt.orR)
-  val s2_check_mmio = !s2_prf && !s2_in.tlbMiss && Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_pmp.mmio) && !s2_un_misalign_exception
+
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
@@ -1196,8 +1196,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
   val s2_exception = s2_vecActive &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
+  val s2_uncache = !s2_prf && !s2_exception && !s2_un_misalign_exception && !s2_in.tlbMiss && s2_actually_uncache
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
-                     s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_check_mmio
+                     s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_uncache
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr, s2_mshr_corrupt) = io.forward_mshr.forward()
   val s2_fwd_frm_d_chan_or_mshr = s2_fwd_data_valid && (s2_fwd_frm_d_chan || s2_fwd_frm_mshr)
@@ -1210,7 +1211,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_mmio = !s2_prf &&
     !s2_exception && !s2_in.tlbMiss &&
     Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
-  val s2_uncache = !s2_prf && !s2_exception && !s2_in.tlbMiss && s2_actually_uncache
 
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
@@ -1299,7 +1299,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Here a judgement is made as to whether a misaligned exception needs to actually be generated.
   // We will generate misaligned exceptions at mmio.
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
-  s2_real_exceptionVec(loadAddrMisaligned) := s2_out.isMisalign && s2_check_mmio
+  s2_real_exceptionVec(loadAddrMisaligned) := s2_out.isMisalign && s2_uncache
   s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
     s2_fwd_frm_d_chan && s2_d_corrupt ||
     s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt
