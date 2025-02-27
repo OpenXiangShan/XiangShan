@@ -152,10 +152,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   // filter out in-core addresses before sent to mmio_port
   // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
-  private def mmioFilters: Seq[AddressSet] = p(DebugModuleKey).get.address +: (
-    icacheParameters.cacheCtrlAddressOpt ++
-    dcacheParameters.cacheCtrlAddressOpt
-  ).toSeq
+  private def cacheAddressSet: Seq[AddressSet] = (icacheParameters.cacheCtrlAddressOpt ++ dcacheParameters.cacheCtrlAddressOpt).toSeq
+  private def mmioFilters = if(SeperateDMBus) (p(DebugModuleKey).get.address +: cacheAddressSet) else cacheAddressSet
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
