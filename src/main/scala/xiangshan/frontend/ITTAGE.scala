@@ -32,6 +32,7 @@ import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
+import utility.mbist.MbistPipeline
 import xiangshan._
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
@@ -271,9 +272,10 @@ class ITTageTable(
     holdRead = true,
     singlePort = true,
     useBitmask = true,
-    withClockGate = true
+    withClockGate = true,
+    hasMbist = hasMbist
   ))
-
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   table.io.r.req.valid       := io.req.fire
   table.io.r.req.bits.setIdx := s0_idx
 

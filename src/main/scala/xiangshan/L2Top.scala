@@ -36,6 +36,7 @@ import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import utility.sram.SramBroadcastBundle
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -108,7 +109,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
-        FPGAPlatform = debugOpts.FPGAPlatform
+        FPGAPlatform = debugOpts.FPGAPlatform,
+        hasMbist = hasMbist
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
@@ -217,8 +219,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Input(Bool())
       val l2_flush_done = Output(Bool())
+      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+      val dft_out = if(hasMbist) Some(Output(new SramBroadcastBundle)) else None
+      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val dft_reset_out = if(hasMbist) Some(Output(new DFTResetSignals())) else None
       // val reset_core = IO(Output(Reset()))
     })
+    io.dft_out.zip(io.dft).foreach({case(a, b) => a := b})
+    io.dft_reset_out.zip(io.dft_reset).foreach({case(a, b) => a := b})
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -273,6 +281,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2 = l2cache.get.module
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
+      l2.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
+      l2.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
@@ -358,7 +368,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       ResetGen(ResetGenNode(Seq(
         CellNode(reset_core),
         ModuleNode(inner.module)
-      )), reset, sim = false)
+      )), reset, sim = false, io.dft_reset)
     } else {
       reset_core := DontCare
     }
