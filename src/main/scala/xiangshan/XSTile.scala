@@ -114,15 +114,15 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
-      val cpu_power_down = Output(Bool())
-      val l2_flush_done = Output(Bool())
+      val cpu_power_down = Option.when(EnablePPU) (Output(Bool()))
+      val l2_flush_done = Option.when(EnablePPU) (Output(Bool()))
+      val nPOWERUP = Option.when(EnablePPU) (Input(Bool()))
+      val nISOLATE = Option.when(EnablePPU) (Input(Bool()))
+      val nPOWERACK = Option.when(EnablePPU) (Output(Bool()))
     })
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
-    dontTouch(io.cpu_power_down)
-    dontTouch(io.l2_flush_done)
-
 
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
@@ -150,8 +150,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     //lower power
     l2top.module.io.l2Flush.foreach{_ := core.module.io.l2_flush_en}
     core.module.io.l2_flush_done := l2top.module.io.l2FlushDone.getOrElse(false.B)
-    io.cpu_power_down := core.module.io.power_down_en
-    io.l2_flush_done := l2top.module.io.l2FlushDone.getOrElse(false.B)
+    io.cpu_power_down.foreach { _ := core.module.io.power_down_en }
+    io.l2_flush_done.foreach { _ := l2top.module.io.l2FlushDone.getOrElse(false.B) }
+    io.nPOWERACK.foreach { _ := false.B }
 
     if (enableL2) {
       // TODO: add ECC interface of L2

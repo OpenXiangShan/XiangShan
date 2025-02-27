@@ -78,9 +78,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
       }
-      val cpu_power_down = Output(Bool())
-      val l2_flush_done = Output(Bool())
-   })
+      val cpu_power_down = Option.when(EnablePPU) (Output(Bool()))
+      val l2_flush_done = Option.when(EnablePPU) (Output(Bool()))
+      val nPOWERUP = Option.when(EnablePPU) (Input(Bool()))
+      val nISOLATE = Option.when(EnablePPU) (Input(Bool()))
+      val nPOWERACK = Option.when(EnablePPU) (Output(Bool()))
+    })
 
     val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen())
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen()))
@@ -103,8 +106,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
-    io.l2_flush_done := tile.module.io.l2_flush_done
-    io.cpu_power_down := tile.module.io.cpu_power_down
+    io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.get }
+    io.cpu_power_down.foreach { _ := tile.module.io.cpu_power_down.get }
+    tile.module.io.nPOWERUP.foreach { _ := io.nPOWERUP.get }
+    tile.module.io.nISOLATE.foreach { _ := io.nISOLATE.get }
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {

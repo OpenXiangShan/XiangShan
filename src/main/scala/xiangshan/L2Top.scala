@@ -257,9 +257,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
       io.l2Miss := l2.io.l2Miss
 
-      io.l2FlushDone.foreach{_:= true.B} //TODO: use below when coupledL2 ready
-//      io.l2FlushDone.foreach{_:= l2.io.l2FlushDone.getOrElse(false.B)}
-//      l2.io.l2Flush.foreach{_:= io.l2Flush.getOrElse(false.B)}
+      io.l2FlushDone.foreach { _ := l2.io.l2FlushDone.get }
+      l2.io.l2Flush.foreach { _ := io.l2Flush.get }
 
       /* l2 tlb */
       io.l2_tlb_req.req.bits := DontCare

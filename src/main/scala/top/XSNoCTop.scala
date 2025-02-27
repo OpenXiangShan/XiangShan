@@ -171,9 +171,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val cpuReset = reset.asBool || ppuReset
 
     /* Core+L2 clock Enable when:
-     1. PPU clock is enabled and NOT disabled during Power on/off flow -> ppuClockEn
+     1. PPU clock is enabled and disabled during Power on/off flow -> ppuClockEn
         a. on Power off flow clock disabled in order: Clock->Isolation->Reset 
-        b. on Power  on flow clock enableed in order: Isolation->Clock->Reset 
+        b. on Power on flow clock enableed in order: Isolation->Clock->Reset 
      2. if PPU enable clock (Core+L2 in normal state) and wfi is NOT gating Clock 
      3. the cycle of Flitpend valid in rx.snp channel  
      */
@@ -220,19 +220,19 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val seip  = plic.last(0)
     val nmi_31 = nmi.head(0)
     val nmi_43 = nmi.head(1)
-    val msi_info_vld = wrapper.u_imsic_bus_top.module.o_msi_info_vld
+    val msi_info_vld = wrapper.u_imsic_bus_top.module.o_msi_info_vld  // AIA 
     val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
 
     /*CPU Low Power state
      1. Low power state is triggered by <core_with_l2.module.io.cpu_power_down>, an CSR bit for power down
      2. wait L2 flush done
      3. wait Core to wfi 
-     3. when enter sPOWERREQ, Invalid <coreAcitve> to PPU to power down CPU   
+     4. when enter sPOWERREQ, Invalid <coreAcitve> to PPU to power down CPU   
      */
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sPOFFREQ :: Nil = Enum(4)
     val lpState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
-    val l2FlushDone = core_with_l2.module.io.l2_flush_done
-    val corePD = core_with_l2.module.io.cpu_power_down
+    val l2FlushDone = core_with_l2.module.io.l2_flush_done.get
+    val corePD = core_with_l2.module.io.cpu_power_down.get
     val isWFI = core_with_l2.module.io.cpu_halt
     lpState :=  lpStateNext(lpState, corePD, l2FlushDone, isWFI)
 
@@ -240,7 +240,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      1. works only when lpState is IDLE means Core+L2 works in normal state
      2. when Core is in wfi state, core+l2 clock is gated
      3. only reset/interrupt/snoop could recover core+l2 clock 
-    */
+     */
     val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
     val wfiState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
     wfiState := WfiStateNext(wfiState, isWFI, corePD, io.chi.rx.snp.flitpend, intSrc)
@@ -261,9 +261,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       val ppu = withClockAndReset(soc_clock, soc_reset_sync)(Module(new PPU))
       ppu.io.coreActive := ~(lpState === sPOFFREQ)
       ppu.io.coreWakeReq := intSrc.orR //TODO use external interrupt only
-      ppu.io.nPOWERACK := true.B
       ppuClockEn := ppu.io.coreClken
       ppuReset := ppu.io.coreReset
+      ppu.io.nPOWERACK := core_with_l2.module.io.nPOWERACK.get
+      core_with_l2.module.io.nPOWERUP.foreach { _ := ppu.io.nPOWERUP }
+      core_with_l2.module.io.nISOLATE.foreach { _ := ppu.io.nISOLATE }
     } else {
       ppuClockEn := true.B
       ppuReset := false.B
