@@ -25,35 +25,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 
-class ICacheMissReq(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt = UInt(idxBits.W)
-}
-
-class ICacheMissResp(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt = UInt(idxBits.W)
-  val waymask:  UInt = UInt(nWays.W)
-  val data:     UInt = UInt(blockBits.W)
-  val corrupt:  Bool = Bool()
-}
-
-class LookUpMSHR(implicit p: Parameters) extends ICacheBundle {
-  val info: Valid[ICacheMissReq] = ValidIO(new ICacheMissReq)
-  val hit:  Bool                 = Input(Bool())
-}
-
-class MSHRResp(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
-  val vSetIdx:  UInt = UInt(idxBits.W)
-  val way:      UInt = UInt(wayBits.W)
-}
-
-class MSHRAcquire(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
-  val acquire: TLBundleA = new TLBundleA(edge.bundle)
-  val vSetIdx: UInt      = UInt(idxBits.W)
-}
-
 class ICacheMSHRIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
   val fencei:    Bool                       = Input(Bool())
   val flush:     Bool                       = Input(Bool())
