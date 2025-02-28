@@ -25,31 +25,6 @@ import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
-class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
-  val startAddr:        UInt   = UInt(VAddrBits.W)
-  val nextlineStart:    UInt   = UInt(VAddrBits.W)
-  val ftqIdx:           FtqPtr = new FtqPtr
-  val isSoftPrefetch:   Bool   = Bool()
-  val backendException: UInt   = UInt(ExceptionType.width.W)
-  def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
-
-  def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
-    this.startAddr      := info.startAddr
-    this.nextlineStart  := info.nextlineStart
-    this.ftqIdx         := info.ftqIdx
-    this.isSoftPrefetch := false.B
-    this
-  }
-
-  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
-    this.startAddr      := req.vaddr
-    this.nextlineStart  := req.vaddr + (1 << blockOffBits).U
-    this.ftqIdx         := DontCare
-    this.isSoftPrefetch := true.B
-    this
-  }
-}
-
 class IPrefetchIO(implicit p: Parameters) extends ICacheBundle {
   // control
   val csr_pf_enable: Bool = Input(Bool())
