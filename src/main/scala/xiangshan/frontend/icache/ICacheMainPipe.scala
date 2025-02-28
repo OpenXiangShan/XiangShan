@@ -1,31 +1,33 @@
-/***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import difftest._
+import difftest.DiffRefillEvent
+import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
-import utility._
-import xiangshan._
-import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.cache.mmu._
+import utility.DataHoldBypass
+import utility.ValidHold
+import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
+import xiangshan.L1CacheErrorInfo
+import xiangshan.cache.mmu.Pbmt
+import xiangshan.cache.mmu.TlbCmd
+import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
 import xiangshan.frontend.ExceptionType
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
