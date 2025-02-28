@@ -137,7 +137,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
   val vaddr:            Vec[UInt] = Vec(PortNumber, UInt(VAddrBits.W))
   val data:             UInt      = UInt(blockBits.W)
   val paddr:            Vec[UInt] = Vec(PortNumber, UInt(PAddrBits.W))
-  val exception:        Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val exception:        Vec[UInt] = Vec(PortNumber, ExceptionType())
   val pmp_mmio:         Vec[Bool] = Vec(PortNumber, Bool())
   val itlb_pbmt:        Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
   val backendException: Bool      = Bool()
@@ -163,7 +163,7 @@ class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
   val nextlineStart:    UInt   = UInt(VAddrBits.W)
   val ftqIdx:           FtqPtr = new FtqPtr
   val isSoftPrefetch:   Bool   = Bool()
-  val backendException: UInt   = UInt(ExceptionType.width.W)
+  val backendException: UInt   = ExceptionType()
   def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
@@ -194,7 +194,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val vSetIdx:        Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
   val waymask:        Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val ptag:           Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlb_exception: Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val itlb_exception: Vec[UInt] = Vec(PortNumber, ExceptionType())
   val itlb_pbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
   val meta_codes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }

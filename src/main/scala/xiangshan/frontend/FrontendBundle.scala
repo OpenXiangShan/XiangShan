@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils.NamedUInt
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
@@ -107,12 +108,11 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioLastCommit = Input(Bool())
 }
 
-object ExceptionType {
-  def width: Int  = 2
-  def none:  UInt = "b00".U(width.W)
-  def pf:    UInt = "b01".U(width.W) // instruction page fault
-  def gpf:   UInt = "b10".U(width.W) // instruction guest page fault
-  def af:    UInt = "b11".U(width.W) // instruction access fault
+object ExceptionType extends NamedUInt(2) {
+  def none: UInt = "b00".U(width.W)
+  def pf:   UInt = "b01".U(width.W) // instruction page fault
+  def gpf:  UInt = "b10".U(width.W) // instruction guest page fault
+  def af:   UInt = "b11".U(width.W) // instruction access fault
 
   def hasException(e: UInt):             Bool = e =/= none
   def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
@@ -243,7 +243,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, UInt(ExceptionType.width.W))
+  val exceptionType    = Vec(PredictWidth, ExceptionType())
   val crossPageIPFFix  = Vec(PredictWidth, Bool())
   val illegalInstr     = Vec(PredictWidth, Bool())
   val triggered        = Vec(PredictWidth, TriggerAction())
