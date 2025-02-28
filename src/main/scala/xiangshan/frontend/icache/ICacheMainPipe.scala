@@ -30,44 +30,38 @@ import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
 import xiangshan.frontend.ExceptionType
 
-class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
-  val hartId: UInt = Input(UInt(hartIdLen.W))
-
-  /*** internal interface ***/
-  val dataArray:      ICacheDataReqBundle               = new ICacheDataReqBundle
-  val metaArrayFlush: Vec[Valid[ICacheMetaFlushBundle]] = Vec(PortNumber, ValidIO(new ICacheMetaFlushBundle))
-  val touch:          Vec[Valid[ReplacerTouch]]         = Vec(PortNumber, ValidIO(new ReplacerTouch))
-  val wayLookupRead:  DecoupledIO[WayLookupInfo]        = Flipped(DecoupledIO(new WayLookupInfo))
-  val mshr:           ICacheMSHRBundle                  = new ICacheMSHRBundle
-  val ecc_enable:     Bool                              = Input(Bool())
-
-  /*** outside interface ***/
-  // FTQ
-  val fetch: ICacheMainPipeBundle = new ICacheMainPipeBundle
-  val flush: Bool                 = Input(Bool())
-  // PMP
-  val pmp: Vec[ICachePMPBundle] = Vec(PortNumber, new ICachePMPBundle)
-  // IFU
-  val respStall: Bool = Input(Bool())
-  // backend/BEU
-  val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
-
-  /*** PERF ***/
-  val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
-}
-
-//class ICacheDB(implicit p: Parameters) extends ICacheBundle {
-//  val blk_vaddr: UInt = UInt((VAddrBits - blockOffBits).W)
-//  val blk_paddr: UInt = UInt((PAddrBits - blockOffBits).W)
-//  val hit:       Bool = Bool()
-//}
-
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
     with ICacheAddrHelper
     with ICacheDataSelHelper {
 
-  val io: ICacheMainPipeInterface = IO(new ICacheMainPipeInterface)
+  class ICacheMainPipeIO(implicit p: Parameters) extends ICacheBundle {
+    val hartId: UInt = Input(UInt(hartIdLen.W))
+
+    /*** internal interface ***/
+    val dataArray:      ICacheDataReqBundle               = new ICacheDataReqBundle
+    val metaArrayFlush: Vec[Valid[ICacheMetaFlushBundle]] = Vec(PortNumber, ValidIO(new ICacheMetaFlushBundle))
+    val touch:          Vec[Valid[ReplacerTouch]]         = Vec(PortNumber, ValidIO(new ReplacerTouch))
+    val wayLookupRead:  DecoupledIO[WayLookupInfo]        = Flipped(DecoupledIO(new WayLookupInfo))
+    val mshr:           ICacheMSHRBundle                  = new ICacheMSHRBundle
+    val ecc_enable:     Bool                              = Input(Bool())
+
+    /*** outside interface ***/
+    // FTQ
+    val fetch: ICacheMainPipeBundle = new ICacheMainPipeBundle
+    val flush: Bool                 = Input(Bool())
+    // PMP
+    val pmp: Vec[ICachePMPBundle] = Vec(PortNumber, new ICachePMPBundle)
+    // IFU
+    val respStall: Bool = Input(Bool())
+    // backend/BEU
+    val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
+
+    /*** PERF ***/
+    val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
+  }
+
+  val io: ICacheMainPipeIO = IO(new ICacheMainPipeIO)
 
   /** Input/Output port */
   private val (fromFtq, toIFU)   = (io.fetch.req, io.fetch.resp)
