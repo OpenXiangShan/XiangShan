@@ -25,49 +25,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 
-class DeMultiplexerIO[T <: Data](gen: T, n: Int) extends Bundle {
-  val in:     DecoupledIO[T]      = Flipped(DecoupledIO(gen))
-  val out:    Vec[DecoupledIO[T]] = Vec(n, DecoupledIO(gen))
-  val chosen: UInt                = Output(UInt(log2Ceil(n).W))
-}
-
-/** Hardware module that is used to sequence 1 producer into n consumer.
- * Priority is given to lower producer.
- */
-class DeMultiplexer[T <: Data](val gen: T, val n: Int) extends Module {
-  require(n >= 2)
-  val io: DeMultiplexerIO[T] = IO(new DeMultiplexerIO(gen, n))
-
-  private val grant = false.B +: (1 until n).map(i => (0 until i).map(io.out(_).ready).reduce(_ || _))
-  (0 until n).foreach { i =>
-    io.out(i).bits  := io.in.bits
-    io.out(i).valid := !grant(i) && io.in.valid
-  }
-
-  io.in.ready := grant.last || io.out.last.ready
-  io.chosen   := PriorityEncoder(VecInit(io.out.map(_.ready)))
-}
-
-class MuxBundleIO[T <: Data](gen: T, n: Int) extends Bundle {
-  val sel: UInt                = Input(UInt(log2Ceil(n).W))
-  val in:  Vec[DecoupledIO[T]] = Flipped(Vec(n, DecoupledIO(gen)))
-  val out: DecoupledIO[T]      = DecoupledIO(gen)
-}
-
-class MuxBundle[T <: Data](val gen: T, val n: Int) extends Module {
-  require(n >= 2)
-  val io: MuxBundleIO[T] = IO(new MuxBundleIO[T](gen, n))
-
-  io.in <> DontCare
-  io.out <> DontCare
-  (0 until n).foreach { i =>
-    when(io.sel === i.U) {
-      io.out <> io.in(i)
-    }
-    io.in(i).ready := (io.sel === i.U) && io.out.ready
-  }
-}
-
 class ICacheMissReq(implicit p: Parameters) extends ICacheBundle {
   val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
