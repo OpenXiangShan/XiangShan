@@ -33,22 +33,23 @@ import utility.XSPerfAccumulate
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.frontend.FtqToPrefetchIO
+import xiangshan.frontend.FtqToICacheIO
+import xiangshan.frontend.ICacheToIfuIO
+import xiangshan.frontend.IfuToICacheIO
 
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
     // FTQ
-    val fetch:       ICacheMainPipeBundle = new ICacheMainPipeBundle
-    val ftqPrefetch: FtqToPrefetchIO      = Flipped(new FtqToPrefetchIO)
+    val fromFtq: FtqToICacheIO = Flipped(new FtqToICacheIO)
     // memblock
-    val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
+    val softPrefetchReq: Vec[Valid[SoftIfetchPrefetchBundle]] =
       Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
     // IFU
-    val stop:  Bool = Input(Bool())
-    val toIFU: Bool = Output(Bool())
+    val toIfu:   ICacheToIfuIO = new ICacheToIfuIO
+    val fromIfu: IfuToICacheIO = Flipped(new IfuToICacheIO)
     // PMP: mainPipe & prefetchPipe need PortNumber each
-    val pmp: Vec[ICachePMPBundle] = Vec(2 * PortNumber, new ICachePMPBundle)
+    val pmp: Vec[PmpCheckBundle] = Vec(2 * PortNumber, new PmpCheckBundle)
     // iTLB
     val itlb:          Vec[TlbRequestIO] = Vec(PortNumber, new TlbRequestIO)
     val itlbFlushPipe: Bool              = Bool()
@@ -59,9 +60,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // flush
     val fencei: Bool = Input(Bool())
     val flush:  Bool = Input(Bool())
-
-    // perf
-    val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -87,7 +85,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val missUnit   = Module(new ICacheMissUnit(edge))
   private val replacer   = Module(new ICacheReplacer)
   private val prefetcher = Module(new ICachePrefetchPipe)
-  private val wayLookup  = Module(new WayLookup)
+  private val wayLookup  = Module(new ICacheWayLookup)
 
   private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else true.B
 
@@ -96,48 +94,47 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val ctrlUnit = outer.ctrlUnitOpt.get.module
     when(ctrlUnit.io.injecting) {
       dataArray.io.write <> ctrlUnit.io.dataWrite
-      missUnit.io.data_write.ready := false.B
+      missUnit.io.dataWrite.req.ready := false.B
     }.otherwise {
-      ctrlUnit.io.dataWrite.ready := false.B
-      dataArray.io.write <> missUnit.io.data_write
+      ctrlUnit.io.dataWrite.req.ready := false.B
+      dataArray.io.write <> missUnit.io.dataWrite
     }
   } else {
-    dataArray.io.write <> missUnit.io.data_write
+    dataArray.io.write <> missUnit.io.dataWrite
   }
-  dataArray.io.read <> mainPipe.io.dataArray.toIData
-  mainPipe.io.dataArray.fromIData := dataArray.io.readResp
+  dataArray.io.read <> mainPipe.io.dataRead
 
   // metaArray io
   metaArray.io.flushAll := io.fencei
-  metaArray.io.flush <> mainPipe.io.metaArrayFlush
+  metaArray.io.flush <> mainPipe.io.metaFlush
   if (outer.ctrlUnitOpt.nonEmpty) {
     val ctrlUnit = outer.ctrlUnitOpt.get.module
     when(ctrlUnit.io.injecting) {
       metaArray.io.write <> ctrlUnit.io.metaWrite
       metaArray.io.read <> ctrlUnit.io.metaRead
-      missUnit.io.meta_write.ready         := false.B
-      prefetcher.io.metaRead.toIMeta.ready := false.B
+      missUnit.io.metaWrite.req.ready  := false.B
+      prefetcher.io.metaRead.req.ready := false.B
+      prefetcher.io.metaRead.resp      := DontCare
     }.otherwise {
-      ctrlUnit.io.metaWrite.ready := false.B
-      ctrlUnit.io.metaRead.ready  := false.B
-      metaArray.io.write <> missUnit.io.meta_write
-      metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+      ctrlUnit.io.metaWrite.req.ready := false.B
+      ctrlUnit.io.metaRead.req.ready  := false.B
+      ctrlUnit.io.metaRead.resp       := DontCare
+      metaArray.io.write <> missUnit.io.metaWrite
+      metaArray.io.read <> prefetcher.io.metaRead
     }
-    ctrlUnit.io.metaReadResp := metaArray.io.readResp
   } else {
-    metaArray.io.write <> missUnit.io.meta_write
-    metaArray.io.read <> prefetcher.io.metaRead.toIMeta
+    metaArray.io.write <> missUnit.io.metaWrite
+    metaArray.io.read <> prefetcher.io.metaRead
   }
-  prefetcher.io.metaRead.fromIMeta := metaArray.io.readResp
 
   prefetcher.io.flush         := io.flush
   prefetcher.io.csr_pf_enable := io.csr_pf_enable
   prefetcher.io.ecc_enable    := ecc_enable
-  prefetcher.io.MSHRResp      := missUnit.io.fetch_resp
-  prefetcher.io.flushFromBpu  := io.ftqPrefetch.flushFromBpu
+  prefetcher.io.missResp      := missUnit.io.resp
+  prefetcher.io.flushFromBpu  := io.fromFtq.flushFromBpu
   // cache softPrefetch
   private val softPrefetchValid = RegInit(false.B)
-  private val softPrefetch      = RegInit(0.U.asTypeOf(new IPrefetchReq))
+  private val softPrefetch      = RegInit(0.U.asTypeOf(new PrefetchReqBundle))
   /* FIXME:
    * If there is already a pending softPrefetch request, it will be overwritten.
    * Also, if there are multiple softPrefetch requests in the same cycle, only the first one will be accepted.
@@ -145,46 +142,46 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
    * However, the impact on performance still needs to be assessed.
    * Considering that the frequency of prefetch.i may not be high, let's start with a temporary dummy solution.
    */
-  when(io.softPrefetch.map(_.valid).reduce(_ || _)) {
+  when(io.softPrefetchReq.map(_.valid).reduce(_ || _)) {
     softPrefetchValid := true.B
     softPrefetch.fromSoftPrefetch(MuxCase(
       0.U.asTypeOf(new SoftIfetchPrefetchBundle),
-      io.softPrefetch.map(req => req.valid -> req.bits)
+      io.softPrefetchReq.map(req => req.valid -> req.bits)
     ))
   }.elsewhen(prefetcher.io.req.fire) {
     softPrefetchValid := false.B
   }
   // pass ftqPrefetch
-  private val ftqPrefetch = WireInit(0.U.asTypeOf(new IPrefetchReq))
-  ftqPrefetch.fromFtqICacheInfo(io.ftqPrefetch.req.bits)
+  private val ftqPrefetch = WireInit(0.U.asTypeOf(new PrefetchReqBundle))
+  ftqPrefetch.fromFtqICacheInfo(io.fromFtq.prefetchReq.bits.req)
   // software prefetch has higher priority
-  prefetcher.io.req.valid                 := softPrefetchValid || io.ftqPrefetch.req.valid
+  prefetcher.io.req.valid                 := softPrefetchValid || io.fromFtq.prefetchReq.valid
   prefetcher.io.req.bits                  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
-  prefetcher.io.req.bits.backendException := io.ftqPrefetch.backendException
-  io.ftqPrefetch.req.ready                := prefetcher.io.req.ready && !softPrefetchValid
+  prefetcher.io.req.bits.backendException := io.fromFtq.prefetchReq.bits.backendException
+  io.fromFtq.prefetchReq.ready            := prefetcher.io.req.ready && !softPrefetchValid
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
   missUnit.io.flush  := io.flush
-  missUnit.io.fetch_req <> mainPipe.io.mshr.req
-  missUnit.io.prefetch_req <> prefetcher.io.MSHRReq
-  missUnit.io.mem_grant.valid := false.B
-  missUnit.io.mem_grant.bits  := DontCare
-  missUnit.io.mem_grant <> bus.d
+  missUnit.io.fetchReq <> mainPipe.io.missReq
+  missUnit.io.prefetchReq <> prefetcher.io.missReq
+  missUnit.io.memGrant.valid := false.B
+  missUnit.io.memGrant.bits  := DontCare
+  missUnit.io.memGrant <> bus.d
 
   mainPipe.io.flush      := io.flush
-  mainPipe.io.respStall  := io.stop
+  mainPipe.io.respStall  := io.fromIfu.stall
   mainPipe.io.ecc_enable := ecc_enable
   mainPipe.io.hartId     := io.hartId
-  mainPipe.io.mshr.resp  := missUnit.io.fetch_resp
-  mainPipe.io.fetch.req <> io.fetch.req
+  mainPipe.io.missResp   := missUnit.io.resp
+  mainPipe.io.req <> io.fromFtq.fetchReq
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 
   wayLookup.io.flush := io.flush
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
-  wayLookup.io.update := missUnit.io.fetch_resp
+  wayLookup.io.update := missUnit.io.resp
 
-  replacer.io.touch <> mainPipe.io.touch
+  replacer.io.touch <> mainPipe.io.replacerTouch
   replacer.io.victim <> missUnit.io.victim
 
   io.pmp(0) <> mainPipe.io.pmp(0)
@@ -197,12 +194,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // notify IFU that Icache pipeline is available
-  io.toIFU    := mainPipe.io.fetch.req.ready
-  io.perfInfo := mainPipe.io.perfInfo
+  io.toIfu.fetchReady := mainPipe.io.req.ready
 
-  io.fetch.resp <> mainPipe.io.fetch.resp
-  io.fetch.topdownIcacheMiss := mainPipe.io.fetch.topdownIcacheMiss
-  io.fetch.topdownItlbMiss   := mainPipe.io.fetch.topdownItlbMiss
+  // send resp
+  io.toIfu.fetchResp <> mainPipe.io.resp
+
+  // perf
+  io.toIfu.perf    := mainPipe.io.perf
+  io.toIfu.topdown := mainPipe.io.topdown
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -210,7 +209,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  bus.a <> missUnit.io.mem_acquire
+  bus.a <> missUnit.io.memAcquire
 
   // Parity error port
   private val errors       = mainPipe.io.errors
@@ -224,10 +223,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   XSPerfAccumulate(
     "softPrefetch_drop_not_ready",
-    io.softPrefetch.map(_.valid).reduce(_ || _) && softPrefetchValid && !prefetcher.io.req.fire
+    io.softPrefetchReq.map(_.valid).reduce(_ || _) && softPrefetchValid && !prefetcher.io.req.fire
   )
-  XSPerfAccumulate("softPrefetch_drop_multi_req", PopCount(io.softPrefetch.map(_.valid)) > 1.U)
-  XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.ftqPrefetch.req.valid)
+  XSPerfAccumulate("softPrefetch_drop_multi_req", PopCount(io.softPrefetchReq.map(_.valid)) > 1.U)
+  XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.fromFtq.prefetchReq.valid)
 
   val perfEvents: Seq[(String, Bool)] = Seq(
     ("icache_miss_cnt  ", false.B),

@@ -48,11 +48,10 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       // ecc control
       val ecc_enable: Bool = Output(Bool())
       // ecc inject
-      val injecting:    Bool                               = Output(Bool())
-      val metaRead:     DecoupledIO[ICacheReadBundle]      = DecoupledIO(new ICacheReadBundle)
-      val metaReadResp: ICacheMetaRespBundle               = Input(new ICacheMetaRespBundle)
-      val metaWrite:    DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
-      val dataWrite:    DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
+      val injecting: Bool            = Output(Bool())
+      val metaRead:  MetaReadBundle  = new MetaReadBundle
+      val metaWrite: MetaWriteBundle = new MetaWriteBundle
+      val dataWrite: DataWriteBundle = new DataWriteBundle
     }
 
     val io: ICacheCtrlUnitIO = IO(new ICacheCtrlUnitIO)
@@ -151,14 +150,14 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       Enum(5)
     private val istate = RegInit(is_idle)
 
-    io.metaRead.valid             := istate === is_readMetaReq
-    io.metaRead.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
-    io.metaRead.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(ivirIdx))
-    io.metaRead.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
-    io.metaRead.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
+    io.metaRead.req.valid             := istate === is_readMetaReq
+    io.metaRead.req.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
+    io.metaRead.req.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(ivirIdx))
+    io.metaRead.req.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
+    io.metaRead.req.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
 
-    io.metaWrite.valid := istate === is_writeMeta
-    io.metaWrite.bits.generate(
+    io.metaWrite.req.valid := istate === is_writeMeta
+    io.metaWrite.req.bits.generate(
       tag = iphyTag,
       idx = ivirIdx,
       waymask = iwaymask,
@@ -166,8 +165,8 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       poison = true.B
     )
 
-    io.dataWrite.valid := istate === is_writeData
-    io.dataWrite.bits.generate(
+    io.dataWrite.req.valid := istate === is_writeData
+    io.dataWrite.req.bits.generate(
       data = 0.U, // inject poisoned data, don't care actual data
       idx = ivirIdx,
       waymask = iwaymask,
@@ -183,14 +182,14 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
         }
       }
       is(is_readMetaReq) {
-        when(io.metaRead.fire) {
+        when(io.metaRead.req.fire) {
           istate := is_readMetaResp
         }
       }
       is(is_readMetaResp) {
         // metaArray ensures resp is valid one cycle after req
         val waymask = VecInit((0 until nWays).map { w =>
-          io.metaReadResp.entryValid.head(w) && io.metaReadResp.tags.head(w) === iphyTag
+          io.metaRead.resp.entryValid.head(w) && io.metaRead.resp.tags.head(w) === iphyTag
         }).asUInt
         iwaymask := waymask
         when(!waymask.orR) {
@@ -203,13 +202,13 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
         }
       }
       is(is_writeMeta) {
-        when(io.metaWrite.fire) {
+        when(io.metaWrite.req.fire) {
           istate          := is_idle
           eccctrl.istatus := eccctrlInjStatus.injected
         }
       }
       is(is_writeData) {
-        when(io.dataWrite.fire) {
+        when(io.dataWrite.req.fire) {
           istate          := is_idle
           eccctrl.istatus := eccctrlInjStatus.injected
         }

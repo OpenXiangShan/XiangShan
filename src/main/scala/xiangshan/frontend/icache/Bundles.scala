@@ -27,8 +27,17 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqICacheInfo
 import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.FtqToICacheRequestBundle
 import xiangshan.frontend.PrunedAddr
+
+/* ***
+ * Naming:
+ * - I/O:
+ *   - ICache inner use only: xxxBundle
+ *   - Other modules use: ICacheXxxBundle, consider move to FrontendBundle.scala
+ * - Sram/register: xxxEntry
+ *
+ * Try avoiding directed Bundle, unless it's req-resp pair
+ * *** */
 
 // meta
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
@@ -44,104 +53,122 @@ object ICacheMetadata {
 }
 
 /* ***** Array write ***** */
-// ICacheMissUnit -> ICacheMetaArray
-class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  val virIdx:  UInt = UInt(idxBits.W)
-  val phyTag:  UInt = UInt(tagBits.W)
-  val waymask: UInt = UInt(nWays.W)
-  val bankIdx: Bool = Bool()
-  val poison:  Bool = Bool()
+// ICacheMissUnit <-> ICacheMetaArray
+class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
+  class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
+    val virIdx:  UInt = UInt(idxBits.W)
+    val phyTag:  UInt = UInt(tagBits.W)
+    val waymask: UInt = UInt(nWays.W)
+    val bankIdx: Bool = Bool()
+    val poison:  Bool = Bool()
 
-  def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-    this.virIdx  := idx
-    this.phyTag  := tag
-    this.waymask := waymask
-    this.bankIdx := bankIdx
-    this.poison  := poison
+    def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
+      this.virIdx  := idx
+      this.phyTag  := tag
+      this.waymask := waymask
+      this.bankIdx := bankIdx
+      this.poison  := poison
+    }
   }
+  val req: DecoupledIO[MetaWriteReqBundle] = DecoupledIO(new MetaWriteReqBundle)
 }
 
-// ICacheMissUnit -> ICacheDataArray
-class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle {
-  val virIdx:  UInt = UInt(idxBits.W)
-  val data:    UInt = UInt(blockBits.W)
-  val waymask: UInt = UInt(nWays.W)
-  val bankIdx: Bool = Bool()
-  val poison:  Bool = Bool()
+// ICacheMissUnit <-> ICacheDataArray
+class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
+  class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
+    val virIdx:  UInt = UInt(idxBits.W)
+    val data:    UInt = UInt(blockBits.W)
+    val waymask: UInt = UInt(nWays.W)
+    val bankIdx: Bool = Bool()
+    val poison:  Bool = Bool()
 
-  def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-    this.virIdx  := idx
-    this.data    := data
-    this.waymask := waymask
-    this.bankIdx := bankIdx
-    this.poison  := poison
+    def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
+      this.virIdx  := idx
+      this.data    := data
+      this.waymask := waymask
+      this.bankIdx := bankIdx
+      this.poison  := poison
+    }
   }
+  val req: DecoupledIO[DataWriteReqBundle] = DecoupledIO(new DataWriteReqBundle)
 }
 
 /* ***** Array flush ***** */
-// ICacheMainPipe -> ICacheMetaArray
-class ICacheMetaFlushBundle(implicit p: Parameters) extends ICacheBundle {
-  val virIdx:  UInt = UInt(idxBits.W)
-  val waymask: UInt = UInt(nWays.W)
+// ICacheMainPipe <-> ICacheMetaArray
+class MetaFlushBundle(implicit p: Parameters) extends ICacheBundle {
+  class MetaFlushReqBundle(implicit p: Parameters) extends ICacheBundle {
+    val virIdx:  UInt = UInt(idxBits.W)
+    val waymask: UInt = UInt(nWays.W)
+  }
+  val req: Vec[Valid[MetaFlushReqBundle]] = Vec(PortNumber, ValidIO(new MetaFlushReqBundle))
 }
 
 /* ***** Array read ***** */
-// ICachePrefetchPipe / ICacheMainPipe -> ICacheMetaArray / ICacheDataArray
-class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:      Vec[UInt]      = Vec(2, UInt(idxBits.W))
-  val waymask:      Vec[Vec[Bool]] = Vec(2, Vec(nWays, Bool()))
+class ArrayReadReqBundle(implicit p: Parameters) extends ICacheBundle {
+  val vSetIdx:      Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:      Vec[Vec[Bool]] = Vec(PortNumber, Vec(nWays, Bool()))
   val blkOffset:    UInt           = UInt(log2Ceil(blockBytes).W)
   val isDoubleLine: Bool           = Bool()
 }
 
-//class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheReadBundle
-class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
-  val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(ICacheMetaCodeBits.W)))
-  val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
-  // for compatibility
-  def tags: Vec[Vec[UInt]] = VecInit(metas.map(port => VecInit(port.map(way => way.tag))))
+// ICachePrefetchPipe / ICacheCtrlUnit <-> ICacheMetaArray
+class MetaReadBundle(implicit p: Parameters) extends ICacheBundle {
+  class MetaReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
+  class MetaReadRespBundle(implicit p: Parameters) extends ICacheBundle {
+    val metas:      Vec[Vec[ICacheMetadata]] = Vec(PortNumber, Vec(nWays, new ICacheMetadata))
+    val codes:      Vec[Vec[UInt]]           = Vec(PortNumber, Vec(nWays, UInt(ICacheMetaCodeBits.W)))
+    val entryValid: Vec[Vec[Bool]]           = Vec(PortNumber, Vec(nWays, Bool()))
+    // for compatibility
+    def tags: Vec[Vec[UInt]] = VecInit(metas.map(port => VecInit(port.map(way => way.tag))))
+  }
+  val req:  DecoupledIO[MetaReadReqBundle] = DecoupledIO(new MetaReadReqBundle)
+  val resp: MetaReadRespBundle             = Input(new MetaReadRespBundle)
 }
 
-class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val toIMeta:   DecoupledIO[ICacheReadBundle] = DecoupledIO(new ICacheReadBundle)
-  val fromIMeta: ICacheMetaRespBundle          = Input(new ICacheMetaRespBundle)
-}
-
-//class ICacheDataReadBundle(implicit p: Parameters) extends ICacheReadBundle
-class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val datas: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataBits.W))
-  val codes: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataCodeBits.W))
-}
-
-class ICacheDataReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val toIData:   Vec[DecoupledIO[ICacheReadBundle]] = Vec(partWayNum, DecoupledIO(new ICacheReadBundle))
-  val fromIData: ICacheDataRespBundle               = Input(new ICacheDataRespBundle)
+// ICacheMainPipe -> ICacheDataArray
+class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
+  class DataReadReqBundle(implicit p: Parameters) extends ArrayReadReqBundle
+  class DataReadRespBundle(implicit p: Parameters) extends ICacheBundle {
+    val datas: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataBits.W))
+    val codes: Vec[UInt] = Vec(ICacheDataBanks, UInt(ICacheDataCodeBits.W))
+  }
+  val req:  Vec[DecoupledIO[DataReadReqBundle]] = Vec(partWayNum, DecoupledIO(new DataReadReqBundle))
+  val resp: DataReadRespBundle                  = Input(new DataReadRespBundle)
 }
 
 /* ***** Replacer ***** */
-// ICacheMainPipe -> ICacheReplacer
-class ReplacerTouch(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx: UInt = UInt(idxBits.W)
-  val way:     UInt = UInt(wayBits.W)
+// ICacheMainPipe <-> ICacheReplacer
+class ReplacerTouchBundle(implicit p: Parameters) extends ICacheBundle {
+  class ReplacerTouchReqBundle(implicit p: Parameters) extends ICacheBundle {
+    val vSetIdx: UInt = UInt(idxBits.W)
+    val way:     UInt = UInt(wayBits.W)
+  }
+  val req: Vec[Valid[ReplacerTouchReqBundle]] = Vec(PortNumber, ValidIO(new ReplacerTouchReqBundle))
 }
-// ICacheReplacer -> ICacheMissUnit
-class ReplacerVictim(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx: Valid[UInt] = ValidIO(UInt(idxBits.W))
-  val way:     UInt        = Input(UInt(wayBits.W))
+
+// ICacheMissUnit <-> ICacheReplacer
+class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
+  class ReplacerVictimReqBundle(implicit p: Parameters) extends ICacheBundle {
+    val vSetIdx: UInt = UInt(idxBits.W)
+  }
+  class ReplacerVictimRespBundle(implicit p: Parameters) extends ICacheBundle {
+    val way: UInt = UInt(wayBits.W)
+  }
+  val req:  Valid[ReplacerVictimReqBundle] = ValidIO(new ReplacerVictimReqBundle)
+  val resp: ReplacerVictimRespBundle       = Input(new ReplacerVictimRespBundle)
 }
 
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
-class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:       Bool            = Bool()
-  val vaddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
-  val data:             UInt            = UInt(blockBits.W)
-  val paddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
-  val exception:        Vec[UInt]       = Vec(PortNumber, ExceptionType())
-  val pmp_mmio:         Vec[Bool]       = Vec(PortNumber, Bool())
-  val itlb_pbmt:        Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
-  val backendException: Bool            = Bool()
+class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
+  val doubleline:         Bool            = Bool()
+  val vaddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val data:               UInt            = UInt(blockBits.W)
+  val paddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val exception:          Vec[UInt]       = Vec(PortNumber, ExceptionType())
+  val pmp_mmio:           Vec[Bool]       = Vec(PortNumber, Bool())
+  val itlb_pbmt:          Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
+  val isBackendException: Bool            = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
@@ -151,15 +178,9 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
   val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
   val isForVSnonLeafPTE: Bool       = Bool()
 }
-class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:               DecoupledIO[FtqToICacheRequestBundle] = Flipped(DecoupledIO(new FtqToICacheRequestBundle))
-  val resp:              Valid[ICacheMainPipeResp]             = ValidIO(new ICacheMainPipeResp)
-  val topdownIcacheMiss: Bool                                  = Output(Bool())
-  val topdownItlbMiss:   Bool                                  = Output(Bool())
-}
 
 /* ***** PrefetchPipe ***** */
-class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
+class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startAddr:        PrunedAddr = PrunedAddr(VAddrBits)
   val nextlineStart:    PrunedAddr = PrunedAddr(VAddrBits)
   val ftqIdx:           FtqPtr     = new FtqPtr
@@ -167,7 +188,7 @@ class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
   val backendException: UInt       = ExceptionType()
   def crossCacheline:   Bool       = startAddr(blockOffBits - 1) === 1.U
 
-  def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
+  def fromFtqICacheInfo(info: FtqICacheInfo): PrefetchReqBundle = {
     this.startAddr      := info.startAddr
     this.nextlineStart  := info.nextlineStart
     this.ftqIdx         := info.ftqIdx
@@ -175,7 +196,7 @@ class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
     this
   }
 
-  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
+  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
     this.startAddr      := req.vaddr
     this.nextlineStart  := req.vaddr + (1 << blockOffBits).U
     this.ftqIdx         := DontCare
@@ -184,7 +205,7 @@ class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
   }
 }
 
-/* ***** WayLookup ***** */
+/* ***** ICacheWayLookup ***** */
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
  *   1. there must be a flush (caused by guest page fault) after excp_tlb_gpf === true.B,
@@ -200,15 +221,15 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val meta_codes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }
 
-class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
+class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
   // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
   val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
   val isForVSnonLeafPTE: Bool       = Bool()
 }
 
-class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
+class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   val entry = new WayLookupEntry
-  val gpf   = new WayLookupGPFEntry
+  val gpf   = new WayLookupGpfEntry
 
   // for compatibility
   def vSetIdx:           Vec[UInt]  = entry.vSetIdx
@@ -223,47 +244,46 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** Miss ***** */
 // ICacheMainPipe / ICachePrefetchPipe -> MissUnit
-class ICacheMissReq(implicit p: Parameters) extends ICacheBundle {
+class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
   val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
 }
-// MissUnit -> ICacheMainPipe / ICachePrefetchPipe / WayLookup
-class ICacheMissResp(implicit p: Parameters) extends ICacheBundle {
+// MissUnit -> ICacheMainPipe / ICachePrefetchPipe / ICacheWayLookup
+class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
   val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
   val waymask:  UInt = UInt(nWays.W)
   val data:     UInt = UInt(blockBits.W)
   val corrupt:  Bool = Bool()
 }
-// ICacheMainPipe <-> ICacheMissUnit
-class ICacheMSHRBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:  DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
-  val resp: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
+
+/* ***** Mshr ***** */
+// ICacheMissUnit <-> Mshr
+class MshrLookupBundle(implicit p: Parameters) extends ICacheBundle {
+  class MshrLookupReqBundle(implicit p: Parameters) extends MissReqBundle
+  class MshrLookupRespBundle(implicit p: Parameters) extends ICacheBundle {
+    val hit: Bool = Bool()
+  }
+  val req:  Valid[MshrLookupReqBundle] = ValidIO(new MshrLookupReqBundle)
+  val resp: MshrLookupRespBundle       = Input(new MshrLookupRespBundle)
 }
 
-/* ***** MSHR ***** */
-// ICacheMainPipe -> MSHR
-class MSHRLookup(implicit p: Parameters) extends ICacheBundle {
-  val info: Valid[ICacheMissReq] = ValidIO(new ICacheMissReq)
-  val hit:  Bool                 = Input(Bool())
-}
-
-// MSHR -> ICacheMissUnit
-class MSHRResp(implicit p: Parameters) extends ICacheBundle {
+// Mshr -> ICacheMissUnit
+class MshrInfoBundle(implicit p: Parameters) extends ICacheBundle {
   val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
   val way:      UInt = UInt(wayBits.W)
 }
 
-// MSHR -> tilelink bus
-class MSHRAcquire(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+// Mshr -> tilelink bus
+class MshrAcquireBundle(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
   val acquire: TLBundleA = new TLBundleA(edge.bundle)
   val vSetIdx: UInt      = UInt(idxBits.W)
 }
 
-/* ***** PMP ***** */
-// ICacheMainPipe / ICachePrefetchPipe <-> PMP
-class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle {
+/* ***** Pmp ***** */
+// ICacheMainPipe / ICachePrefetchPipe <-> Pmp
+class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
   val req:  Valid[PMPReqBundle] = ValidIO(new PMPReqBundle)
   val resp: PMPRespBundle       = Input(new PMPRespBundle)
 }
@@ -281,4 +301,9 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val except_0:        Bool      = Bool()
   val bank_hit:        Vec[Bool] = Vec(PortNumber, Bool())
   val hit:             Bool      = Bool()
+}
+
+class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
+  val icacheMiss: Bool = Output(Bool())
+  val itlbMiss:   Bool = Output(Bool())
 }

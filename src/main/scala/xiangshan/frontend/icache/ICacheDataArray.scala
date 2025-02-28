@@ -22,9 +22,8 @@ import utility.mbist.MbistPipeline
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper with ICacheDataSelHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
-    val write:    DecoupledIO[ICacheDataWriteBundle] = Flipped(DecoupledIO(new ICacheDataWriteBundle))
-    val read:     Vec[DecoupledIO[ICacheReadBundle]] = Flipped(Vec(partWayNum, DecoupledIO(new ICacheReadBundle)))
-    val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
+    val write: DataWriteBundle = Flipped(new DataWriteBundle)
+    val read:  DataReadBundle  = Flipped(new DataReadBundle)
   }
 
   val io: ICacheDataArrayIO = IO(new ICacheDataArrayIO)
@@ -48,13 +47,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
    * data array
    ******************************************************************************
    */
-  private val writeDatas   = io.write.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt(ICacheDataBits.W)))
-  private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.bits.poison).asUInt)
+  private val writeDatas   = io.write.req.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt(ICacheDataBits.W)))
+  private val writeEntries = writeDatas.map(ICacheDataEntry(_, io.write.req.bits.poison).asUInt)
 
   // io.read() are copies to control fan-out, we can simply use .head here
-  private val bankSel  = getBankSel(io.read.head.bits.blkOffset, io.read.head.valid)
-  private val lineSel  = getLineSel(io.read.head.bits.blkOffset)
-  private val waymasks = io.read.head.bits.waymask
+  private val bankSel  = getBankSel(io.read.req.head.bits.blkOffset, io.read.req.head.valid)
+  private val lineSel  = getLineSel(io.read.req.head.bits.blkOffset)
+  private val waymasks = io.read.req.head.bits.waymask
   private val masks    = Wire(Vec(nWays, Vec(ICacheDataBanks, Bool())))
   (0 until nWays).foreach { way =>
     (0 until ICacheDataBanks).foreach { bank =>
@@ -80,15 +79,15 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
       ))
 
       // read
-      sramBank.io.r.req.valid := io.read(bank % 4).valid && masks(way)(bank)
+      sramBank.io.r.req.valid := io.read.req(bank % 4).valid && masks(way)(bank)
       sramBank.io.r.req.bits.apply(setIdx =
-        Mux(lineSel(bank), io.read(bank % 4).bits.vSetIdx(1), io.read(bank % 4).bits.vSetIdx(0))
+        Mux(lineSel(bank), io.read.req(bank % 4).bits.vSetIdx(1), io.read.req(bank % 4).bits.vSetIdx(0))
       )
       // write
-      sramBank.io.w.req.valid := io.write.valid && io.write.bits.waymask(way).asBool
+      sramBank.io.w.req.valid := io.write.req.valid && io.write.req.bits.waymask(way).asBool
       sramBank.io.w.req.bits.apply(
         data = writeEntries(bank),
-        setIdx = io.write.bits.virIdx,
+        setIdx = io.write.req.bits.virIdx,
         // waymask is invalid when way of SRAMTemplate <= 1
         waymask = 0.U
       )
@@ -103,7 +102,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
    * read logic
    ******************************************************************************
    */
-  private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read(0).valid)
+  private val masksReg = RegEnable(masks, 0.U.asTypeOf(masks), io.read.req(0).valid)
   private val readDataWithCode = (0 until ICacheDataBanks).map { bank =>
     Mux1H(VecInit(masksReg.map(_(bank))).asTypeOf(UInt(nWays.W)), dataArrays.map(_(bank).io.r.resp.asUInt))
   }
@@ -121,8 +120,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
    * IO
    ******************************************************************************
    */
-  io.readResp.datas := readDatas
-  io.readResp.codes := readCodes
-  io.write.ready    := true.B
-  io.read.foreach(_.ready := !io.write.valid)
+  io.read.resp.datas := readDatas
+  io.read.resp.codes := readCodes
+  io.write.req.ready := true.B
+  io.read.req.foreach(_.ready := !io.write.req.valid)
 }

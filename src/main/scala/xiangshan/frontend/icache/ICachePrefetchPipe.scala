@@ -41,23 +41,23 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val ecc_enable:    Bool = Input(Bool())
     val flush:         Bool = Input(Bool())
 
-    val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
-    val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
-    val itlb:           Vec[TlbRequestIO]          = Vec(PortNumber, new TlbRequestIO)
-    val itlbFlushPipe:  Bool                       = Bool()
-    val pmp:            Vec[ICachePMPBundle]       = Vec(PortNumber, new ICachePMPBundle)
-    val metaRead:       ICacheMetaReqBundle        = new ICacheMetaReqBundle
-    val MSHRReq:        DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
-    val MSHRResp:       Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
-    val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
+    val req:            DecoupledIO[PrefetchReqBundle] = Flipped(Decoupled(new PrefetchReqBundle))
+    val flushFromBpu:   BpuFlushInfo                   = Flipped(new BpuFlushInfo)
+    val itlb:           Vec[TlbRequestIO]              = Vec(PortNumber, new TlbRequestIO)
+    val itlbFlushPipe:  Bool                           = Output(Bool())
+    val pmp:            Vec[PmpCheckBundle]            = Vec(PortNumber, new PmpCheckBundle)
+    val metaRead:       MetaReadBundle                 = new MetaReadBundle
+    val missReq:        DecoupledIO[MissReqBundle]     = DecoupledIO(new MissReqBundle)
+    val missResp:       Valid[MissRespBundle]          = Flipped(ValidIO(new MissRespBundle))
+    val wayLookupWrite: DecoupledIO[WayLookupBundle]   = DecoupledIO(new WayLookupBundle)
   }
 
   val io: ICachePrefetchPipeIO = IO(new ICachePrefetchPipeIO)
 
   private val (toITLB, fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
   private val (toPMP, fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
-  private val (toMeta, fromMeta) = (io.metaRead.toIMeta, io.metaRead.fromIMeta)
-  private val (toMSHR, fromMSHR) = (io.MSHRReq, io.MSHRResp)
+  private val (toMeta, fromMeta) = (io.metaRead.req, io.metaRead.resp)
+  private val (toMSHR, fromMSHR) = (io.missReq, io.missResp)
   private val toWayLookup        = io.wayLookupWrite
 
   private val s0_fire, s1_fire, s2_fire            = WireInit(false.B)
@@ -334,7 +334,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   /**
     ******************************************************************************
-    * send enqueue req to WayLookup
+    * send enqueue req to ICacheWayLookup
     ******** **********************************************************************
     */
   // Disallow enqueuing wayLookup when SRAM write occurs.
@@ -349,7 +349,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).foreach { i =>
     // exception in first line is always valid, in second line is valid iff is doubleline request
     val excpValid = if (i == 0) true.B else s1_doubleline
-    // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing.
+    // Send s1_itlb_exception to ICacheWayLookup (instead of s1_exception_out) for better timing.
     // Will check pmp again in mainPipe
     toWayLookup.bits.itlb_exception(i) := Mux(
       excpValid,
@@ -540,7 +540,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * send req to missUnit
     ******************************************************************************
     */
-  private val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
+  private val toMSHRArbiter = Module(new Arbiter(new MissReqBundle, PortNumber))
 
   // To avoid sending duplicate requests.
   private val has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
