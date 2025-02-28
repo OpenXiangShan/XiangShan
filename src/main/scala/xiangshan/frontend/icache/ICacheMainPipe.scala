@@ -27,8 +27,9 @@ import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
-import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
+import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.FtqToFetchBundle
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
@@ -39,35 +40,38 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val hartId: UInt = Input(UInt(hartIdLen.W))
 
     /*** internal interface ***/
-    val dataArray:      ICacheDataReqBundle               = new ICacheDataReqBundle
-    val metaArrayFlush: Vec[Valid[ICacheMetaFlushBundle]] = Vec(PortNumber, ValidIO(new ICacheMetaFlushBundle))
-    val touch:          Vec[Valid[ReplacerTouch]]         = Vec(PortNumber, ValidIO(new ReplacerTouch))
-    val wayLookupRead:  DecoupledIO[WayLookupInfo]        = Flipped(DecoupledIO(new WayLookupInfo))
-    val mshr:           ICacheMSHRBundle                  = new ICacheMSHRBundle
-    val ecc_enable:     Bool                              = Input(Bool())
+    val dataRead:      DataReadBundle               = new DataReadBundle
+    val metaFlush:     MetaFlushBundle              = new MetaFlushBundle
+    val replacerTouch: ReplacerTouchBundle          = new ReplacerTouchBundle
+    val wayLookupRead: DecoupledIO[WayLookupBundle] = Flipped(DecoupledIO(new WayLookupBundle))
+    val missReq:       DecoupledIO[MissReqBundle]   = DecoupledIO(new MissReqBundle)
+    val missResp:      Valid[MissRespBundle]        = Flipped(ValidIO(new MissRespBundle))
+    val ecc_enable:    Bool                         = Input(Bool())
 
     /*** outside interface ***/
     // FTQ
-    val fetch: ICacheMainPipeBundle = new ICacheMainPipeBundle
-    val flush: Bool                 = Input(Bool())
+    val req:   DecoupledIO[FtqToFetchBundle] = Flipped(DecoupledIO(new FtqToFetchBundle))
+    val flush: Bool                          = Input(Bool())
     // PMP
-    val pmp: Vec[ICachePMPBundle] = Vec(PortNumber, new ICachePMPBundle)
+    val pmp: Vec[PmpCheckBundle] = Vec(PortNumber, new PmpCheckBundle)
     // IFU
-    val respStall: Bool = Input(Bool())
+    val resp:      Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
+    val respStall: Bool                    = Input(Bool())
     // backend/BEU
     val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
 
     /*** PERF ***/
-    val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
+    val perf:    ICachePerfInfo    = Output(new ICachePerfInfo)
+    val topdown: ICacheTopdownInfo = Output(new ICacheTopdownInfo)
   }
 
   val io: ICacheMainPipeIO = IO(new ICacheMainPipeIO)
 
   /** Input/Output port */
-  private val (fromFtq, toIFU)   = (io.fetch.req, io.fetch.resp)
-  private val (toData, fromData) = (io.dataArray.toIData, io.dataArray.fromIData)
-  private val toMetaFlush        = io.metaArrayFlush
-  private val (toMSHR, fromMSHR) = (io.mshr.req, io.mshr.resp)
+  private val (fromFtq, toIfu)   = (io.req, io.resp)
+  private val (toData, fromData) = (io.dataRead.req, io.dataRead.resp)
+  private val toMetaFlush        = io.metaFlush.req
+  private val (toMSHR, fromMSHR) = (io.missReq, io.missResp)
   private val (toPMP, fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
   private val fromWayLookup      = io.wayLookupRead
   private val ecc_enable =
@@ -103,7 +107,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s0 control */
   // 0,1,2,3 -> dataArray(data); 4 -> mainPipe
   // Ftq RegNext Register
-  private val fromFtqReq       = fromFtq.bits.pcMemRead
+  private val fromFtqReq       = fromFtq.bits.req
   private val s0_valid         = fromFtq.valid
   private val s0_req_valid_all = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i))
   private val s0_req_vaddr_all =
@@ -117,7 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_req_vSetIdx = s0_req_vSetIdx_all.last
   private val s0_doubleline  = s0_doubleline_all.last
 
-  private val s0_backendException = fromFtq.bits.backendException
+  private val s0_isBackendException = fromFtq.bits.isBackendException
 
   /**
     ******************************************************************************
@@ -180,13 +184,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_req_gpaddr = RegEnable(s0_req_gpaddr, 0.U.asTypeOf(s0_req_gpaddr), s0_fire)
   private val s1_req_isForVSnonLeafPTE =
     RegEnable(s0_req_isForVSnonLeafPTE, 0.U.asTypeOf(s0_req_isForVSnonLeafPTE), s0_fire)
-  private val s1_doubleline       = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
-  private val s1_SRAMhits         = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
-  private val s1_itlb_exception   = RegEnable(s0_itlb_exception, 0.U.asTypeOf(s0_itlb_exception), s0_fire)
-  private val s1_backendException = RegEnable(s0_backendException, false.B, s0_fire)
-  private val s1_itlb_pbmt        = RegEnable(s0_itlb_pbmt, 0.U.asTypeOf(s0_itlb_pbmt), s0_fire)
-  private val s1_waymasks         = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
-  private val s1_meta_codes       = RegEnable(s0_meta_codes, 0.U.asTypeOf(s0_meta_codes), s0_fire)
+  private val s1_doubleline         = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+  private val s1_SRAMhits           = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
+  private val s1_itlb_exception     = RegEnable(s0_itlb_exception, 0.U.asTypeOf(s0_itlb_exception), s0_fire)
+  private val s1_isBackendException = RegEnable(s0_isBackendException, false.B, s0_fire)
+  private val s1_itlb_pbmt          = RegEnable(s0_itlb_pbmt, 0.U.asTypeOf(s0_itlb_pbmt), s0_fire)
+  private val s1_waymasks           = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
+  private val s1_meta_codes         = RegEnable(s0_meta_codes, 0.U.asTypeOf(s0_meta_codes), s0_fire)
 
   private val s1_req_vSetIdx = s1_req_vaddr.map(get_idx)
   private val s1_req_paddr   = getPaddrFromPtag(s1_req_vaddr, s1_req_ptags)
@@ -211,11 +215,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   (0 until PortNumber).foreach { i =>
-    io.touch(i).bits.vSetIdx := s1_req_vSetIdx(i)
-    io.touch(i).bits.way     := OHToUInt(s1_waymasks(i))
+    io.replacerTouch.req(i).bits.vSetIdx := s1_req_vSetIdx(i)
+    io.replacerTouch.req(i).bits.way     := OHToUInt(s1_waymasks(i))
   }
-  io.touch(0).valid := RegNext(s0_fire) && s1_SRAMhits(0)
-  io.touch(1).valid := RegNext(s0_fire) && s1_SRAMhits(1) && s1_doubleline
+  io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_SRAMhits(0)
+  io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_SRAMhits(1) && s1_doubleline
 
   /**
     ******************************************************************************
@@ -287,12 +291,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_req_gpaddr = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s1_fire)
   private val s2_req_isForVSnonLeafPTE =
     RegEnable(s1_req_isForVSnonLeafPTE, 0.U.asTypeOf(s1_req_isForVSnonLeafPTE), s1_fire)
-  private val s2_doubleline       = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
-  private val s2_exception        = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)
-  private val s2_backendException = RegEnable(s1_backendException, false.B, s1_fire)
-  private val s2_pmp_mmio         = RegEnable(s1_pmp_mmio, 0.U.asTypeOf(s1_pmp_mmio), s1_fire)
-  private val s2_itlb_pbmt        = RegEnable(s1_itlb_pbmt, 0.U.asTypeOf(s1_itlb_pbmt), s1_fire)
-  private val s2_waymasks         = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
+  private val s2_doubleline         = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
+  private val s2_exception          = RegEnable(s1_exception_out, 0.U.asTypeOf(s1_exception_out), s1_fire)
+  private val s2_isBackendException = RegEnable(s1_isBackendException, false.B, s1_fire)
+  private val s2_pmp_mmio           = RegEnable(s1_pmp_mmio, 0.U.asTypeOf(s1_pmp_mmio), s1_fire)
+  private val s2_itlb_pbmt          = RegEnable(s1_itlb_pbmt, 0.U.asTypeOf(s1_itlb_pbmt), s1_fire)
+  private val s2_waymasks           = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
   private val s2_req_vSetIdx = s2_req_vaddr.map(get_idx)
   private val s2_req_offset  = s2_req_vaddr(0)(log2Ceil(blockBytes) - 1, 0)
@@ -432,7 +436,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s2_mmio.take(i + 1).map(!_).reduce(_ && _)
   })
 
-  private val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
+  private val toMSHRArbiter = Module(new Arbiter(new MissReqBundle, PortNumber))
 
   // To avoid sending duplicate requests.
   private val s2_has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
@@ -470,21 +474,21 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * response to IFU
     ******************************************************************************
     */
-  toIFU.valid                 := s2_fire
-  toIFU.bits.doubleline       := s2_doubleline
-  toIFU.bits.data             := s2_datas.asTypeOf(UInt(blockBits.W))
-  toIFU.bits.backendException := s2_backendException
+  toIfu.valid                   := s2_fire
+  toIfu.bits.doubleline         := s2_doubleline
+  toIfu.bits.data               := s2_datas.asTypeOf(UInt(blockBits.W))
+  toIfu.bits.isBackendException := s2_isBackendException
   (0 until PortNumber).foreach { i =>
-    toIFU.bits.vaddr(i) := s2_req_vaddr(i)
-    toIFU.bits.paddr(i) := s2_req_paddr(i)
+    toIfu.bits.vaddr(i) := s2_req_vaddr(i)
+    toIfu.bits.paddr(i) := s2_req_paddr(i)
     val needThisLine = if (i == 0) true.B else s2_doubleline
-    toIFU.bits.exception(i) := Mux(needThisLine, s2_exception_out(i), ExceptionType.none)
-    toIFU.bits.pmp_mmio(i)  := Mux(needThisLine, s2_pmp_mmio(i), false.B)
-    toIFU.bits.itlb_pbmt(i) := Mux(needThisLine, s2_itlb_pbmt(i), Pbmt.pma)
+    toIfu.bits.exception(i) := Mux(needThisLine, s2_exception_out(i), ExceptionType.none)
+    toIfu.bits.pmp_mmio(i)  := Mux(needThisLine, s2_pmp_mmio(i), false.B)
+    toIfu.bits.itlb_pbmt(i) := Mux(needThisLine, s2_itlb_pbmt(i), Pbmt.pma)
   }
   // valid only for the first gpf
-  toIFU.bits.gpaddr            := s2_req_gpaddr
-  toIFU.bits.isForVSnonLeafPTE := s2_req_isForVSnonLeafPTE
+  toIfu.bits.gpaddr            := s2_req_gpaddr
+  toIfu.bits.isForVSnonLeafPTE := s2_req_isForVSnonLeafPTE
 
   s2_flush := io.flush
   s2_ready := (s2_fetch_finish && !io.respStall) || !s2_valid
@@ -511,25 +515,25 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * performance info. TODO: need to simplify the logic
     ***********************************************************s*******************
     */
-  io.perfInfo.only_0_hit      := s2_hits(0) && !s2_doubleline
-  io.perfInfo.only_0_miss     := !s2_hits(0) && !s2_doubleline
-  io.perfInfo.hit_0_hit_1     := s2_hits(0) && s2_hits(1) && s2_doubleline
-  io.perfInfo.hit_0_miss_1    := s2_hits(0) && !s2_hits(1) && s2_doubleline
-  io.perfInfo.miss_0_hit_1    := !s2_hits(0) && s2_hits(1) && s2_doubleline
-  io.perfInfo.miss_0_miss_1   := !s2_hits(0) && !s2_hits(1) && s2_doubleline
-  io.perfInfo.hit_0_except_1  := s2_hits(0) && ExceptionType.hasException(s2_exception(1)) && s2_doubleline
-  io.perfInfo.miss_0_except_1 := !s2_hits(0) && ExceptionType.hasException(s2_exception(1)) && s2_doubleline
-  io.perfInfo.bank_hit(0)     := s2_hits(0)
-  io.perfInfo.bank_hit(1)     := s2_hits(1) && s2_doubleline
-  io.perfInfo.except_0        := ExceptionType.hasException(s2_exception(0))
-  io.perfInfo.hit             := s2_hits(0) && (!s2_doubleline || s2_hits(1))
+  io.perf.only_0_hit      := s2_hits(0) && !s2_doubleline
+  io.perf.only_0_miss     := !s2_hits(0) && !s2_doubleline
+  io.perf.hit_0_hit_1     := s2_hits(0) && s2_hits(1) && s2_doubleline
+  io.perf.hit_0_miss_1    := s2_hits(0) && !s2_hits(1) && s2_doubleline
+  io.perf.miss_0_hit_1    := !s2_hits(0) && s2_hits(1) && s2_doubleline
+  io.perf.miss_0_miss_1   := !s2_hits(0) && !s2_hits(1) && s2_doubleline
+  io.perf.hit_0_except_1  := s2_hits(0) && ExceptionType.hasException(s2_exception(1)) && s2_doubleline
+  io.perf.miss_0_except_1 := !s2_hits(0) && ExceptionType.hasException(s2_exception(1)) && s2_doubleline
+  io.perf.bank_hit(0)     := s2_hits(0)
+  io.perf.bank_hit(1)     := s2_hits(1) && s2_doubleline
+  io.perf.except_0        := ExceptionType.hasException(s2_exception(0))
+  io.perf.hit             := s2_hits(0) && (!s2_doubleline || s2_hits(1))
 
   /** <PERF> fetch bubble generated by icache miss */
   XSPerfAccumulate("icache_bubble_s2_miss", s2_valid && !s2_fetch_finish)
   XSPerfAccumulate("icache_bubble_s0_wayLookup", s0_valid && !fromWayLookup.ready)
 
-  io.fetch.topdownIcacheMiss := !s2_fetch_finish
-  io.fetch.topdownItlbMiss   := s0_valid && !fromWayLookup.ready
+  io.topdown.icacheMiss := !s2_fetch_finish
+  io.topdown.itlbMiss   := s0_valid && !fromWayLookup.ready
 
   // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
   //   val blkPaddr  = UInt((PAddrBits - blockOffBits).W)
@@ -549,7 +553,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //   ICacheTouchDumpData(i).waymask   := OHToUInt(s2_tag_match_vec(i))
   //   ICacheTouchTable.log(
   //     data  = ICacheTouchDumpData(i),
-  //     en    = io.touch(i).valid,
+  //     en    = io.replacerTouch.req(i).valid,
   //     site  = "req_" + i.toString,
   //     clock = clock,
   //     reset = reset
@@ -563,9 +567,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
-      ExceptionType.hasException(toIFU.bits.exception(i)) ||
-      toIFU.bits.pmp_mmio(i) ||
-      Pbmt.isUncache(toIFU.bits.itlb_pbmt(i))
+      ExceptionType.hasException(toIfu.bits.exception(i)) ||
+      toIfu.bits.pmp_mmio(i) ||
+      Pbmt.isUncache(toIfu.bits.itlb_pbmt(i))
     }
     val blkPaddrAll = s2_req_paddr.map(addr => (addr(PAddrBits - 1, blockOffBits) << blockOffBits).asUInt)
     (0 until ICacheDataBanks).foreach { i =>
