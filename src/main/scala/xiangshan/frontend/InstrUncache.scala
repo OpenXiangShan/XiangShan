@@ -15,7 +15,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend.icache
+package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -31,18 +31,22 @@ import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utils._
-import xiangshan.frontend._
+import xiangshan.XSBundle
+import xiangshan.XSModule
+import xiangshan.frontend.icache.HasICacheParameters
 
-class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
+class InsUncacheReq(implicit p: Parameters) extends XSBundle {
   val addr: UInt = UInt(PAddrBits.W)
 }
 
-class InsUncacheResp(implicit p: Parameters) extends ICacheBundle {
+class InsUncacheResp(implicit p: Parameters) extends XSBundle with HasInstrMMIOConst {
   val data:    UInt = UInt(maxInstrLen.W)
   val corrupt: Bool = Bool()
 }
 
-class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends XSBundle with HasICacheParameters
+    with HasInstrMMIOConst {
+  // FIXME: InstrUncache should not use ICacheParams, as it's not a submodule of ICache, but actually IFU's
   val id: UInt = Input(UInt(log2Up(cacheParams.nMMIOs).W))
   // client requests
   val req:  DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
@@ -55,7 +59,7 @@ class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBu
 }
 
 // One miss entry deals with one mmio request
-class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with HasIFUConst {
+class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule with HasInstrMMIOConst {
   val io: InstrMMIOEntryIO = IO(new InstrMMIOEntryIO(edge))
 
   private val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
@@ -143,7 +147,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   }
 }
 
-class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
+class InstrUncacheIO(implicit p: Parameters) extends XSBundle {
   val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
   val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
   val flush: Bool                        = Input(Bool())
