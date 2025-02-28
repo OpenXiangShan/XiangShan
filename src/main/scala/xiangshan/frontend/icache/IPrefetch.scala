@@ -195,32 +195,32 @@ class IPrefetchPipe(implicit p: Parameters) extends ICacheModule
     Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))
   })
   private val s1_req_gpaddr_tmp = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
+    DataHoldBypass(
+      fromITLB(i).bits.gpaddr(0),
       // NOTE: we dont use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-      init = 0.U(PAddrBitsMax.W),
-      data = fromITLB(i).bits.gpaddr(0)
+      0.U(PAddrBitsMax.W),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_req_isForVSnonLeafPTE_tmp = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE),
-      data = fromITLB(i).bits.isForVSnonLeafPTE
+    DataHoldBypass(
+      fromITLB(i).bits.isForVSnonLeafPTE,
+      0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_exception = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U(ExceptionType.width.W),
-      data = ExceptionType.fromTlbResp(fromITLB(i).bits)
+    DataHoldBypass(
+      ExceptionType.fromTlbResp(fromITLB(i).bits),
+      0.U(ExceptionType.width.W),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_pbmt = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U.asTypeOf(fromITLB(i).bits.pbmt(0)),
-      data = fromITLB(i).bits.pbmt(0)
+    DataHoldBypass(
+      fromITLB(i).bits.pbmt(0),
+      0.U.asTypeOf(fromITLB(i).bits.pbmt(0)),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_exception_gpf = VecInit(s1_itlb_exception.map(_ === ExceptionType.gpf))
