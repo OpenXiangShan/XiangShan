@@ -238,8 +238,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * - monitor missUint response port
     ******************************************************************************
     */
-  private val s1_valid =
-    generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
+  private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_req_vaddr  = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
   private val s1_req_ptags  = RegEnable(s0_req_ptags, 0.U.asTypeOf(s0_req_ptags), s0_fire)
@@ -346,9 +345,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * - response to IFU
     ******************************************************************************
     */
-
-  private val s2_valid =
-    generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
+  private val s2_valid = ValidHold(s1_fire, s2_fire, s2_flush)
 
   private val s2_req_vaddr  = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
   private val s2_req_ptags  = RegEnable(s1_req_ptags, 0.U.asTypeOf(s1_req_ptags), s1_fire)
