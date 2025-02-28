@@ -36,7 +36,6 @@ import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToPrefetchIO
 
 class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters with HasPerfEvents {
-
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
     // FTQ
@@ -64,6 +63,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // perf
     val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
   }
+
   val io: ICacheIO = IO(new ICacheIO)
 
   println("ICache:")
@@ -86,7 +86,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val mainPipe   = Module(new ICacheMainPipe)
   private val missUnit   = Module(new ICacheMissUnit(edge))
   private val replacer   = Module(new ICacheReplacer)
-  private val prefetcher = Module(new IPrefetchPipe)
+  private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new WayLookup)
 
   private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else true.B
