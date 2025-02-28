@@ -21,23 +21,23 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.frontend.ExceptionType
 
-class WayLookup(implicit p: Parameters) extends ICacheModule
+class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
     with ICacheAddrHelper {
 
-  class WayLookupIO(implicit p: Parameters) extends ICacheBundle {
-    val flush:  Bool                       = Input(Bool())
-    val read:   DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
-    val write:  DecoupledIO[WayLookupInfo] = Flipped(DecoupledIO(new WayLookupInfo))
-    val update: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
+  class ICacheWayLookupIO(implicit p: Parameters) extends ICacheBundle {
+    val flush:  Bool                         = Input(Bool())
+    val read:   DecoupledIO[WayLookupBundle] = DecoupledIO(new WayLookupBundle)
+    val write:  DecoupledIO[WayLookupBundle] = Flipped(DecoupledIO(new WayLookupBundle))
+    val update: Valid[MissRespBundle]        = Flipped(ValidIO(new MissRespBundle))
   }
 
-  val io: WayLookupIO = IO(new WayLookupIO)
+  val io: ICacheWayLookupIO = IO(new ICacheWayLookupIO)
 
-  class WayLookupPtr extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)
-  private object WayLookupPtr {
-    def apply(f: Bool, v: UInt): WayLookupPtr = {
-      val ptr = Wire(new WayLookupPtr)
+  class ICacheWayLookupPtr extends CircularQueuePtr[ICacheWayLookupPtr](nWayLookupSize)
+  private object ICacheWayLookupPtr {
+    def apply(f: Bool, v: UInt): ICacheWayLookupPtr = {
+      val ptr = Wire(new ICacheWayLookupPtr)
       ptr.flag  := f
       ptr.value := v
       ptr
@@ -45,8 +45,8 @@ class WayLookup(implicit p: Parameters) extends ICacheModule
   }
 
   private val entries  = RegInit(VecInit(Seq.fill(nWayLookupSize)(0.U.asTypeOf(new WayLookupEntry))))
-  private val readPtr  = RegInit(WayLookupPtr(false.B, 0.U))
-  private val writePtr = RegInit(WayLookupPtr(false.B, 0.U))
+  private val readPtr  = RegInit(ICacheWayLookupPtr(false.B, 0.U))
+  private val writePtr = RegInit(ICacheWayLookupPtr(false.B, 0.U))
 
   private val empty = readPtr === writePtr
   private val full  = (readPtr.value === writePtr.value) && (readPtr.flag ^ writePtr.flag)
@@ -65,14 +65,14 @@ class WayLookup(implicit p: Parameters) extends ICacheModule
     readPtr := readPtr + 1.U
   }
 
-  private val gpf_entry = RegInit(0.U.asTypeOf(Valid(new WayLookupGPFEntry)))
-  private val gpfPtr    = RegInit(WayLookupPtr(false.B, 0.U))
+  private val gpf_entry = RegInit(0.U.asTypeOf(Valid(new WayLookupGpfEntry)))
+  private val gpfPtr    = RegInit(ICacheWayLookupPtr(false.B, 0.U))
   private val gpf_hit   = gpfPtr === readPtr && gpf_entry.valid
 
   when(io.flush) {
     // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
     gpf_entry.valid := false.B
-    gpf_entry.bits  := 0.U.asTypeOf(new WayLookupGPFEntry)
+    gpf_entry.bits  := 0.U.asTypeOf(new WayLookupGpfEntry)
   }
 
   /**
@@ -125,7 +125,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule
         gpf_entry.valid := false.B
       }
     }.otherwise { // gpf not hit
-      io.read.bits.gpf := 0.U.asTypeOf(new WayLookupGPFEntry)
+      io.read.bits.gpf := 0.U.asTypeOf(new WayLookupGpfEntry)
     }
   }
 
