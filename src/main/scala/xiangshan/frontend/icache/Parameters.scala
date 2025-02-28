@@ -65,9 +65,9 @@ case class ICacheParameters(
 trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams: ICacheParameters = icacheParameters
 
-  def ctrlUnitParamsOpt: Option[ICacheCtrlUnitParams] = OptionWrapper(
+  def ctrlUnitParamsOpt: Option[ICacheCtrlUnitParameters] = OptionWrapper(
     cacheParams.cacheCtrlAddressOpt.nonEmpty,
-    ICacheCtrlUnitParams(
+    ICacheCtrlUnitParameters(
       address = cacheParams.cacheCtrlAddressOpt.get,
       regWidth = XLEN
     )
@@ -101,4 +101,16 @@ trait HasICacheParameters extends HasL1CacheParameters {
   require(ICacheDataSRAMWidth >= ICacheDataEntryBits)
   require(isPow2(ICacheSets), s"nSets($ICacheSets) must be pow2")
   require(isPow2(ICacheWays), s"nWays($ICacheWays) must be pow2")
+}
+
+// for ICacheCtrlUnit
+case class ICacheCtrlUnitParameters(
+    address:   AddressSet,
+    regWidth:  Int,
+    beatBytes: Int = 8
+) {
+  def regBytes: Int = regWidth / 8
+
+  def eccctrlOffset:  Int = 0
+  def ecciaddrOffset: Int = eccctrlOffset + regBytes
 }
