@@ -569,14 +569,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // when we release this block,
     // we invalidate this reservation set
     lrsc_count := 0.U
-  }.elsewhen (lrsc_valid) {
+  }.elsewhen (lrsc_count > 0.U) {
     lrsc_count := lrsc_count - 1.U
   }
 
 
   io.lrsc_locked_block.valid := lrsc_valid
   io.lrsc_locked_block.bits  := lrsc_addr
-  io.block_lr := GatedValidRegNext(lrsc_valid)
+  io.block_lr := GatedValidRegNext(lrsc_count > 0.U)
 
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
