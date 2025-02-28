@@ -195,15 +195,6 @@ trait HasICacheECCHelper extends HasICacheParameters {
   }
 }
 
-abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
-    with HasICacheParameters
-
-abstract class ICacheModule(implicit p: Parameters) extends XSModule
-    with HasICacheParameters
-
-abstract class ICacheArray(implicit p: Parameters) extends XSModule
-    with HasICacheParameters
-
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
   val tag: UInt = UInt(tagBits.W)
 }
@@ -224,7 +215,7 @@ class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
   val flushAll: Bool                               = Input(Bool())
 }
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICacheECCHelper {
+class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
   class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
     val meta: ICacheMetadata = new ICacheMetadata
     val code: UInt           = UInt(ICacheMetaCodeBits.W)
@@ -388,7 +379,7 @@ class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
   val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
 }
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICacheECCHelper {
+class ICacheDataArray(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
   class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
     val data: UInt = UInt(ICacheDataBits.W)
     val code: UInt = UInt(ICacheDataCodeBits.W)
