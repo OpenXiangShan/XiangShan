@@ -120,14 +120,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   require(ICacheDataSRAMWidth >= ICacheDataEntryBits)
   require(isPow2(ICacheSets), s"nSets($ICacheSets) must be pow2")
   require(isPow2(ICacheWays), s"nWays($ICacheWays) must be pow2")
-
-  def generatePipeControl(lastFire: Bool, thisFire: Bool, thisFlush: Bool, lastFlush: Bool): Bool = {
-    val valid = RegInit(false.B)
-    when(thisFlush)(valid := false.B)
-      .elsewhen(lastFire && !lastFlush)(valid := true.B)
-      .elsewhen(thisFire)(valid := false.B)
-    valid
-  }
 }
 
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
