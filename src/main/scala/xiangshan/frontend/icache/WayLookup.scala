@@ -21,18 +21,18 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.frontend.ExceptionType
 
-class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
-  val flush:  Bool                       = Input(Bool())
-  val read:   DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
-  val write:  DecoupledIO[WayLookupInfo] = Flipped(DecoupledIO(new WayLookupInfo))
-  val update: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
-}
-
 class WayLookup(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
     with ICacheAddrHelper {
 
-  val io: WayLookupInterface = IO(new WayLookupInterface)
+  class WayLookupIO(implicit p: Parameters) extends ICacheBundle {
+    val flush:  Bool                       = Input(Bool())
+    val read:   DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
+    val write:  DecoupledIO[WayLookupInfo] = Flipped(DecoupledIO(new WayLookupInfo))
+    val update: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
+  }
+
+  val io: WayLookupIO = IO(new WayLookupIO)
 
   class WayLookupPtr extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)
   private object WayLookupPtr {

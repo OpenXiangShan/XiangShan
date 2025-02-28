@@ -33,6 +33,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     val resp:      Valid[MSHRResp]            = ValidIO(new MSHRResp)
     val victimWay: UInt                       = Input(UInt(wayBits.W))
   }
+
   val io: ICacheMSHRIO = IO(new ICacheMSHRIO(edge))
 
   private val valid = RegInit(Bool(), false.B)
