@@ -25,10 +25,7 @@ import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
-abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
-abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
-
-class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
+class IPrefetchReq(implicit p: Parameters) extends ICacheBundle {
   val startAddr:        PrunedAddr = PrunedAddr(VAddrBits)
   val nextlineStart:    PrunedAddr = PrunedAddr(VAddrBits)
   val ftqIdx:           FtqPtr     = new FtqPtr
@@ -53,7 +50,7 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
   }
 }
 
-class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
+class IPrefetchIO(implicit p: Parameters) extends ICacheBundle {
   // control
   val csr_pf_enable: Bool = Input(Bool())
   val ecc_enable:    Bool = Input(Bool())
@@ -70,7 +67,7 @@ class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
 }
 
-class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule
+class IPrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
     with ICacheAddrHelper {
 
