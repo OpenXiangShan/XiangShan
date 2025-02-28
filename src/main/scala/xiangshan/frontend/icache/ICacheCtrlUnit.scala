@@ -29,17 +29,6 @@ import freechips.rocketchip.tilelink.TLRegisterNode
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 
-class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
-  // ecc control
-  val ecc_enable: Bool = Output(Bool())
-  // ecc inject
-  val injecting:    Bool                               = Output(Bool())
-  val metaRead:     DecoupledIO[ICacheReadBundle]      = DecoupledIO(new ICacheReadBundle)
-  val metaReadResp: ICacheMetaRespBundle               = Input(new ICacheMetaRespBundle)
-  val metaWrite:    DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
-  val dataWrite:    DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
-}
-
 // currently for ECC control only
 class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
   lazy val module = new ICacheCtrlUnitImp(this)
@@ -55,6 +44,17 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
   )
 
   class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasICacheParameters {
+    class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
+      // ecc control
+      val ecc_enable: Bool = Output(Bool())
+      // ecc inject
+      val injecting:    Bool                               = Output(Bool())
+      val metaRead:     DecoupledIO[ICacheReadBundle]      = DecoupledIO(new ICacheReadBundle)
+      val metaReadResp: ICacheMetaRespBundle               = Input(new ICacheMetaRespBundle)
+      val metaWrite:    DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
+      val dataWrite:    DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
+    }
+
     val io: ICacheCtrlUnitIO = IO(new ICacheCtrlUnitIO)
 
     // eccctrl.ierror: inject error code

@@ -29,28 +29,28 @@ import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility
 import xiangshan.frontend.BpuFlushInfo
 import xiangshan.frontend.ExceptionType
 
-class IPrefetchIO(implicit p: Parameters) extends ICacheBundle {
-  // control
-  val csr_pf_enable: Bool = Input(Bool())
-  val ecc_enable:    Bool = Input(Bool())
-  val flush:         Bool = Input(Bool())
-
-  val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
-  val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
-  val itlb:           Vec[TlbRequestIO]          = Vec(PortNumber, new TlbRequestIO)
-  val itlbFlushPipe:  Bool                       = Bool()
-  val pmp:            Vec[ICachePMPBundle]       = Vec(PortNumber, new ICachePMPBundle)
-  val metaRead:       ICacheMetaReqBundle        = new ICacheMetaReqBundle
-  val MSHRReq:        DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
-  val MSHRResp:       Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
-  val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
-}
-
-class IPrefetchPipe(implicit p: Parameters) extends ICacheModule
+class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheECCHelper
     with ICacheAddrHelper {
 
-  val io: IPrefetchIO = IO(new IPrefetchIO)
+  class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
+    // control
+    val csr_pf_enable: Bool = Input(Bool())
+    val ecc_enable:    Bool = Input(Bool())
+    val flush:         Bool = Input(Bool())
+
+    val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
+    val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
+    val itlb:           Vec[TlbRequestIO]          = Vec(PortNumber, new TlbRequestIO)
+    val itlbFlushPipe:  Bool                       = Bool()
+    val pmp:            Vec[ICachePMPBundle]       = Vec(PortNumber, new ICachePMPBundle)
+    val metaRead:       ICacheMetaReqBundle        = new ICacheMetaReqBundle
+    val MSHRReq:        DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
+    val MSHRResp:       Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
+    val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
+  }
+
+  val io: ICachePrefetchPipeIO = IO(new ICachePrefetchPipeIO)
 
   private val (toITLB, fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
   private val (toPMP, fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))

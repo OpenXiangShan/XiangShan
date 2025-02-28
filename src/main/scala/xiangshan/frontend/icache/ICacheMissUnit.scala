@@ -28,28 +28,28 @@ import utility.Constantin
 import utility.XSPerfAccumulate
 import xiangshan.XSCoreParamsKey
 
-class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
-  // difftest
-  val hartId: Bool = Input(Bool())
-  // control
-  val fencei: Bool = Input(Bool())
-  val flush:  Bool = Input(Bool())
-  // fetch
-  val fetch_req:  DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
-  val fetch_resp: Valid[ICacheMissResp]      = ValidIO(new ICacheMissResp)
-  // prefetch
-  val prefetch_req: DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
-  // SRAM Write Req
-  val meta_write: DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
-  val data_write: DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
-  // get victim from replacer
-  val victim: ReplacerVictim = new ReplacerVictim
-  // Tilelink
-  val mem_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
-  val mem_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-}
-
 class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
+  class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+    // difftest
+    val hartId: Bool = Input(Bool())
+    // control
+    val fencei: Bool = Input(Bool())
+    val flush:  Bool = Input(Bool())
+    // fetch
+    val fetch_req:  DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
+    val fetch_resp: Valid[ICacheMissResp]      = ValidIO(new ICacheMissResp)
+    // prefetch
+    val prefetch_req: DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
+    // SRAM Write Req
+    val meta_write: DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
+    val data_write: DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
+    // get victim from replacer
+    val victim: ReplacerVictim = new ReplacerVictim
+    // Tilelink
+    val mem_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+  }
+
   val io: ICacheMissUnitIO = IO(new ICacheMissUnitIO(edge))
 
   /**
