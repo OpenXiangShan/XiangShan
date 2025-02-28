@@ -129,12 +129,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
       .elsewhen(thisFire)(valid := false.B)
     valid
   }
-
-  def ResultHoldBypass[T <: Data](data: T, valid: Bool): T =
-    Mux(valid, data, RegEnable(data, valid))
-
-  def ResultHoldBypass[T <: Data](data: T, init: T, valid: Bool): T =
-    Mux(valid, data, RegEnable(data, init, valid))
 }
 
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
