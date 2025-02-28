@@ -135,65 +135,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def ResultHoldBypass[T <: Data](data: T, init: T, valid: Bool): T =
     Mux(valid, data, RegEnable(data, init, valid))
-
-  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool = {
-    val bit = RegInit(false.B)
-    when(flush)(bit := false.B)
-      .elsewhen(valid && !release)(bit := true.B)
-      .elsewhen(release)(bit := false.B)
-    bit || valid
-  }
-
-  def blockCounter(block: Bool, flush: Bool, threshold: Int): Bool = {
-    val counter = RegInit(0.U(log2Up(threshold + 1).W))
-    when(block)(counter := counter + 1.U)
-    when(flush)(counter := 0.U)
-    counter > threshold.U
-  }
-
-  def InitQueue[T <: Data](entry: T, size: Int): Vec[T] =
-    RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
-
-  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[UInt] = {
-    val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val bankSel     = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
-    assert(
-      !valid || PopCount(bankSel) === ICacheBankVisitNum.U,
-      "The number of bank visits must be %d, but bankSel=0x%x",
-      ICacheBankVisitNum.U,
-      bankSel.asUInt
-    )
-    bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, UInt(ICacheDataBanks.W)))
-  }
-
-  def getLineSel(blkOffset: UInt): Vec[Bool] = {
-    val bankIdxLow = (blkOffset >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val lineSel    = VecInit((0 until ICacheDataBanks).map(i => i.U < bankIdxLow))
-    lineSel
-  }
-
-  def getBlkAddr(addr:        PrunedAddr): UInt = (addr >> blockOffBits).asUInt
-  def getPhyTagFromBlk(addr:  UInt): UInt = (addr >> (pgUntagBits - blockOffBits)).asUInt
-  def getIdxFromBlk(addr:     UInt): UInt = addr(idxBits - 1, 0)
-  def getPaddrFromPtag(vaddr: PrunedAddr, ptag: UInt): PrunedAddr = PrunedAddrInit(Cat(ptag, vaddr(pgUntagBits - 1, 0)))
-  def getPaddrFromPtag(vaddrVec: Vec[PrunedAddr], ptagVec: Vec[UInt]): Vec[PrunedAddr] =
-    VecInit((vaddrVec zip ptagVec).map { case (vaddr, ptag) => getPaddrFromPtag(vaddr, ptag) })
-}
-
-trait HasICacheECCHelper extends HasICacheParameters {
-  def encodeMetaECC(meta: UInt, poison: Bool = false.B): UInt = {
-    require(meta.getWidth == ICacheMetaBits)
-    val code = cacheParams.tagCode.encode(meta, poison) >> ICacheMetaBits
-    code.asTypeOf(UInt(ICacheMetaCodeBits.W))
-  }
-
-  def encodeDataECC(data: UInt, poison: Bool = false.B): UInt = {
-    require(data.getWidth == ICacheDataBits)
-    val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
-    val codes = VecInit(datas.map(cacheParams.dataCode.encode(_, poison) >> (ICacheDataBits / ICacheDataCodeSegs)))
-    codes.asTypeOf(UInt(ICacheDataCodeBits.W))
-  }
 }
 
 class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
@@ -216,7 +157,7 @@ class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
   val flushAll: Bool                               = Input(Bool())
 }
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
+class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper {
   class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
     val meta: ICacheMetadata = new ICacheMetadata
     val code: UInt           = UInt(ICacheMetaCodeBits.W)
@@ -382,7 +323,7 @@ class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
   val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
 }
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
+class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper with ICacheDataSelHelper {
   class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
     val data: UInt = UInt(ICacheDataBits.W)
     val code: UInt = UInt(ICacheDataCodeBits.W)

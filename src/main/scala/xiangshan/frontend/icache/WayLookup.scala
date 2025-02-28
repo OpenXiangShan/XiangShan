@@ -68,7 +68,10 @@ class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
   val update: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
 }
 
-class WayLookup(implicit p: Parameters) extends ICacheModule with HasICacheECCHelper {
+class WayLookup(implicit p: Parameters) extends ICacheModule
+    with ICacheECCHelper
+    with ICacheAddrHelper {
+
   val io: WayLookupInterface = IO(new WayLookupInterface)
 
   class WayLookupPtr extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)

@@ -162,7 +162,7 @@ class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBu
   val mem_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 }
 
-class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule {
+class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   val io: ICacheMissUnitIO = IO(new ICacheMissUnitIO(edge))
 
   /**
