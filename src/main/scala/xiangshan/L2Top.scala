@@ -103,6 +103,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val debug_int_node = IntIdentityNode()
   val plic_int_node = IntIdentityNode()
   val nmi_int_node = IntIdentityNode()
+  val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
@@ -227,6 +228,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.dft_reset_out.zip(io.dft_reset).foreach({case(a, b) => a := b})
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
+
+    val (beu_int_out, _) = beu_local_int_source.out(0)
+    beu_int_out(0) := beu.module.io.interrupt
 
     beu.module.io.errors.icache := io.beu_errors.icache
     beu.module.io.errors.dcache := io.beu_errors.dcache

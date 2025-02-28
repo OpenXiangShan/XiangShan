@@ -27,7 +27,7 @@ import freechips.rocketchip.amba.axi4._
 import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
-import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, IntBuffer, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
 import utility.sram.SramBroadcastBundle
@@ -58,6 +58,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.plic_int_sink :*= plic_int_node
   memBlock.debug_int_sink := debug_int_node
   memBlock.nmi_int_sink := nmi_int_node
+  memBlock.beu_local_int_sink := IntBuffer() := l2top.inner.beu_local_int_source
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
