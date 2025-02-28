@@ -124,8 +124,7 @@ class IPrefetchPipe(implicit p: Parameters) extends ICacheModule
     * - 4. Write wayLookup
     ******************************************************************************
     */
-  private val s1_valid =
-    generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
+  private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_req_vaddr        = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
   private val s1_isSoftPrefetch   = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
@@ -476,8 +475,7 @@ class IPrefetchPipe(implicit p: Parameters) extends ICacheModule
     * - 2. send req to missUnit
     ******************************************************************************
     */
-  private val s2_valid =
-    generatePipeControl(lastFire = s1_real_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
+  private val s2_valid = ValidHold(s1_real_fire, s2_fire, s2_flush)
 
   private val s2_req_vaddr      = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_real_fire)
   private val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_real_fire)
