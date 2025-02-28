@@ -27,68 +27,6 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FtqToICacheRequestBundle
-import xiangshan.frontend.PrunedAddr
-
-class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:       Bool            = Bool()
-  val vaddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
-  val data:             UInt            = UInt(blockBits.W)
-  val paddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
-  val exception:        Vec[UInt]       = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val pmp_mmio:         Vec[Bool]       = Vec(PortNumber, Bool())
-  val itlb_pbmt:        Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
-  val backendException: Bool            = Bool()
-  /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
-   * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
-   * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
-   * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
-   * (cases 56<x<=64 are handled by the backend datapath)
-   */
-  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
-  val isForVSnonLeafPTE: Bool       = Bool()
-}
-
-class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:               DecoupledIO[FtqToICacheRequestBundle] = Flipped(DecoupledIO(new FtqToICacheRequestBundle))
-  val resp:              Valid[ICacheMainPipeResp]             = ValidIO(new ICacheMainPipeResp)
-  val topdownIcacheMiss: Bool                                  = Output(Bool())
-  val topdownItlbMiss:   Bool                                  = Output(Bool())
-}
-
-class ICacheMetaReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val toIMeta:   DecoupledIO[ICacheReadBundle] = DecoupledIO(new ICacheReadBundle)
-  val fromIMeta: ICacheMetaRespBundle          = Input(new ICacheMetaRespBundle)
-}
-
-class ICacheDataReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val toIData:   Vec[DecoupledIO[ICacheReadBundle]] = Vec(partWayNum, DecoupledIO(new ICacheReadBundle))
-  val fromIData: ICacheDataRespBundle               = Input(new ICacheDataRespBundle)
-}
-
-class ICacheMSHRBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:  DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
-  val resp: Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
-}
-
-class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:  Valid[PMPReqBundle] = ValidIO(new PMPReqBundle())
-  val resp: PMPRespBundle       = Input(new PMPRespBundle())
-}
-
-class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val only_0_hit:      Bool      = Bool()
-  val only_0_miss:     Bool      = Bool()
-  val hit_0_hit_1:     Bool      = Bool()
-  val hit_0_miss_1:    Bool      = Bool()
-  val miss_0_hit_1:    Bool      = Bool()
-  val miss_0_miss_1:   Bool      = Bool()
-  val hit_0_except_1:  Bool      = Bool()
-  val miss_0_except_1: Bool      = Bool()
-  val except_0:        Bool      = Bool()
-  val bank_hit:        Vec[Bool] = Vec(PortNumber, Bool())
-  val hit:             Bool      = Bool()
-}
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val hartId: UInt = Input(UInt(hartIdLen.W))

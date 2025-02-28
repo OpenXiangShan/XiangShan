@@ -48,18 +48,6 @@ import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend._
 
-class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
-  val tag: UInt = UInt(tagBits.W)
-}
-
-object ICacheMetadata {
-  def apply(tag: Bits)(implicit p: Parameters): ICacheMetadata = {
-    val meta = Wire(new ICacheMetadata)
-    meta.tag := tag
-    meta
-  }
-}
-
 class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
   val write:    DecoupledIO[ICacheMetaWriteBundle] = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
   val read:     DecoupledIO[ICacheReadBundle]      = Flipped(DecoupledIO(new ICacheReadBundle))

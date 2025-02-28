@@ -21,45 +21,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.PrunedAddr
-
-/* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
- * Notes:
- *   1. there must be a flush (caused by guest page fault) after excp_tlb_gpf === true.B,
- *      so, we need only the first excp_tlb_gpf and the corresponding gpaddr.
- *      to save area, we separate those signals from WayLookupEntry and store only once.
- */
-class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:        Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:        Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val ptag:           Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlb_exception: Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val itlb_pbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val meta_codes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
-}
-
-class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
-  // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
-  val isForVSnonLeafPTE: Bool       = Bool()
-}
-
-class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
-  val entry = new WayLookupEntry
-  val gpf   = new WayLookupGPFEntry
-
-  // for compatibility
-  def vSetIdx:           Vec[UInt]  = entry.vSetIdx
-  def waymask:           Vec[UInt]  = entry.waymask
-  def ptag:              Vec[UInt]  = entry.ptag
-  def itlb_exception:    Vec[UInt]  = entry.itlb_exception
-  def itlb_pbmt:         Vec[UInt]  = entry.itlb_pbmt
-  def meta_codes:        Vec[UInt]  = entry.meta_codes
-  def gpaddr:            PrunedAddr = gpf.gpaddr
-  def isForVSnonLeafPTE: Bool       = gpf.isForVSnonLeafPTE
-}
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
   val flush:  Bool                       = Input(Bool())
