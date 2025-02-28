@@ -78,17 +78,34 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
   }
 }
 
-class IFUICacheIO(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val icacheReady       = Output(Bool())
-  val resp              = ValidIO(new ICacheMainPipeResp)
-  val topdownIcacheMiss = Output(Bool())
-  val topdownItlbMiss   = Output(Bool())
+class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
+  val req:              FtqICacheInfo = new FtqICacheInfo
+  val backendException: UInt          = ExceptionType()
 }
 
-class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val pcMemRead        = Vec(5, new FtqICacheInfo)
-  val readValid        = Vec(5, Bool())
-  val backendException = Bool()
+class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+  val req:                Vec[FtqICacheInfo] = Vec(5, new FtqICacheInfo)
+  val readValid:          Vec[Bool]          = Vec(5, Bool())
+  val isBackendException: Bool               = Bool()
+}
+
+class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
+  // NOTE: req.bits must be prepare in T cycle
+  // while req.valid is set true in T + 1 cycle
+  val fetchReq:     DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
+  val prefetchReq:  DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
+  val flushFromBpu: BpuFlushInfo                     = new BpuFlushInfo
+}
+
+class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
+  val fetchResp:  Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
+  val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
+  val fetchReady: Bool                    = Output(Bool())
+}
+
+class IfuToICacheIO(implicit p: Parameters) extends XSBundle {
+  val stall: Bool = Output(Bool())
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {

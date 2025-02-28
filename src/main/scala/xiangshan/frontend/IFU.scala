@@ -69,16 +69,15 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
-  val icacheInter     = Flipped(new IFUICacheIO)
-  val icacheStop      = Output(Bool())
-  val icachePerfInfo  = Input(new ICachePerfInfo)
+  val fromICache      = Flipped(new ICacheToIfuIO)
+  val toICache        = new IfuToICacheIO
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val toBackend       = new IfuToBackendIO
   val uncacheInter    = new UncacheInterface
   val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
   val rob_commits     = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
   val iTLBInter       = new TlbRequestIO
-  val pmp             = new ICachePMPBundle
+  val pmp             = new PmpCheckBundle
   val mmioCommitRead  = new mmioCommitRead
   val csr_fsIsOff     = Input(Bool())
 }
@@ -137,7 +136,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     with HasTlbConst {
   val io                       = IO(new NewIFUIO)
   val (toFtq, fromFtq)         = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
-  val fromICache               = io.icacheInter.resp
+  val fromICache               = io.fromICache.fetchResp
   val (toUncache, fromUncache) = (io.uncacheInter.toUncache, io.uncacheInter.fromUncache)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
@@ -260,7 +259,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f1_ready, f2_ready, f3_ready = WireInit(false.B)
 
-  fromFtq.req.ready := f1_ready && io.icacheInter.icacheReady
+  fromFtq.req.ready := f1_ready && io.fromICache.fetchReady
 
   when(wb_redirect) {
     when(f3_wb_not_flush) {
@@ -371,10 +370,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
 
-  icacheMissBubble := io.icacheInter.topdownIcacheMiss
-  itlbMissBubble   := io.icacheInter.topdownItlbMiss
+  icacheMissBubble := io.fromICache.topdown.icacheMiss
+  itlbMissBubble   := io.fromICache.topdown.itlbMiss
 
-  io.icacheStop := !f3_ready
+  io.toICache.stall := !f3_ready
 
   when(f2_flush)(f2_icache_all_resp_reg := false.B)
     .elsewhen(f2_valid && f2_icache_all_resp_wire && !f3_ready)(f2_icache_all_resp_reg := true.B)
@@ -385,7 +384,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     .elsewhen(f2_fire)(f2_valid := false.B)
 
   val f2_exception_in     = fromICache.bits.exception
-  val f2_backendException = fromICache.bits.backendException
+  val f2_backendException = fromICache.bits.isBackendException
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs            = fromICache.bits.paddr
   val f2_gpaddr            = fromICache.bits.gpaddr
@@ -453,7 +452,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       )
     )
   ))
-  val f2_perf_info = io.icachePerfInfo
+  val f2_perf_info = io.fromICache.perf
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]): Vec[UInt] = {
     require(HasCExtension)

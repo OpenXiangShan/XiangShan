@@ -24,14 +24,24 @@ import utility.ReqSourceKey
 
 class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheMSHRIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
-    val fencei:    Bool                       = Input(Bool())
-    val flush:     Bool                       = Input(Bool())
-    val invalid:   Bool                       = Input(Bool())
-    val req:       DecoupledIO[ICacheMissReq] = Flipped(DecoupledIO(new ICacheMissReq))
-    val acquire:   DecoupledIO[MSHRAcquire]   = DecoupledIO(new MSHRAcquire(edge))
-    val lookUps:   Vec[MSHRLookup]            = Flipped(Vec(2, new MSHRLookup))
-    val resp:      Valid[MSHRResp]            = ValidIO(new MSHRResp)
-    val victimWay: UInt                       = Input(UInt(wayBits.W))
+    val fencei: Bool = Input(Bool())
+    val flush:  Bool = Input(Bool())
+
+    // request from mainPipe / prefetchPipe
+    val req: DecoupledIO[MissReqBundle] = Flipped(DecoupledIO(new MissReqBundle))
+    // look up if the request is already in MSHR
+    // NOTE: lookUps Vec(2) is not Vec(PortNumber), it's mainPipe + prefetchPipe
+    val lookUps: Vec[MshrLookupBundle] = Flipped(Vec(2, new MshrLookupBundle))
+
+    // send request to L2 (tilelink bus)
+    val acquire: DecoupledIO[MshrAcquireBundle] = DecoupledIO(new MshrAcquireBundle(edge))
+    // select the victim way when acquire fire
+    val victimWay: UInt = Input(UInt(wayBits.W))
+
+    // offer the information needed by responding to requester
+    val info: Valid[MshrInfoBundle] = ValidIO(new MshrInfoBundle)
+    // after respond to requester, invalid the MSHR
+    val invalid: Bool = Input(Bool())
   }
 
   val io: ICacheMSHRIO = IO(new ICacheMSHRIO(edge))
@@ -49,11 +59,11 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // look up and return result at the same cycle
   private val hits = io.lookUps.map { lookup =>
-    valid && !fencei && !flush && (lookup.info.bits.vSetIdx === vSetIdx) &&
-    (lookup.info.bits.blkPaddr === blkPaddr)
+    valid && !fencei && !flush && (lookup.req.bits.vSetIdx === vSetIdx) &&
+    (lookup.req.bits.blkPaddr === blkPaddr)
   }
   // Decoupling valid and bits
-  (0 until 2).foreach(i => io.lookUps(i).hit := hits(i))
+  (0 until 2).foreach(i => io.lookUps(i).resp.hit := hits(i))
 
   // disable wake up when hit MSHR (fencei is low)
   // when(hit) {
@@ -103,8 +113,8 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   }
 
   // offer the information other than data for write sram and response fetch
-  io.resp.valid         := valid && (!flush && !fencei)
-  io.resp.bits.blkPaddr := blkPaddr
-  io.resp.bits.vSetIdx  := vSetIdx
-  io.resp.bits.way      := way
+  io.info.valid         := valid && (!flush && !fencei)
+  io.info.bits.blkPaddr := blkPaddr
+  io.info.bits.vSetIdx  := vSetIdx
+  io.info.bits.way      := way
 }
