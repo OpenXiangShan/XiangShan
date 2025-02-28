@@ -470,7 +470,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // TODO: dcache resp
   io.dcache.resp.ready := true.B
 
-  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
+  val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception && !s2_mmio
   // goto misalignBuffer
   val toMisalignBufferValid = s2_valid && GatedValidRegNext(s1_mis_align && !s1_frm_mabuf)
   io.misalign_buf.valid := toMisalignBufferValid
