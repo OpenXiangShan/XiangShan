@@ -26,17 +26,6 @@ import freechips.rocketchip.tilelink._
 import org.chipsalliance.cde.config.Parameters
 import utils._
 
-case class L1ICacheCtrlParams(
-    address:   AddressSet,
-    regWidth:  Int,
-    beatBytes: Int = 8
-) {
-  def regBytes: Int = regWidth / 8
-
-  def eccctrlOffset:  Int = 0
-  def ecciaddrOffset: Int = eccctrlOffset + regBytes
-}
-
 class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
   // ecc control
   val ecc_enable: Bool = Output(Bool())
@@ -49,7 +38,7 @@ class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
 }
 
 // currently for ECC control only
-class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends LazyModule {
+class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
   lazy val module = new ICacheCtrlUnitImp(this)
 
   // register tilelink node
