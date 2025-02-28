@@ -230,7 +230,7 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
 class FtqToPrefetchIO(implicit p: Parameters) extends XSBundle {
   val req              = Decoupled(new FtqICacheInfo)
   val flushFromBpu     = new BpuFlushInfo
-  val backendException = UInt(ExceptionType.width.W)
+  val backendException = ExceptionType()
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle {
