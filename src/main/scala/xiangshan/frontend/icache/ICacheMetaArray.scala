@@ -22,15 +22,17 @@ import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.SRAMTemplate
 
-class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
-  val write:    DecoupledIO[ICacheMetaWriteBundle] = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
-  val read:     DecoupledIO[ICacheReadBundle]      = Flipped(DecoupledIO(new ICacheReadBundle))
-  val readResp: ICacheMetaRespBundle               = Output(new ICacheMetaRespBundle)
-  val flush:    Vec[Valid[ICacheMetaFlushBundle]]  = Vec(PortNumber, Flipped(ValidIO(new ICacheMetaFlushBundle)))
-  val flushAll: Bool                               = Input(Bool())
-}
-
 class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper {
+  class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
+    val write:    DecoupledIO[ICacheMetaWriteBundle] = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
+    val read:     DecoupledIO[ICacheReadBundle]      = Flipped(DecoupledIO(new ICacheReadBundle))
+    val readResp: ICacheMetaRespBundle               = Output(new ICacheMetaRespBundle)
+    val flush:    Vec[Valid[ICacheMetaFlushBundle]]  = Vec(PortNumber, Flipped(ValidIO(new ICacheMetaFlushBundle)))
+    val flushAll: Bool                               = Input(Bool())
+  }
+
+  val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
+
   class ICacheMetaEntry(implicit p: Parameters) extends ICacheBundle {
     val meta: ICacheMetadata = new ICacheMetadata
     val code: UInt           = UInt(ICacheMetaCodeBits.W)
@@ -47,8 +49,6 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
 
   // sanity check
   require(ICacheMetaEntryBits == (new ICacheMetaEntry).getWidth)
-
-  val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
 
   private val port_0_read_0 = io.read.valid && !io.read.bits.vSetIdx(0)(0)
   private val port_0_read_1 = io.read.valid && io.read.bits.vSetIdx(0)(0)

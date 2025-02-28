@@ -20,13 +20,15 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.mbist.MbistPipeline
 
-class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
-  val write:    DecoupledIO[ICacheDataWriteBundle] = Flipped(DecoupledIO(new ICacheDataWriteBundle))
-  val read:     Vec[DecoupledIO[ICacheReadBundle]] = Flipped(Vec(partWayNum, DecoupledIO(new ICacheReadBundle)))
-  val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
-}
-
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper with ICacheDataSelHelper {
+  class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
+    val write:    DecoupledIO[ICacheDataWriteBundle] = Flipped(DecoupledIO(new ICacheDataWriteBundle))
+    val read:     Vec[DecoupledIO[ICacheReadBundle]] = Flipped(Vec(partWayNum, DecoupledIO(new ICacheReadBundle)))
+    val readResp: ICacheDataRespBundle               = Output(new ICacheDataRespBundle)
+  }
+
+  val io: ICacheDataArrayIO = IO(new ICacheDataArrayIO)
+
   class ICacheDataEntry(implicit p: Parameters) extends ICacheBundle {
     val data: UInt = UInt(ICacheDataBits.W)
     val code: UInt = UInt(ICacheDataCodeBits.W)
@@ -40,8 +42,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
       entry
     }
   }
-
-  val io: ICacheDataArrayIO = IO(new ICacheDataArrayIO)
 
   /**
    ******************************************************************************
