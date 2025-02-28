@@ -332,50 +332,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
   io.read.foreach(_.ready := !io.write.valid)
 }
 
-class ICacheReplacerIO(implicit p: Parameters) extends ICacheBundle {
-  val touch:  Vec[Valid[ReplacerTouch]] = Vec(PortNumber, Flipped(ValidIO(new ReplacerTouch)))
-  val victim: ReplacerVictim            = Flipped(new ReplacerVictim)
-}
-
-class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
-  val io: ICacheReplacerIO = IO(new ICacheReplacerIO)
-
-  private val replacers =
-    Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets / PortNumber))
-
-  // touch
-  private val touch_sets = Seq.fill(PortNumber)(Wire(Vec(PortNumber, UInt(log2Ceil(nSets / PortNumber).W))))
-  private val touch_ways = Seq.fill(PortNumber)(Wire(Vec(PortNumber, Valid(UInt(wayBits.W)))))
-  (0 until PortNumber).foreach { i =>
-    touch_sets(i)(0) := Mux(
-      io.touch(i).bits.vSetIdx(0),
-      io.touch(1).bits.vSetIdx(highestIdxBit, 1),
-      io.touch(0).bits.vSetIdx(highestIdxBit, 1)
-    )
-    touch_ways(i)(0).bits  := Mux(io.touch(i).bits.vSetIdx(0), io.touch(1).bits.way, io.touch(0).bits.way)
-    touch_ways(i)(0).valid := Mux(io.touch(i).bits.vSetIdx(0), io.touch(1).valid, io.touch(0).valid)
-  }
-
-  // victim
-  io.victim.way := Mux(
-    io.victim.vSetIdx.bits(0),
-    replacers(1).way(io.victim.vSetIdx.bits(highestIdxBit, 1)),
-    replacers(0).way(io.victim.vSetIdx.bits(highestIdxBit, 1))
-  )
-
-  // touch the victim in next cycle
-  private val victim_vSetIdx_reg =
-    RegEnable(io.victim.vSetIdx.bits, 0.U.asTypeOf(io.victim.vSetIdx.bits), io.victim.vSetIdx.valid)
-  private val victim_way_reg = RegEnable(io.victim.way, 0.U.asTypeOf(io.victim.way), io.victim.vSetIdx.valid)
-  (0 until PortNumber).foreach { i =>
-    touch_sets(i)(1)       := victim_vSetIdx_reg(highestIdxBit, 1)
-    touch_ways(i)(1).bits  := victim_way_reg
-    touch_ways(i)(1).valid := RegNext(io.victim.vSetIdx.valid) && (victim_vSetIdx_reg(0) === i.U)
-  }
-
-  ((replacers zip touch_sets) zip touch_ways).foreach { case ((r, s), w) => r.access(s, w) }
-}
-
 class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   val hartId: UInt = Input(UInt(hartIdLen.W))
   // FTQ
