@@ -364,8 +364,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire =
     fromICache.valid &&
-      fromICache.bits.vaddr(0) === f2_ftq_req.startAddr &&
-      (fromICache.bits.doubleline && fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
+      fromICache.bits.vAddr(0) === f2_ftq_req.startAddr &&
+      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
   val f2_icache_all_resp_reg = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
@@ -386,8 +386,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_exception_in     = fromICache.bits.exception
   val f2_backendException = fromICache.bits.isBackendException
   // paddr and gpaddr of [startAddr, nextLineAddr]
-  val f2_paddrs            = fromICache.bits.paddr
-  val f2_gpaddr            = fromICache.bits.gpaddr
+  val f2_paddrs            = fromICache.bits.pAddr
+  val f2_gpaddr            = fromICache.bits.gpAddr
   val f2_isForVSnonLeafPTE = fromICache.bits.isForVSnonLeafPTE
 
   // FIXME: raise af if one fetch block crosses the cacheable-noncacheable boundary, might not correct
@@ -397,8 +397,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
       // not double-line, skip check
       !fromICache.bits.doubleline || (
         // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-        fromICache.bits.pmp_mmio(0) === fromICache.bits.pmp_mmio(1) &&
-          fromICache.bits.itlb_pbmt(0) === fromICache.bits.itlb_pbmt(1)
+        fromICache.bits.pmpMmio(0) === fromICache.bits.pmpMmio(1) &&
+          fromICache.bits.itlbPbmt(0) === fromICache.bits.itlbPbmt(1)
       ),
       ExceptionType.none,
       ExceptionType.af
@@ -409,8 +409,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_exception = ExceptionType.merge(f2_exception_in, f2_mmio_mismatch_exception)
 
   // we need only the first port, as the second is asked to be the same
-  val f2_pmp_mmio  = fromICache.bits.pmp_mmio(0)
-  val f2_itlb_pbmt = fromICache.bits.itlb_pbmt(0)
+  val f2_pmp_mmio  = fromICache.bits.pmpMmio(0)
+  val f2_itlb_pbmt = fromICache.bits.itlbPbmt(0)
 
   /**
     * reduce the number of registers, origin code
@@ -1148,8 +1148,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_perf_info = RegEnable(f2_perf_info, f2_fire)
   val f3_req_0     = io.toIbuffer.fire
   val f3_req_1     = io.toIbuffer.fire && f3_doubleLine
-  val f3_hit_0     = io.toIbuffer.fire && f3_perf_info.bank_hit(0)
-  val f3_hit_1     = io.toIbuffer.fire && f3_doubleLine & f3_perf_info.bank_hit(1)
+  val f3_hit_0     = io.toIbuffer.fire && f3_perf_info.bankHit(0)
+  val f3_hit_1     = io.toIbuffer.fire && f3_doubleLine & f3_perf_info.bankHit(1)
   val f3_hit       = f3_perf_info.hit
   val perfEvents = Seq(
     ("frontendFlush                ", wb_redirect),
@@ -1159,12 +1159,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ("ifu_req_cacheline_1          ", f3_req_1),
     ("ifu_req_cacheline_0_hit      ", f3_hit_1),
     ("ifu_req_cacheline_1_hit      ", f3_hit_1),
-    ("only_0_hit                   ", f3_perf_info.only_0_hit && io.toIbuffer.fire),
-    ("only_0_miss                  ", f3_perf_info.only_0_miss && io.toIbuffer.fire),
-    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1 && io.toIbuffer.fire),
-    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1 && io.toIbuffer.fire),
-    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1 && io.toIbuffer.fire),
-    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire)
+    ("only_0_hit                   ", f3_perf_info.only0Hit && io.toIbuffer.fire),
+    ("only_0_miss                  ", f3_perf_info.only0Miss && io.toIbuffer.fire),
+    ("hit_0_hit_1                  ", f3_perf_info.hit0Hit1 && io.toIbuffer.fire),
+    ("hit_0_miss_1                 ", f3_perf_info.hit0Miss1 && io.toIbuffer.fire),
+    ("miss_0_hit_1                 ", f3_perf_info.miss0Hit1 && io.toIbuffer.fire),
+    ("miss_0_miss_1                ", f3_perf_info.miss0Miss1 && io.toIbuffer.fire)
   )
   generatePerfEvent()
 
@@ -1175,15 +1175,15 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("ifu_req_cacheline_0_hit", f3_hit_0)
   XSPerfAccumulate("ifu_req_cacheline_1_hit", f3_hit_1)
   XSPerfAccumulate("frontendFlush", wb_redirect)
-  XSPerfAccumulate("only_0_hit", f3_perf_info.only_0_hit && io.toIbuffer.fire)
-  XSPerfAccumulate("only_0_miss", f3_perf_info.only_0_miss && io.toIbuffer.fire)
-  XSPerfAccumulate("hit_0_hit_1", f3_perf_info.hit_0_hit_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("hit_0_miss_1", f3_perf_info.hit_0_miss_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("miss_0_hit_1", f3_perf_info.miss_0_hit_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("miss_0_miss_1", f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("hit_0_except_1", f3_perf_info.hit_0_except_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("miss_0_except_1", f3_perf_info.miss_0_except_1 && io.toIbuffer.fire)
-  XSPerfAccumulate("except_0", f3_perf_info.except_0 && io.toIbuffer.fire)
+  XSPerfAccumulate("only_0_hit", f3_perf_info.only0Hit && io.toIbuffer.fire)
+  XSPerfAccumulate("only_0_miss", f3_perf_info.only0Miss && io.toIbuffer.fire)
+  XSPerfAccumulate("hit_0_hit_1", f3_perf_info.hit0Hit1 && io.toIbuffer.fire)
+  XSPerfAccumulate("hit_0_miss_1", f3_perf_info.hit0Miss1 && io.toIbuffer.fire)
+  XSPerfAccumulate("miss_0_hit_1", f3_perf_info.miss0Hit1 && io.toIbuffer.fire)
+  XSPerfAccumulate("miss_0_miss_1", f3_perf_info.miss0Miss1 && io.toIbuffer.fire)
+  XSPerfAccumulate("hit_0_except_1", f3_perf_info.hit0Except1 && io.toIbuffer.fire)
+  XSPerfAccumulate("miss_0_except_1", f3_perf_info.miss0Except1 && io.toIbuffer.fire)
+  XSPerfAccumulate("except_0", f3_perf_info.except0 && io.toIbuffer.fire)
   XSPerfHistogram(
     "ifu2ibuffer_validCnt",
     PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable),
@@ -1202,7 +1202,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
   fetchIBufferDumpData.start_addr  := f3_ftq_req.startAddr
   fetchIBufferDumpData.instr_count := PopCount(io.toIbuffer.bits.enqEnable)
-  fetchIBufferDumpData.exception := (f3_perf_info.except_0 && io.toIbuffer.fire) || (f3_perf_info.hit_0_except_1 && io.toIbuffer.fire) || (f3_perf_info.miss_0_except_1 && io.toIbuffer.fire)
+  fetchIBufferDumpData.exception := (f3_perf_info.except0 && io.toIbuffer.fire) || (f3_perf_info.hit0Except1 && io.toIbuffer.fire) || (f3_perf_info.miss0Except1 && io.toIbuffer.fire)
   fetchIBufferDumpData.is_cache_hit := f3_hit
 
   val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
