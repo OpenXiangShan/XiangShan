@@ -109,8 +109,8 @@ case class ICacheCtrlUnitParameters(
     regWidth:  Int,
     beatBytes: Int = 8
 ) {
-  def regBytes: Int = regWidth / 8
+  def RegBytes: Int = regWidth / 8
 
-  def eccctrlOffset:  Int = 0
-  def ecciaddrOffset: Int = eccctrlOffset + regBytes
+  def EccCtrlOffset:  Int = 0
+  def EccIAddrOffset: Int = EccCtrlOffset + RegBytes
 }
