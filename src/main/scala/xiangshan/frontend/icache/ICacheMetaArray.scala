@@ -22,7 +22,7 @@ import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper {
+class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEccHelper {
   class ICacheMetaArrayIO(implicit p: Parameters) extends ICacheBundle {
     val write:    MetaWriteBundle = Flipped(new MetaWriteBundle)
     val read:     MetaReadBundle  = Flipped(new MetaReadBundle)
@@ -41,7 +41,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
     def apply(meta: ICacheMetadata, poison: Bool)(implicit p: Parameters): ICacheMetaEntry = {
       val entry = Wire(new ICacheMetaEntry)
       entry.meta := meta
-      entry.code := encodeMetaECC(meta.asUInt, poison)
+      entry.code := encodeMetaEcc(meta.asUInt, poison)
       entry
     }
   }
@@ -49,23 +49,23 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
   // sanity check
   require(ICacheMetaEntryBits == (new ICacheMetaEntry).getWidth)
 
-  private val port_0_read_0 = io.read.req.valid && !io.read.req.bits.vSetIdx(0)(0)
-  private val port_0_read_1 = io.read.req.valid && io.read.req.bits.vSetIdx(0)(0)
-  private val port_1_read_1 = io.read.req.valid && io.read.req.bits.vSetIdx(1)(0) && io.read.req.bits.isDoubleLine
-  private val port_1_read_0 = io.read.req.valid && !io.read.req.bits.vSetIdx(1)(0) && io.read.req.bits.isDoubleLine
+  private val port0Read0 = io.read.req.valid && !io.read.req.bits.vSetIdx(0)(0)
+  private val port0Read1 = io.read.req.valid && io.read.req.bits.vSetIdx(0)(0)
+  private val port1Read1 = io.read.req.valid && io.read.req.bits.vSetIdx(1)(0) && io.read.req.bits.isDoubleLine
+  private val port1Read0 = io.read.req.valid && !io.read.req.bits.vSetIdx(1)(0) && io.read.req.bits.isDoubleLine
 
-  private val port_0_read_0_reg = RegEnable(port_0_read_0, 0.U.asTypeOf(port_0_read_0), io.read.req.fire)
-  private val port_0_read_1_reg = RegEnable(port_0_read_1, 0.U.asTypeOf(port_0_read_1), io.read.req.fire)
-  private val port_1_read_1_reg = RegEnable(port_1_read_1, 0.U.asTypeOf(port_1_read_1), io.read.req.fire)
-  private val port_1_read_0_reg = RegEnable(port_1_read_0, 0.U.asTypeOf(port_1_read_0), io.read.req.fire)
+  private val port0Read0Reg = RegEnable(port0Read0, 0.U.asTypeOf(port0Read0), io.read.req.fire)
+  private val port0Read1Reg = RegEnable(port0Read1, 0.U.asTypeOf(port0Read1), io.read.req.fire)
+  private val port1Read1Reg = RegEnable(port1Read1, 0.U.asTypeOf(port1Read1), io.read.req.fire)
+  private val port1Read0Reg = RegEnable(port1Read0, 0.U.asTypeOf(port1Read0), io.read.req.fire)
 
-  private val bank_0_idx = Mux(port_0_read_0, io.read.req.bits.vSetIdx(0), io.read.req.bits.vSetIdx(1))
-  private val bank_1_idx = Mux(port_0_read_1, io.read.req.bits.vSetIdx(0), io.read.req.bits.vSetIdx(1))
+  private val bank0Idx = Mux(port0Read0, io.read.req.bits.vSetIdx(0), io.read.req.bits.vSetIdx(1))
+  private val bank1Idx = Mux(port0Read1, io.read.req.bits.vSetIdx(0), io.read.req.bits.vSetIdx(1))
 
-  private val write_bank_0 = io.write.req.valid && !io.write.req.bits.bankIdx
-  private val write_bank_1 = io.write.req.valid && io.write.req.bits.bankIdx
+  private val writeBank0 = io.write.req.valid && !io.write.req.bits.bankIdx
+  private val writeBank1 = io.write.req.valid && io.write.req.bits.bankIdx
 
-  private val write_meta_bits = ICacheMetaEntry(
+  private val writeMetaBits = ICacheMetaEntry(
     meta = ICacheMetadata(
       tag = io.write.req.bits.phyTag
     ),
@@ -88,21 +88,21 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
 
     // meta connection
     if (bank == 0) {
-      tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      tagArray.io.r.req.bits.apply(setIdx = bank_0_idx(highestIdxBit, 1))
-      tagArray.io.w.req.valid := write_bank_0
+      tagArray.io.r.req.valid := port0Read0 || port1Read0
+      tagArray.io.r.req.bits.apply(setIdx = bank0Idx(highestIdxBit, 1))
+      tagArray.io.w.req.valid := writeBank0
       tagArray.io.w.req.bits.apply(
-        data = write_meta_bits,
-        setIdx = io.write.req.bits.virIdx(highestIdxBit, 1),
+        data = writeMetaBits,
+        setIdx = io.write.req.bits.vSetIdx(highestIdxBit, 1),
         waymask = io.write.req.bits.waymask
       )
     } else {
-      tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      tagArray.io.r.req.bits.apply(setIdx = bank_1_idx(highestIdxBit, 1))
-      tagArray.io.w.req.valid := write_bank_1
+      tagArray.io.r.req.valid := port0Read1 || port1Read1
+      tagArray.io.r.req.bits.apply(setIdx = bank1Idx(highestIdxBit, 1))
+      tagArray.io.w.req.valid := writeBank1
       tagArray.io.w.req.bits.apply(
-        data = write_meta_bits,
-        setIdx = io.write.req.bits.virIdx(highestIdxBit, 1),
+        data = writeMetaBits,
+        setIdx = io.write.req.bits.vSetIdx(highestIdxBit, 1),
         waymask = io.write.req.bits.waymask
       )
     }
@@ -111,25 +111,25 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
   }
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIcacheTag", hasMbist)
 
-  private val read_set_idx_next =
+  private val readSetIdxNext =
     RegEnable(io.read.req.bits.vSetIdx, 0.U.asTypeOf(io.read.req.bits.vSetIdx), io.read.req.fire)
-  private val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
-  private val valid_metas = Wire(Vec(PortNumber, Vec(nWays, Bool())))
+  private val validArray = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
+  private val validMetas = Wire(Vec(PortNumber, Vec(nWays, Bool())))
   // valid read
   (0 until PortNumber).foreach(i =>
     (0 until nWays).foreach(way =>
-      valid_metas(i)(way) := valid_array(way)(read_set_idx_next(i))
+      validMetas(i)(way) := validArray(way)(readSetIdxNext(i))
     )
   )
-  io.read.resp.entryValid := valid_metas
+  io.read.resp.entryValid := validMetas
 
   io.read.req.ready := !io.write.req.valid && !io.flush.req.map(_.valid).reduce(_ || _) && !io.flushAll &&
     tagArrays.map(_.io.r.req.ready).reduce(_ && _)
 
   // valid write
-  private val way_num = OHToUInt(io.write.req.bits.waymask)
+  private val writeWayNum = OHToUInt(io.write.req.bits.waymask)
   when(io.write.req.valid) {
-    valid_array(way_num) := valid_array(way_num).bitSet(io.write.req.bits.virIdx, true.B)
+    validArray(writeWayNum) := validArray(writeWayNum).bitSet(io.write.req.bits.vSetIdx, true.B)
   }
 
   XSPerfAccumulate("meta_refill_num", io.write.req.valid)
@@ -145,23 +145,23 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
     readCodes.foreach(_.foreach(_ := 0.U))
   }
 
-  when(port_0_read_0_reg) {
+  when(port0Read0Reg) {
     io.read.resp.metas(0) := readMetas(0)
     io.read.resp.codes(0) := readCodes(0)
-  }.elsewhen(port_0_read_1_reg) {
+  }.elsewhen(port0Read1Reg) {
     io.read.resp.metas(0) := readMetas(1)
     io.read.resp.codes(0) := readCodes(1)
   }
 
-  when(port_1_read_0_reg) {
+  when(port1Read0Reg) {
     io.read.resp.metas(1) := readMetas(0)
     io.read.resp.codes(1) := readCodes(0)
-  }.elsewhen(port_1_read_1_reg) {
+  }.elsewhen(port1Read1Reg) {
     io.read.resp.metas(1) := readMetas(1)
     io.read.resp.codes(1) := readCodes(1)
   }
 
-  io.write.req.ready := true.B // TODO : has bug ? should be !io.cacheOp.req.valid
+  io.write.req.ready := true.B
 
   /*
    * flush logic
@@ -169,12 +169,12 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
   // flush standalone set (e.g. flushed by mainPipe before doing re-fetch)
   when(io.flush.req.map(_.valid).reduce(_ || _)) {
     (0 until nWays).foreach { w =>
-      valid_array(w) := (0 until PortNumber).map { i =>
+      validArray(w) := (0 until PortNumber).map { i =>
         Mux(
-          // check if set `virIdx` in way `w` is requested to be flushed by port `i`
+          // check if set `vSetIdx` in way `w` is requested to be flushed by port `i`
           io.flush.req(i).valid && io.flush.req(i).bits.waymask(w),
-          valid_array(w).bitSet(io.flush.req(i).bits.virIdx, false.B),
-          valid_array(w)
+          validArray(w).bitSet(io.flush.req(i).bits.vSetIdx, false.B),
+          validArray(w)
         )
       }.reduce(_ & _)
     }
@@ -182,7 +182,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEC
 
   // flush all (e.g. fence.i)
   when(io.flushAll) {
-    (0 until nWays).foreach(w => valid_array(w) := 0.U)
+    (0 until nWays).foreach(w => validArray(w) := 0.U)
   }
 
   // PERF: flush counter

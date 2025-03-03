@@ -56,14 +56,14 @@ object ICacheMetadata {
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val virIdx:  UInt = UInt(idxBits.W)
+    val vSetIdx: UInt = UInt(idxBits.W)
     val phyTag:  UInt = UInt(tagBits.W)
     val waymask: UInt = UInt(nWays.W)
     val bankIdx: Bool = Bool()
     val poison:  Bool = Bool()
 
     def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.virIdx  := idx
+      this.vSetIdx := idx
       this.phyTag  := tag
       this.waymask := waymask
       this.bankIdx := bankIdx
@@ -76,14 +76,14 @@ class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
 // ICacheMissUnit <-> ICacheDataArray
 class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
   class DataWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val virIdx:  UInt = UInt(idxBits.W)
+    val vSetIdx: UInt = UInt(idxBits.W)
     val data:    UInt = UInt(blockBits.W)
     val waymask: UInt = UInt(nWays.W)
     val bankIdx: Bool = Bool()
     val poison:  Bool = Bool()
 
     def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.virIdx  := idx
+      this.vSetIdx := idx
       this.data    := data
       this.waymask := waymask
       this.bankIdx := bankIdx
@@ -97,7 +97,7 @@ class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
 // ICacheMainPipe <-> ICacheMetaArray
 class MetaFlushBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaFlushReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val virIdx:  UInt = UInt(idxBits.W)
+    val vSetIdx: UInt = UInt(idxBits.W)
     val waymask: UInt = UInt(nWays.W)
   }
   val req: Vec[Valid[MetaFlushReqBundle]] = Vec(PortNumber, ValidIO(new MetaFlushReqBundle))
@@ -162,20 +162,20 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
   val doubleline:         Bool            = Bool()
-  val vaddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
   val data:               UInt            = UInt(blockBits.W)
-  val paddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
   val exception:          Vec[UInt]       = Vec(PortNumber, ExceptionType())
-  val pmp_mmio:           Vec[Bool]       = Vec(PortNumber, Bool())
-  val itlb_pbmt:          Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
+  val pmpMmio:            Vec[Bool]       = Vec(PortNumber, Bool())
+  val itlbPbmt:           Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
   val isBackendException: Bool            = Bool()
-  /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
-   * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
-   * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
+  /* NOTE: GPAddrBits(=50bit) is not enough for gpAddr here, refer to PR#3795
+   * Sv48*4 only allows 50bit gpAddr, when software violates this requirement
+   * it needs to fill the mtval2 register with the full XLEN(=64bit) gpAddr,
    * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
    * (cases 56<x<=64 are handled by the backend datapath)
    */
-  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
+  val gpAddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
   val isForVSnonLeafPTE: Bool       = Bool()
 }
 
@@ -209,21 +209,21 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
  *   1. there must be a flush (caused by guest page fault) after excp_tlb_gpf === true.B,
- *      so, we need only the first excp_tlb_gpf and the corresponding gpaddr.
+ *      so, we need only the first excp_tlb_gpf and the corresponding gpAddr.
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:        Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:        Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val ptag:           Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlb_exception: Vec[UInt] = Vec(PortNumber, ExceptionType())
-  val itlb_pbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val meta_codes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val vSetIdx:       Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:       Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val pTag:          Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
+  val itlbException: Vec[UInt] = Vec(PortNumber, ExceptionType())
+  val itlbPbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
+  val metaCodes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }
 
 class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
   // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
+  val gpAddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
   val isForVSnonLeafPTE: Bool       = Bool()
 }
 
@@ -234,23 +234,23 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   // for compatibility
   def vSetIdx:           Vec[UInt]  = entry.vSetIdx
   def waymask:           Vec[UInt]  = entry.waymask
-  def ptag:              Vec[UInt]  = entry.ptag
-  def itlb_exception:    Vec[UInt]  = entry.itlb_exception
-  def itlb_pbmt:         Vec[UInt]  = entry.itlb_pbmt
-  def meta_codes:        Vec[UInt]  = entry.meta_codes
-  def gpaddr:            PrunedAddr = gpf.gpaddr
+  def pTag:              Vec[UInt]  = entry.pTag
+  def itlbException:     Vec[UInt]  = entry.itlbException
+  def itlbPbmt:          Vec[UInt]  = entry.itlbPbmt
+  def metaCodes:         Vec[UInt]  = entry.metaCodes
+  def gpAddr:            PrunedAddr = gpf.gpAddr
   def isForVSnonLeafPTE: Bool       = gpf.isForVSnonLeafPTE
 }
 
 /* ***** Miss ***** */
 // ICacheMainPipe / ICachePrefetchPipe -> MissUnit
 class MissReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
 }
 // MissUnit -> ICacheMainPipe / ICachePrefetchPipe / ICacheWayLookup
 class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
   val waymask:  UInt = UInt(nWays.W)
   val data:     UInt = UInt(blockBits.W)
@@ -270,7 +270,7 @@ class MshrLookupBundle(implicit p: Parameters) extends ICacheBundle {
 
 // Mshr -> ICacheMissUnit
 class MshrInfoBundle(implicit p: Parameters) extends ICacheBundle {
-  val blkPaddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
   val vSetIdx:  UInt = UInt(idxBits.W)
   val way:      UInt = UInt(wayBits.W)
 }
@@ -290,17 +290,17 @@ class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** Perf ***** */
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val only_0_hit:      Bool      = Bool()
-  val only_0_miss:     Bool      = Bool()
-  val hit_0_hit_1:     Bool      = Bool()
-  val hit_0_miss_1:    Bool      = Bool()
-  val miss_0_hit_1:    Bool      = Bool()
-  val miss_0_miss_1:   Bool      = Bool()
-  val hit_0_except_1:  Bool      = Bool()
-  val miss_0_except_1: Bool      = Bool()
-  val except_0:        Bool      = Bool()
-  val bank_hit:        Vec[Bool] = Vec(PortNumber, Bool())
-  val hit:             Bool      = Bool()
+  val only0Hit:     Bool      = Bool()
+  val only0Miss:    Bool      = Bool()
+  val hit0Hit1:     Bool      = Bool()
+  val hit0Miss1:    Bool      = Bool()
+  val miss0Hit1:    Bool      = Bool()
+  val miss0Miss1:   Bool      = Bool()
+  val hit0Except1:  Bool      = Bool()
+  val miss0Except1: Bool      = Bool()
+  val except0:      Bool      = Bool()
+  val bankHit:      Vec[Bool] = Vec(PortNumber, Bool())
+  val hit:          Bool      = Bool()
 }
 
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {

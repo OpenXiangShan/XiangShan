@@ -20,14 +20,14 @@ import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
-trait ICacheECCHelper extends HasICacheParameters {
-  def encodeMetaECC(meta: UInt, poison: Bool = false.B): UInt = {
+trait ICacheEccHelper extends HasICacheParameters {
+  def encodeMetaEcc(meta: UInt, poison: Bool = false.B): UInt = {
     require(meta.getWidth == ICacheMetaBits)
     val code = cacheParams.tagCode.encode(meta, poison) >> ICacheMetaBits
     code.asTypeOf(UInt(ICacheMetaCodeBits.W))
   }
 
-  def encodeDataECC(data: UInt, poison: Bool = false.B): UInt = {
+  def encodeDataEcc(data: UInt, poison: Bool = false.B): UInt = {
     require(data.getWidth == ICacheDataBits)
     val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
     val codes = VecInit(datas.map(cacheParams.dataCode.encode(_, poison) >> (ICacheDataBits / ICacheDataCodeSegs)))
@@ -60,15 +60,15 @@ trait ICacheAddrHelper extends HasICacheParameters {
   def getBlkAddr(addr: PrunedAddr): UInt =
     (addr >> blockOffBits).asUInt
 
-  def getPhyTagFromBlk(blkAddr: UInt): UInt =
+  def getPTagFromBlk(blkAddr: UInt): UInt =
     (blkAddr >> (pgUntagBits - blockOffBits)).asUInt
 
   def getIdxFromBlk(blkAddr: UInt): UInt =
     blkAddr(idxBits - 1, 0)
 
-  def getPaddrFromPtag(vaddr: PrunedAddr, ptag: UInt): PrunedAddr =
-    PrunedAddrInit(Cat(ptag, vaddr(pgUntagBits - 1, 0)))
+  def getPAddrFromPTag(vAddr: PrunedAddr, pTag: UInt): PrunedAddr =
+    PrunedAddrInit(Cat(pTag, vAddr(pgUntagBits - 1, 0)))
 
-  def getPaddrFromPtag(vaddrVec: Vec[PrunedAddr], ptagVec: Vec[UInt]): Vec[PrunedAddr] =
-    VecInit((vaddrVec zip ptagVec).map { case (vaddr, ptag) => getPaddrFromPtag(vaddr, ptag) })
+  def getPAddrFromPTag(vAddrVec: Vec[PrunedAddr], pTagVec: Vec[UInt]): Vec[PrunedAddr] =
+    VecInit((vAddrVec zip pTagVec).map { case (vAddr, pTag) => getPAddrFromPTag(vAddr, pTag) })
 }

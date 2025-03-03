@@ -56,7 +56,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     // backend/BEU
     val error: Valid[L1CacheErrorInfo] = ValidIO(new L1CacheErrorInfo)
     // backend/CSR
-    val csr_pf_enable: Bool = Input(Bool())
+    val csrPfEnable: Bool = Input(Bool())
     // flush
     val fencei: Bool = Input(Bool())
     val flush:  Bool = Input(Bool())
@@ -87,7 +87,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
 
-  private val ecc_enable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.ecc_enable else true.B
+  private val eccEnable = if (outer.ctrlUnitOpt.nonEmpty) outer.ctrlUnitOpt.get.module.io.eccEnable else true.B
 
   // dataArray io
   if (outer.ctrlUnitOpt.nonEmpty) {
@@ -128,8 +128,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }
 
   prefetcher.io.flush         := io.flush
-  prefetcher.io.csr_pf_enable := io.csr_pf_enable
-  prefetcher.io.ecc_enable    := ecc_enable
+  prefetcher.io.csrPfEnable := io.csrPfEnable
+  prefetcher.io.eccEnable    := eccEnable
   prefetcher.io.missResp      := missUnit.io.resp
   prefetcher.io.flushFromBpu  := io.fromFtq.flushFromBpu
   // cache softPrefetch
@@ -171,7 +171,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   mainPipe.io.flush      := io.flush
   mainPipe.io.respStall  := io.fromIfu.stall
-  mainPipe.io.ecc_enable := ecc_enable
+  mainPipe.io.eccEnable := eccEnable
   mainPipe.io.hartId     := io.hartId
   mainPipe.io.missResp   := missUnit.io.resp
   mainPipe.io.req <> io.fromFtq.fetchReq
@@ -212,14 +212,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.a <> missUnit.io.memAcquire
 
   // Parity error port
-  private val errors       = mainPipe.io.errors
-  private val errors_valid = errors.map(e => e.valid).reduce(_ | _)
+  private val errors      = mainPipe.io.errors
+  private val errorsValid = errors.map(e => e.valid).reduce(_ | _)
   io.error.bits <> RegEnable(
     PriorityMux(errors.map(e => e.valid -> e.bits)),
     0.U.asTypeOf(errors(0).bits),
-    errors_valid
+    errorsValid
   )
-  io.error.valid := RegNext(errors_valid, false.B)
+  io.error.valid := RegNext(errorsValid, false.B)
 
   XSPerfAccumulate(
     "softPrefetch_drop_not_ready",

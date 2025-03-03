@@ -22,8 +22,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import utility.ReqSourceKey
 
-class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
-  class ICacheMSHRIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
+  class ICacheMshrIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
     val fencei: Bool = Input(Bool())
     val flush:  Bool = Input(Bool())
 
@@ -44,7 +44,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     val invalid: Bool = Input(Bool())
   }
 
-  val io: ICacheMSHRIO = IO(new ICacheMSHRIO(edge))
+  val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
 
   private val valid = RegInit(Bool(), false.B)
   // this MSHR doesn't respond to fetch and sram
@@ -53,14 +53,14 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   // this MSHR has been issued
   private val issue = RegInit(Bool(), false.B)
 
-  private val blkPaddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
+  private val blkPAddr = RegInit(UInt((PAddrBits - blockOffBits).W), 0.U)
   private val vSetIdx  = RegInit(UInt(idxBits.W), 0.U)
   private val way      = RegInit(UInt(wayBits.W), 0.U)
 
   // look up and return result at the same cycle
   private val hits = io.lookUps.map { lookup =>
     valid && !fencei && !flush && (lookup.req.bits.vSetIdx === vSetIdx) &&
-    (lookup.req.bits.blkPaddr === blkPaddr)
+    (lookup.req.bits.blkPAddr === blkPAddr)
   }
   // Decoupling valid and bits
   (0 until 2).foreach(i => io.lookUps(i).resp.hit := hits(i))
@@ -86,7 +86,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     flush    := false.B
     issue    := false.B
     fencei   := false.B
-    blkPaddr := io.req.bits.blkPaddr
+    blkPAddr := io.req.bits.blkPAddr
     vSetIdx  := io.req.bits.vSetIdx
   }
 
@@ -94,7 +94,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   io.acquire.valid := valid && !issue && !io.flush && !io.fencei
   private val getBlock = edge.Get(
     fromSource = ID.U,
-    toAddress = Cat(blkPaddr, 0.U(blockOffBits.W)),
+    toAddress = Cat(blkPAddr, 0.U(blockOffBits.W)),
     lgSize = log2Up(cacheParams.blockBytes).U
   )._2
   io.acquire.bits.acquire := getBlock
@@ -114,7 +114,7 @@ class ICacheMSHR(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // offer the information other than data for write sram and response fetch
   io.info.valid         := valid && (!flush && !fencei)
-  io.info.bits.blkPaddr := blkPaddr
+  io.info.bits.blkPAddr := blkPAddr
   io.info.bits.vSetIdx  := vSetIdx
   io.info.bits.way      := way
 }
