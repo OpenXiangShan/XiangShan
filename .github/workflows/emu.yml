@@ -24,6 +24,7 @@ jobs:
       with:
         predicate-quantifier: 'every'
         filters: .github/filters.yaml
+
   generate-verilog:
     runs-on: bosc
     needs: changes
@@ -101,6 +102,7 @@ jobs:
           python3 ./difftest/scripts/st_tools/interface.py ./build/rtl/XSDiffTop.sv --core --filelist ./build/rtl/filelist.f --simtop ./difftest/build/rtl/SimTop.sv
           cp -r -v ./difftest/build/* ./build/
           verilator --lint-only -Wno-fatal --top-module XSDiffTopChecker build/XSDiffTopChecker.sv build/rtl/*sv build/rtl/*v -Ibuild/generated-src/ -LDFLAGS -"lreadline"
+
   emu-basics:
     runs-on: bosc
     needs: changes
@@ -171,6 +173,7 @@ jobs:
       - name: Zcb Extension Test - zcb-test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci zcb-test 2> /dev/zero
+
   emu-chi:
     runs-on: bosc
     needs: changes
@@ -200,6 +203,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
+
   emu-performance:
     runs-on: bosc
     needs: changes
@@ -272,6 +276,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
+
   emu-mc:
     runs-on: bosc
     needs: changes
@@ -309,6 +314,7 @@ jobs:
       - name: SMP Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
+
   simv-basics:
     runs-on: eda
     needs: changes
@@ -360,6 +366,76 @@ jobs:
       # - name: System Test - Linux
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero
+
+  artifacts-uploading:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 40
+    name: Upload Artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - name: set env
+        run: echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: psutil
+        run: sudo apt install python3-psutil
+      - name: init
+        run: make init
+      - name: mill
+        uses: jodersky/setup-mill@v0.3.0
+        with:
+          mill-version: 0.12.3
+      - name: swapfile
+        run: |
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+      - name: clean up
+        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+      - name: generate CHI Issue B XSNoCTop verilog with difftest and filelist
+        run: |
+          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=B XSTOP_PREFIX=bosc_ JVM_XMX=16g
+          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
+          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
+      - name: acrhive issue B verilog artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xs-issue-b-difftest-verilog
+          path: build
+      - name: clean up
+        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+      - name: generate CHI Issue E.b XSNoCTop verilog with difftest and filelist
+        run: |
+          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=E.b XSTOP_PREFIX=bosc_ JVM_XMX=16g
+          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
+          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
+      - name: acrhive issue E.b verilog artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xs-issue-e-b-difftest-verilog
+          path: build
+      - name: generate test-jar
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          make test-jar
+      - name: acrhive test jar artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xsgen
+          path: out/xiangshan/test/assembly.dest/out.jar
+
   check-submodules:
     runs-on: ubuntu-latest
     needs: changes
@@ -393,3 +469,23 @@ jobs:
       - name: check src/main/resources/aia
         run: cd src/main/resources/aia && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
 
+  scalafmt:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: true
+    timeout-minutes: 900
+    name: Check Format
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      - run: |
+          mkdir -p ~/.local/bin
+          sh -c "curl -L https://github.com/com-lihaoyi/mill/releases/download/0.11.7/0.11.7 > ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
+          export PATH=~/.local/bin:$PATH
+      - run: make check-format
