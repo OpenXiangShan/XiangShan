@@ -21,9 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import xiangshan.frontend.ExceptionType
 
-class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
-    with ICacheEccHelper
-    with ICacheAddrHelper {
+class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMissUpdateHelper {
 
   class ICacheWayLookupIO(implicit p: Parameters) extends ICacheBundle {
     val flush:  Bool                         = Input(Bool())
@@ -80,24 +78,18 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   entries.zip(hits).foreach { case (entry, hit) =>
     val hitVec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
-      val vSetSame = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
-      val pTagSame = getPTagFromBlk(io.update.bits.blkPAddr) === entry.pTag(i)
-      val waySame  = io.update.bits.waymask === entry.waymask(i)
-      when(vSetSame) {
-        when(pTagSame) {
-          // miss -> hit
-          entry.waymask(i) := io.update.bits.waymask
-          // also update meta_codes
-          // NOTE: we have getPhyTagFromBlk(io.update.bits.blkPAddr) === entry.pTag(i),
-          //       so we can use entry.pTag(i) for better timing
-          entry.metaCodes(i) := encodeMetaEcc(entry.pTag(i))
-        }.elsewhen(waySame) {
-          // data is overwritten: hit -> miss
-          entry.waymask(i) := 0.U
-          // don't care meta_codes, since it's not used for a missed request
-        }
+      val (updated, newMask, newCode) = updateMetaInfo(
+        io.update,
+        entry.waymask(i),
+        entry.vSetIdx(i),
+        entry.pTag(i),
+        entry.metaCodes(i)
+      )
+      when(updated) {
+        entry.waymask(i)   := newMask
+        entry.metaCodes(i) := newCode
       }
-      hitVec(i) := vSetSame && (pTagSame || waySame)
+      hitVec(i) := updated
     }
     hit := hitVec.reduce(_ || _)
   }
