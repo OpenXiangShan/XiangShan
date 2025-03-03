@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.mbist.MbistPipeline
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheECCHelper with ICacheDataSelHelper {
+class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEccHelper with ICacheDataSelHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
     val write: DataWriteBundle = Flipped(new DataWriteBundle)
     val read:  DataReadBundle  = Flipped(new DataReadBundle)
@@ -37,7 +37,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
     def apply(data: UInt, poison: Bool)(implicit p: Parameters): ICacheDataEntry = {
       val entry = Wire(new ICacheDataEntry)
       entry.data := data
-      entry.code := encodeDataECC(data, poison)
+      entry.code := encodeDataEcc(data, poison)
       entry
     }
   }
@@ -87,7 +87,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEC
       sramBank.io.w.req.valid := io.write.req.valid && io.write.req.bits.waymask(way).asBool
       sramBank.io.w.req.bits.apply(
         data = writeEntries(bank),
-        setIdx = io.write.req.bits.virIdx,
+        setIdx = io.write.req.bits.vSetIdx,
         // waymask is invalid when way of SRAMTemplate <= 1
         waymask = 0.U
       )
