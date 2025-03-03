@@ -30,8 +30,8 @@ import xiangshan.frontend.BpuFlushInfo
 import xiangshan.frontend.ExceptionType
 
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
-    with ICacheEccHelper
-    with ICacheAddrHelper {
+    with ICacheAddrHelper
+    with ICacheMissUpdateHelper {
 
   class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
     // control
@@ -280,27 +280,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * update waymasks and meta_codes according to MSHR update data
     ******************************************************************************
     */
-  private def updateMetaInfo(mask: UInt, vSetIdx: UInt, pTag: UInt, code: UInt): (UInt, UInt) = {
-    require(mask.getWidth == nWays)
-    val new_mask  = WireInit(mask)
-    val new_code  = WireInit(code)
-    val valid     = fromMSHR.valid && !fromMSHR.bits.corrupt
-    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
-    val pTag_same = getPTagFromBlk(fromMSHR.bits.blkPAddr) === pTag
-    val way_same  = fromMSHR.bits.waymask === mask
-    when(valid && vset_same) {
-      when(pTag_same) {
-        new_mask := fromMSHR.bits.waymask
-        // also update meta_codes
-        // we have getPhyTagFromBlk(fromMSHR.bits.blkPAddr) === pTag, so we can use pTag directly for better timing
-        new_code := encodeMetaEcc(pTag)
-      }.elsewhen(way_same) {
-        new_mask := 0.U
-        // we don't care about new_code, since it's not used for a missed request
-      }
-    }
-    (new_mask, new_code)
-  }
 
   private val s1_SRAM_valid   = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
   private val s1_MSHR_valid   = fromMSHR.valid && !fromMSHR.bits.corrupt
@@ -311,11 +290,15 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // update waymasks and meta_codes
   (0 until PortNumber).foreach { i =>
-    val old_waymask    = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
-    val old_meta_codes = Mux(s1_SRAM_valid, s1_SRAM_meta_codes(i), s1_meta_codes_r(i))
-    val new_info       = updateMetaInfo(old_waymask, s1_req_vSetIdx(i), s1_req_pTags(i), old_meta_codes)
-    s1_waymasks(i)   := new_info._1
-    s1_meta_codes(i) := new_info._2
+    val (_, newMask, newCode) = updateMetaInfo(
+      fromMSHR,
+      Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i)),
+      s1_req_vSetIdx(i),
+      s1_req_pTags(i),
+      Mux(s1_SRAM_valid, s1_SRAM_meta_codes(i), s1_meta_codes_r(i))
+    )
+    s1_waymasks(i)   := newMask
+    s1_meta_codes(i) := newCode
   }
 
   /**
