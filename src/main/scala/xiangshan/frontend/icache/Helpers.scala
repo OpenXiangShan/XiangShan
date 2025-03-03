@@ -72,3 +72,37 @@ trait ICacheAddrHelper extends HasICacheParameters {
   def getPAddrFromPTag(vAddrVec: Vec[PrunedAddr], pTagVec: Vec[UInt]): Vec[PrunedAddr] =
     VecInit((vAddrVec zip pTagVec).map { case (vAddr, pTag) => getPAddrFromPTag(vAddr, pTag) })
 }
+
+trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper with ICacheAddrHelper {
+  def updateMetaInfo(
+      update:  Valid[MissRespBundle],
+      waymask: UInt,
+      vSetIdx: UInt,
+      pTag:    UInt,
+      code:    UInt
+  ): (Bool, UInt, UInt) = {
+    require(waymask.getWidth == nWays)
+    val newMask  = WireInit(waymask)
+    val newCode  = WireInit(code)
+    val valid    = update.valid && !update.bits.corrupt
+    val vSetSame = update.bits.vSetIdx === vSetIdx
+    val pTagSame = getPTagFromBlk(update.bits.blkPAddr) === pTag
+    val waySame  = update.bits.waymask === waymask
+    when(valid && vSetSame) {
+      when(pTagSame) {
+        // vSetIdx & pTag match => update has newer data
+        newMask := update.bits.waymask
+        // also update meta_codes
+        // we have getPhyTagFromBlk(fromMSHR.bits.blkPAddr) === pTag, so we can use pTag directly for better timing
+        newCode := encodeMetaEcc(pTag)
+      }.elsewhen(waySame) {
+        // vSetIdx & way match, but pTag not match => older hit data has been replaced, treat as a miss
+        newMask := 0.U
+        // we don't care about newCode, since it's not used for a missed request
+      }
+      // otherwise is an irrelevant update, ignore it
+    }
+    val updated = valid && vSetSame && (pTagSame || waySame)
+    (updated, newMask, newCode)
+  }
+}
