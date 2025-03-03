@@ -22,7 +22,7 @@ import utility.CircularQueuePtr
 import xiangshan.frontend.ExceptionType
 
 class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
-    with ICacheECCHelper
+    with ICacheEccHelper
     with ICacheAddrHelper {
 
   class ICacheWayLookupIO(implicit p: Parameters) extends ICacheBundle {
@@ -65,64 +65,56 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     readPtr := readPtr + 1.U
   }
 
-  private val gpf_entry = RegInit(0.U.asTypeOf(Valid(new WayLookupGpfEntry)))
-  private val gpfPtr    = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val gpf_hit   = gpfPtr === readPtr && gpf_entry.valid
+  private val gpfEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupGpfEntry)))
+  private val gpfPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
+  private val gpfHit   = gpfPtr === readPtr && gpfEntry.valid
 
   when(io.flush) {
     // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
-    gpf_entry.valid := false.B
-    gpf_entry.bits  := 0.U.asTypeOf(new WayLookupGpfEntry)
+    gpfEntry.valid := false.B
+    gpfEntry.bits  := 0.U.asTypeOf(new WayLookupGpfEntry)
   }
 
-  /**
-    ******************************************************************************
-    * update
-    ******************************************************************************
-    */
+  /* *** update *** */
   private val hits = Wire(Vec(nWayLookupSize, Bool()))
   entries.zip(hits).foreach { case (entry, hit) =>
-    val hit_vec = Wire(Vec(PortNumber, Bool()))
+    val hitVec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
-      val vset_same = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
-      val ptag_same = getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i)
-      val way_same  = io.update.bits.waymask === entry.waymask(i)
-      when(vset_same) {
-        when(ptag_same) {
+      val vSetSame = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
+      val pTagSame = getPTagFromBlk(io.update.bits.blkPAddr) === entry.pTag(i)
+      val waySame  = io.update.bits.waymask === entry.waymask(i)
+      when(vSetSame) {
+        when(pTagSame) {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
           // also update meta_codes
-          // NOTE: we have getPhyTagFromBlk(io.update.bits.blkPaddr) === entry.ptag(i),
-          //       so we can use entry.ptag(i) for better timing
-          entry.meta_codes(i) := encodeMetaECC(entry.ptag(i))
-        }.elsewhen(way_same) {
+          // NOTE: we have getPhyTagFromBlk(io.update.bits.blkPAddr) === entry.pTag(i),
+          //       so we can use entry.pTag(i) for better timing
+          entry.metaCodes(i) := encodeMetaEcc(entry.pTag(i))
+        }.elsewhen(waySame) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
           // don't care meta_codes, since it's not used for a missed request
         }
       }
-      hit_vec(i) := vset_same && (ptag_same || way_same)
+      hitVec(i) := vSetSame && (pTagSame || waySame)
     }
-    hit := hit_vec.reduce(_ || _)
+    hit := hitVec.reduce(_ || _)
   }
 
-  /**
-    ******************************************************************************
-    * read
-    ******************************************************************************
-    */
+  /* *** read *** */
   // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
-  private val can_bypass = empty && io.write.valid
+  private val canBypass = empty && io.write.valid
   io.read.valid := !empty || io.write.valid
-  when(can_bypass) {
+  when(canBypass) {
     io.read.bits := io.write.bits
   }.otherwise { // can't bypass
     io.read.bits.entry := entries(readPtr.value)
-    when(gpf_hit) { // ptr match && entry valid
-      io.read.bits.gpf := gpf_entry.bits
-      // also clear gpf_entry.valid when it's read, note this will be overridden by write (L175)
+    when(gpfHit) { // ptr match && entry valid
+      io.read.bits.gpf := gpfEntry.bits
+      // also clear gpfEntry.valid when it's read, note this will be overridden by write (L175)
       when(io.read.fire) {
-        gpf_entry.valid := false.B
+        gpfEntry.valid := false.B
       }
     }.otherwise { // gpf not hit
       io.read.bits.gpf := 0.U.asTypeOf(new WayLookupGpfEntry)
@@ -135,16 +127,16 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   // if there is a valid gpf to be read, we should stall write
-  private val gpf_stall = gpf_entry.valid && !(io.read.fire && gpf_hit)
-  io.write.ready := !full && !gpf_stall
+  private val gpfStall = gpfEntry.valid && !(io.read.fire && gpfHit)
+  io.write.ready := !full && !gpfStall
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
-    when(io.write.bits.itlb_exception.map(_ === ExceptionType.gpf).reduce(_ || _)) {
-      // if gpf_entry is bypassed, we don't need to save it
+    when(io.write.bits.itlbException.map(_ === ExceptionType.gpf).reduce(_ || _)) {
+      // if gpfEntry is bypassed, we don't need to save it
       // note this will override the read (L156)
-      gpf_entry.valid := !(can_bypass && io.read.fire)
-      gpf_entry.bits  := io.write.bits.gpf
-      gpfPtr          := writePtr
+      gpfEntry.valid := !(canBypass && io.read.fire)
+      gpfEntry.bits  := io.write.bits.gpf
+      gpfPtr         := writePtr
     }
   }
 }
