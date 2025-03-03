@@ -213,6 +213,9 @@ class InstrUncacheImp(outer: InstrUncache)
     entry
   }
 
+  // override mmio_grant.ready to prevent x-propagation
+  mmio_grant.ready := true.B
+
   entry_alloc_idx := PriorityEncoder(entries.map(m => m.io.req.ready))
 
   req.ready := req_ready
