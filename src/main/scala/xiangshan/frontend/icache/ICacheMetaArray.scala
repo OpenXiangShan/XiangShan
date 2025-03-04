@@ -41,7 +41,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     def apply(meta: ICacheMetadata, poison: Bool)(implicit p: Parameters): ICacheMetaEntry = {
       val entry = Wire(new ICacheMetaEntry)
       entry.meta := meta
-      entry.code := encodeMetaEcc(meta.asUInt, poison)
+      entry.code := encodeMetaEccByPort(meta.asUInt, poison)
       entry
     }
   }
