@@ -34,9 +34,10 @@ trait ICacheEccHelper extends HasICacheParameters {
 }
 
 trait ICacheDataSelHelper extends HasICacheParameters {
-  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[UInt] = {
-    val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
+  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[Vec[Bool]] = {
+    val bankOffBits = log2Ceil(blockBytes / ICacheDataBanks)
+    val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
+    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> bankOffBits).asUInt
     val bankSel     = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
     assert(
       !valid || PopCount(bankSel) === ICacheBankVisitNum.U,
@@ -44,7 +45,7 @@ trait ICacheDataSelHelper extends HasICacheParameters {
       ICacheBankVisitNum.U,
       bankSel.asUInt
     )
-    bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, UInt(ICacheDataBanks.W)))
+    bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, Vec(ICacheDataBanks, Bool())))
   }
 
   def getLineSel(blkOffset: UInt): Vec[Bool] = {

@@ -319,7 +319,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // if data is from MSHR, we don't need to check ECC
   private val s2_data_corrupt = VecInit((0 until PortNumber).map { port =>
     (0 until ICacheDataBanks).map { bank =>
-      s2_bank_corrupt(bank) && s2_bankSel(port)(bank).asBool && !s2_data_is_from_MSHR(bank)
+      s2_bank_corrupt(bank) && s2_bankSel(port)(bank) && !s2_data_is_from_MSHR(bank)
     }.reduce(_ || _) && s2_SRAMhits(port)
   })
   // force clear data_corrupt when parity check is disabled
@@ -577,7 +577,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index  := (3 + i).U
 
-      val bankSel = getBankSel(s2_req_offset, s2_valid).reduce(_ | _)
+      val bankSel = getBankSel(s2_req_offset, s2_valid).map(_.asUInt).reduce(_ | _)
       val lineSel = getLineSel(s2_req_offset)
 
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))
