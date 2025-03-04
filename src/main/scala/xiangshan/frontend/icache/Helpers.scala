@@ -21,17 +21,79 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
 trait ICacheEccHelper extends HasICacheParameters {
-  def encodeMetaEcc(meta: UInt, poison: Bool = false.B): UInt = {
+  // per-port
+  def encodeMetaEccByPort(meta: UInt, poison: Bool = false.B): UInt = {
     require(meta.getWidth == ICacheMetaBits)
     val code = cacheParams.tagCode.encode(meta, poison) >> ICacheMetaBits
     code.asTypeOf(UInt(ICacheMetaCodeBits.W))
   }
 
-  def encodeDataEcc(data: UInt, poison: Bool = false.B): UInt = {
+  // per-port
+  def checkMetaEccByPort(meta: UInt, code: UInt, waymask: Vec[Bool], enable: Bool): Bool = {
+    require(meta.getWidth == ICacheMetaBits)
+    require(code.getWidth == ICacheMetaCodeBits)
+    val hitNum = PopCount(waymask)
+    // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
+    // hit one way, but parity code does not match => ECC failure
+    val corrupt = encodeMetaEccByPort(meta) =/= code && hitNum === 1.U
+    // hit multi-way => must be an ECC failure
+    val multiHit = hitNum > 1.U
+    enable && (corrupt || multiHit)
+  }
+
+  // all ports
+  def checkMetaEcc(metaVec: Vec[UInt], codeVec: Vec[UInt], waymaskVec: Vec[Vec[Bool]], enable: Bool): Vec[Bool] = {
+    require(metaVec.length == PortNumber)
+    require(codeVec.length == PortNumber)
+    require(waymaskVec.length == PortNumber)
+    require(waymaskVec.head.length == nWays)
+    VecInit((metaVec zip codeVec zip waymaskVec).map { case ((meta, code), mask) =>
+      checkMetaEccByPort(meta, code, mask, enable)
+    })
+  }
+
+  // per-bank
+  def encodeDataEccByBank(data: UInt, poison: Bool = false.B): UInt = {
     require(data.getWidth == ICacheDataBits)
     val datas = data.asTypeOf(Vec(ICacheDataCodeSegs, UInt((ICacheDataBits / ICacheDataCodeSegs).W)))
     val codes = VecInit(datas.map(cacheParams.dataCode.encode(_, poison) >> (ICacheDataBits / ICacheDataCodeSegs)))
     codes.asTypeOf(UInt(ICacheDataCodeBits.W))
+  }
+
+  def checkDataEccByBank(data: UInt, code: UInt, enable: Bool): Bool = {
+    require(data.getWidth == ICacheDataBits)
+    require(code.getWidth == ICacheDataCodeBits)
+    enable && (encodeDataEccByBank(data) =/= code)
+  }
+
+  // all banks
+  def checkDataEcc(
+      data:      Vec[UInt],
+      code:      Vec[UInt],
+      enable:    Bool,
+      bankSel:   Vec[Vec[Bool]],
+      bankValid: Vec[Bool],
+      portHit:   Vec[Bool]
+  ): Vec[Bool] = {
+    require(data.length == ICacheDataBanks)
+    require(code.length == ICacheDataBanks)
+    require(bankSel.length == PortNumber)
+    require(bankSel.head.length == ICacheDataBanks)
+    require(bankValid.length == ICacheDataBanks)
+    require(portHit.length == PortNumber)
+
+    val bankCorrupt = VecInit((data zip code).map { case (d, c) =>
+      checkDataEccByBank(d, c, enable)
+    })
+
+    VecInit((bankSel zip portHit).map { case (bs, h) =>
+      // port is corrupted iff: any bank:
+      //   is corrupted && is selected in this port && is valid (not from Mshr)
+      // && port is hit
+      VecInit((bankCorrupt zip bs zip bankValid).map { case ((c, s), v) =>
+        c && s && v
+      }).reduce(_ || _) && h
+    })
   }
 }
 
@@ -95,7 +157,7 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
         newMask := update.bits.waymask
         // also update meta_codes
         // we have getPhyTagFromBlk(fromMSHR.bits.blkPAddr) === pTag, so we can use pTag directly for better timing
-        newCode := encodeMetaEcc(pTag)
+        newCode := encodeMetaEccByPort(pTag)
       }.elsewhen(waySame) {
         // vSetIdx & way match, but pTag not match => older hit data has been replaced, treat as a miss
         newMask := 0.U
