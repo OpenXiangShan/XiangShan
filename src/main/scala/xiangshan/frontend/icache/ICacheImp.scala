@@ -127,11 +127,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     metaArray.io.read <> prefetcher.io.metaRead
   }
 
-  prefetcher.io.flush         := io.flush
-  prefetcher.io.csrPfEnable := io.csrPfEnable
+  prefetcher.io.flush        := io.flush
+  prefetcher.io.csrPfEnable  := io.csrPfEnable
   prefetcher.io.eccEnable    := eccEnable
-  prefetcher.io.missResp      := missUnit.io.resp
-  prefetcher.io.flushFromBpu  := io.fromFtq.flushFromBpu
+  prefetcher.io.missResp     := missUnit.io.resp
+  prefetcher.io.flushFromBpu := io.fromFtq.flushFromBpu
   // cache softPrefetch
   private val softPrefetchValid = RegInit(false.B)
   private val softPrefetch      = RegInit(0.U.asTypeOf(new PrefetchReqBundle))
@@ -169,11 +169,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.memGrant.bits  := DontCare
   missUnit.io.memGrant <> bus.d
 
-  mainPipe.io.flush      := io.flush
-  mainPipe.io.respStall  := io.fromIfu.stall
+  mainPipe.io.flush     := io.flush
+  mainPipe.io.respStall := io.fromIfu.stall
   mainPipe.io.eccEnable := eccEnable
-  mainPipe.io.hartId     := io.hartId
-  mainPipe.io.missResp   := missUnit.io.resp
+  mainPipe.io.hartId    := io.hartId
+  mainPipe.io.missResp  := missUnit.io.resp
   mainPipe.io.req <> io.fromFtq.fetchReq
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 
