@@ -974,7 +974,7 @@ class AXI4MemEncrypt(address: AddressSet)(implicit p: Parameters) extends LazyMo
         }
       }
       val finalNameStrings = names.map { n => if (n.isEmpty) "(unused)" else n.toList.mkString(", ") }
-      mp.copy(masters = masters.zip(finalNameStrings).map { case (m, n) => m.copy(name = n) })
+      mp.copy(masters = masters.toIndexedSeq.zip(finalNameStrings.toIndexedSeq).map { case (m, n) => m.copy(name = n) })
     },
     slaveFn  = { sp => sp })
 
