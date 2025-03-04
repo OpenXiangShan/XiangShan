@@ -38,7 +38,9 @@ import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistPipeline
-import utility.sram.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
+import utility.sram.SRAMReadBus
+import utility.sram.SRAMTemplate
+import utility.sram.SRAMWriteBus
 import utils._
 import xiangshan._
 import xiangshan.cache._
