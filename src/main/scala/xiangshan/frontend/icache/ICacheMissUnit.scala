@@ -93,31 +93,24 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.memAcquire.bits      := acquireArb.io.out.bits.acquire
   acquireArb.io.out.ready := io.memAcquire.ready
 
-  private val fetchMSHRs = (0 until nFetchMshr).map { i =>
-    val mshr = Module(new ICacheMshr(edge, true, i))
-    mshr.io.flush  := false.B
-    mshr.io.fencei := io.fencei
-    mshr.io.req <> fetchDemux.io.out(i)
+  private val allMshr = (0 until nFetchMshr + nPrefetchMshr).map { i =>
+    val isFetch = i < nFetchMshr
+    val mshr    = Module(new ICacheMshr(edge, isFetch, i))
+    mshr.io.fencei               := io.fencei
     mshr.io.lookUps(0).req.valid := io.fetchReq.valid
     mshr.io.lookUps(0).req.bits  := io.fetchReq.bits
     mshr.io.lookUps(1).req.valid := io.prefetchReq.valid
     mshr.io.lookUps(1).req.bits  := io.prefetchReq.bits
     mshr.io.victimWay            := io.victim.resp.way
-    acquireArb.io.in(i) <> mshr.io.acquire
-    mshr
-  }
-
-  private val prefetchMSHRs = (0 until nPrefetchMshr).map { i =>
-    val mshr = Module(new ICacheMshr(edge, false, nFetchMshr + i))
-    mshr.io.flush  := io.flush
-    mshr.io.fencei := io.fencei
-    mshr.io.req <> prefetchDemux.io.out(i)
-    mshr.io.lookUps(0).req.valid := io.fetchReq.valid
-    mshr.io.lookUps(0).req.bits  := io.fetchReq.bits
-    mshr.io.lookUps(1).req.valid := io.prefetchReq.valid
-    mshr.io.lookUps(1).req.bits  := io.prefetchReq.bits
-    mshr.io.victimWay            := io.victim.resp.way
-    prefetchArb.io.in(i) <> mshr.io.acquire
+    if (isFetch) {
+      mshr.io.flush := false.B
+      mshr.io.req <> fetchDemux.io.out(i)
+      acquireArb.io.in(i) <> mshr.io.acquire
+    } else {
+      mshr.io.flush := io.flush
+      mshr.io.req <> prefetchDemux.io.out(i - nFetchMshr)
+      prefetchArb.io.in(i - nFetchMshr) <> mshr.io.acquire
+    }
     mshr
   }
 
@@ -127,12 +120,12 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     * - look up all mshr
     ******************************************************************************
     */
-  private val allMSHRs = fetchMSHRs ++ prefetchMSHRs
-  private val prefetchHitFetchReq = (io.prefetchReq.bits.blkPAddr === io.fetchReq.bits.blkPAddr) &&
-    (io.prefetchReq.bits.vSetIdx === io.fetchReq.bits.vSetIdx) &&
-    io.fetchReq.valid
-  fetchHit    := allMSHRs.map(mshr => mshr.io.lookUps(0).resp.hit).reduce(_ || _)
-  prefetchHit := allMSHRs.map(mshr => mshr.io.lookUps(1).resp.hit).reduce(_ || _) || prefetchHitFetchReq
+  private val prefetchHitFetchReq =
+    (io.prefetchReq.bits.blkPAddr === io.fetchReq.bits.blkPAddr) &&
+      (io.prefetchReq.bits.vSetIdx === io.fetchReq.bits.vSetIdx) &&
+      io.fetchReq.valid
+  fetchHit    := allMshr.map(mshr => mshr.io.lookUps(0).resp.hit).reduce(_ || _)
+  prefetchHit := allMshr.map(mshr => mshr.io.lookUps(1).resp.hit).reduce(_ || _) || prefetchHitFetchReq
 
   /**
     ******************************************************************************
@@ -205,13 +198,13 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     * invalid mshr when finish transition
     ******************************************************************************
     */
-  (0 until (nFetchMshr + nPrefetchMshr)).foreach(i => allMSHRs(i).io.invalid := lastFireNext && (idNext === i.U))
+  (0 until (nFetchMshr + nPrefetchMshr)).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
 
   /* *****************************************************************************
    * response fetch and write SRAM
    * ***************************************************************************** */
   // get request information from MSHRs
-  private val allMshrResp = VecInit(allMSHRs.map(mshr => mshr.io.info))
+  private val allMshrResp = VecInit(allMshr.map(mshr => mshr.io.info))
   // select MSHR response 1 cycle before sending response to mainPipe/prefetchPipe for better timing
   private val mshrResp =
     RegEnable(allMshrResp(io.memGrant.bits.source).bits, 0.U.asTypeOf(allMshrResp(0).bits), lastFire)
