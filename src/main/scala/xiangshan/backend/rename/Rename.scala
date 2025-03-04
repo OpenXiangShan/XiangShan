@@ -19,6 +19,7 @@ package xiangshan.backend.rename
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode.TruthTable
 import utility._
 import utils._
 import xiangshan._
@@ -299,6 +300,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
+  val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
@@ -364,7 +367,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.in(i).ready := !io.in(0).valid || canOut
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
-    uops(i).instrSize := instrSizesVec(i) + io.fusionCross2FtqVec(i)
+    instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numUops := 0.U
@@ -500,19 +503,45 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
    * trace begin
    */
-  // note: fusionInst can't robcompress
   val inVec = io.in.map(_.bits)
   val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
-  val halfWordNumVec = (0 until RenameWidth).map{
+  val nonRVCNumVec = (0 until RenameWidth).map{
     i => compressMasksVec(i).asBools.zip(isRVCVec).map{
-      case (mask, isRVC) => Mux(mask, Mux(isRVC, 1.U, 2.U), 0.U)
+      case (mask, isRVC) => (mask && !isRVC).asUInt
     }
   }
 
+  /*
+  encode: instrNum, nonRVCNum => commitinfo.iretire
+  (instrNum((log2Ceil(RenameWidth + 1)).W), nonRVCNum(IretireWidthInPipe.W), encode(IretireWidthEncode.W))
+  val instrSizeTable = Seq(
+    (1, 0, 1), (1, 1, 2),
+    (2, 0, 3), (2, 1, 4), (2, 2, 5),
+    (3, 0, 6), (3, 1, 7), (3, 2, 8), (3, 3, 9),
+    (4, 0, 10), (4, 1, 11), (4, 2, 12), (4, 3, 13), (4, 4, 14),
+    (5, 0, 15), (5, 1, 16), (5, 2, 17), (5, 3, 18), (5, 4, 19), (5, 5, 20),
+    (6, 0, 21), (6, 1, 22), (6, 2, 23), (6, 3, 24), (6, 4, 25), (6, 5, 26), (6, 6, 27),
+  )
+   */
+
+  val instrSizeTable = (1 to RenameWidth).map{ instrNum =>
+    (0 to instrNum).map( nonRVCNum => (instrNum, nonRVCNum) )
+  }.flatten
+
   for (i <- 0 until RenameWidth) {
     // iretire
-    uops(i).traceBlockInPipe.iretire := halfWordNumVec(i).reduce(_ +& _)
-
+    val nonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
+    nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
+    uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
+      (instrSize(i) ## nonRVCNum),
+      TruthTable(
+        instrSizeTable.zipWithIndex.map { case (table, encode) =>
+          (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
+            BitPat((encode + 1).U(IretireWidthEncoded.W)))
+        },
+        BitPat.N(IretireWidthEncoded)
+      )
+    )
     // ilastsize
     val lastIsRVC = isRVCVec(i)
     when (!needRobFlags(i)) {
