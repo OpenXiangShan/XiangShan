@@ -453,11 +453,39 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new DefaultConfig(1)
 )
 
+// class DefaultConfig(n: Int = 1) extends Config(
+//   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+//     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+//     ++ WithNKBL1D(64, ways = 4)
+//     ++ new BaseConfig(n, true)
+// )
+
 class DefaultConfig(n: Int = 1) extends Config(
-  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
-    ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n, true)
+  new MinimalConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(_.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
+        nSets = 2
+      )),
+      L2CacheParamsOpt = Some(L2Param(
+        sets = 2,
+        replacement = "plru"
+      ))
+    ))
+  })
+)
+
+class MinimalL1L2Config(n: Int = 1) extends Config(
+  new MinimalConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(_.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
+        nSets = 2
+      )),
+      L2CacheParamsOpt = Some(L2Param(
+        sets = 2,
+        replacement = "plru"
+      ))
+    ))
+  })
 )
 
 class CVMConfig(n: Int = 1) extends Config(
