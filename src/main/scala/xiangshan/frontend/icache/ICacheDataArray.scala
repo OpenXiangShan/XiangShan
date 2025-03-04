@@ -37,7 +37,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     def apply(data: UInt, poison: Bool)(implicit p: Parameters): ICacheDataEntry = {
       val entry = Wire(new ICacheDataEntry)
       entry.data := data
-      entry.code := encodeDataEcc(data, poison)
+      entry.code := encodeDataEccByBank(data, poison)
       entry
     }
   }
