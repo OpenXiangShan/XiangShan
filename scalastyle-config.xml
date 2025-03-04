@@ -7,11 +7,8 @@
  <!-- always starts with XiangShan license -->
  <check enabled="true" class="org.scalastyle.file.HeaderMatchesChecker" level="warning">
   <parameters>
-   <parameter name="regex">false</parameter>
-   <parameter name="header"><![CDATA[// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2020-2021 Peng Cheng Laboratory
-//
+   <parameter name="regex">true</parameter>
+   <parameter name="header"><![CDATA[(?m)(?:// Copyright \(c\) \d{4}(?:-\d{4})? (?:.+?)\n)+//
 // XiangShan is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
 // You may obtain a copy of Mulan PSL v2 at:
