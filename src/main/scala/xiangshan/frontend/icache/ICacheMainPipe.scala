@@ -197,17 +197,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_req_offset  = s1_req_vaddr(0)(log2Ceil(blockBytes) - 1, 0)
 
   // do metaArray ECC check
-  private val s1_meta_corrupt = VecInit((s1_req_pTags zip s1_meta_codes zip s1_waymasks).map {
-    case ((meta, code), waymask) =>
-      val hit_num = PopCount(waymask)
-      // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
-      (encodeMetaEcc(meta) =/= code && hit_num === 1.U) || // hit one way, but parity code does not match, ECC failure
-      hit_num > 1.U                                        // hit multi-way, must be an ECC failure
-  })
-  // force clear meta_corrupt when parity check is disabled
-  when(!eccEnable) {
-    s1_meta_corrupt := VecInit(Seq.fill(PortNumber)(false.B))
-  }
+  private val s1_meta_corrupt = checkMetaEcc(s1_req_pTags, s1_meta_codes, s1_waymasks, eccEnable)
 
   /**
     ******************************************************************************
@@ -314,14 +304,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   // check data error
-  private val s2_bankSel      = getBankSel(s2_req_offset, s2_valid)
-  private val s2_bank_corrupt = (0 until ICacheDataBanks).map(i => encodeDataEcc(s2_datas(i)) =/= s2_codes(i))
-  // if data is from MSHR, we don't need to check ECC
-  private val s2_data_corrupt = VecInit((0 until PortNumber).map { port =>
-    (0 until ICacheDataBanks).map { bank =>
-      s2_bank_corrupt(bank) && s2_bankSel(port)(bank) && !s2_data_is_from_MSHR(bank)
-    }.reduce(_ || _) && s2_SRAMhits(port)
-  })
+  private val s2_data_corrupt = checkDataEcc(
+    s2_datas,
+    s2_codes,
+    eccEnable,
+    getBankSel(s2_req_offset, s2_valid),
+    VecInit(s2_data_is_from_MSHR.map(!_)),
+    s2_SRAMhits
+  )
   // force clear data_corrupt when parity check is disabled
   when(!eccEnable) {
     s2_data_corrupt := VecInit(Seq.fill(PortNumber)(false.B))
