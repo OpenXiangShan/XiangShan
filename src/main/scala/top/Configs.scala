@@ -37,7 +37,7 @@ import huancun._
 import coupledL2._
 import coupledL2.prefetch._
 
-class BaseConfig(n: Int, hasMbist:Boolean = false) extends Config((site, here, up) => {
+class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
