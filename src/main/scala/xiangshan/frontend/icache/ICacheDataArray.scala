@@ -59,8 +59,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     (0 until ICacheDataBanks).foreach { bank =>
       masks(way)(bank) := Mux(
         lineSel(bank),
-        waymasks(1)(way) && bankSel(1)(bank).asBool,
-        waymasks(0)(way) && bankSel(0)(bank).asBool
+        waymasks(1)(way) && bankSel(1)(bank),
+        waymasks(0)(way) && bankSel(0)(bank)
       )
     }
   }
