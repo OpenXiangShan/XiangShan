@@ -77,9 +77,13 @@ ifeq ($(IMSIC_USE_TL),1)
 COMMON_EXTRA_ARGS += --imsic-use-tl
 endif
 
-# IMSIC use TileLink rather than AXI4Lite
+# enable or disable dfx manually
 ifeq ($(DFX),1)
-COMMON_EXTRA_ARGS += --enable-dfx
+COMMON_EXTRA_ARGS += --dfx true
+else
+ifeq ($(DFX),0)
+COMMON_EXTRA_ARGS += --dfx false
+endif
 endif
 
 # L2 cache size in KB

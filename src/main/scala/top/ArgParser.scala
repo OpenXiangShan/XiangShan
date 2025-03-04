@@ -189,9 +189,9 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
-        case "--enable-dfx" :: tail =>
+        case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = true))
+            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
           }), tail)
         case "--seperate-dm-bus" :: tail =>
           nextOption(config.alter((site, here, up) => {
