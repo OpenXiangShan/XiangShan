@@ -29,6 +29,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils._
 import utility._
+import utility.sram.SRAMTemplate
 import chisel3.util._
 import utility.mbist.MbistPipeline
 import xiangshan.mem.LqPtr

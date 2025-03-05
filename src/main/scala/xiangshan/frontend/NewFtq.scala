@@ -30,6 +30,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
 import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
