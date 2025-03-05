@@ -322,7 +322,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val vma = fromRename(i).bits.vpu.vma
     val vm = fromRename(i).bits.vpu.vm
     val vlIsVlmax = vlBusyTable.io_vl_read.vlReadInfo(i).is_vlmax
-    val vlIsNonZero = !vlBusyTable.io_vl_read.vlReadInfo(i).is_zero
+    val vlIsNonZero = vlBusyTable.io_vl_read.vlReadInfo(i).is_nonzero
     val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
     val ignoreWhole = (vm =/= 0.U || vma) && vta
     val ignoreOldVd = vlBusyTable.io.read(i).resp && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
