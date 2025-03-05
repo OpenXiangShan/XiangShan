@@ -250,6 +250,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // main pipeline read / write line req
     val readline_intend = Input(Bool())
     val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
+    val readline_can_go = Input(Bool())
     val write = Flipped(DecoupledIO(new L1BankedDataWriteReq))
     val write_dup = Vec(DCacheBanks, Flipped(Decoupled(new L1BankedDataWriteReqCtrl)))
     // data for readline and loadpipe
@@ -896,7 +897,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
   val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))
   (0 until DCacheBanks).map(i => {
-    io.readline_resp(i) := bank_result(readline_r_div_addr)(i)(readline_r_way_addr)
+    io.readline_resp(i) := RegEnable(bank_result(readline_r_div_addr)(i)(readline_r_way_addr), io.readline_can_go)
     readline_error_delayed(i) := bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
   })
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) && readline_error_delayed.asUInt.orR
