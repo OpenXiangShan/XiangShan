@@ -277,6 +277,27 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
     ))
 })
 
+case class WithNSetL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+  case XSTileKey =>
+    val sets = n
+    up(XSTileKey).map(_.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        replacer = Some("setplru"),
+        nMissEntries = 16,
+        nProbeEntries = 8,
+        nReleaseEntries = 18,
+        nMaxPrefetchEntry = 6,
+        enableTagEcc = true,
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+      ))
+    ))
+})
+
 case class L2CacheConfig
 (
   size: String,
@@ -453,10 +474,24 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new DefaultConfig(1)
 )
 
+// class DefaultConfig(n: Int = 1) extends Config(
+//   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+//     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+//     ++ WithNKBL1D(64, ways = 4)
+//     ++ new BaseConfig(n, true)
+// )
+
 class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
-    ++ WithNKBL1D(64, ways = 4)
+    ++ L2CacheConfig("4KB", inclusive = true, banks = 4)
+    ++ WithNSetL1D(2, ways = 4)
+    ++ new BaseConfig(n, true)
+)
+
+class MinimalL1L2Config(n: Int = 1) extends Config(
+  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+    ++ L2CacheConfig("4KB", inclusive = true, banks = 4)
+    ++ WithNSetL1D(2, ways = 4)
     ++ new BaseConfig(n, true)
 )
 
