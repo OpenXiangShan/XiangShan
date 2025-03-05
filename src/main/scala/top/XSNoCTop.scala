@@ -16,6 +16,7 @@
 
 package top
 
+import aia.{AXIRegIMSIC_WRAP, IMSICParams, MSITransBundle}
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -23,6 +24,8 @@ import utils._
 import utility._
 import system._
 import device._
+import freechips.rocketchip.devices.debug.{DebugModuleKey, DebugTransportModuleJTAG, JtagDTMKeyDefault, SystemJTAGIO}
+//import aia._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
@@ -72,7 +75,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     useTL = soc.IMSICUseTL,
     baseAddress = (0x3A800000, 0x3B000000)
   )))
-
+  val u_imsic_bus_top = Option.when(!IMSICUseHalf)(LazyModule(new AXIRegIMSIC_WRAP(IMSICParams(
+    HasTEEIMSIC = soc.HasSECIMSIC,
+    mAddr = 0x3A800000,
+    sgAddr = 0x3B000000
+  ))))
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
@@ -110,14 +117,15 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val reset = IO(Input(AsyncReset()))
     val noc_clock = EnableCHIAsyncBridge.map(_ => IO(Input(Clock())))
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
-    val soc_clock = IO(Input(Clock()))
-    val soc_reset = IO(Input(AsyncReset()))
+    val soc_clock = Option.when(!ClintAsyncFromSPMT)(IO(Input(Clock())))
+    val soc_reset = Option.when(!ClintAsyncFromSPMT)(IO(Input(AsyncReset())))
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
       val riscv_critical_error = Output(Bool())
-      val hartResetReq = Input(Bool())
-      val hartIsInReset = Output(Bool())
+      val hartResetReq = Option.when(!UseDMInTop)(Input(Bool()))
+      val hartIsInReset = Option.when(!UseDMInTop)(Output(Bool()))
+      val dm_ndreset = Option.when(UseDMInTop)(Output(Bool()))
       val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
       val chi = new PortIO
       val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
@@ -138,12 +146,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
         })
       }
       // differentiate imsic version
-      val msiinfo = Option.when(IMSICUseHalf)((new Bundle {
-        val vld_req = Input(Bool())
-        val data = Input(UInt(MSI_INFO_WIDTH.W))
-        val vld_ack = Output(Bool())
-      }))
-      val dm = Option.when(UseDMInTop)(Flipped(new JTAGIO(hasTRSTn = false)))
+      val msiinfo = Option.when(IMSICUseHalf)(new MSITransBundle(aia.IMSICParams()))
+      val jtag = Option.when(UseDMInTop)(Flipped(new JTAGIO(hasTRSTn = true)))
     })
     // imsic axi4lite io
     val imsic_axi4lite = wrapper.u_imsic_bus_top.map(_.module.axi4lite.map(x => IO(chiselTypeOf(x))))
@@ -152,10 +156,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val imsic_s_tl = wrapper.u_imsic_bus_top.map(_.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue))))
 
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen() })
-    val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
+    val soc_reset_sync = withClockAndReset(soc_clock.get, soc_reset.get) { ResetGen() }
 
     // device clock and reset
-    wrapper.u_imsic_bus_top.foreach(_.module.clock := soc_clock)
+    wrapper.u_imsic_bus_top.foreach(_.module.clock := soc_clock.get)
     wrapper.u_imsic_bus_top.foreach(_.module.reset := soc_reset_sync)
 
     // imsic axi4lite io connection
@@ -166,8 +170,24 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     wrapper.u_imsic_bus_top.foreach(_.tl_s.foreach(_ <> imsic_s_tl.get.get))
 
     // temporary dontcare some io
-    io.msiinfo.foreach(_ <> DontCare)
-    io.dm.foreach(_ <> DontCare)
+    io.msiinfo.foreach(_ <> core_with_l2.module.io.msiinfo)
+    io.jtag.foreach(_ <> DontCare)
+    // TODO requirement from spacement: instanciated dtm to connected with debug,as other half module of debug module.
+    //    def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
+    val c = new JtagDTMKeyDefault
+    val dtm = Option.when(UseDMInTop)(Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, c)))
+    //start TBD about JTAG zhaohong
+    //      io.debugIO.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x }  // force TMS high when debug is disabled
+    dtm.foreach { dtm =>
+      dtm.io.jtag_clock := io.jtag.get.TCK
+      dtm.io.jtag_reset := io.jtag.get.TRSTn.get
+      dtm.io.jtag_mfr_id := 0.U
+      dtm.io.jtag_part_number := 0.U
+      dtm.io.jtag_version := 0.U
+      dtm.rf_reset := 0.U
+    }
+    //     dtm.foreach(_.io.dmi<>core_with_l2.module.io.debug.module.io.dmi.get.dmi)  //wait core_with_l2 update dm interface
+    //end TBD about JTAG zhaohong
 
     // input
     dontTouch(io)
@@ -175,13 +195,14 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.clock := clock
     core_with_l2.module.reset := reset
     core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
-    core_with_l2.module.soc_reset := soc_reset
+    core_with_l2.module.soc_reset.foreach(_ := soc_reset.get)
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
-    core_with_l2.module.io.hartResetReq := io.hartResetReq
-    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
+    core_with_l2.module.io.hartResetReq.foreach(_ := io.hartResetReq.get)
+    io.hartIsInReset.foreach(_ := core_with_l2.module.io.hartIsInReset.get)
+    io.dm_ndreset.foreach(_ := core_with_l2.module.io.dm.get.ndreset)
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
@@ -217,8 +238,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
         io.chi <> core_with_l2.module.io.chi
     }
 
-    core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.map(_.module.o_msi_info_vld).getOrElse(false.B)
-    core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.map(_.module.o_msi_info).getOrElse(0.U)
+//    core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.map(_.module.o_msi_info_vld).getOrElse(false.B)
+//    core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.map(_.module.o_msi_info).getOrElse(0.U)
     // tie off core soft reset
     core_rst_node.out.head._1 := false.B.asAsyncReset
 

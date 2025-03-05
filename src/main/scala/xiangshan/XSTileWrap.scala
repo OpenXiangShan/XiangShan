@@ -18,12 +18,17 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.devices.debug.{ClockedDMIIO, ExportDebug, TLDebugModule}
+import freechips.rocketchip.devices.debug
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
+import freechips.rocketchip.tilelink.{TLWidthWidget, TLXbar}
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import device.{IMSICAsync, MsiInfoBundle}
+//import device.{IMSICAsync, MsiInfoBundle}
+import aia._
+import device._
 import coupledL2.tl2chi.{PortIO, AsyncPortIO, CHIAsyncBridgeSource}
 import utility.{IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
@@ -54,53 +59,86 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
-    val soc_reset = IO(Input(AsyncReset()))
+    val soc_reset = Option.when(!ClintAsyncFromSPMT)(Input(AsyncReset()))
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
-      val msiInfo = Input(ValidIO(new MsiInfoBundle))
+      val msiinfo = new MSITransBundle(aia.IMSICParams())
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
-      val hartResetReq = Input(Bool())
-      val hartIsInReset = Output(Bool())
+      // ==UseDMInTop start: 1- DebugModule is integrated in XSTOP, only spacemit need it,other 0.==
+      val hartResetReq = Option.when(!UseDMInTop)(Input(Bool()))
+      val hartIsInReset = Option.when(!UseDMInTop)(Output(Bool()))
+      val dm = Option.when(UseDMInTop)(new Bundle {
+        val dmi = (!p(ExportDebug).apb).option(Flipped(new ClockedDMIIO()))
+        val ndreset = Output(Bool()) //output of top,to request that soc can reset system logic exclude debug.
+      })
+      // ==UseDMInTop end ==
       val traceCoreInterface = new TraceCoreInterface
       val debugTopDown = new Bundle {
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
+
       val l3Miss = Input(Bool())
       val chi = EnableCHIAsyncBridge match {
-        case Some(param) => new AsyncPortIO(param)
+        case Some(param) => if (CHIAsyncFromSPMT) (new CHIAsyncIOSPMT()) else (new AsyncPortIO(param))
         case None => new PortIO
       }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = EnableClintAsyncBridge match {
-        case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
+        case Some(param) => if (ClintAsyncFromSPMT) (new ClintAsyncIOSPMT()) else (Flipped(new AsyncBundle(UInt(64.W), param)))
         case None => Input(ValidIO(UInt(64.W)))
       }
     })
-
-    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen())
+    val hartResetReq = Bool() // derive from io.hartResetReq or debugwrapper in top
+    hartResetReq := io.hartResetReq.get
+    val reset_sync = withClockAndReset(clock, (reset.asBool || hartResetReq).asAsyncReset)(ResetGen())
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen()))
-    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen())
+    val soc_reset_sync = withClockAndReset(clock, soc_reset.get)(ResetGen())
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
     childReset := reset_sync
 
-    val imsicAsync = withClockAndReset(clock, reset_sync)(Module(new IMSICAsync()))
-    imsicAsync.i.msiInfo := io.msiInfo
-
     tile.module.io.hartId := io.hartId
-    tile.module.io.msiInfo := imsicAsync.o.msiInfo
+    //connect msi info io with xstile
+    //start :TBD zhaohong ,wait tile update the msi interface,
+
+    tile.module.io.msiInfo.valid := io.msiinfo.vld_req
+    io.msiinfo.vld_ack := io.msiinfo.vld_req
+    tile.module.io.msiInfo.bits := 1.U // TODO for compile error since type donot match io.msiinfo.data
+    //end :TBD zhaohong
+
     tile.module.io.reset_vector := io.reset_vector
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
-    io.hartIsInReset := tile.module.io.hartIsInReset
+    io.hartIsInReset.foreach(_ := tile.module.io.hartIsInReset)
     io.traceCoreInterface <> tile.module.io.traceCoreInterface
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
+
+    // instance :TL DebugModule
+    val debugModule = Option.when(UseDMInTop)(LazyModule(new DebugModule(numCores=NumCores,defDTM=false)(p)))
+    debugModule.foreach(_.module.debug.node := TLXbar) //TBD connect with xstile.tl.out
+//    debugModule.foreach(_.module.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
+//      io.dm.mbus := sb2tl.node    //master node connect about debug
+//    })
+//    val io = IO(new DebugModuleIO)
+    debugModule.foreach { dm =>
+      dm.module.io.reset := reset
+      dm.module.io.clock := clock
+      dm.module.io.debugIO.clock := clock
+      dm.module.io.debugIO.reset := reset
+      dm.module.io.resetCtrl.hartIsInReset := tile.module.io.hartIsInReset
+      hartResetReq := dm.module.io.resetCtrl.hartResetReq.get
+      io.dm.foreach { iodm =>
+        iodm.ndreset := dm.module.io.debugIO.ndreset
+        iodm.dmi <> dm.module.io.debugIO.clockeddmi
+      }
+    }
+
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
@@ -132,7 +170,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
     }
     dontTouch(io.hartId)
-    dontTouch(io.msiInfo)
+//    dontTouch(io.msiInfo)
   }
   lazy val module = new XSTileWrapImp(this)
 }

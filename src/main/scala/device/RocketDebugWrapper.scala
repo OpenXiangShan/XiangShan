@@ -38,7 +38,7 @@ import freechips.rocketchip.devices.debug._
 // this module creates wrapped dm and dtm
 
 
-class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
+class DebugModule(numCores: Int,defDTM: Boolean =true)(implicit p: Parameters) extends LazyModule {
 
   val debug = LazyModule(new TLDebugModule(8)(p))
 
@@ -74,7 +74,7 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     io.debugIO.extTrigger.foreach { x => debug.module.io.extTrigger.foreach {y => x <> y}}
     debug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
 
-    val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
+   val dtm =  Option.when(defDTM)((io.debugIO.systemjtag.map(instantiateJtagDTM(_))))
 
     def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
       val c = new JtagDTMKeyDefault
@@ -99,6 +99,10 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
   lazy val module = new DebugModuleImp(this)
 }
 
+class DebugModuleEXdtm(numCores: Int)(implicit p: Parameters) extends DebugModule{
+  override def desiredName = "DebugModuleEXdtm"
+
+}
 case object EnableJtag extends Field[Bool]
 
 class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule(Map("TICK_DELAY" -> IntParam(tickDelay)))

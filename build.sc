@@ -25,6 +25,7 @@ import $file.`rocket-chip`.hardfloat.common
 import $file.huancun.common
 import $file.coupledL2.common
 import $file.openLLC.common
+import $file.ChiselAIA.common
 
 /* for publishVersion */
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
@@ -119,6 +120,15 @@ object utility extends HasChisel {
 
 }
 
+object aia extends $file.ChiselAIA.common.ChiselAIAModule with HasChisel {
+
+  override def millSourcePath = pwd / "ChiselAIA"
+
+  def rocketModule: ScalaModule = rocketchip
+
+  def utilityModule: ScalaModule = utility
+
+}
 object yunsuan extends HasChisel {
 
   override def millSourcePath = pwd / "yunsuan"
@@ -221,6 +231,8 @@ trait XiangShanModule extends ScalaModule {
 
   def macrosModule: ScalaModule
 
+  def aiaModule: ScalaModule
+
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
@@ -230,6 +242,7 @@ trait XiangShanModule extends ScalaModule {
     yunsuanModule,
     fudianModule,
     utilityModule,
+    aiaModule,
     macrosModule,
   )
 
@@ -256,6 +269,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
   def fudianModule = fudian
 
   def utilityModule = utility
+
+  def aiaModule = aia
 
   def yunsuanModule = yunsuan
 
