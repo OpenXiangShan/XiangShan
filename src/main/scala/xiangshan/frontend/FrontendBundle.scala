@@ -169,6 +169,9 @@ object ExceptionType {
   def fromECC(enable: Bool, corrupt: Bool): UInt =
     Mux(enable && corrupt, af, none)
 
+  def fromTilelink(corrupt: Bool): UInt =
+    Mux(corrupt, af, none)
+
   /**Generates exception mux tree
    *
    * Exceptions that are further to the left in the parameter list have higher priority
