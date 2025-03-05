@@ -60,11 +60,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isRVC = Bool()
     val isVset = Bool()
     val isHls = Bool()
-    val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     // data end
     
     // trace
-    val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
+    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // status begin
     val valid = Bool()
     val fflags = UInt(5.W)
@@ -75,6 +74,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val needFlush = Bool()
+    val crossFtqCommit = UInt(2.W) // 59 bit
     // status end
 
     // debug_begin
@@ -108,12 +108,12 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
-    val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     val fpWen = Bool()
     val rfWen = Bool()
     val needFlush = Bool()
+    val crossFtqCommit = UInt(2.W)
     // trace
-    val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
+    val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -133,12 +133,12 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.isRVC := robEnq.preDecodeInfo.isRVC
     robEntry.isVset := robEnq.isVset
     robEntry.isHls := robEnq.isHls
-    robEntry.instrSize := robEnq.instrSize
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
     robEntry.dirtyVs := robEnq.dirtyVs
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
+    robEntry.crossFtqCommit := robEnq.crossFtqCommit
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.debug_pc.foreach(_ := robEnq.pc)
@@ -168,10 +168,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
-    robCommitEntry.instrSize := robEntry.instrSize
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
+    robCommitEntry.crossFtqCommit := robEntry.crossFtqCommit
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
