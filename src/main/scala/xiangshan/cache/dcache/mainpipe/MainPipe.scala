@@ -143,6 +143,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
     val data_read_intend = Output(Bool())
     val data_readline = DecoupledIO(new L1BankedDataReadLineReq)
+    val data_readline_can_go = Output(Bool())
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
@@ -446,33 +447,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_ready := !s2_valid || s2_can_go
   val replay = !io.miss_req.ready || io.wbq_block_miss_req
 
-  val data_resp = Wire(io.data_resp.cloneType)
-  data_resp := Mux(GatedValidRegNext(s1_fire), io.data_resp, RegEnable(data_resp, s2_valid))
-  val s2_store_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
-
-  def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
-    val full_wmask = FillInterleaved(8, wmask)
-    ((~full_wmask & old_data) | (full_wmask & new_data))
-  }
-
-  val s2_data = WireInit(VecInit((0 until DCacheBanks).map(i => {
-    data_resp(i).raw_data
-  })))
-
-  for (i <- 0 until DCacheBanks) {
-    val old_data = s2_data(i)
-    val new_data = get_data_of_bank(i, Mux(s2_req.miss, io.refill_info.bits.store_data, s2_req.store_data))
-    // for amo hit, we should use read out SRAM data
-    // do not merge with store data
-    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, Mux(s2_req.miss, io.refill_info.bits.store_mask, s2_req.store_mask)))
-    s2_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
-  }
-
-  val s2_data_word = s2_store_data_merged(s2_req.word_idx)
-  val s2_data_quad_word = VecInit((0 until DCacheBanks).map(i => {
-    if (i == (DCacheBanks - 1)) s2_store_data_merged(i)
-    else Cat(s2_store_data_merged(i + 1), s2_store_data_merged(i))
-  }))(s2_req.word_idx)
+  io.data_readline_can_go := s2_can_go_to_s3
 
   io.pseudo_data_error_inj_done := s2_fire_to_s3 && (s2_tag_error || s2_hit) && s2_may_report_data_error
   io.pseudo_error.ready := false.B
@@ -493,11 +468,40 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_new_hit_coh = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
-  val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire_to_s3)
-  val s3_data_word = RegEnable(s2_data_word, s2_fire_to_s3)
-  val s3_data_quad_word = RegEnable(s2_data_quad_word, s2_fire_to_s3)
-  val s3_data = RegEnable(s2_data, s2_fire_to_s3)
+  val s3_l2_error = RegEnable(s2_l2_error, s2_fire_to_s3)
   val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
+
+  val s3_data_resp = io.data_resp
+  val s3_store_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+
+  def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
+    val full_wmask = FillInterleaved(8, wmask)
+    ((~full_wmask & old_data) | (full_wmask & new_data))
+  }
+
+  val s3_data = WireInit(VecInit((0 until DCacheBanks).map(i => {
+    s3_data_resp(i).raw_data
+  })))
+
+  for (i <- 0 until DCacheBanks) {
+    val old_data = s3_data(i)
+    val refill_data = Wire(s3_req.store_data.cloneType)
+    refill_data := RegNext(io.refill_info.bits.store_data)
+    val new_data = get_data_of_bank(i, Mux(s3_req.miss, refill_data, s3_req.store_data))
+    // for amo hit, we should use read out SRAM data
+    // do not merge with store data
+    val refill_mask = Wire(s3_req.store_mask.cloneType)
+    refill_mask := RegNext(io.refill_info.bits.store_mask)
+    val wmask = Mux(s3_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, Mux(s3_req.miss, refill_mask, s3_req.store_mask)))
+    s3_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
+  }
+
+  val s3_data_word = s3_store_data_merged(s3_req.word_idx)
+  val s3_data_quad_word = VecInit((0 until DCacheBanks).map(i => {
+    if (i == (DCacheBanks - 1)) s3_store_data_merged(i)
+    else Cat(s3_store_data_merged(i + 1), s3_store_data_merged(i))
+  }))(s3_req.word_idx)
+
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
 
