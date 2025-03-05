@@ -19,5 +19,6 @@ object CSROoORead {
     CSRs.hstatus,
     CSRs.mnstatus,
     CSRs.dcsr,
+    CSRs.vtype,
   )
 }
