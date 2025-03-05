@@ -1,82 +1,61 @@
-/***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility._
-import xiangshan.SoftIfetchPrefetchBundle
-import xiangshan.cache.mmu._
-import xiangshan.frontend._
+import utility.DataHoldBypass
+import utility.PriorityMuxDefault
+import utility.ValidHold
+import utility.XSPerfAccumulate
+import xiangshan.cache.mmu.Pbmt
+import xiangshan.cache.mmu.TlbCmd
+import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
+import xiangshan.frontend.BpuFlushInfo
+import xiangshan.frontend.ExceptionType
 
-abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
-abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
+class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
+    with ICacheAddrHelper
+    with ICacheMissUpdateHelper {
 
-class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
-  val startAddr:        UInt   = UInt(VAddrBits.W)
-  val nextlineStart:    UInt   = UInt(VAddrBits.W)
-  val ftqIdx:           FtqPtr = new FtqPtr
-  val isSoftPrefetch:   Bool   = Bool()
-  val backendException: UInt   = UInt(ExceptionType.width.W)
-  def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
+  class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
+    // control
+    val csrPfEnable: Bool = Input(Bool())
+    val eccEnable:   Bool = Input(Bool())
+    val flush:       Bool = Input(Bool())
 
-  def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
-    this.startAddr      := info.startAddr
-    this.nextlineStart  := info.nextlineStart
-    this.ftqIdx         := info.ftqIdx
-    this.isSoftPrefetch := false.B
-    this
+    val req:            DecoupledIO[PrefetchReqBundle] = Flipped(Decoupled(new PrefetchReqBundle))
+    val flushFromBpu:   BpuFlushInfo                   = Flipped(new BpuFlushInfo)
+    val itlb:           Vec[TlbRequestIO]              = Vec(PortNumber, new TlbRequestIO)
+    val itlbFlushPipe:  Bool                           = Output(Bool())
+    val pmp:            Vec[PmpCheckBundle]            = Vec(PortNumber, new PmpCheckBundle)
+    val metaRead:       MetaReadBundle                 = new MetaReadBundle
+    val missReq:        DecoupledIO[MissReqBundle]     = DecoupledIO(new MissReqBundle)
+    val missResp:       Valid[MissRespBundle]          = Flipped(ValidIO(new MissRespBundle))
+    val wayLookupWrite: DecoupledIO[WayLookupBundle]   = DecoupledIO(new WayLookupBundle)
   }
 
-  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
-    this.startAddr      := req.vaddr
-    this.nextlineStart  := req.vaddr + (1 << blockOffBits).U
-    this.ftqIdx         := DontCare
-    this.isSoftPrefetch := true.B
-    this
-  }
-}
-
-class IPrefetchIO(implicit p: Parameters) extends IPrefetchBundle {
-  // control
-  val csr_pf_enable: Bool = Input(Bool())
-  val ecc_enable:    Bool = Input(Bool())
-  val flush:         Bool = Input(Bool())
-
-  val req:            DecoupledIO[IPrefetchReq]  = Flipped(Decoupled(new IPrefetchReq))
-  val flushFromBpu:   BpuFlushInfo               = Flipped(new BpuFlushInfo)
-  val itlb:           Vec[TlbRequestIO]          = Vec(PortNumber, new TlbRequestIO)
-  val itlbFlushPipe:  Bool                       = Bool()
-  val pmp:            Vec[ICachePMPBundle]       = Vec(PortNumber, new ICachePMPBundle)
-  val metaRead:       ICacheMetaReqBundle        = new ICacheMetaReqBundle
-  val MSHRReq:        DecoupledIO[ICacheMissReq] = DecoupledIO(new ICacheMissReq)
-  val MSHRResp:       Valid[ICacheMissResp]      = Flipped(ValidIO(new ICacheMissResp))
-  val wayLookupWrite: DecoupledIO[WayLookupInfo] = DecoupledIO(new WayLookupInfo)
-}
-
-class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICacheECCHelper {
-  val io: IPrefetchIO = IO(new IPrefetchIO)
+  val io: ICachePrefetchPipeIO = IO(new ICachePrefetchPipeIO)
 
   private val (toITLB, fromITLB) = (io.itlb.map(_.req), io.itlb.map(_.resp))
   private val (toPMP, fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
-  private val (toMeta, fromMeta) = (io.metaRead.toIMeta, io.metaRead.fromIMeta)
-  private val (toMSHR, fromMSHR) = (io.MSHRReq, io.MSHRResp)
+  private val (toMeta, fromMeta) = (io.metaRead.req, io.metaRead.resp)
+  private val (toMSHR, fromMSHR) = (io.missReq, io.missResp)
   private val toWayLookup        = io.wayLookupWrite
 
   private val s0_fire, s1_fire, s2_fire            = WireInit(false.B)
@@ -124,8 +103,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * - 4. Write wayLookup
     ******************************************************************************
     */
-  private val s1_valid =
-    generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
+  private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_req_vaddr        = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
   private val s1_isSoftPrefetch   = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
@@ -195,39 +173,39 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))
   })
   private val s1_req_gpaddr_tmp = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
+    DataHoldBypass(
+      fromITLB(i).bits.gpaddr(0),
       // NOTE: we dont use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-      init = 0.U(PAddrBitsMax.W),
-      data = fromITLB(i).bits.gpaddr(0)
+      0.U(PAddrBitsMax.W),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_req_isForVSnonLeafPTE_tmp = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE),
-      data = fromITLB(i).bits.isForVSnonLeafPTE
+    DataHoldBypass(
+      fromITLB(i).bits.isForVSnonLeafPTE,
+      0.U.asTypeOf(fromITLB(i).bits.isForVSnonLeafPTE),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_exception = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U(ExceptionType.width.W),
-      data = ExceptionType.fromTlbResp(fromITLB(i).bits)
+    DataHoldBypass(
+      ExceptionType.fromTlbResp(fromITLB(i).bits),
+      0.U(ExceptionType.width.W),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_pbmt = VecInit((0 until PortNumber).map { i =>
-    ResultHoldBypass(
-      valid = tlb_valid_pulse(i),
-      init = 0.U.asTypeOf(fromITLB(i).bits.pbmt(0)),
-      data = fromITLB(i).bits.pbmt(0)
+    DataHoldBypass(
+      fromITLB(i).bits.pbmt(0),
+      0.U.asTypeOf(fromITLB(i).bits.pbmt(0)),
+      tlb_valid_pulse(i)
     )
   })
   private val s1_itlb_exception_gpf = VecInit(s1_itlb_exception.map(_ === ExceptionType.gpf))
 
-  /* Select gpaddr with the first gpf
+  /* Select gpAddr with the first gpf
    * Note: the backend wants the base guest physical address of a fetch block
-   *       for port(i), its base gpaddr is actually (gpaddr - i * blocksize)
+   *       for port(i), its base gpAddr is actually (gpAddr - i * blocksize)
    *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
    *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
    */
@@ -260,15 +238,15 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * Receive resp from IMeta and check
     ******************************************************************************
     */
-  private val s1_req_ptags = VecInit(s1_req_paddr.map(get_phy_tag))
+  private val s1_req_pTags = VecInit(s1_req_paddr.map(get_phy_tag))
 
-  private val s1_meta_ptags  = fromMeta.tags
+  private val s1_meta_pTags  = fromMeta.tags
   private val s1_meta_valids = fromMeta.entryValid
 
   private def getWaymask(paddrs: Vec[UInt]): Vec[UInt] = {
-    val ptags = paddrs.map(get_phy_tag)
+    val pTags = paddrs.map(get_phy_tag)
     val tag_eq_vec =
-      VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s1_meta_ptags(p)(w) === ptags(p)))))
+      VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s1_meta_pTags(p)(w) === pTags(p)))))
     val tag_match_vec = VecInit((0 until PortNumber).map { k =>
       VecInit(tag_eq_vec(k).zipWithIndex.map { case (way_tag_eq, w) => way_tag_eq && s1_meta_valids(k)(w) })
     })
@@ -286,7 +264,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
    * However, we can guarantee that the request sent to the l2 cache and the response to the IFU are both correct,
    * considering the probability of bit flipping abnormally is very small, consider there's up to 1 bit being wrong:
    * 1. miss -> fake hit: The wrong bit in s1_waymasks was set to true.B, thus selects the wrong meta_codes,
-   *                      but we can detect this by checking whether `encodeMetaECC(req_ptags) === meta_codes`.
+   *                      but we can detect this by checking whether `encodeMetaECC(req_pTags) === meta_codes`.
    * 2. hit -> fake multi-hit: In normal situation, multi-hit never happens, so multi-hit indicates ECC failure,
    *                           we can detect this by checking whether `PopCount(waymasks) <= 1.U`,
    *                           and meta_codes is not important in this situation.
@@ -302,27 +280,6 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * update waymasks and meta_codes according to MSHR update data
     ******************************************************************************
     */
-  private def updateMetaInfo(mask: UInt, vSetIdx: UInt, ptag: UInt, code: UInt): (UInt, UInt) = {
-    require(mask.getWidth == nWays)
-    val new_mask  = WireInit(mask)
-    val new_code  = WireInit(code)
-    val valid     = fromMSHR.valid && !fromMSHR.bits.corrupt
-    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
-    val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
-    val way_same  = fromMSHR.bits.waymask === mask
-    when(valid && vset_same) {
-      when(ptag_same) {
-        new_mask := fromMSHR.bits.waymask
-        // also update meta_codes
-        // we have getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag, so we can use ptag directly for better timing
-        new_code := encodeMetaECC(ptag)
-      }.elsewhen(way_same) {
-        new_mask := 0.U
-        // we don't care about new_code, since it's not used for a missed request
-      }
-    }
-    (new_mask, new_code)
-  }
 
   private val s1_SRAM_valid   = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
   private val s1_MSHR_valid   = fromMSHR.valid && !fromMSHR.bits.corrupt
@@ -333,16 +290,20 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 
   // update waymasks and meta_codes
   (0 until PortNumber).foreach { i =>
-    val old_waymask    = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
-    val old_meta_codes = Mux(s1_SRAM_valid, s1_SRAM_meta_codes(i), s1_meta_codes_r(i))
-    val new_info       = updateMetaInfo(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i), old_meta_codes)
-    s1_waymasks(i)   := new_info._1
-    s1_meta_codes(i) := new_info._2
+    val (_, newMask, newCode) = updateMetaInfo(
+      fromMSHR,
+      Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i)),
+      s1_req_vSetIdx(i),
+      s1_req_pTags(i),
+      Mux(s1_SRAM_valid, s1_SRAM_meta_codes(i), s1_meta_codes_r(i))
+    )
+    s1_waymasks(i)   := newMask
+    s1_meta_codes(i) := newCode
   }
 
   /**
     ******************************************************************************
-    * send enqueue req to WayLookup
+    * send enqueue req to ICacheWayLookup
     ******** **********************************************************************
     */
   // Disallow enqueuing wayLookup when SRAM write occurs.
@@ -350,30 +311,30 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     !s1_flush && !fromMSHR.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
   toWayLookup.bits.vSetIdx           := s1_req_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
-  toWayLookup.bits.ptag              := s1_req_ptags
-  toWayLookup.bits.gpaddr            := s1_req_gpaddr
+  toWayLookup.bits.pTag              := s1_req_pTags
+  toWayLookup.bits.gpAddr            := s1_req_gpaddr
   toWayLookup.bits.isForVSnonLeafPTE := s1_req_isForVSnonLeafPTE
-  toWayLookup.bits.meta_codes        := s1_meta_codes
+  toWayLookup.bits.metaCodes         := s1_meta_codes
   (0 until PortNumber).foreach { i =>
     // exception in first line is always valid, in second line is valid iff is doubleline request
     val excpValid = if (i == 0) true.B else s1_doubleline
-    // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing.
+    // Send s1_itlb_exception to ICacheWayLookup (instead of s1_exception_out) for better timing.
     // Will check pmp again in mainPipe
-    toWayLookup.bits.itlb_exception(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
-    toWayLookup.bits.itlb_pbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
+    toWayLookup.bits.itlbException(i) := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.itlbPbmt(i)      := Mux(excpValid, s1_itlb_pbmt(i), Pbmt.pma)
   }
 
   private val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
   when(toWayLookup.fire) {
     assert(
       PopCount(s1_waymasks_vec(0)) <= 1.U && (PopCount(s1_waymasks_vec(1)) <= 1.U || !s1_doubleline),
-      "Multi-hit:\nport0: count=%d ptag=0x%x vSet=0x%x vaddr=0x%x\nport1: count=%d ptag=0x%x vSet=0x%x vaddr=0x%x",
+      "Multi-hit:\nport0: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x\nport1: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x",
       PopCount(s1_waymasks_vec(0)) > 1.U,
-      s1_req_ptags(0),
+      s1_req_pTags(0),
       get_idx(s1_req_vaddr(0)),
       s1_req_vaddr(0),
       PopCount(s1_waymasks_vec(1)) > 1.U && s1_doubleline,
-      s1_req_ptags(1),
+      s1_req_pTags(1),
       get_idx(s1_req_vaddr(1)),
       s1_req_vaddr(1)
     )
@@ -385,7 +346,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     ******************************************************************************
     */
   toPMP.zipWithIndex.foreach { case (p, i) =>
-    // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
+    // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped
     p.valid     := s1_valid // !ExceptionType.hasException(s1_itlb_exception(i))
     p.bits.addr := s1_req_paddr(i)
     p.bits.size := 3.U
@@ -467,7 +428,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 
   s1_ready := next_state === m_idle
   s1_fire  := (next_state === m_idle) && s1_valid && !s1_flush // used to clear s1_valid & itlb_valid_latch
-  private val s1_real_fire = s1_fire && io.csr_pf_enable // real "s1 fire" that s1 enters s2
+  private val s1_real_fire = s1_fire && io.csrPfEnable // real "s1 fire" that s1 enters s2
 
   /**
     ******************************************************************************
@@ -476,8 +437,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * - 2. send req to missUnit
     ******************************************************************************
     */
-  private val s2_valid =
-    generatePipeControl(lastFire = s1_real_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
+  private val s2_valid = ValidHold(s1_real_fire, s2_fire, s2_flush)
 
   private val s2_req_vaddr      = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_real_fire)
   private val s2_isSoftPrefetch = RegEnable(s1_isSoftPrefetch, 0.U.asTypeOf(s1_isSoftPrefetch), s1_real_fire)
@@ -494,11 +454,11 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 // private val s2_meta_codes   = RegEnable(s1_meta_codes, 0.U.asTypeOf(s1_meta_codes), s1_real_fire)
 
   private val s2_req_vSetIdx = s2_req_vaddr.map(get_idx)
-  private val s2_req_ptags   = s2_req_paddr.map(get_phy_tag)
+  private val s2_req_pTags   = s2_req_paddr.map(get_phy_tag)
 
   // disabled for timing consideration
 //  // do metaArray ECC check
-//  val s2_meta_corrupt = VecInit((s2_req_ptags zip s2_meta_codes zip s2_waymasks).map{ case ((meta, code), waymask) =>
+//  val s2_meta_corrupt = VecInit((s2_req_pTags zip s2_meta_codes zip s2_waymasks).map{ case ((meta, code), waymask) =>
 //    val hit_num = PopCount(waymask)
 //    // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
 //    (encodeMetaECC(meta) =/= code && hit_num === 1.U) ||  // hit one way, but parity code does not match, ECC failure
@@ -523,7 +483,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
    */
   private val s2_MSHR_match = VecInit((0 until PortNumber).map { i =>
     (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
-    (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
+    (s2_req_pTags(i) === getPTagFromBlk(fromMSHR.bits.blkPAddr)) &&
     s2_valid && fromMSHR.valid && !fromMSHR.bits.corrupt
   })
   private val s2_MSHR_hits = (0 until PortNumber).map(i => ValidHoldBypass(s2_MSHR_match(i), s2_fire || s2_flush))
@@ -546,7 +506,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * send req to missUnit
     ******************************************************************************
     */
-  private val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
+  private val toMSHRArbiter = Module(new Arbiter(new MissReqBundle, PortNumber))
 
   // To avoid sending duplicate requests.
   private val has_send = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
@@ -560,7 +520,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
 
   (0 until PortNumber).foreach { i =>
     toMSHRArbiter.io.in(i).valid         := s2_valid && s2_miss(i) && !has_send(i)
-    toMSHRArbiter.io.in(i).bits.blkPaddr := getBlkAddr(s2_req_paddr(i))
+    toMSHRArbiter.io.in(i).bits.blkPAddr := getBlkAddr(s2_req_paddr(i))
     toMSHRArbiter.io.in(i).bits.vSetIdx  := s2_req_vSetIdx(i)
   }
 
