@@ -1257,7 +1257,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isCommit = io.commits.isCommit
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
-  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
+  val fuseCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.debug_fusionNum.getOrElse(0.U), 0.U) }.reduce(_ +& _), isCommit)
   val trueCommitCnt = RegEnable(io.commits.commitValid.zip(instrSizeCommit).map { case (v, instrSize) => Mux(v, instrSize, 0.U) }.reduce(_ +& _), isCommit)
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
