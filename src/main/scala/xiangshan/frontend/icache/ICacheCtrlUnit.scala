@@ -148,7 +148,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParams)(implicit p: Parameters) exten
 
     // inject FSM
     private def nInjectFsmState: Int = 5
-    private object InjectFsmState extends NamedUInt(nInjectFsmState) {
+    private object InjectFsmState extends NamedUInt(log2Up(nInjectFsmState)) {
       // scala ask identifier that begins with uppercase cannot be used in pattern matching like `X :: Nil = Enum()`
       // but we want UpperCamelCase for constants for better readability, so we dont use Enum() here
       def Idle:         UInt = 0.U(width.W)
