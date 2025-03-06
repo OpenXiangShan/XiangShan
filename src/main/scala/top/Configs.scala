@@ -277,12 +277,34 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
     ))
 })
 
+case class WithNSetL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+  case XSTileKey =>
+    val sets = n
+    up(XSTileKey).map(_.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        replacer = Some("setplru"),
+        nMissEntries = 16,
+        nProbeEntries = 8,
+        nReleaseEntries = 18,
+        nMaxPrefetchEntry = 6,
+        enableTagEcc = true,
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+      ))
+    ))
+})
+
 case class L2CacheConfig
 (
   size: String,
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
+  replacement: String = "drrip", 
   tp: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
@@ -306,6 +328,7 @@ case class L2CacheConfig
           vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
+        replacement = replacement,
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         tagECC = Some("secded"),
@@ -461,31 +484,17 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 // )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new MinimalConfig(n).alter((site, here, up) => {
-    case XSTileKey => up(XSTileKey).map(_.copy(
-      dcacheParametersOpt = Some(DCacheParameters(
-        nSets = 2
-      )),
-      L2CacheParamsOpt = Some(L2Param(
-        sets = 2,
-        replacement = "plru"
-      ))
-    ))
-  })
+  L2CacheConfig("1KB", inclusive = true, banks = 1, replacement="plru", tp = false)
+    ++ WithNSetL1D(2, ways = 4)
+    ++ new MinimalConfig(n)
+    ++ new WithCHI
 )
 
 class MinimalL1L2Config(n: Int = 1) extends Config(
-  new MinimalConfig(n).alter((site, here, up) => {
-    case XSTileKey => up(XSTileKey).map(_.copy(
-      dcacheParametersOpt = Some(DCacheParameters(
-        nSets = 2
-      )),
-      L2CacheParamsOpt = Some(L2Param(
-        sets = 2,
-        replacement = "plru"
-      ))
-    ))
-  })
+  L2CacheConfig("1KB", inclusive = true, banks = 1, replacement="plru", tp = false)
+    ++ WithNSetL1D(2, ways = 4)
+    ++ new MinimalConfig(n)
+    ++ new WithCHI
 )
 
 class CVMConfig(n: Int = 1) extends Config(
