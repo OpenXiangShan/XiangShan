@@ -477,12 +477,12 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    * This is the opposite of how mainPipe handles fromMiss.bits.corrupt,
    *   in which we should set s2_mshrHits to true.B, and send error to ifu.
    */
-  private val s2_mshrMatch = VecInit((0 until PortNumber).map { i =>
-    (s2_vSetIdx(i) === fromMiss.bits.vSetIdx) &&
-    (s2_pTags(i) === getPTagFromBlk(fromMiss.bits.blkPAddr)) &&
-    s2_valid && fromMiss.valid && !fromMiss.bits.corrupt
-  })
-  private val s2_mshrHits = (0 until PortNumber).map(i => ValidHoldBypass(s2_mshrMatch(i), s2_fire || s2_flush))
+  private val s2_mshrHits = (0 until PortNumber).map(i =>
+    ValidHoldBypass(
+      checkMshrHit(fromMiss, s2_vSetIdx(i), s2_pTags(i), s2_valid),
+      s2_fire || s2_flush
+    )
+  )
 
   private val s2_sramHits = s2_waymasks.map(_.orR)
   private val s2_hits     = VecInit((0 until PortNumber).map(i => s2_mshrHits(i) || s2_sramHits(i)))

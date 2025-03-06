@@ -34,7 +34,8 @@ import xiangshan.frontend.FtqToFetchBundle
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
     with ICacheAddrHelper
-    with ICacheDataSelHelper {
+    with ICacheDataSelHelper
+    with ICacheMissUpdateHelper {
 
   class ICacheMainPipeIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
@@ -192,7 +193,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_waymasks           = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
   private val s1_metaCodes          = RegEnable(s0_metaCodes, 0.U.asTypeOf(s0_metaCodes), s0_fire)
 
-  private val s1_vSetIdx = s1_vAddr.map(get_idx)
+  private val s1_vSetIdx = VecInit(s1_vAddr.map(get_idx))
   private val s1_pAddr   = getPAddrFromPTag(s1_vAddr, s1_pTags)
   private val s1_offset  = s1_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
 
@@ -237,23 +238,20 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * select data from MSHR, SRAM
     ******************************************************************************
     */
-  private val s1_mshrMatch = VecInit((0 until PortNumber).map { i =>
-    (s1_vSetIdx(i) === fromMiss.bits.vSetIdx) &&
-    (s1_pTags(i) === getPTagFromBlk(fromMiss.bits.blkPAddr)) &&
-    fromMiss.valid && !fromMiss.bits.corrupt
-  })
-  private val s1_mshrHits  = Seq(s1_valid && s1_mshrMatch(0), s1_valid && (s1_mshrMatch(1) && s1_doubleline))
+  private val s1_mshrHits = checkMshrHitVec(
+    fromMiss,
+    s1_vSetIdx,
+    s1_pTags,
+    VecInit(s1_valid, s1_valid && s1_doubleline)
+  )
   private val s1_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits / ICacheDataBanks).W)))
 
   private val s1_hits = (0 until PortNumber).map { i =>
     ValidHoldBypass(s1_mshrHits(i) || (RegNext(s0_fire) && s1_sramHits(i)), s1_fire || s1_flush)
   }
 
-  private val s1_bankIdxLow = (s1_offset >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-  private val s1_bankMshrHit = VecInit((0 until ICacheDataBanks).map { i =>
-    (i.U >= s1_bankIdxLow) && s1_mshrHits(0) ||
-    (i.U < s1_bankIdxLow) && s1_mshrHits(1)
-  })
+  private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
+
   private val s1_datas = VecInit((0 until ICacheDataBanks).map { i =>
     DataHoldBypass(Mux(s1_bankMshrHit(i), s1_mshrDatas(i), fromData.datas(i)), s1_bankMshrHit(i) || RegNext(s0_fire))
   })
@@ -288,7 +286,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_itlbPbmt           = RegEnable(s1_itlbPbmt, 0.U.asTypeOf(s1_itlbPbmt), s1_fire)
   private val s2_waymasks           = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
-  private val s2_vSetIdx = s2_vAddr.map(get_idx)
+  private val s2_vSetIdx = VecInit(s2_vAddr.map(get_idx))
   private val s2_offset  = s2_vAddr(0)(log2Ceil(blockBytes) - 1, 0)
   private val s2_pAddr   = getPAddrFromPTag(s2_vAddr, s2_pTags)
 
@@ -355,18 +353,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * monitor missUint response port
     ******************************************************************************
     */
-  private val s2_mshrMatch = VecInit((0 until PortNumber).map { i =>
-    (s2_vSetIdx(i) === fromMiss.bits.vSetIdx) &&
-    (s2_pTags(i) === getPTagFromBlk(fromMiss.bits.blkPAddr)) &&
-    fromMiss.valid // we don't care about whether it's corrupt here
-  })
-  private val s2_mshrHits  = Seq(s2_valid && s2_mshrMatch(0), s2_valid && s2_mshrMatch(1) && s2_doubleline)
+  private val s2_mshrHits = checkMshrHitVec(
+    fromMiss,
+    s2_vSetIdx,
+    s2_pTags,
+    VecInit(s2_valid, s2_valid && s2_doubleline),
+    allowCorrupt = true // we also need to update s2_hits when fromMiss.bits.corrupt
+  )
   private val s2_mshrDatas = fromMiss.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits / ICacheDataBanks).W)))
 
-  private val s2_bankIdxLow = (s2_offset >> log2Ceil(blockBytes / ICacheDataBanks)).asUInt
-  private val s2_bankMshrHit = VecInit((0 until ICacheDataBanks).map { i =>
-    ((i.U >= s2_bankIdxLow) && s2_mshrHits(0)) || ((i.U < s2_bankIdxLow) && s2_mshrHits(1))
-  })
+  private val s2_bankMshrHit = getBankValid(s2_mshrHits, s2_offset)
 
   (0 until ICacheDataBanks).foreach { i =>
     when(s1_fire) {
