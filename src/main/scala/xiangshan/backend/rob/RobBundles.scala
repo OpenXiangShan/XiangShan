@@ -83,6 +83,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
     val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
     // debug_end
 
     def isWritebacked: Bool = !uopNum.orR && stdWritebacked
@@ -121,6 +122,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
     val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
     // debug_end
     val dirtyFs = Bool()
     val dirtyVs = Bool()
@@ -147,6 +149,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
     robEntry.debug_pdest.foreach(_ := robEnq.pdest)
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
+    robEntry.debug_fusionNum.foreach(_ := robEnq.fusionNum)
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
@@ -179,6 +182,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
     robCommitEntry.debug_pdest.foreach(_ := robEntry.debug_pdest.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
+    robCommitEntry.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
   }
 }
 
