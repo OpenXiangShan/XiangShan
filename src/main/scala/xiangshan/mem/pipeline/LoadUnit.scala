@@ -1314,7 +1314,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_safe_writeback = s2_real_exception || s2_safe_wakeup || s2_vp_match_fail
 
   // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid
+  io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
