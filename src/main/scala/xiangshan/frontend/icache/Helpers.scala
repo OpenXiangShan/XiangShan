@@ -96,10 +96,25 @@ trait ICacheEccHelper extends HasICacheParameters {
 }
 
 trait ICacheDataSelHelper extends HasICacheParameters {
+  def bankOffBits: Int = log2Ceil(blockBytes / ICacheDataBanks)
+
+  def getBankIdxLow(blkOffset: UInt): UInt =
+    (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
+
+  def getBankIdxHigh(blkOffset: UInt): UInt =
+    ((Cat(0.U(1.W), blkOffset) + 32.U) >> bankOffBits).asUInt
+
+  def getBankValid(portValid: Vec[Bool], blkOffset: UInt): Vec[Bool] = {
+    require(portValid.length == PortNumber)
+    val bankIdxLow = getBankIdxLow(blkOffset)
+    VecInit((0 until ICacheDataBanks).map { i =>
+      (i.U >= bankIdxLow) && portValid(0) || (i.U < bankIdxLow) && portValid(1)
+    })
+  }
+
   def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[Vec[Bool]] = {
-    val bankOffBits = log2Ceil(blockBytes / ICacheDataBanks)
-    val bankIdxLow  = (Cat(0.U(1.W), blkOffset) >> bankOffBits).asUInt
-    val bankIdxHigh = ((Cat(0.U(1.W), blkOffset) + 32.U) >> bankOffBits).asUInt
+    val bankIdxLow  = getBankIdxLow(blkOffset)
+    val bankIdxHigh = getBankIdxHigh(blkOffset)
     val bankSel     = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
     assert(
       !valid || PopCount(bankSel) === ICacheBankVisitNum.U,
@@ -162,4 +177,28 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
     val updated = valid && vSetSame && (pTagSame || waySame)
     (updated, newMask, newCode)
   }
+
+  def checkMshrHit(
+      update:       Valid[MissRespBundle],
+      vSetIdx:      UInt,
+      pTag:         UInt,
+      valid:        Bool,
+      allowCorrupt: Boolean = false
+  ): Bool =
+    valid &&
+      update.valid &&
+      vSetIdx === update.bits.vSetIdx &&
+      pTag === getPTagFromBlk(update.bits.blkPAddr) &&
+      (if (allowCorrupt) true.B else !update.bits.corrupt)
+
+  def checkMshrHitVec(
+      update:       Valid[MissRespBundle],
+      vSetIdxVec:   Vec[UInt],
+      pTagVec:      Vec[UInt],
+      validVec:     Vec[Bool],
+      allowCorrupt: Boolean = false
+  ): Vec[Bool] =
+    VecInit((vSetIdxVec zip pTagVec zip validVec).map { case ((vs, pt), v) =>
+      checkMshrHit(update, vs, pt, v, allowCorrupt)
+    })
 }
