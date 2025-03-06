@@ -137,7 +137,8 @@
  <!-- lowerCamelCase for variables and UpperCamelCase for constants -->
  <check enabled="true" class="org.scalastyle.scalariform.FieldNamesChecker" level="warning">
   <parameters>
-   <parameter name="regex">^[a-z][A-Za-z0-9]*$</parameter>
+   <!-- we allow sx_lowerCamelCase for pipeline signals -->
+   <parameter name="regex">^(s[0-9]_)?[a-z][A-Za-z0-9]*$</parameter>
    <parameter name="objectFieldRegex">^[A-Z][A-Za-z0-9]*$</parameter>
   </parameters>
  </check>
@@ -157,7 +158,7 @@
  <!-- pure lower cases for package names -->
  <check enabled="true" class="org.scalastyle.scalariform.PackageNamesChecker" level="warning">
   <parameters>
-   <parameter name="regex">^[a-z]*$</parameter>
+   <parameter name="regex">^[a-z0-9]*$</parameter>
   </parameters>
  </check>
 
