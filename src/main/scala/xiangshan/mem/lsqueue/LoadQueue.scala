@@ -193,6 +193,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val uncache = new UncacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
+    val misalignAllowSpec = Input(Bool())
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -203,6 +204,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqEmpty = Output(Bool())
 
     val lqDeqPtr = Output(new LqPtr)
+
+    val rarValidCount = Output(UInt())
 
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssed = Input(Bool())
@@ -220,6 +223,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.validCount<> io.rarValidCount
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
@@ -279,6 +283,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   exceptionBuffer.io.req(LoadPipelineWidth + VecLoadPipelineWidth).bits.vaNeedExt := true.B
 
   loadQueueReplay.io.loadMisalignFull := io.loadMisalignFull
+  loadQueueReplay.io.misalignAllowSpec := io.misalignAllowSpec
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
