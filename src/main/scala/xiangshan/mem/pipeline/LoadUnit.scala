@@ -1314,7 +1314,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_safe_writeback = s2_real_exception || s2_safe_wakeup || s2_vp_match_fail
 
   // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid
+  /**
+    * In order to ensure timing, the RAR enqueue conditions need to be compromised, worst source of timing from pmp and missQueue.
+    *   * if LoadQueueRARSize == VirtualLoadQueueSize, just need to exclude prefetching.
+    *   * if LoadQueueRARSize < VirtualLoadQueueSize, need to consider the situation of s2_can_query
+    */
+  if (LoadQueueRARSize == VirtualLoadQueueSize) {
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf
+  } else {
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
+  }
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
