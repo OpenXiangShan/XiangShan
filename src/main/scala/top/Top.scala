@@ -44,6 +44,9 @@ import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
 
+import difftest.common.DifftestWiring
+import difftest.util.Profile
+
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
 {
@@ -439,6 +442,32 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   lazy val module = new XSTopImp(this)
 }
 
+class XSTileDiffTop(implicit p: Parameters) extends Module {
+  override val desiredName: String = "XSDiffTop"
+  val l_soc = LazyModule(new XSTop())
+  val soc = Module(l_soc.module)
+
+  // Expose XSTop IOs outside, i.e. io
+  def exposeIO(data: Data, name: String): Unit = {
+    val dummy = IO(chiselTypeOf(data)).suggestName(name)
+    dummy <> data
+  }
+  def exposeOptionIO(data: Option[Data], name: String): Unit = {
+    if (data.isDefined) {
+      val dummy = IO(chiselTypeOf(data.get)).suggestName(name)
+      dummy <> data.get
+    }
+  }
+  exposeIO(l_soc.nmi,"nmi")
+  exposeIO(soc.memory, "memory")
+  exposeIO(soc.peripheral,"peripheral")
+  exposeIO(soc.io,"io")
+  exposeOptionIO(soc.dma, "dma")
+
+  DifftestWiring.createAndConnectExtraIOs()
+  Profile.generateJson("XiangShan")
+}
+
 object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
@@ -452,6 +481,8 @@ object TopMain extends App {
 
   if (config(SoCParamsKey).UseXSNoCDiffTop) {
     Generator.execute(firrtlOpts, DisableMonitors(p => new XSNoCDiffTop()(p))(config), firtoolOpts)
+  } else if (config(SoCParamsKey).UseXSTileDiffTop) {
+    Generator.execute(firrtlOpts, DisableMonitors(p => new XSTileDiffTop()(p))(config), firtoolOpts)
   } else {
     val soc = if (config(SoCParamsKey).UseXSNoCTop)
       DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
