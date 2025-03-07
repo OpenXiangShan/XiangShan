@@ -235,6 +235,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 2048,
           banks = 4,
+          fullAddressBits = 48,
           clientCaches = Seq(L2Param())
         )),
         L3NBanks = 1
