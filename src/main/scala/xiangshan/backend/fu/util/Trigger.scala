@@ -289,23 +289,20 @@ trait SdtrigExt extends HasXSParameter{
     val overallLess = Wire(Vec(pcVecWidth, Bool()))
 
     overallEqual.zipWithIndex.map{case (o, i) => o :=
-      (!carry(i) && lowPCEqual(i) && highPCEqual) ||
+      !carry(i) && highPCEqual  && lowPCEqual(i) ||
         carry(i) && highPC1Equal && lowPCEqual(i)
     }
 
     // [left : greater 1. nonCarry 2. carry
     overallGreater.zipWithIndex.map { case (o, i) => o :=
-      !carry(i) && (highPCGreater || highPCEqual && lowPCGreater(i)) ||
-       carry(i) && (highPCGreater || highPCEqual || highPC1Equal && lowPCGreater(i))
+      !carry(i) && (highPCGreater || highPCEqual && (lowPCEqual(i) || lowPCGreater(i))) ||
+       carry(i) && (highPC1Greater || highPC1Equal && (lowPCEqual(i) || lowPCGreater(i)))
     }
 
-    // right) : less 1. nonCarryRight 2. carryRight
-    val carryRight = Wire(Vec(pcVecWidth, Bool()))
-    carryRight.zipWithIndex.map{case (c, i) => c := pcVec(i)(highPos) =/= pcVec(pcVecWidth - 1)(highPos)}
-
+    // right) : less 1. nonCarry 2. carry
     overallLess.zipWithIndex.map { case (o, i) => o :=
-      !carryRight(i) && (highPCLess || highPCEqual && lowPCLess(i)) ||
-       carryRight(i) && (highPC1Less || highPC1Equal || highPCEqual && lowPCLess(i))
+      !carry(i) && (highPCLess || highPCEqual && lowPCLess(i)) ||
+       carry(i) && (highPC1Less || highPC1Equal && lowPCLess(i))
     }
 
     val ret = Wire(Vec(pcVecWidth, Bool()))
