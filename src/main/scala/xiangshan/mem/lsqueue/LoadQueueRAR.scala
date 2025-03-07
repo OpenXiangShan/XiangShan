@@ -47,6 +47,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     // global
     val lqFull = Output(Bool())
+
+    val validCount = Output(UInt())
   })
 
   private val PartialPAddrStride: Int = 6
@@ -266,6 +268,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   })
 
   io.lqFull := freeList.io.empty
+  io.validCount := freeList.io.validCount
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
