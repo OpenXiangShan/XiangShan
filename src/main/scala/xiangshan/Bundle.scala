@@ -809,3 +809,15 @@ class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
   val l2Miss = Bool()
   val l3Miss = Bool()
 }
+
+class LowPowerIO(implicit p: Parameters) extends XSBundle {
+  /* i_*: SoC -> CPU   o_*: CPU -> SoC */
+  val o_cpu_no_op = Output(Bool()) 
+  //physical power down 
+  val i_cpu_pwrdown_req_n = Input(Bool())
+  val o_cpu_pwrdown_ack_n = Output(Bool())
+  // power on/off sequence control for Core iso/rst/clk
+  val i_cpu_iso_en= Input(Bool())
+  val i_cpu_sw_rst_n = Input(Bool())
+  val i_cpu_sw_clk_en= Input(Bool())
+}

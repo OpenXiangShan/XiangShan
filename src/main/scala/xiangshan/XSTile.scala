@@ -105,7 +105,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
-      val cpu_poff = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
@@ -119,11 +118,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val clintTime = Input(ValidIO(UInt(64.W)))
       val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
       val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
+      val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
     })
 
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
-    dontTouch(io.cpu_poff)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -149,11 +149,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
 
-    //lower power
-    l2top.module.io.l2_flush_en := core.module.io.l2_flush_en
-    core.module.io.l2_flush_done := l2top.module.io.l2_flush_done
-    io.cpu_poff := l2top.module.io.cpu_poff.toTile
-    l2top.module.io.cpu_poff.fromCore := core.module.io.power_down_en
+    l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
+    io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
+    core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
+    io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
+
     l2top.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
     l2top.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
     core.module.io.dft.zip(l2top.module.io.dft_out).foreach({case(a, b) => a := b})
