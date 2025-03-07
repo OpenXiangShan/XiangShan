@@ -102,7 +102,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
+    numWDelay = 1,
     numCamPort = LoadPipelineWidth,
     enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
     paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
