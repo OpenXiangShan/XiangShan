@@ -69,7 +69,7 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
     val time = RegInit(0.U(timeWidth.W))
     when (io.time.valid) { time := io.time.bits }
     val nTiles = intnode.out.size
-    val timecmp = Seq.fill(nTiles) { Reg(UInt(timeWidth.W)) }
+    val timecmp = Seq.fill(nTiles) { RegInit((BigInt(2).pow(timeWidth)-1).asUInt(timeWidth.W))}
     val ipi = Seq.fill(nTiles) { RegInit(0.U(1.W)) }
 
     val (intnode_out, _) = intnode.out.unzip
