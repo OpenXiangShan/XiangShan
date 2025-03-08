@@ -19,6 +19,7 @@ package top
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.auto._
 
+import aia.IMSICParams
 import org.chipsalliance.cde.config.Parameters
 import system.SoCParamsKey
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
@@ -26,6 +27,7 @@ import xiangshan.XSTileKey
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.util.AsyncQueueParams
+import device.IMSICBusType
 
 case class YamlConfig(
   PmemRanges: Option[List[MemoryRange]],
@@ -37,7 +39,9 @@ case class YamlConfig(
   WFIResume: Option[Boolean],
   SeperateDM: Option[Boolean],
   SeperateTLBus: Option[Boolean],
-  SeperateTLBusRanges: Option[List[AddressSet]]
+  SeperateTLBusRanges: Option[List[AddressSet]],
+  IMSICBusType: Option[String],
+  IMSICParams: Option[IMSICParams],
 )
 
 object YamlParser {
@@ -95,6 +99,16 @@ object YamlParser {
     yamlConfig.SeperateTLBusRanges.foreach { ranges =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBusRanges = ranges)
+      })
+    }
+    yamlConfig.IMSICBusType.foreach { busType =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(IMSICBusType = device.IMSICBusType.withName(busType))
+      })
+    }
+    yamlConfig.IMSICParams.foreach { params =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(IMSICParams = params)
       })
     }
     newConfig

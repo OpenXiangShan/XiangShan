@@ -20,7 +20,7 @@ import xiangshan.frontend.FtqPtr
 import CSRConst._
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
-  with HasCircularQueuePtrHelper with HasCriticalErrors
+  with HasCircularQueuePtrHelper with HasCriticalErrors with HasSoCParameter
 {
   val csrIn = io.csrio.get
   val csrOut = io.csrio.get
@@ -91,7 +91,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   private val waddrReg = RegEnable(addr, 0.U(12.W), io.in.fire)
   private val wdataReg = RegEnable(wdata, 0.U(64.W), io.in.fire)
-  
+
   private val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
   private val thisRobIdx = Wire(new RobPtr)
   when (io.in.valid) {
@@ -201,30 +201,32 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapTvalMod.io.fromCtrlBlock.flush := io.flush
   trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
-  private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
-  imsic.i.hartId := io.csrin.get.hartId
-  imsic.i.msiInfo := io.csrin.get.msiInfo
-  imsic.i.csr.addr.valid := csrMod.toAIA.addr.valid
-  imsic.i.csr.addr.bits.addr := csrMod.toAIA.addr.bits.addr
-  imsic.i.csr.addr.bits.prvm := csrMod.toAIA.addr.bits.prvm.asUInt
-  imsic.i.csr.addr.bits.v := csrMod.toAIA.addr.bits.v.asUInt
-  imsic.i.csr.vgein := csrMod.toAIA.vgein
-  imsic.i.csr.mClaim := csrMod.toAIA.mClaim
-  imsic.i.csr.sClaim := csrMod.toAIA.sClaim
-  imsic.i.csr.vsClaim := csrMod.toAIA.vsClaim
-  imsic.i.csr.wdata.valid := csrMod.toAIA.wdata.valid
-  imsic.i.csr.wdata.bits.op := csrMod.toAIA.wdata.bits.op
-  imsic.i.csr.wdata.bits.data := csrMod.toAIA.wdata.bits.data
+  val imsic = Module(new aia.IMSIC(soc.IMSICParams))
+  imsic.fromCSR.addr.valid := csrMod.toAIA.addr.valid
+  imsic.fromCSR.addr.bits.addr := csrMod.toAIA.addr.bits.addr
+  imsic.fromCSR.addr.bits.virt := csrMod.toAIA.addr.bits.v.asUInt.asBool
+  imsic.fromCSR.addr.bits.priv := aia.PrivType(csrMod.toAIA.addr.bits.prvm.asUInt)
+  imsic.fromCSR.vgein := csrMod.toAIA.vgein
+  imsic.fromCSR.wdata.valid := csrMod.toAIA.wdata.valid
+  imsic.fromCSR.wdata.bits.op := aia.OpType(csrMod.toAIA.wdata.bits.op)
+  imsic.fromCSR.wdata.bits.data := csrMod.toAIA.wdata.bits.data
+  imsic.fromCSR.claims(0) := csrMod.toAIA.mClaim
+  imsic.fromCSR.claims(1) := csrMod.toAIA.sClaim
+  imsic.fromCSR.claims(2) := csrMod.toAIA.vsClaim
 
-  csrMod.fromAIA.rdata.valid        := imsic.o.csr.rdata.valid
-  csrMod.fromAIA.rdata.bits.data    := imsic.o.csr.rdata.bits.rdata
-  csrMod.fromAIA.rdata.bits.illegal := imsic.o.csr.rdata.bits.illegal
-  csrMod.fromAIA.meip    := imsic.o.meip
-  csrMod.fromAIA.seip    := imsic.o.seip
-  csrMod.fromAIA.vseip   := imsic.o.vseip
-  csrMod.fromAIA.mtopei  := imsic.o.mtopei
-  csrMod.fromAIA.stopei  := imsic.o.stopei
-  csrMod.fromAIA.vstopei := imsic.o.vstopei
+  csrMod.fromAIA.rdata.valid        := imsic.toCSR.rdata.valid
+  csrMod.fromAIA.rdata.bits.data    := imsic.toCSR.rdata.bits
+  csrMod.fromAIA.rdata.bits.illegal := imsic.toCSR.illegal
+  csrMod.fromAIA.meip    := imsic.toCSR.pendings(0)
+  csrMod.fromAIA.seip    := imsic.toCSR.pendings(1)
+  csrMod.fromAIA.vseip   := imsic.toCSR.pendings(soc.IMSICParams.intFilesNum - 1, 2)
+  csrMod.fromAIA.mtopei  := imsic.toCSR.topeis(0)
+  csrMod.fromAIA.stopei  := imsic.toCSR.topeis(1)
+  csrMod.fromAIA.vstopei := imsic.toCSR.topeis(2)
+
+  imsic.msiio.vld_req := io.csrin.get.msiInfo.valid
+  imsic.msiio.data := io.csrin.get.msiInfo.bits
+  io.csrio.get.msiAck := imsic.msiio.vld_ack
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
 
@@ -371,9 +373,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrToDecode := csrMod.io.toDecode
 }
 
-class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
+class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId = Input(UInt(8.W))
-  val msiInfo = Input(ValidIO(new MsiInfoBundle))
+  val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val l2FlushDone = Input(Bool())

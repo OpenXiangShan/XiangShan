@@ -100,6 +100,17 @@ case class SoCParameters
   SeperateTLBus: Boolean = false,
   SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
   SeperateTLBusRanges: Seq[AddressSet] = Seq(),
+  IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
+  IMSICParams: aia.IMSICParams = aia.IMSICParams(
+    imsicIntSrcWidth = 8,
+    mAddr = 0x3A800000,
+    sgAddr = 0x3B000000,
+    geilen = 5,
+    vgeinWidth = 6,
+    iselectWidth = 12,
+    EnableImsicAsyncBridge = true,
+    HasTEEIMSIC = false
+  ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
