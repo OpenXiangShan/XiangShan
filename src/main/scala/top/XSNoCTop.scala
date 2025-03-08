@@ -178,6 +178,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // imsic tl io
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
+    // imsic bare io
+    val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
@@ -189,10 +191,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     // imsic axi4 io connection
     imsic_axi4.foreach(_.viewAs[AXI4Bundle] <> wrapper.u_imsic_bus_top.axi4.get.elements.head._2)
-
     // imsic tl io connection
     wrapper.u_imsic_bus_top.tl_m.foreach(_ <> imsic_m_tl.get)
     wrapper.u_imsic_bus_top.tl_s.foreach(_ <> imsic_s_tl.get)
+    // imsic bare io connection
+    wrapper.u_imsic_bus_top.module.msi.foreach(_ <> imsic.get)
 
     // input
     dontTouch(io)

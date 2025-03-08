@@ -24,9 +24,13 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
 import system.HasSoCParameter
 
+object IMSICBusType extends Enumeration {
+  val NONE, TL, AXI = Value
+}
+
 class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParameter {
-  val tl_reg_imsic = Option.when(soc.IMSICUseTL)(LazyModule(new aia.TLRegIMSIC(soc.IMSICParams, seperateBus = true)))
-  val axi_reg_imsic = Option.when(!soc.IMSICUseTL)(LazyModule(new aia.AXIRegIMSIC(soc.IMSICParams, seperateBus = false)))
+  // Tilelink Bus
+  val tl_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.TL)(LazyModule(new aia.TLRegIMSIC(soc.IMSICParams, seperateBus = true)))
 
   val tl = tl_reg_imsic.map { tl_reg_imsic =>
     val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
@@ -48,6 +52,9 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   val tl_m = tl.map(x => InModuleBody(x(0).makeIOs()))
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
 
+  // AXI4 Bus
+  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC(soc.IMSICParams, seperateBus = false)))
+
   val axi = axi_reg_imsic.map { axi_reg_imsic =>
     val axinode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       Seq(AXI4MasterParameters(
@@ -64,8 +71,14 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   class imsic_bus_top_imp(wrapper: imsic_bus_top) extends LazyModuleImp(wrapper) {
     val msiio = IO(Flipped(new aia.MSITransBundle(soc.IMSICParams)))
 
+    // No Bus
+    val msi = Option.when(soc.IMSICBusType == device.IMSICBusType.NONE)(
+      IO(new aia.MSITransBundle(soc.IMSICParams))
+    )
+
     tl_reg_imsic.foreach(_.module.msiio <> msiio)
     axi_reg_imsic.foreach(_.module.msiio <> msiio)
+    msi.foreach(_ <> msiio)
   }
 
   lazy val module = new imsic_bus_top_imp(this)
