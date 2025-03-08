@@ -24,7 +24,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import device.{IMSICAsync, MsiInfoBundle}
+import device.IMSICAsync
 import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
@@ -71,7 +71,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     val soc_reset = IO(Input(AsyncReset()))
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
-      val msiInfo = Input(ValidIO(new MsiInfoBundle))
+      val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+      val msiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -114,6 +115,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
+    io.msiAck := tile.module.io.msiAck
     io.hartIsInReset := tile.module.io.hartIsInReset
     io.traceCoreInterface <> tile.module.io.traceCoreInterface
     io.debugTopDown <> tile.module.io.debugTopDown

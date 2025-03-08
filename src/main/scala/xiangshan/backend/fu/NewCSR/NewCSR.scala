@@ -36,9 +36,6 @@ object CSRConfig {
 
   final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
 
-  // the width of VGEIN
-  final val VGEINWidth = 6
-
   final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
 
   final val InstWidth = 32
