@@ -95,6 +95,7 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   UseXSNoCDiffTop: Boolean = false,
+  UseXSTileDiffTop: Boolean = false,
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
     imsicIntSrcWidth = 8,
