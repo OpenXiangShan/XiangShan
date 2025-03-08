@@ -466,8 +466,8 @@ jobs:
         run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check openLLC
         run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check src/main/resources/aia
-        run: cd src/main/resources/aia && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
+      - name: check ChiselAIA
+        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
 
   scalafmt:
     runs-on: ubuntu-latest
