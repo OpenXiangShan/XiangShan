@@ -293,6 +293,9 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   exposeOptionIO(soc.noc_clock, "noc_clock")
   exposeOptionIO(soc.noc_reset, "noc_reset")
   exposeOptionIO(soc.imsic_axi4, "imsic_axi4")
+  exposeOptionIO(soc.imsic_m_tl, "imsic_m_tl")
+  exposeOptionIO(soc.imsic_s_tl, "imsic_s_tl")
+  exposeOptionIO(soc.imsic, "imsic")
 
   // TODO:
   // XSDiffTop is only part of DUT, we can not instantiate difftest here.
