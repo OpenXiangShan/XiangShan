@@ -36,7 +36,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
     val tlnodes = Seq.fill(2)(TLClientNode(Seq(TLMasterPortParameters.v1(
       clients = Seq(TLMasterParameters.v1(
         "tl",
-        sourceId = IdRange(0, 16)
+        sourceId = IdRange(0, 65536)
       ))
     ))))
     tl_reg_imsic.fromMem zip tlnodes foreach { case (fromMem, tlnode) =>
@@ -59,7 +59,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
     val axinode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       Seq(AXI4MasterParameters(
         name = "s_axi_",
-        id = IdRange(0, 16)
+        id = IdRange(0, 65536)
       ))
     )))
     axi_reg_imsic.axi4tolite.head.node := AXI4Buffer() := axinode
