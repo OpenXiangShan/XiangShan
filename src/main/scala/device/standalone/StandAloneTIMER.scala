@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.interrupts._
 import utility.IntBuffer
+import device.{TIMER,TIMERParams}
 
 class StandAloneTIMER (
   useTL: Boolean = false,
