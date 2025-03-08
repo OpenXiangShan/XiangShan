@@ -1,4 +1,4 @@
-// See LICENSE.SiFive for license details.
+// See LICENSE.bosc for license details.
 
 package device
 
