@@ -3,10 +3,13 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
+import org.chipsalliance.cde.config.Parameters
 import CSRConfig._
+import system.HasSoCParameter
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
+import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap
 
@@ -278,16 +281,14 @@ class SIprio2Bundle extends CSRBundle {
   val Prio15    = RW(63, 56).withReset(0.U)
 }
 
-class CSRToAIABundle extends Bundle {
-  private final val AddrWidth = 12
-
+class CSRToAIABundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val addr = ValidIO(new Bundle {
-    val addr = UInt(AddrWidth.W)
+    val addr = UInt(soc.IMSICParams.iselectWidth.W)
     val v = VirtMode()
     val prvm = PrivMode()
   })
 
-  val vgein = UInt(VGEINWidth.W)
+  val vgein = UInt(soc.IMSICParams.vgeinWidth.W)
 
   val wdata = ValidIO(new Bundle {
     val op = UInt(2.W)
@@ -299,15 +300,14 @@ class CSRToAIABundle extends Bundle {
   val vsClaim = Bool()
 }
 
-class AIAToCSRBundle extends Bundle {
-  private val NumVSIRFiles = 5
+class AIAToCSRBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val rdata = ValidIO(new Bundle {
     val data = UInt(XLEN.W)
     val illegal = Bool()
   })
   val meip    = Bool()
   val seip    = Bool()
-  val vseip   = UInt(NumVSIRFiles.W)
+  val vseip   = UInt(soc.IMSICParams.geilen.W)
   val mtopei  = new TopEIBundle
   val stopei  = new TopEIBundle
   val vstopei = new TopEIBundle

@@ -24,7 +24,6 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import device.MsiInfoBundle
 import utils._
 import utility._
 import system.SoCParamsKey
@@ -52,6 +51,7 @@ import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
+import system.HasSoCParameter
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -292,6 +292,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasFPUParameters
   with HasPerfEvents
+  with HasSoCParameter
   with HasL1PrefetchSourceParameter
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters
@@ -330,7 +331,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val fromTopToBackend = Input(new Bundle {
-      val msiInfo   = ValidIO(new MsiInfoBundle)
+      val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
       val clintTime = ValidIO(UInt(64.W))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
@@ -340,6 +341,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_l2_flush_en = Output(Bool())
     val outer_power_down_en = Output(Bool())
     val outer_cpu_critical_error = Output(Bool())
+    val outer_msi_ack = Output(Bool())
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
@@ -1962,6 +1964,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
+  io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
 

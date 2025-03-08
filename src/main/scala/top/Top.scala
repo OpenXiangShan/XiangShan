@@ -312,7 +312,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(new MsiInfoBundle)))
+    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {

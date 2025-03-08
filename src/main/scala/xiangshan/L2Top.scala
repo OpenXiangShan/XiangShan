@@ -25,7 +25,6 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
-import device.MsiInfoBundle
 import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2}
@@ -172,8 +171,12 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val toCore = Output(UInt(64.W))
       }
       val msiInfo = new Bundle() {
-        val fromTile = Input(ValidIO(new MsiInfoBundle))
-        val toCore = Output(ValidIO(new MsiInfoBundle))
+        val fromTile = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+        val toCore = Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+      }
+      val msiAck = new Bundle {
+        val fromCore = Input(Bool())
+        val toTile = Output(Bool())
       }
       val cpu_halt = new Bundle() {
         val fromCore = Input(Bool())
@@ -241,6 +244,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.cpu_halt.toTile := io.cpu_halt.fromCore
     io.cpu_poff.toTile := io.cpu_poff.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
+    io.msiAck.toTile := io.msiAck.fromCore
     io.l2_flush_done := true.B //TODO connect CoupleedL2
     io.l3Miss.toCore := io.l3Miss.fromTile
     io.clintTime.toCore := io.clintTime.fromTile
