@@ -351,6 +351,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     //lvp
     val loadtolvp = Vec(LduCnt, Valid(new LoadToIfu))
+    //read pc from rob
+    val loadRdPc = Vec(LduCnt, new LoadReadPc)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -452,7 +454,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   for (i <- 0 until LduCnt) {
     io.loadtolvp(i).valid := loadUnits(i).io.toifu.valid
     io.loadtolvp(i).bits := loadUnits(i).io.toifu.bits
-    io.loadtolvp(i).bits.loadpc := io.ooo_to_mem.loadPc(i)
+//    io.loadtolvp(i).bits.loadpc := RegNextN(io.ooo_to_mem.loadPc(i), 2)
+    io.loadtolvp(i).bits.loadpc := io.loadRdPc(i).debugpc
+    io.loadRdPc(i) <> loadUnits(i).io.readPc
   }
 
   val hartId = p(XSCoreParamsKey).HartId

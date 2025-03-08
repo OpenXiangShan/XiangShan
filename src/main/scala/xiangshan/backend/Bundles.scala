@@ -314,10 +314,20 @@ object Bundles {
       * @param successor Seq[(psrc, srcType)]
       * @return Seq[if wakeup psrc]
       */
-    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool): Seq[Bool] = {
-      successor.map { case (thatPsrc, srcType) =>
+//    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool, pvt: Seq[Bool]): Seq[Bool] = {
+//      successor.map { case (thatPsrc, srcType) =>
+//        val pdestMatch = pdest === thatPsrc
+//        pdestMatch && (
+//          SrcType.isFp(srcType) && this.fpWen ||
+//            SrcType.isXp(srcType) && this.rfWen ||
+//            SrcType.isVp(srcType) && this.vecWen
+//          ) && valid
+//      }
+//    }
+    def wakeUp(successor: Seq[(UInt, UInt)], valid: Bool, pvt: Seq[Bool]): Seq[Bool] = {
+      successor.zip(pvt).map { case ((thatPsrc, srcType), pvtFlag) =>
         val pdestMatch = pdest === thatPsrc
-        pdestMatch && (
+        !pvtFlag && pdestMatch && (
           SrcType.isFp(srcType) && this.fpWen ||
             SrcType.isXp(srcType) && this.rfWen ||
             SrcType.isVp(srcType) && this.vecWen
@@ -338,10 +348,10 @@ object Bundles {
         SrcType.isVp(srcType) && this.vlWen
       ) && valid
     }
-    def wakeUpFromIQ(successor: Seq[(UInt, UInt)]): Seq[Bool] = {
-      successor.map { case (thatPsrc, srcType) =>
+    def wakeUpFromIQ(successor: Seq[(UInt, UInt)], pvt: Seq[Bool]): Seq[Bool] = {
+      successor.zip(pvt).map { case ((thatPsrc, srcType), pvtFlag) =>
         val pdestMatch = pdest === thatPsrc
-        pdestMatch && (
+        !pvtFlag && pdestMatch && (
           SrcType.isFp(srcType) && this.fpWen ||
             SrcType.isXp(srcType) && this.rfWen ||
             SrcType.isVp(srcType) && this.vecWen
@@ -618,6 +628,7 @@ object Bundles {
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val ldest         = UInt(LogicRegsWidth.W)
+    val predSrc       = UInt(params.rdPregIdxWidth.W)
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
@@ -664,6 +675,7 @@ object Bundles {
       this.robIdx        := source.common.robIdx
       this.pdest         := source.common.pdest
       this.ldest         := source.common.ldest
+      this.predSrc       := source.common.predSrc
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
@@ -704,6 +716,8 @@ object Bundles {
   ) extends Bundle with BundleSource with HasXSParameter {
     val data         = Vec(params.wbPathNum, UInt(params.destDataBitsMax.W))
     val pdest        = UInt(params.wbPregIdxWidth.W)
+    val predSrc      = UInt(params.rdPregIdxWidth.W)
+    val pred         = Bool()
     val robIdx       = new RobPtr
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
     val fpWen        = if (params.needFpWen)    Some(Bool())                  else None
@@ -749,6 +763,7 @@ object Bundles {
     val v0Wen = Bool()
     val vlWen = Bool()
     val pdest = UInt(params.pregIdxWidth(backendParams).W)
+    val pred = Bool()
     val data = UInt(params.dataWidth.W)
     val robIdx = new RobPtr()(p)
     val flushPipe = Bool()
@@ -771,6 +786,7 @@ object Bundles {
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
+      this.pred   := source.pred
       this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)

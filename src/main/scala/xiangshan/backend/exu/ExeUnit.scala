@@ -371,6 +371,8 @@ class ExeUnitImp(
   io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
+  io.out.bits.predSrc := io.in.bits.predSrc
+  io.out.bits.pred := io.in.bits.dataSources.map(_.readPvt).reduce(_ || _) && Cat(fuOutValidOH).orR
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))

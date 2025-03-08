@@ -29,7 +29,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.{DecodeToLvp, FtqPtr}
 
 class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   // params alias
@@ -40,22 +40,26 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
 
-  val redirect = Input(Bool())
-  val canAccept = Output(Bool())
-  // from Ibuffer
-  val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
-  // to Rename
-  val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
-  // RAT read
-  val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(IntLogicRegs))))
-  val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(FpLogicRegs))))
-  val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
-  val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
-  val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
-  // csr control
-  val csrCtrl = Input(new CustomCSRCtrlIO)
-  val fromCSR = Input(new CSRToDecode)
-  val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+  val io = IO(new Bundle() {
+    val redirect = Input(Bool())
+    val canAccept = Output(Bool())
+    // from Ibuffer
+    val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
+    // to Rename
+    val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
+    // to lvp
+    val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
+    // RAT read
+    // has bug: shoule be log2ceil(intlogicregs)
+    val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(IntLogicRegs)))) // Todo: make it configurable
+    val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(FpLogicRegs))))
+    val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
+    val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
+    val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
+    // csr control
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+    val fromCSR = Input(new CSRToDecode)
+    val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
   // vtype update
   val fromRob = new Bundle {
@@ -247,6 +251,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     when (inst.bits.uopIdx =/= 0.U) {
       inst.bits.debug_seqNum := 0.U
     }
+  }
+
+  io.decode2Lvp.zipWithIndex.foreach{ case (tolvp, i) =>
+    tolvp.valid := finalDecodedInst(i).fuType === FuType.ldu.U && io.out(i).valid
+    tolvp.pc := finalDecodedInst(i).pc
   }
 
   io.out.map(x =>

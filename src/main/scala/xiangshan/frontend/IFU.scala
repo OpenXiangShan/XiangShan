@@ -17,7 +17,7 @@
 
 package xiangshan.frontend
 
-import chisel3._
+import chisel3.{util, _}
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
@@ -74,16 +74,6 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
   val toUncache   = DecoupledIO(new InsUncacheReq)
 }
 
-class LvpPredict(implicit p: Parameters) extends XSBundle {
-  val Predictvalue = Output(UInt(XLEN.W))
-  val Predict = Output(Bool())
-  val pdest = Output(UInt(PhyRegIdxWidth.W))
-  val rfWen = Output(Bool())
-  val fpWen = Output(Bool())
-  val vecWen = Output(Bool())
-}
-
-
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
   val icacheInter     = Flipped(new IFUICacheIO)
@@ -98,7 +88,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val pmp             = new ICachePMPBundle
   val mmioCommitRead  = new mmioCommitRead
   val fromload        = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToIfu)))
-  val torename        = Vec(backendParams.LduCnt, new LvpPredict)
+  val lvpMisPredict   = ValidIO(new Redirect)
+  val readLvp         = Vec(DecodeWidth, new DecodeToLvp)
   val csr_fsIsOff     = Input(Bool())
 }
 
@@ -159,8 +150,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val fromICache               = io.icacheInter.resp
   val (toUncache, fromUncache) = (io.uncacheInter.toUncache, io.uncacheInter.fromUncache)
   val lvp = Module(new Lvp)
-
-  dontTouch(io.torename)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
@@ -997,18 +986,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
     sink.loadvalue := source.bits.loadvalue
     sink.loadvalid := source.valid
   }
+  io.readLvp <> lvp.io.readPorts
 
-  io.torename.zipWithIndex.foreach{ case (lvpTorename, i) =>
-    lvpTorename.Predictvalue := lvp.io.PredictValue(i)
-    lvpTorename.Predict := lvp.io.Predict(i)
-    lvpTorename.pdest := io.fromload(i).bits.pdest
-    lvpTorename.rfWen := io.fromload(i).bits.rfWen
-    lvpTorename.fpWen := io.fromload(i).bits.fpWen
-    lvpTorename.vecWen := io.fromload(i).bits.vecWen
-  }
+  io.lvpMisPredict := 0.U.asTypeOf(ValidIO(new Redirect))
+  io.lvpMisPredict.valid := lvp.io.misPredict.reduce(_ || _)
+  assert(PopCount(lvp.io.misPredict) < 2.U, "more than 2 mispred at a time")
+  val selectedIdx = PriorityEncoder(lvp.io.misPredict)
+  io.lvpMisPredict.bits := io.fromload(selectedIdx).bits.misPredict
+  io.lvpMisPredict.bits.cfiUpdate.pc := io.fromload(selectedIdx).bits.loadpc
 
-  XSPerfAccumulate("lvp_mispredict_total", lvp.io.flush.valid)
-
+  XSPerfAccumulate("lvp_mispredict_total", PopCount(lvp.io.misPredict))
+  
   /** to backend */
   // f3_gpaddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := f3_toIbuffer_valid && Mux(

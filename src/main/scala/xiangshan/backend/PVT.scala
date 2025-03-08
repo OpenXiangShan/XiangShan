@@ -22,6 +22,7 @@ import utility._
 import utils._
 import xiangshan._
 import org.codehaus.plexus.classworlds.strategy.ParentFirstStrategy
+import xiangshan.backend.datapath.DataConfig.IntData
 
 class PvtReadPort(implicit p: Parameters) extends PvtBundle {
     val valid = Input(Bool())
@@ -43,7 +44,7 @@ trait HasPvtConst extends HasXSParameter {
     val PvtTagLen = PhyRegIdxWidth
     val EntryNum = MaxPhyRegs
     val ReadPortNum = 8
-    val WritePortNum = backendParams.LduCnt
+    val WritePortNum = RenameWidth
 }
 
 class PvtEntry(implicit p: Parameters) extends PvtBundle{
@@ -58,7 +59,8 @@ class PvtIO(implicit p: Parameters) extends PvtBundle{
     val flush = Input(Bool())
     val full = Output(Bool())
     val writeFail = Vec(WritePortNum, Output(Bool()))
-    val pvtUpdate = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
+    val pvtUpdateFrmRename = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
 }
 
 class Pvt(implicit p: Parameters) extends PvtModule{
@@ -85,10 +87,16 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     }
 
     // pvt wb update
-    for ((update, i) <- io.pvtUpdate.zipWithIndex) {
-        when (PvtTable(update(log2Ceil(EntryNum)-1, 0)).valid &&
-          (PvtTable(update(log2Ceil(EntryNum)-1, 0)).tag === update)) {
-            PvtTableNext(update(log2Ceil(EntryNum)-1, 0)) := 0.U.asTypeOf(new PvtEntry)
+    io.pvtUpdate.zipWithIndex.foreach{ case (pvtUpdate, i) =>
+        when (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid &&
+          (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).tag === pvtUpdate)) {
+            PvtTableNext(pvtUpdate(log2Ceil(EntryNum)-1, 0)) := 0.U.asTypeOf(new PvtEntry)
+        }
+    }
+    io.pvtUpdateFrmRename.zipWithIndex.foreach{ case (pvtUpdate, i) =>
+        when (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid &&
+          (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).tag === pvtUpdate)) {
+            PvtTableNext(pvtUpdate(log2Ceil(EntryNum)-1, 0)) := 0.U.asTypeOf(new PvtEntry)
         }
     }
 
@@ -99,7 +107,7 @@ class Pvt(implicit p: Parameters) extends PvtModule{
         val rindex = r.addr(log2Ceil(EntryNum)-1, 0)
         r.data := PvtTable(rindex).value
         when (r.valid) {
-            assert(PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr, s"Pvt readports $i read a invalid entry")
+            assert(PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr, "Pvt readports $i read a invalid entry")
         }
     }
 

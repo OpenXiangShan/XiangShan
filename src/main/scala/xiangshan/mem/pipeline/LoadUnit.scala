@@ -112,10 +112,12 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 class LoadToIfu(implicit p: Parameters) extends XSBundle {
   val loadvalue = Output(UInt(XLEN.W))
   val loadpc    = Output(UInt(VAddrBits.W))
-  val pdest     = Output(UInt(LogicRegsWidth.W))
-  val rfWen     = Output(Bool())
-  val fpWen     = Output(Bool())
-  val vecWen    = Output(Bool())
+  val misPredict = Output(new Redirect)
+}
+
+class LoadReadPc(implicit p: Parameters) extends XSBundle {
+  val robidx = Output(new RobPtr)
+  val debugpc = Input(UInt(VAddrBits.W))
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule
@@ -221,6 +223,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // lvp
     val toifu            = Valid(new LoadToIfu)
+    val readPc           = new LoadReadPc
   })
 
   dontTouch(io.toifu)
@@ -1776,11 +1779,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.toifu.valid := ldoutValid
   io.toifu.bits.loadpc := DontCare
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-  io.toifu.bits.pdest := RegEnable(s3_ld_wb_meta.uop.pdest, ldoutValid)
-  io.toifu.bits.rfWen := s3_ld_wb_meta.uop.rfWen
-  io.toifu.bits.fpWen := s3_ld_wb_meta.uop.fpWen
-  io.toifu.bits.vecWen := s3_ld_wb_meta.uop.vecWen
-  
+  // mispredict flush pipe
+  io.toifu.bits.misPredict := DontCare
+  io.toifu.bits.misPredict.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
+  io.toifu.bits.misPredict.robIdx      := s3_out.bits.uop.robIdx
+  io.toifu.bits.misPredict.ftqIdx      := s3_out.bits.uop.ftqPtr
+  io.toifu.bits.misPredict.ftqOffset   := s3_out.bits.uop.ftqOffset
+  io.toifu.bits.misPredict.level       := RedirectLevel.flushAfter
+  io.toifu.bits.misPredict.cfiUpdate.target := s3_out.bits.uop.pc
+  io.toifu.bits.misPredict.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
+
+  //to rob readpc
+  io.readPc.robidx := io.ldout.bits.uop.robIdx
+
   io.ldout.bits.isFromLoadUnit := true.B
   io.ldout.bits.uop.fuType := Mux(
                                   s3_valid && s3_isvec,

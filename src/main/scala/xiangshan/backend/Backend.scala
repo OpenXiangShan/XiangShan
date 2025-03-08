@@ -48,8 +48,8 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{IntScheduler, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{FtqPtr, FtqRead, LvpPredict, PreDecodeInfo}
-import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.frontend.{DecodeToLvp, FtqPtr, FtqRead, PreDecodeInfo}
+import xiangshan.mem.{LoadReadPc, LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable
 
@@ -318,13 +318,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
-  ctrlBlock.io.fromlvp := io.fromlvp
+  ctrlBlock.io.lvpMisPredict := io.lvpMisPredict
   ctrlBlock.io.intPvtRead <> intScheduler.io.pvtRead
   ctrlBlock.io.fpPvtRead <> fpScheduler.io.pvtRead
   ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   ctrlBlock.io.intSrcPred <> intScheduler.io.srcPred
   ctrlBlock.io.fpSrcPred <> fpScheduler.io.srcPred
+  ctrlBlock.io.decode2Lvp <> io.decode2Lvp
+  ctrlBlock.io.loadRdPc <> io.loadRdPc
 
   val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
   intWriteBackDelayed.zip(wbDataPath.io.toIntPreg).map{ case (sink, source) =>
@@ -683,6 +685,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     source.ready := sink.ready
     sink.bits.data   := VecInit(Seq.fill(sink.bits.params.wbPathNum)(source.bits.data))
     sink.bits.pdest  := source.bits.uop.pdest
+    sink.bits.pred := DontCare
+    sink.bits.predSrc := DontCare
     sink.bits.robIdx := source.bits.uop.robIdx
     sink.bits.intWen.foreach(_ := source.bits.uop.rfWen)
     sink.bits.fpWen.foreach(_ := source.bits.uop.fpWen)
@@ -1103,9 +1107,11 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
     val fromCore = new CoreDispatchTopDownIO
   }
   val debugRolling = new RobDebugRollingIO
+
+  val lvpMisPredict = Flipped(Valid(new Redirect))
+  val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
+  val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val topDownInfo = new TopDownInfo
   val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
   val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-
-  val fromlvp = Vec(backendParams.LduCnt ,Flipped(new LvpPredict))
 }

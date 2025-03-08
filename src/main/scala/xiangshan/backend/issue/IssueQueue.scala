@@ -786,6 +786,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
+    val predIdx = PriorityEncoder(finalDataSources(i).map(_.readPvt))
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
@@ -804,6 +805,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
+    deq.bits.common.predSrc := deqEntryVec(i).bits.status.srcStatus(predIdx).psrc
+    assert(PopCount(finalDataSources(i).map(_.readPvt)) < 2.U, "no instr can pred more than 2 src")
     deq.bits.common.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.srcTimer.foreach(_ := DontCare)
     deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})

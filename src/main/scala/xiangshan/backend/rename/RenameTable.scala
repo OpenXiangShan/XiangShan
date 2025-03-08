@@ -24,8 +24,8 @@ import utility.ParallelPriorityMux
 import utility.GatedValidRegNext
 import utility.XSError
 import xiangshan._
+import xiangshan.backend.datapath.DataConfig.IntData
 import xiangshan.backend.issue.{FpScheduler, IntScheduler}
-import xiangshan.frontend.LvpPredict
 
 import java.lang.reflect.Parameter
 
@@ -246,10 +246,12 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vl_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val fromlvp = Vec(backendParams.LduCnt, Flipped(new LvpPredict))
     val pvtfull = Input(Bool())
-    val pvtWriteFail = Vec(backendParams.LduCnt, Input(Bool()))
-    val pvtUpdate = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
+    val pvtWriteFail = Vec(RenameWidth, Input(Bool()))
+    val pvtWen = Vec(RenameWidth, Input(Bool()))
+    val pvtWaddr = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
+    val pvtUpdateFrmRename = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
 
     // for debug assertions
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
@@ -272,7 +274,6 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val v0Rat  = Module(new RenameTable(Reg_V0))
   val vlRat  = Module(new RenameTable(Reg_Vl))
 
-  dontTouch(io.fromlvp)
   dontTouch(io.pvtfull)
   dontTouch(io.pvtWriteFail)
 //  dontTouch(io.intSrcPred)
@@ -281,26 +282,27 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   // set predict table
   val intPdt = RegInit(VecInit(Seq.fill(IntPhyRegs)(false.B)))
   val intPdtNext = WireInit(intPdt)
-  val fpPdt = RegInit(VecInit(Seq.fill(IntPhyRegs)(false.B)))
+  val fpPdt = RegInit(VecInit(Seq.fill(FpPhyRegs)(false.B)))
   val fpPdtNext = WireInit(fpPdt)
   dontTouch(intPdt)
   dontTouch(fpPdt)
   //val vecPdt = VecInit.fill(VfPhyRegs)(false.B)
-  io.fromlvp.zipWithIndex.foreach{ case (lvp, i) =>
-    when (lvp.Predict && !io.pvtfull && !io.pvtWriteFail(i)) {
-      when (lvp.rfWen) {
-        intPdtNext(lvp.pdest) := true.B
-      }.elsewhen (lvp.fpWen) {
-        fpPdtNext(lvp.pdest) := true.B
-      }/*.elsewhen (lvp.vecWen) {
-        vecPdt(lvp.pdest) := true.B
-      }*/
+  io.pvtWen.zipWithIndex.foreach{ case (w, i) =>
+    when (w && !io.pvtfull && !io.pvtWriteFail(i)) {
+      intPdtNext(io.pvtWaddr(i)) := true.B
+    }.elsewhen (io.redirect) {
+      intPdtNext := 0.U.asTypeOf(intPdt)
+      fpPdtNext := 0.U.asTypeOf(fpPdt)
     }
   }
   // update predict bit
-  io.pvtUpdate.zipWithIndex.foreach { case (addr, i) =>
-    intPdtNext(addr) := false.B
-    fpPdtNext(addr) := false.B
+  io.pvtUpdate.zipWithIndex.foreach{ case(pvtUpdate, i) =>
+    intPdtNext(pvtUpdate) := false.B
+    fpPdtNext(pvtUpdate) := false.B
+  }
+  io.pvtUpdateFrmRename.zipWithIndex.foreach{ case(pvtUpdate, i) =>
+    intPdtNext(pvtUpdate) := false.B
+    fpPdtNext(pvtUpdate) := false.B
   }
   intPdt := intPdtNext
   fpPdt := fpPdtNext

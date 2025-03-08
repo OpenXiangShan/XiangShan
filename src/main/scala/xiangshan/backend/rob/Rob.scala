@@ -39,7 +39,7 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
-import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LoadReadPc, LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
@@ -123,6 +123,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadLqIdx = Valid(new LqPtr)
     }
     val debugRolling = new RobDebugRollingIO
+    val loadRdPc = Vec(LduCnt, Flipped(new LoadReadPc))
 
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
@@ -334,6 +335,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.io.req.zip(io.enq.req).map { case (dest, src) =>
     dest.bits := src.bits
     dest.valid := src.valid && io.enq.canAccept
+  }
+
+  // load read pc
+  for (i <- 0 until LduCnt) {
+    io.loadRdPc(i).debugpc := debug_microOp(io.loadRdPc(i).robidx.value).pc
   }
 
   val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))

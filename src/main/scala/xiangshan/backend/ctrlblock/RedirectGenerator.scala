@@ -19,6 +19,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val instrAddrTransType = Input(new AddrTransType)
     val oldestExuOutPredecode = Input(new PreDecodeInfo) // guarded by exuRedirect.valid
     val loadReplay = Flipped(ValidIO(new Redirect))
+    val lvpMisPredict = Flipped(ValidIO(new Redirect))
     val robFlush = Flipped(ValidIO(new Redirect))
     val stage2Redirect = ValidIO(new Redirect)
 
@@ -39,7 +40,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     oldestExuRedirect.bits.cfiUpdate.backendIPF := io.instrAddrTransType.checkPageFault(oldestExuRedirect.bits.fullTarget)
     oldestExuRedirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.checkGuestPageFault(oldestExuRedirect.bits.fullTarget)
   }
-  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(oldestExuRedirect, loadRedirect)
+  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(oldestExuRedirect, io.lvpMisPredict, loadRedirect)
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val flushAfter = RegInit(0.U.asTypeOf(ValidIO(new Redirect)))
   val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(flushAfter) || robFlush.valid))
