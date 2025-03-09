@@ -310,10 +310,10 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   XSNoCDiffTopChecker()
 }
 
-//TODO:
-//Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
-//To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
-//We will try one-step XS-Diff later
+// TODO:
+// Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
+// To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
+// We will try one-step XS-Diff later
 object XSNoCDiffTopChecker {
   def apply(): Unit = {
     val verilog =
