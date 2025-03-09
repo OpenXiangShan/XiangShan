@@ -162,9 +162,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true,
-      withClockGate = true,
-      avoidSameAddr = true
+      conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
+      withClockGate = true
     )
   )
 

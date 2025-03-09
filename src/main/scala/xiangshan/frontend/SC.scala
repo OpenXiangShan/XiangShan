@@ -79,7 +79,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     shouldReset = true,
     holdRead = true,
     singlePort = false,
-    bypassWrite = true,
+    conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
     withClockGate = true
   ))
 

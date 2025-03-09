@@ -816,15 +816,15 @@ class SRAMTemplateWithFixedWidthIO[T <: Data](gen: T, set: Int, way: Int) extend
 // Automatically partition the SRAM based on the width of the data and the desired width.
 // final SRAM width = width * way
 class SRAMTemplateWithFixedWidth[T <: Data](
-    gen:           T,
-    set:           Int,
-    width:         Int,
-    way:           Int = 1,
-    shouldReset:   Boolean = false,
-    holdRead:      Boolean = false,
-    singlePort:    Boolean = false,
-    bypassWrite:   Boolean = false,
-    withClockGate: Boolean = false
+    gen:              T,
+    set:              Int,
+    width:            Int,
+    way:              Int = 1,
+    shouldReset:      Boolean = false,
+    holdRead:         Boolean = false,
+    singlePort:       Boolean = false,
+    conflictBehavior: SRAMConflictBehavior = SRAMConflictBehavior.CorruptReadWay,
+    withClockGate:    Boolean = false
 ) extends Module {
 
   private val dataBits  = gen.getWidth
@@ -848,7 +848,7 @@ class SRAMTemplateWithFixedWidth[T <: Data](
       shouldReset = shouldReset,
       holdRead = holdRead,
       singlePort = singlePort,
-      bypassWrite = bypassWrite,
+      conflictBehavior = conflictBehavior,
       withClockGate = withClockGate
     ))
     // read req
