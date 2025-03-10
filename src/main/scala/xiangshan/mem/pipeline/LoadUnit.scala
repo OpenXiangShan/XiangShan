@@ -1177,8 +1177,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_prf    = s2_in.isPrefetch
   val s2_hw_prf = s2_in.isHWPrefetch
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
-  val s2_un_misalign_exception =  s2_vecActive &&
-                                  (s2_trigger_debug_mode || ExceptionNO.selectByFuAndUnSelect(s2_exception_vec, LduCfg, Seq(loadAddrMisaligned)).asUInt.orR)
 
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
@@ -1204,7 +1202,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
   val s2_exception = s2_vecActive &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
-  val s2_uncache = !s2_prf && !s2_exception && !s2_un_misalign_exception && !s2_in.tlbMiss && s2_actually_uncache
+  val s2_uncache = !s2_prf && !s2_in.tlbMiss && s2_actually_uncache
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
                      s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_uncache
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
