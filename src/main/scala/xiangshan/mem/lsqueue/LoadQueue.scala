@@ -198,6 +198,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     val lq_rep_full = Output(Bool())
+    val lqRepThreshold = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -327,6 +328,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.stDataReadyVec   <> io.sq.stDataReadyVec
   loadQueueReplay.io.sqEmpty          <> io.sq.sqEmpty
   loadQueueReplay.io.lqFull           <> io.lq_rep_full
+  loadQueueReplay.io.lqThreshold      <> io.lqRepThreshold
   loadQueueReplay.io.ldWbPtr          <> virtualLoadQueue.io.ldWbPtr
   loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
