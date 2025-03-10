@@ -124,12 +124,12 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     def EnterS2:    UInt = 4.U(width.W)
   }
 
-  private val state       = RegInit(S1FsmState.Idle)
-  private val nextState   = WireDefault(state)
-  private val s0_fireNext = RegNext(s0_fire)
-  dontTouch(state)
-  dontTouch(nextState)
-  state := nextState
+  private val s1_state     = RegInit(S1FsmState.Idle)
+  private val s1_nextState = WireDefault(s1_state)
+  private val s0_fireNext  = RegNext(s0_fire)
+  dontTouch(s1_state)
+  dontTouch(s1_nextState)
+  s1_state := s1_nextState
 
   /**
     ******************************************************************************
@@ -235,7 +235,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * resend metaArray read req when itlb miss finish
     ******************************************************************************
     */
-  private val s1_needMeta = ((state === S1FsmState.ItlbResend) && tlbFinish) || (state === S1FsmState.MetaResend)
+  private val s1_needMeta = ((s1_state === S1FsmState.ItlbResend) && tlbFinish) || (s1_state === S1FsmState.MetaResend)
   toMeta.valid             := s1_needMeta || s0_valid
   toMeta.bits              := DontCare
   toMeta.bits.isDoubleLine := Mux(s1_needMeta, s1_doubleline, s0_doubleline)
@@ -316,7 +316,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     ******** **********************************************************************
     */
   // Disallow enqueuing wayLookup when SRAM write occurs.
-  toWayLookup.valid := ((state === S1FsmState.EnqWay) || ((state === S1FsmState.Idle) && tlbFinish)) &&
+  toWayLookup.valid := ((s1_state === S1FsmState.EnqWay) || ((s1_state === S1FsmState.Idle) && tlbFinish)) &&
     !s1_flush && !fromMiss.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
   toWayLookup.bits.vSetIdx           := s1_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
@@ -382,54 +382,54 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   /**
     ******************************************************************************
-    * state machine
+    * s1_state machine
     ******** **********************************************************************
     */
 
-  switch(state) {
+  switch(s1_state) {
     is(S1FsmState.Idle) {
       when(s1_valid) {
         when(!tlbFinish) {
-          nextState := S1FsmState.ItlbResend
+          s1_nextState := S1FsmState.ItlbResend
         }.elsewhen(!toWayLookup.fire) { // tlbFinish
-          nextState := S1FsmState.EnqWay
+          s1_nextState := S1FsmState.EnqWay
         }.elsewhen(!s2_ready) { // tlbFinish && toWayLookup.fire
-          nextState := S1FsmState.EnterS2
-        } // .otherwise { nextState := S1FsmState.Idle }
-      }   // .otherwise { nextState := S1FsmState.Idle }  // !s1_valid
+          s1_nextState := S1FsmState.EnterS2
+        } // .otherwise { s1_nextState := S1FsmState.Idle }
+      }   // .otherwise { s1_nextState := S1FsmState.Idle }  // !s1_valid
     }
     is(S1FsmState.ItlbResend) {
       when(tlbFinish) {
         when(!toMeta.ready) {
-          nextState := S1FsmState.MetaResend
+          s1_nextState := S1FsmState.MetaResend
         }.otherwise { // toMeta.ready
-          nextState := S1FsmState.EnqWay
+          s1_nextState := S1FsmState.EnqWay
         }
-      } // .otherwise { nextState := S1FsmState.itlbResend }  // !tlbFinish
+      } // .otherwise { s1_nextState := S1FsmState.itlbResend }  // !tlbFinish
     }
     is(S1FsmState.MetaResend) {
       when(toMeta.ready) {
-        nextState := S1FsmState.EnqWay
-      } // .otherwise { nextState := S1FsmState.metaResend }  // !toMeta.ready
+        s1_nextState := S1FsmState.EnqWay
+      } // .otherwise { s1_nextState := S1FsmState.metaResend }  // !toMeta.ready
     }
     is(S1FsmState.EnqWay) {
       when(toWayLookup.fire || s1_isSoftPrefetch) {
         when(!s2_ready) {
-          nextState := S1FsmState.EnterS2
+          s1_nextState := S1FsmState.EnterS2
         }.otherwise { // s2_ready
-          nextState := S1FsmState.Idle
+          s1_nextState := S1FsmState.Idle
         }
-      } // .otherwise { nextState := S1FsmState.enqWay }
+      } // .otherwise { s1_nextState := S1FsmState.enqWay }
     }
     is(S1FsmState.EnterS2) {
       when(s2_ready) {
-        nextState := S1FsmState.Idle
+        s1_nextState := S1FsmState.Idle
       }
     }
   }
 
   when(s1_flush) {
-    nextState := S1FsmState.Idle
+    s1_nextState := S1FsmState.Idle
   }
 
   /** Stage 1 control */
@@ -438,8 +438,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // when s1 is flushed, itlb pipeline should also be flushed
   io.itlbFlushPipe := s1_flush
 
-  s1_ready := nextState === S1FsmState.Idle
-  s1_fire  := (nextState === S1FsmState.Idle) && s1_valid && !s1_flush // used to clear s1_valid & itlb_valid_latch
+  s1_ready := s1_nextState === S1FsmState.Idle
+  s1_fire  := (s1_nextState === S1FsmState.Idle) && s1_valid && !s1_flush // used to clear s1_valid & itlb_valid_latch
   private val s1_realFire = s1_fire && io.csrPfEnable // real "s1 fire" that s1 enters s2
 
   /**
