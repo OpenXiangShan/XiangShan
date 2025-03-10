@@ -38,7 +38,8 @@ class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
 }
 
 class InsUncacheResp(implicit p: Parameters) extends ICacheBundle {
-  val data: UInt = UInt(maxInstrLen.W)
+  val data:    UInt = UInt(maxInstrLen.W)
+  val corrupt: Bool = Bool()
 }
 
 class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
@@ -61,8 +62,9 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   private val state = RegInit(s_invalid)
 
-  private val req         = Reg(new InsUncacheReq)
-  private val respDataReg = Reg(UInt(mmioBusWidth.W))
+  private val req            = Reg(new InsUncacheReq)
+  private val respDataReg    = RegInit(0.U(mmioBusWidth.W))
+  private val respCorruptReg = RegInit(false.B)
 
   // assign default values to output signals
   io.req.ready  := false.B
@@ -110,8 +112,9 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     io.mmio_grant.ready := true.B
 
     when(io.mmio_grant.fire) {
-      respDataReg := io.mmio_grant.bits.data
-      state       := s_send_resp
+      respDataReg    := io.mmio_grant.bits.data
+      respCorruptReg := io.mmio_grant.bits.corrupt // this includes bits.denied, as tilelink spec defines
+      state          := s_send_resp
     }
   }
 
@@ -130,8 +133,9 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   }
 
   when(state === s_send_resp) {
-    io.resp.valid     := !needFlush
-    io.resp.bits.data := getDataFromBus(req.addr)
+    io.resp.valid        := !needFlush
+    io.resp.bits.data    := getDataFromBus(req.addr)
+    io.resp.bits.corrupt := respCorruptReg
     // metadata should go with the response
     when(io.resp.fire || needFlush) {
       state := s_invalid
@@ -208,6 +212,9 @@ class InstrUncacheImp(outer: InstrUncache)
     }
     entry
   }
+
+  // override mmio_grant.ready to prevent x-propagation
+  mmio_grant.ready := true.B
 
   entry_alloc_idx := PriorityEncoder(entries.map(m => m.io.req.ready))
 
