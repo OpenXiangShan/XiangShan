@@ -233,8 +233,6 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 2,
   VSUopWritebackWidth: Int = 1,
   VSegmentBufferSize: Int = 8,
-  VFOFBufferSize: Int = 8,
-  VLFOFWritebackWidth: Int = 1,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -809,7 +807,6 @@ trait HasXSParameter {
   def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   def VSegmentBufferSize = coreParams.VSegmentBufferSize
-  def VFOFBufferSize = coreParams.VFOFBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def UncacheBufferIndexWidth = log2Up(UncacheBufferSize)
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
