@@ -77,7 +77,7 @@ override SIM_ARGS += --with-dramsim3
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+RELEASE_ARGS += --disable-perf --fpga-platform
 DEBUG_ARGS   += --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
@@ -94,6 +94,11 @@ SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 
 help:
 	mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
+
+ifeq ($(PLDM),1)
+SED_IFNDEF = `ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala
+SED_ENDIF  = `endif // not def SYNTHESIS
+endif
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
@@ -134,7 +139,12 @@ endif
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
+ifeq ($(PLDM),1)
+	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
+	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(SIM_TOP_V)
+else
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+endif
 ifeq ($(MFC),1)
 	sed -i -e 's/__PERCENTAGE_M__/%m/g' $(SIM_TOP_V)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
