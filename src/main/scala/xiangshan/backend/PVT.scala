@@ -74,15 +74,11 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     io.writePorts.zipWithIndex.foreach{ case (w, i) =>
         val windex = w.addr(log2Ceil(EntryNum)-1, 0)
         //todo: same tag different ld
-        when (!PvtTable(windex).valid && w.wen){
+        when (w.wen){
             // can not find match entry, create a new entry
             PvtTableNext(windex).value := w.data
             PvtTableNext(windex).tag := w.addr
             PvtTableNext(windex).valid := true.B
-        }.elsewhen(PvtTable(windex).valid && w.wen){
-            // already exist a match entry, update entry
-            PvtTableNext(windex).value := w.data
-            PvtTableNext(windex).tag := w.addr
         }
     }
 

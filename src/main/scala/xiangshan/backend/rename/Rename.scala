@@ -151,8 +151,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     w.addr := io.out(i).bits.pdest
     w.data := io.pvtWdata(i)
   }
-  // todo: apply flush pipe feature
-  pvt.io.flush := false.B
   // pvt read
   pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
   io.fpPvtRead.flatten.foreach(_.data := DontCare)
