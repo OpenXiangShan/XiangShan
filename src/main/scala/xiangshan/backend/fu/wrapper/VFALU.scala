@@ -10,7 +10,7 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecInfo, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
 import yunsuan.{VfaluType, VfpuType}
-import yunsuan.vector.VectorFloatAdder
+import yunsuan.vector.{LZD, VectorFloatAdder}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 
 class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -407,8 +407,15 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(allFFlagsEn)
     dontTouch(fflagsRedMask)
   }
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum && !outVecCtrl.lastUop) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+  // use srcMask(XLEN-1, 0) because float format hasn't fp8
+  val allVmZero = RegEnable(LZD(Reverse(srcMask(XLEN-1, 0))) >= outVl_s0, io.in.fire)
+  allFFlagsEn := Mux(outIsResuction,
+    Cat(
+      Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum && !outVecCtrl.lastUop) & fflagsRedMask(4*numVecModule - 1, 1),
+      !allVmZero && (lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum)
+    ),
+    fflagsEn & vlMaskEn
+  ).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
