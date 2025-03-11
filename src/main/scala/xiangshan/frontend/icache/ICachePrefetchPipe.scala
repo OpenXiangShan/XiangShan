@@ -32,6 +32,7 @@ import xiangshan.frontend.ExceptionType
 
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
+    with ICacheMetaHelper
     with ICacheMissUpdateHelper {
 
   class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
@@ -239,19 +240,12 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_metaPTags  = fromMeta.tags
   private val s1_metaValids = fromMeta.entryValid
 
-  private def getWaymask(paddrs: Vec[UInt]): Vec[UInt] = {
-    val pTags = paddrs.map(get_phy_tag)
-    val tagEqVec =
-      VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s1_metaPTags(p)(w) === pTags(p)))))
-    val tagMatchVec = VecInit((0 until PortNumber).map { k =>
-      VecInit(tagEqVec(k).zipWithIndex.map { case (eq, w) => eq && s1_metaValids(k)(w) })
-    })
-    val waymasks = VecInit(tagMatchVec.map(_.asUInt))
-    waymasks
-  }
-
   private val s1_sramWaymasks = VecInit((0 until PortNumber).map { port =>
-    Mux(tlbValidPulse(port), getWaymask(s1_pAddrWire)(port), getWaymask(s1_pAddrReg)(port))
+    Mux(
+      tlbValidPulse(port),
+      getWaymask(s1_pAddrWire(port), s1_metaPTags(port), s1_metaValids(port)),
+      getWaymask(s1_pAddrReg(port), s1_metaPTags(port), s1_metaValids(port))
+    )
   })
 
   // select ecc code
