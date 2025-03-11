@@ -97,7 +97,23 @@ trait ICacheEccHelper extends HasICacheParameters {
   }
 }
 
-trait ICacheDataSelHelper extends HasICacheParameters {
+trait ICacheMetaHelper extends HasICacheParameters {
+  def getWaymask(reqPAddr: PrunedAddr, metaPTag: Vec[UInt], metaValid: Vec[Bool]): UInt = {
+    require(metaPTag.length == nWays)
+    require(metaValid.length == nWays)
+    val reqPTag = get_phy_tag(reqPAddr)
+    VecInit((metaPTag zip metaValid).map { case (wayPTag, wayValid) =>
+      wayValid && (wayPTag === reqPTag)
+    }).asUInt
+  }
+
+  def getWaymask(reqPAddrVec: Vec[PrunedAddr], metaPTagVec: Vec[Vec[UInt]], metaValidVec: Vec[Vec[Bool]]): Vec[UInt] =
+    VecInit((reqPAddrVec zip metaPTagVec zip metaValidVec).map { case ((reqPAddr, metaPTag), metaValid) =>
+      getWaymask(reqPAddr, metaPTag, metaValid)
+    })
+}
+
+trait ICacheDataHelper extends HasICacheParameters {
   def bankOffBits: Int = log2Ceil(blockBytes / ICacheDataBanks)
 
   def getBankIdxLow(blkOffset: UInt): UInt =

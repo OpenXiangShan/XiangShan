@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.mbist.MbistPipeline
 
-class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEccHelper with ICacheDataSelHelper {
+class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheEccHelper with ICacheDataHelper {
   class ICacheDataArrayIO(implicit p: Parameters) extends ICacheBundle {
     val write: DataWriteBundle = Flipped(new DataWriteBundle)
     val read:  DataReadBundle  = Flipped(new DataReadBundle)

@@ -34,7 +34,7 @@ import xiangshan.frontend.FtqToFetchBundle
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
     with ICacheAddrHelper
-    with ICacheDataSelHelper
+    with ICacheDataHelper
     with ICacheMissUpdateHelper {
 
   class ICacheMainPipeIO(implicit p: Parameters) extends ICacheBundle {

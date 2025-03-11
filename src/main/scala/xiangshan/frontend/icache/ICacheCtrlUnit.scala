@@ -28,6 +28,7 @@ import freechips.rocketchip.regmapper.RegWriteFn
 import freechips.rocketchip.tilelink.TLRegisterNode
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
+import xiangshan.frontend.PrunedAddrInit
 
 // currently for ECC control only
 class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
@@ -43,7 +44,9 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     concurrency = 1
   )
 
-  class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasICacheParameters {
+  class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
+      with HasICacheParameters
+      with ICacheMetaHelper {
     class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
       // ecc control
       val eccEnable: Bool = Output(Bool())
@@ -142,7 +145,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     // inject position
     private val iVSetIdx = get_idx(eccIAddr.pAddr)
-    private val iPTag    = get_tag(eccIAddr.pAddr)
+    private val iPAddr   = eccIAddr.pAddr
     private val iWaymask =
       RegInit(0.U(nWays.W)) // read from metaArray, valid after iState === InjectFsmState.readMetaResp
 
@@ -167,7 +170,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     io.metaWrite.req.valid := iState === InjectFsmState.WriteMeta
     io.metaWrite.req.bits.generate(
-      tag = iPTag,
+      tag = get_phy_tag(iPAddr),
       idx = iVSetIdx,
       waymask = iWaymask,
       bankIdx = iVSetIdx(0),
@@ -197,9 +200,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
       }
       is(InjectFsmState.ReadMetaResp) {
         // metaArray ensures resp is valid one cycle after req
-        val waymask = VecInit((0 until nWays).map { w =>
-          io.metaRead.resp.entryValid.head(w) && io.metaRead.resp.tags.head(w) === iPTag
-        }).asUInt
+        val waymask = getWaymask(PrunedAddrInit(iPAddr), io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
         iWaymask := waymask
         when(!waymask.orR) {
           // not hit, refuse to inject
