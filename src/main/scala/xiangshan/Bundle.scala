@@ -816,8 +816,7 @@ class LowPowerIO(implicit p: Parameters) extends XSBundle {
   //physical power down 
   val i_cpu_pwrdown_req_n = Input(Bool())
   val o_cpu_pwrdown_ack_n = Output(Bool())
-  // power on/off sequence control for Core iso/rst/clk
+  // power on/off sequence control for Core iso/rst
   val i_cpu_iso_en= Input(Bool())
   val i_cpu_sw_rst_n = Input(Bool())
-  val i_cpu_sw_clk_en= Input(Bool())
 }

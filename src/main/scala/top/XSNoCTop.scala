@@ -203,11 +203,16 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     /* 
      SoC control the sequence of power on/off with isolation/reset/clock 
      */
-    val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(false.B)
-    val soc_clk_en = io.lp.map(_.i_cpu_sw_clk_en).getOrElse(false.B)
+    val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
     val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
+
+    /* wfiGateClock: Gate core+l2 clock when wfi and exit when reset/interrupt/snoop*/
     val wfiGateClock = withClockAndReset(soc_clock, soc_reset) {RegInit(true.B)}
 
+
+    /* during power down sequence, SoC reset will gate clock */
+    val pwrdownGateClock = withClockAndReset(soc_clock, soc_reset) {RegInit(false.B)}
+    pwrdownGateClock := !soc_rst_n && lpState === sPOFFREQ
     /*
      physical power off handshake: 
      i_cpu_pwrdown_req_n
@@ -222,16 +227,15 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      */
     val cpuReset = reset.asBool || !soc_rst_n
 
-    /* Core+L2 clock Enable when:
-     1. SoC initialize clock enable -> io.cpu_sw_clk_en 
-        a. on Power off flow clock disabled in order: Clock->Isolation->Reset 
-        b. on Power  on flow clock enableed in order: Isolation->Clock->Reset 
-     2. if SoC enable clock (Core+L2 in normal state) and wfi is NOT gating Clock 
-     3. the cycle of Flitpend valid in rx.snp channel  
+    /* Core+L2 hardware initial clock gating as:
+     1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid 
+     2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state 
+     3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel  
      */
-    val cpuClockEn = !wfiGateClock && soc_clk_en | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
 
     dontTouch(wfiGateClock)
+    dontTouch(pwrdownGateClock)
     dontTouch(cpuClockEn)
 
     core_with_l2.module.clock := ClockGate(false.B, cpuClockEn, clock)
@@ -272,12 +276,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      * 2. wait L2 flush done
      * 3. wait Core to wfi -> send out < io.o_cpu_no_op > 
      */
-    val sIDLE :: sL2FLUSH :: sWAITWFI :: sPOFFREQ :: Nil = Enum(4)
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
     val lpState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
     val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
     val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
     val isWFI = core_with_l2.module.io.cpu_halt
-    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI)
+    val exitco = !io.chi.syscoreq & !io.chi.syscoack
+    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
     io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
 
     /*WFI clock Gating state
