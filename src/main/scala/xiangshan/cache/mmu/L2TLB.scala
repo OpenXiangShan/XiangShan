@@ -704,7 +704,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
     ptw_merge_resp.not_super := not_super.B
-    ptw_merge_resp.not_merge := hasS2xlate
+    ptw_merge_resp.not_merge := hasS2xlate || pte_in.n
     ptw_merge_resp
   }
 
