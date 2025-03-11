@@ -513,8 +513,9 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
-    ++ new DefaultConfig(n)
+  // L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  // for EMU_CHI test
+  new DefaultConfig(n)
     ++ new WithCHI
 )
 
@@ -526,7 +527,9 @@ class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  // (new KunminghuV2Config(n)).alter((site, here, up) => {
+  // for Upload Artifacts test, generate verilog
+  (new DefaultConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
