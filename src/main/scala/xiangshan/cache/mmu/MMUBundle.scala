@@ -301,7 +301,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s1tag = item.s1.entry.tag
     val s2tag = item.s2.entry.tag(gvpnLen - 1, sectortlbwidth)
     this.tag := Mux(item.s2xlate === onlyStage2, s2tag, s1tag)
-    val s2page_pageSuper = item.s2.entry.level.getOrElse(0.U) =/= 0.U
+    val s2page_pageSuper = item.s2.entry.level.getOrElse(0.U) =/= 0.U || item.s2.entry.n.getOrElse(0.U) =/= 0.U
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.pteidx)
     val s2_valid = Mux(s2page_pageSuper, VecInit(Seq.fill(tlbcontiguous)(true.B)), VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
     this.valididx := Mux(item.s2xlate === onlyStage2, s2_valid, item.s1.valididx)

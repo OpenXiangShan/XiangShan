@@ -703,7 +703,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_merge_resp.entry(i) := ptw_resp
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
-    ptw_merge_resp.not_super := not_super.B
+    val napot = ptw_merge_resp.entry(vpn(sectortlbwidth - 1, 0)).n.getOrElse(0.U)
+    ptw_merge_resp.not_super := not_super.B && !napot
     ptw_merge_resp.not_merge := hasS2xlate
     ptw_merge_resp
   }
@@ -728,13 +729,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     for (i <- 0 until tlbcontiguous) {
       val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
       val pbmt_equal = pte.entry(i).pbmt === pte.entry(OHToUInt(pte.pteidx)).pbmt
-      val n_equal = pte.entry(i).n.getOrElse(0.U) === pte.entry(OHToUInt(pte.pteidx)).n.getOrElse(0.U)
       val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
       val cf_equal = if (HasBitmapCheck) pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf else true.B
-      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && n_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
+      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
