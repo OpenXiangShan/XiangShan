@@ -24,7 +24,6 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
 import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, IntBuffer, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
@@ -102,7 +101,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
-      val msiInfo = Input(ValidIO(new MsiInfoBundle))
+      val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
+      val msiAck = Output(Bool())
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
@@ -140,6 +140,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.cpu_halt := l2top.module.io.cpu_halt.toTile
     l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
     io.cpu_crtical_error := l2top.module.io.cpu_critical_error.toTile
+    l2top.module.io.msiAck.fromCore := core.module.io.msiAck
+    io.msiAck := l2top.module.io.msiAck.toTile
 
     l2top.module.io.hartIsInReset.resetInFrontend := core.module.io.resetInFrontend
     io.hartIsInReset := l2top.module.io.hartIsInReset.toTile

@@ -473,7 +473,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem.resp.fire && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level - 1.U
-    s_llptw_req := false.B
     gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
     update_full_gvpn_mem_resp := true.B
@@ -481,10 +480,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (bitmap_enable) {
         whether_need_bitmap_check := true.B
       } .otherwise {
+        s_llptw_req := false.B
         mem_addr_update := true.B
         whether_need_bitmap_check := false.B
       }
     } else {
+      s_llptw_req := false.B
       mem_addr_update := true.B
     }
   }
@@ -501,6 +502,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         whether_need_bitmap_check := false.B
       } .otherwise {
         mem_addr_update := true.B
+        s_llptw_req := false.B
         whether_need_bitmap_check := false.B
       }
     }
