@@ -159,6 +159,9 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val bt = Module(
     new FoldedSRAMTemplate(
       UInt(2.W),
+      setSplit = 2,
+      waySplit = 1,
+      dataSplit = 1,
       set = BtSize,
       width = foldWidth,
       way = numBr,

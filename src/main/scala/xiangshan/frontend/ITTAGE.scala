@@ -210,6 +210,7 @@ class ITTageTable(
   val SRAM_SIZE = 128
 
   val foldedWidth = if (nRows >= SRAM_SIZE) nRows / SRAM_SIZE else 1
+  val dataSplit   = if (nRows <= 2 * SRAM_SIZE) 1 else 2
 
   if (nRows < SRAM_SIZE) {
     println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
@@ -267,6 +268,9 @@ class ITTageTable(
 
   val table = Module(new FoldedSRAMTemplate(
     new ITTageEntry,
+    setSplit = 1,
+    waySplit = 1,
+    dataSplit = dataSplit,
     set = nRows,
     width = foldedWidth,
     shouldReset = true,
