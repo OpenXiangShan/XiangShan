@@ -251,7 +251,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val pvtWen = Vec(RenameWidth, Input(Bool()))
     val pvtWaddr = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
     val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
-    val pvtUpdateFrmRename = Vec(RenameWidth, Input(UInt(LogicRegsWidth.W)))
+    val pvtUpdateFrmRename = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
 
     // for debug assertions
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
