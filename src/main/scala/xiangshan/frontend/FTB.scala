@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import utility._
 import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 import xiangshan._
 
 trait FTBParams extends HasXSParameter with HasBPUConst {

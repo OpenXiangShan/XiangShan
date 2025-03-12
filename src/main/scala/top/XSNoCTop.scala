@@ -18,6 +18,7 @@ package top
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import xiangshan._
 import utils._
 import utility._
@@ -68,10 +69,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   })))
 
   // imsic bus top
-  val u_imsic_bus_top = LazyModule(new imsic_bus_top(
-    useTL = soc.IMSICUseTL,
-    baseAddress = (0x3A800000, 0x3B000000)
-  ))
+  val u_imsic_bus_top = LazyModule(new imsic_bus_top)
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
@@ -175,11 +173,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
       val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
     })
-    // imsic axi4lite io
-    val imsic_axi4lite = wrapper.u_imsic_bus_top.module.axi4lite.map(x => IO(chiselTypeOf(x)))
+    // imsic axi4 io
+    val imsic_axi4 = wrapper.u_imsic_bus_top.axi4.map(x => IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
     // imsic tl io
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
+    // imsic bare io
+    val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
@@ -189,12 +189,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
 
-    // imsic axi4lite io connection
-    wrapper.u_imsic_bus_top.module.axi4lite.foreach(_ <> imsic_axi4lite.get)
-
+    // imsic axi4 io connection
+    imsic_axi4.foreach(_.viewAs[AXI4Bundle] <> wrapper.u_imsic_bus_top.axi4.get.elements.head._2)
     // imsic tl io connection
     wrapper.u_imsic_bus_top.tl_m.foreach(_ <> imsic_m_tl.get)
     wrapper.u_imsic_bus_top.tl_s.foreach(_ <> imsic_s_tl.get)
+    // imsic bare io connection
+    wrapper.u_imsic_bus_top.module.msi.foreach(_ <> imsic.get)
 
     // input
     dontTouch(io)
@@ -250,8 +251,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       dmAsyncSinkOpt.get.module.reset := soc_reset_sync
     }
 
-    core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
-    core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info
+    core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.msiio.vld_req
+    core_with_l2.module.io.msiInfo.bits := wrapper.u_imsic_bus_top.module.msiio.data
+    wrapper.u_imsic_bus_top.module.msiio.vld_ack := core_with_l2.module.io.msiAck
     // tie off core soft reset
     core_rst_node.out.head._1 := false.B.asAsyncReset
 
@@ -290,7 +292,10 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   exposeIO(soc.io, "io")
   exposeOptionIO(soc.noc_clock, "noc_clock")
   exposeOptionIO(soc.noc_reset, "noc_reset")
-  exposeOptionIO(soc.imsic_axi4lite, "imsic_axi4lite")
+  exposeOptionIO(soc.imsic_axi4, "imsic_axi4")
+  exposeOptionIO(soc.imsic_m_tl, "imsic_m_tl")
+  exposeOptionIO(soc.imsic_s_tl, "imsic_s_tl")
+  exposeOptionIO(soc.imsic, "imsic")
 
   // TODO:
   // XSDiffTop is only part of DUT, we can not instantiate difftest here.
@@ -305,10 +310,10 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   XSNoCDiffTopChecker()
 }
 
-//TODO:
-//Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
-//To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
-//We will try one-step XS-Diff later
+// TODO:
+// Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
+// To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
+// We will try one-step XS-Diff later
 object XSNoCDiffTopChecker {
   def apply(): Unit = {
     val verilog =

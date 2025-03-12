@@ -41,7 +41,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run_biweekly=true" >> $GITHUB_OUTPUT
-          elif [ $(( $(date +'%V') % 2 )) -eq 1 ]; then
+          elif [ $(( 10#$(date +'%V') % 2 )) -eq 1 ]; then
             echo "run_biweekly=true" >> $GITHUB_OUTPUT
           else
             echo "run_biweekly=false" >> $GITHUB_OUTPUT

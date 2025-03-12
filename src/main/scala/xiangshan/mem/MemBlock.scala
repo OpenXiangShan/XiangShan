@@ -24,7 +24,6 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import device.MsiInfoBundle
 import utils._
 import utility._
 import system.SoCParamsKey
@@ -36,7 +35,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil}
+import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil, PFEvent}
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
@@ -52,6 +51,7 @@ import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
+import system.HasSoCParameter
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -274,6 +274,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
+  val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
@@ -291,6 +292,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasFPUParameters
   with HasPerfEvents
+  with HasSoCParameter
   with HasL1PrefetchSourceParameter
   with HasCircularQueuePtrHelper
   with HasMemBlockParameters
@@ -329,7 +331,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val fromTopToBackend = Input(new Bundle {
-      val msiInfo   = ValidIO(new MsiInfoBundle)
+      val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
       val clintTime = ValidIO(UInt(64.W))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
@@ -339,6 +341,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_l2_flush_en = Output(Bool())
     val outer_power_down_en = Output(Bool())
     val outer_cpu_critical_error = Output(Bool())
+    val outer_msi_ack = Output(Bool())
     val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
     val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
@@ -801,11 +804,22 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vSegmentFlag := false.B
   }
 
+  val misalign_allow_spec = RegInit(true.B)
+  val ldu_rollback_with_misalign_nack = loadUnits.map(ldu =>
+    ldu.io.lsq.ldin.bits.isFrmMisAlignBuf && ldu.io.lsq.ldin.bits.rep_info.rar_nack && ldu.io.rollback.valid
+  ).reduce(_ || _)
+  when (ldu_rollback_with_misalign_nack) {
+    misalign_allow_spec := false.B
+  } .elsewhen(lsq.io.rarValidCount < (LoadQueueRARSize - 4).U) {
+    misalign_allow_spec := true.B
+  }
+
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
+    loadUnits(i).io.misalign_allow_spec := misalign_allow_spec
 
     // get input form dispatch
     loadUnits(i).io.ldin <> io.ooo_to_mem.issueLda(i)
@@ -878,6 +892,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // ld-ld violation check
     loadUnits(i).io.lsq.ldld_nuke_query <> lsq.io.ldu.ldld_nuke_query(i)
     loadUnits(i).io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(i)
+    // loadqueue old ptr
+    loadUnits(i).io.lsq.lqDeqPtr := lsq.io.lqDeqPtr
     loadUnits(i).io.csrCtrl       <> csrCtrl
     // dcache refill req
   // loadUnits(i).io.refill           <> delayedDcacheRefill
@@ -1142,6 +1158,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 
   lsq.io.loadMisalignFull                       := loadMisalignBuffer.io.loadMisalignFull
+  lsq.io.misalignAllowSpec                      := misalign_allow_spec
 
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
@@ -1826,25 +1843,41 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     (misalignBufExceptionOverwrite && misalignBufExceptionIsHyper ||
       (!vSegmentException && lsq.io.exceptionAddr.isHyper && !misalignBufExceptionOverwrite))
 
-  def GenExceptionVa(mode: UInt, isVirt: Bool, vaNeedExt: Bool,
-                     satp: TlbSatpBundle, vsatp: TlbSatpBundle, hgatp: TlbHgatpBundle,
-                     vaddr: UInt) = {
+  def GenExceptionVa(
+    mode: UInt, isVirt: Bool, vaNeedExt: Bool,
+    satp: TlbSatpBundle, vsatp: TlbSatpBundle, hgatp: TlbHgatpBundle,
+    vaddr: UInt
+  ) = {
     require(VAddrBits >= 50)
 
-    val Sv39 = satp.mode === 8.U
-    val Sv48 = satp.mode === 9.U
-    val Sv39x4 = vsatp.mode === 8.U || hgatp.mode === 8.U
-    val Sv48x4 = vsatp.mode === 9.U || hgatp.mode === 9.U
-    val vmEnable = !isVirt && (Sv39 || Sv48) && (mode < CSRConst.ModeM)
-    val s2xlateEnable = isVirt && (Sv39x4 || Sv48x4) && (mode < CSRConst.ModeM)
+    val satpNone = satp.mode === 0.U
+    val satpSv39 = satp.mode === 8.U
+    val satpSv48 = satp.mode === 9.U
 
-    val s2xlate = MuxCase(noS2xlate, Seq(
-      !isVirt                                    -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U)                       -> onlyStage2,
-      (hgatp.mode === 0.U)                       -> onlyStage1
-    ))
-    val onlyS2 = s2xlate === onlyStage2
+    val vsatpNone = vsatp.mode === 0.U
+    val vsatpSv39 = vsatp.mode === 8.U
+    val vsatpSv48 = vsatp.mode === 9.U
+
+    val hgatpNone = hgatp.mode === 0.U
+    val hgatpSv39x4 = hgatp.mode === 8.U
+    val hgatpSv48x4 = hgatp.mode === 9.U
+
+    // For !isVirt, mode check is necessary, as we don't want virtual memory in M-mode.
+    // For isVirt, mode check is unnecessary, as virt won't be 1 in M-mode.
+    // Also, isVirt includes Hyper Insts, which don't care mode either.
+
+    val useBareAddr = 
+      (isVirt && vsatpNone && hgatpNone) ||
+      (!isVirt && (mode === CSRConst.ModeM)) || 
+      (!isVirt && (mode =/= CSRConst.ModeM) && satpNone)
+    val useSv39Addr =
+      (isVirt && vsatpSv39) ||
+      (!isVirt && (mode =/= CSRConst.ModeM) && satpSv39)
+    val useSv48Addr =
+      (isVirt && vsatpSv48) ||
+      (!isVirt && (mode =/= CSRConst.ModeM) && satpSv48)
+    val useSv39x4Addr = isVirt && vsatpNone && hgatpSv39x4
+    val useSv48x4Addr = isVirt && vsatpNone && hgatpSv48x4
 
     val bareAddr   = ZeroExt(vaddr(PAddrBits - 1, 0), XLEN)
     val sv39Addr   = SignExt(vaddr.take(39), XLEN)
@@ -1855,11 +1888,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val ExceptionVa = Wire(UInt(XLEN.W))
     when (vaNeedExt) {
       ExceptionVa := Mux1H(Seq(
-        (!(vmEnable || s2xlateEnable)) -> bareAddr,
-        (!onlyS2 && (Sv39 || Sv39x4))  -> sv39Addr,
-        (!onlyS2 && (Sv48 || Sv48x4))  -> sv48Addr,
-        ( onlyS2 && (Sv39 || Sv39x4))  -> sv39x4Addr,
-        ( onlyS2 && (Sv48 || Sv48x4))  -> sv48x4Addr,
+        (useBareAddr)   -> bareAddr,
+        (useSv39Addr)   -> sv39Addr,
+        (useSv48Addr)   -> sv48Addr,
+        (useSv39x4Addr) -> sv39x4Addr,
+        (useSv48x4Addr) -> sv48x4Addr,
       ))
     } .otherwise {
       ExceptionVa := vaddr
@@ -1915,7 +1948,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.meip  := outer.plic_int_sink.in.head._1(0)
     x.externalInterrupt.seip  := outer.plic_int_sink.in.last._1(0)
     x.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
-    x.externalInterrupt.nmi.nmi_31 := outer.nmi_int_sink.in.head._1(0)
+    x.externalInterrupt.nmi.nmi_31 := outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0)
     x.externalInterrupt.nmi.nmi_43 := outer.nmi_int_sink.in.head._1(1)
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
@@ -1931,6 +1964,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
   io.outer_cpu_critical_error := io.ooo_to_mem.backendToTopBypass.cpuCriticalError
+  io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
 

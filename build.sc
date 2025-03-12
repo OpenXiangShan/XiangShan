@@ -117,6 +117,10 @@ object utility extends HasChisel {
     rocketchip
   )
 
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    ivy"com.lihaoyi::sourcecode:0.4.2",
+  )
+
 }
 
 object yunsuan extends HasChisel {
@@ -189,6 +193,15 @@ object fudian extends HasChisel {
 
 }
 
+object chiselAIA extends HasChisel {
+  override def millSourcePath = pwd / "ChiselAIA"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    utility
+  )
+}
+
 object macros extends ScalaModule {
 
   override def millSourcePath = pwd / "macros"
@@ -219,6 +232,8 @@ trait XiangShanModule extends ScalaModule {
 
   def yunsuanModule: ScalaModule
 
+  def chiselAIAModule: ScalaModule
+
   def macrosModule: ScalaModule
 
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -230,6 +245,7 @@ trait XiangShanModule extends ScalaModule {
     yunsuanModule,
     fudianModule,
     utilityModule,
+    chiselAIAModule,
     macrosModule,
   )
 
@@ -258,6 +274,8 @@ object xiangshan extends XiangShanModule with HasChisel with ScalafmtModule {
   def utilityModule = utility
 
   def yunsuanModule = yunsuan
+
+  def chiselAIAModule = chiselAIA
 
   def macrosModule = macros
 

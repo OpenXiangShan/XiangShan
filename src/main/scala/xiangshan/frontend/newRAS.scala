@@ -93,7 +93,7 @@ class RASDebug(implicit p: Parameters) extends XSBundle {
   val commit_stack = Output(Vec(RasSize, new RASEntry))
 }
 
-class RAS(implicit p: Parameters) extends BasePredictor {
+class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtrHelper {
   override val meta_size = WireInit(0.U.asTypeOf(new RASMeta)).getWidth
 
   object RASEntry {
@@ -591,7 +591,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
-    when(distanceBetween(TOSW, BOS) > (rasSpecSize - 4).U) {
+    when(distanceBetween(TOSW, BOS) > (rasSpecSize - 2).U) {
       spec_near_overflowed := true.B
     }.otherwise {
       spec_near_overflowed := false.B
@@ -606,13 +606,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   val stack = Module(new RASStack(RasSize, RasSpecSize)).io
 
-  val s2_spec_push = WireInit(false.B)
-  val s2_spec_pop  = WireInit(false.B)
-  val s2_full_pred = io.in.bits.resp_in(0).s2.full_pred(2)
+  val stack_near_overflow = stack.spec_near_overflow
+  val s2_spec_push        = WireInit(false.B)
+  val s2_spec_pop         = WireInit(false.B)
+  val s2_full_pred        = io.in.bits.resp_in(0).s2.full_pred(2)
   // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
   val s2_spec_new_addr = s2_full_pred.fallThroughAddr + Mux(s2_full_pred.last_may_be_rvi_call, 2.U, 0.U)
-  stack.spec_push_valid := s2_spec_push
-  stack.spec_pop_valid  := s2_spec_pop
+  stack.spec_push_valid := s2_spec_push && !stack_near_overflow
+  stack.spec_pop_valid  := s2_spec_pop && !stack_near_overflow
   stack.spec_push_addr  := s2_spec_new_addr
 
   // confirm that the call/ret is the taken cfi
@@ -680,7 +681,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.s2_fire := io.s2_fire(2)
   stack.s3_fire := io.s3_fire(2)
 
-  stack.s3_cancel := s3_cancel
+  stack.s3_cancel := s3_cancel && !stack_near_overflow
 
   val s3_meta = RegEnable(s2_meta, io.s2_fire(2))
 
@@ -695,8 +696,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val last_stage_meta = Wire(new RASMeta)
   last_stage_meta.ssp  := s3_meta.ssp
   last_stage_meta.TOSW := s3_meta.TOSW
-
-  io.s1_ready := !stack.spec_near_overflow
 
   io.out.last_stage_spec_info.sctr    := s3_meta.sctr
   io.out.last_stage_spec_info.ssp     := s3_meta.ssp
@@ -714,7 +713,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val callMissPred = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isCall && recover_cfi.pd.valid
   // when we mispredict a call, we must redo a push operation
   // similarly, when we mispredict a return, we should redo a pop
-  stack.redirect_valid     := do_recover
+  val stack_TOSW    = stack.TOSW
+  val redirect_TOSW = recover_cfi.TOSW
+  stack.redirect_valid     := do_recover && (isBefore(redirect_TOSW, stack_TOSW) || !stack_near_overflow)
   stack.redirect_isCall    := callMissPred
   stack.redirect_isRet     := retMissPred
   stack.redirect_meta_ssp  := recover_cfi.ssp

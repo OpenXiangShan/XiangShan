@@ -69,6 +69,10 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
+  // hash asid width
+  hashAsidWidth: Int = 3,
+  // hash vpn width
+  hashVpnWidth: Int = 6,
   // filter
   ifilterSize: Int = 8,
   dfilterSize: Int = 32,

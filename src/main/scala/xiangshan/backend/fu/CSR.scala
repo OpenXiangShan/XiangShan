@@ -118,6 +118,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // instruction fetch address translation type
   val instrAddrTransType = Output(new AddrTransType)
+  // ack for axireg from imsic. which indicates imsic can work actively
+  val msiAck = Output(Bool())
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {
@@ -1639,7 +1641,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
-*/
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
@@ -1665,3 +1666,4 @@ class PFEvent(implicit p: Parameters) extends XSModule {
     io.hpmevent(i) := perfEvents(i)
   }
 }
+*/

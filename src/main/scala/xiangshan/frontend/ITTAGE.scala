@@ -33,6 +33,7 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
+import utility.sram.FoldedSRAMTemplate
 import xiangshan._
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {

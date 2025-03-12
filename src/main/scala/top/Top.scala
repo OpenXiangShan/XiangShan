@@ -30,6 +30,7 @@ import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import openLLC.TargetBinder._
 import cc.xiangshan.openncb._
 import utility._
+import utility.sram.SramBroadcastBundle
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
@@ -43,6 +44,9 @@ import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 import scala.collection.mutable.{Map}
+
+import difftest.common.DifftestWiring
+import difftest.util.Profile
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -308,7 +312,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(new MsiInfoBundle)))
+    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
 
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
@@ -328,8 +332,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-      core.module.io.dft.foreach(_ := DontCare)
-      core.module.io.dft_reset.foreach(_ := DontCare)
+      core.module.io.dft.foreach(dontTouch(_) := 0.U.asTypeOf(new SramBroadcastBundle))
+      core.module.io.dft_reset.foreach(dontTouch(_) := 0.U.asTypeOf(new DFTResetSignals))
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
@@ -442,6 +446,32 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   lazy val module = new XSTopImp(this)
 }
 
+class XSTileDiffTop(implicit p: Parameters) extends Module {
+  override val desiredName: String = "XSDiffTop"
+  val l_soc = LazyModule(new XSTop())
+  val soc = Module(l_soc.module)
+
+  // Expose XSTop IOs outside, i.e. io
+  def exposeIO(data: Data, name: String): Unit = {
+    val dummy = IO(chiselTypeOf(data)).suggestName(name)
+    dummy <> data
+  }
+  def exposeOptionIO(data: Option[Data], name: String): Unit = {
+    if (data.isDefined) {
+      val dummy = IO(chiselTypeOf(data.get)).suggestName(name)
+      dummy <> data.get
+    }
+  }
+  exposeIO(l_soc.nmi,"nmi")
+  exposeIO(soc.memory, "memory")
+  exposeIO(soc.peripheral,"peripheral")
+  exposeIO(soc.io,"io")
+  exposeOptionIO(soc.dma, "dma")
+
+  DifftestWiring.createAndConnectExtraIOs()
+  Profile.generateJson("XiangShan")
+}
+
 object TopMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
@@ -455,6 +485,8 @@ object TopMain extends App {
 
   if (config(SoCParamsKey).UseXSNoCDiffTop) {
     Generator.execute(firrtlOpts, DisableMonitors(p => new XSNoCDiffTop()(p))(config), firtoolOpts)
+  } else if (config(SoCParamsKey).UseXSTileDiffTop) {
+    Generator.execute(firrtlOpts, DisableMonitors(p => new XSTileDiffTop()(p))(config), firtoolOpts)
   } else {
     val soc = if (config(SoCParamsKey).UseXSNoCTop)
       DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)

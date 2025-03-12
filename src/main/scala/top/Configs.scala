@@ -37,7 +37,7 @@ import huancun._
 import coupledL2._
 import coupledL2.prefetch._
 
-class BaseConfig(n: Int, hasMbist:Boolean = false) extends Config((site, here, up) => {
+class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
@@ -538,6 +538,22 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
       AlwaysBasicDB = false
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true,
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)
+
+class FpgaDiffMinimalConfig(n: Int = 1) extends Config(
+  (new MinimalConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = true,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true,
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sramClkDivBy2 = false,
       )),

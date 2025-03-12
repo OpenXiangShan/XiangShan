@@ -21,7 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import utility.{Code, ParallelOR, ReplacementPolicy, XSDebug}
+import utility.sram.SRAMTemplate
 import xiangshan.L1CacheErrorInfo
 
 // basic building blocks for L1 DCache

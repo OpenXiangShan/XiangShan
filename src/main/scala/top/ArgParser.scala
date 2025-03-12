@@ -27,6 +27,7 @@ import scala.annotation.tailrec
 import scala.sys.exit
 import chisel3.util.log2Up
 import utility._
+import device.IMSICBusType
 
 object ArgParser {
   // TODO: add more explainations
@@ -144,9 +145,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)
-        case "--imsic-use-tl" :: tail =>
+        case "--imsic-bus-type" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICBusType = device.IMSICBusType.withName(value))
           }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
@@ -189,9 +190,9 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
-        case "--enable-dfx" :: tail =>
+        case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = true))
+            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
           }), tail)
         case "--seperate-dm-bus" :: tail =>
           nextOption(config.alter((site, here, up) => {
