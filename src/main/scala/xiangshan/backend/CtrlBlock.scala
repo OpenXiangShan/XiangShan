@@ -230,14 +230,20 @@ class CtrlBlockImp(
   private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
   private val memViolation = io.fromMem.violation
+  private val oldestOneHotLvp = Redirect.selectOldestRedirect(lvpMisPredict)
+  private val oldestLvpRedirect = Mux1h(oldestOneHotLvp, lvpMisPredict)
   val loadReplay = Wire(ValidIO(new Redirect))
-  val lvpMisPredict = Wire(ValidIO(new Redirect))
+  val lvpMisPredict = Vec(3, Wire(ValidIO(new Redirect)))
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
-  lvpMisPredict.valid := io.lvpMisPredict.valid
-  lvpMisPredict.bits := io.lvpMisPredict.bits
+  lvpMisPredict.zip(io.lvpMisPredict).foreach{ case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits
+  }
+  // lvpMisPredict.valid := io.lvpMisPredict.valid
+  // lvpMisPredict.bits := io.lvpMisPredict.bits
 
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
@@ -341,15 +347,15 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
   redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
-  redirectGen.io.lvpMisPredict <> lvpMisPredict
+  redirectGen.io.lvpMisPredict <> oldestLvpRedirect
   val loadRedirectOffset = Mux(memViolation.bits.flushItself(), 0.U, Mux(memViolation.bits.isRVC, 2.U, 4.U))
   val loadRedirectPcFtqOffset = RegEnable((memViolation.bits.ftqOffset << instOffsetBits).asUInt +& loadRedirectOffset, memViolation.valid)
   val loadRedirectPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).startAddr + loadRedirectPcFtqOffset
   redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectPcRead
-  val misPred_offset = Mux(lvpMisPredict.bits.isRVC, 2.U, 4.U)
+  val misPred_offset = Mux(oldestLvpRedirect.bits.isRVC, 2.U, 4.U)
   val load_target = loadRedirectPcRead
   redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
-  redirectGen.io.lvpMisPredict.bits.cfiUpdate.target := misPred_offset + lvpMisPredict.bits.cfiUpdate.pc
+  redirectGen.io.lvpMisPredict.bits.cfiUpdate.target := misPred_offset + oldestLvpRedirect.bits.cfiUpdate.pc
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
@@ -1026,7 +1032,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
-  val lvpMisPredict = Flipped(ValidIO(new Redirect))
+  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(Vec(ValidIO(new Redirect))))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
   val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))

@@ -88,7 +88,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val pmp             = new ICachePMPBundle
   val mmioCommitRead  = new mmioCommitRead
   val fromload        = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToIfu)))
-  val lvpMisPredict   = ValidIO(new Redirect)
+  val lvpMisPredict   = Vec(backendParams.LduCnt, ValidIO(new Redirect))
   val readLvp         = Vec(DecodeWidth, new DecodeToLvp)
   val csr_fsIsOff     = Input(Bool())
 }
@@ -988,12 +988,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
   io.readLvp <> lvp.io.readPorts
 
-  io.lvpMisPredict := 0.U.asTypeOf(ValidIO(new Redirect))
-  io.lvpMisPredict.valid := lvp.io.misPredict.reduce(_ || _)
-  assert(PopCount(lvp.io.misPredict) < 2.U, "more than 2 mispred at a time")
-  val selectedIdx = PriorityEncoder(lvp.io.misPredict)
-  io.lvpMisPredict.bits := io.fromload(selectedIdx).bits.misPredict
-  io.lvpMisPredict.bits.cfiUpdate.pc := io.fromload(selectedIdx).bits.loadpc
+  io.lvpMisPredict := 0.U.asTypeOf(Vec(3, ValidIO(new Redirect)))
+  io.lvpMisPredict.zipWithIndex.foreach { case (mispred, i) =>
+    mispred.valid := lvp.io.misPredict(i)
+    mispred.bits := io.fromload(i).bits.misPredict
+    mispred.bits.cfiUpdate.pc := io.fromload(i).bits.loadpc
+  }
+  // io.lvpMisPredict.valid := lvp.io.misPredict.reduce(_ || _)
+  // val selectedIdx = PriorityEncoder(lvp.io.misPredict)
+  // io.lvpMisPredict.bits := io.fromload(selectedIdx).bits.misPredict
+  // io.lvpMisPredict.bits.cfiUpdate.pc := io.fromload(selectedIdx).bits.loadpc
 
   XSPerfAccumulate("lvp_mispredict_total", PopCount(lvp.io.misPredict))
   

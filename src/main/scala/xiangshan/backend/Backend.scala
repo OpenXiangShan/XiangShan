@@ -1108,7 +1108,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   }
   val debugRolling = new RobDebugRollingIO
 
-  val lvpMisPredict = Flipped(Valid(new Redirect))
+  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(Valid(new Redirect)))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
   val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val topDownInfo = new TopDownInfo
