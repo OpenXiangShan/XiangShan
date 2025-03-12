@@ -362,9 +362,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
           tile.module.io.debugTopDown.l3MissMatch := l3Match
         }
-        core_with_l2.zip(chi_openllc_opt).foreach { case (tile, l3) =>
-          tile.module.io.l3Miss := l3.io.l3Miss
-        }
+        core_with_l2.map(_.module.io.l3Miss := (if (chi_openllc_opt.nonEmpty) chi_openllc_opt.get.io.l3Miss else false.B))
       }
     }
 
