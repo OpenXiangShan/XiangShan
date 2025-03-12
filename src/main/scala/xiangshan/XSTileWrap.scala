@@ -127,6 +127,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
 
+    io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
+    io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
+    io.pwrdown_ack_n.foreach { _ := true.B }
+
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
       case Some(param) =>

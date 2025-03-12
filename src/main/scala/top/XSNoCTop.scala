@@ -291,6 +291,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.hartResetReq := io.hartResetReq
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
+
+    core_with_l2.module.io.iso_en.foreach { _ := false.B }
+    core_with_l2.module.io.pwrdown_req_n.foreach { _ := true.B }
+
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
     traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder

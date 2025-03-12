@@ -810,7 +810,7 @@ class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
   val l3Miss = Bool()
 }
 
-class LowPowerIO(implicit p: Parameters) extends XSBundle {
+class LowPowerIO(implicit p: Parameters) extends Bundle {
   /* i_*: SoC -> CPU   o_*: CPU -> SoC */
   val o_cpu_no_op = Output(Bool()) 
   //physical power down 
