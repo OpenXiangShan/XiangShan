@@ -201,18 +201,64 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
-    /* 
+    /*
      SoC control the sequence of power on/off with isolation/reset/clock 
      */
     val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
     val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
 
-    /* wfiGateClock: Gate core+l2 clock when wfi and exit when reset/interrupt/snoop*/
-    val wfiGateClock = withClockAndReset(soc_clock, soc_reset) {RegInit(true.B)}
+    /* Core+L2 reset when:
+     1. normal reset from SoC 
+     2. SoC initialize reset during Power on/off flow
+     */
+    val cpuReset = reset.asBool || !soc_rst_n
+
+    //Interrupt sources collect
+    val msip  = clint.head(0)
+    val mtip  = clint.head(1)
+    val meip  = plic.head(0)
+    val seip  = plic.last(0)
+    val nmi_31 = nmi.head(0)
+    val nmi_43 = nmi.head(1)
+    val msi_info_vld = core_with_l2.module.io.msiInfo.valid 
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
+
+    /*
+     * CPU Low Power State:
+     * 1. core+L2 Low power state transactions is triggered by l2 flush request from core CSR
+     * 2. wait L2 flush done
+     * 3. wait Core to wfi -> send out < io.o_cpu_no_op > 
+     */
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
+    val lpState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
+    val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
+    val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
+    val isWFI = core_with_l2.module.io.cpu_halt
+    val exitco = !io.chi.syscoreq & !io.chi.syscoack
+    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
+    io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
+
+    /*WFI clock Gating state
+     1. works only when lpState is IDLE means Core+L2 works in normal state
+     2. when Core is in wfi state, core+l2 clock is gated
+     3. only reset/interrupt/snoop could recover core+l2 clock 
+    */
+    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+    val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
+    val isNormal = lpState === sIDLE
+    val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(true.B)}
+    wfiState := WfiStateNext(wfiState, isWFI, isNormal, io.chi.rx.snp.flitpend, intSrc)
+
+    if (WFIClockGate) {
+      wfiGateClock := (wfiState === sGCLOCK)
+    }else {
+      wfiGateClock := false.B
+    }
+
 
 
     /* during power down sequence, SoC reset will gate clock */
-    val pwrdownGateClock = withClockAndReset(soc_clock, soc_reset) {RegInit(false.B)}
+    val pwrdownGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
     pwrdownGateClock := !soc_rst_n && lpState === sPOFFREQ
     /*
      physical power off handshake: 
@@ -222,11 +268,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val soc_pwrdown_n = io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B)
     io.lp.foreach { lp => lp.o_cpu_pwrdown_ack_n := core_with_l2.module.io.pwrdown_ack_n.getOrElse(true.B) }
 
-    /* Core+L2 reset when:
-     1. normal reset from SoC 
-     2. SoC initialize reset during Power on/off flow
-     */
-    val cpuReset = reset.asBool || !soc_rst_n
 
     /* Core+L2 hardware initial clock gating as:
      1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid 
@@ -261,46 +302,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
     io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-    //Interrupt sources collect
-    val msip  = clint.head(0)
-    val mtip  = clint.head(1)
-    val meip  = plic.head(0)
-    val seip  = plic.last(0)
-    val nmi_31 = nmi.head(0)
-    val nmi_43 = nmi.head(1)
-    val msi_info_vld = core_with_l2.module.io.msiInfo.valid 
-    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
-
-    /*
-     * CPU Low Power State:
-     * 1. core+L2 Low power state transactions is triggered by l2 flush request from core CSR
-     * 2. wait L2 flush done
-     * 3. wait Core to wfi -> send out < io.o_cpu_no_op > 
-     */
-    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
-    val lpState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
-    val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
-    val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
-    val isWFI = core_with_l2.module.io.cpu_halt
-    val exitco = !io.chi.syscoreq & !io.chi.syscoack
-    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
-    io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
-
-    /*WFI clock Gating state
-     1. works only when lpState is IDLE means Core+L2 works in normal state
-     2. when Core is in wfi state, core+l2 clock is gated
-     3. only reset/interrupt/snoop could recover core+l2 clock 
-    */
-    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
-    val wfiState = withClockAndReset(soc_clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
-    val isNormal = lpState === sIDLE
-    wfiState := WfiStateNext(wfiState, isWFI, isNormal, io.chi.rx.snp.flitpend, intSrc)
-
-    if (WFIClockGate) {
-      wfiGateClock := (wfiState === sGCLOCK)
-    }else {
-      wfiGateClock := false.B
-    }
 
      
 
