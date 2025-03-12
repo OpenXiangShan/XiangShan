@@ -236,7 +236,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           sets = 2048,
           banks = 4,
           fullAddressBits = 48,
-          clientCaches = Seq(L2Param())
+          clientCaches = tiles.map { core =>
+            val clientDirBytes = tiles.map{ t =>
+              t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+            }.sum
+            val l2params = core.L2CacheParamsOpt.get
+            l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
+          }
         )),
         L3NBanks = 1
       )
