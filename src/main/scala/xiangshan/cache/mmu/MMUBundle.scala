@@ -906,7 +906,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     pbmt := pte.asTypeOf(new PteBundle().cloneType).pbmt
-    ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
+    ppn := pte.asTypeOf(new PteBundle().cloneType).getPPN()
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     n.map(_ := pte.asTypeOf(new PteBundle().cloneType).n)
     this.asid := asid
@@ -997,7 +997,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.pbmts(i) := pte.pbmt
-      ps.ppns(i) := pte.ppn
+      ps.ppns(i) := pte.getPPN()
       ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
       ps.perms.map(_(i) := pte.perm)
