@@ -124,6 +124,7 @@ object Bundles {
   class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     val meta_prefetch = UInt(L1PfSourceBits.W)
     val meta_access = Bool()
+    val is_from_hw_pf = Bool()
 
     def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
       val inputReg = latch match {
@@ -133,6 +134,7 @@ object Bundles {
       connectSamePort(this, inputReg)
       this.meta_prefetch := DontCare
       this.meta_access := DontCare
+      this.is_from_hw_pf := DontCare
     }
 
     def toPrefetchReqBundle(): PrefetchReqBundle = {

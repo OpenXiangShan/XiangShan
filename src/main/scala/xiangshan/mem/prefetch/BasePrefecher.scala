@@ -60,6 +60,8 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val source = UInt(MemReqSource.reqSourceBits.W)
 }
 
+class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq
+
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
@@ -67,7 +69,7 @@ class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())
   val l2_req = ValidIO(new L2PrefetchReq())
-  val l3_req = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
+  val l3_req = ValidIO(new L3PrefetchReq()) // TODO: l3 pf source
   val enable = Input(Bool())
 }
 
@@ -78,8 +80,6 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val miss        = Bool()
   val pfHitStream = Bool()
 }
-
-trait PrefetcherParams
 
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule {
   val io = IO(new PrefetcherIO())

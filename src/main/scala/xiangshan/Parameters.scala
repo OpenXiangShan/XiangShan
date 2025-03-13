@@ -45,7 +45,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
-import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams}
 
 import scala.math.{max, min, pow}
 
@@ -210,7 +210,7 @@ case class XSCoreParameters
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
-  prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
@@ -595,6 +595,11 @@ trait HasXSParameter {
 
   def HasBitmapCheck = coreParams.HasBitmapCheck
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
+  
+  /** prefetch config */
+  def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
+  def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
+
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension

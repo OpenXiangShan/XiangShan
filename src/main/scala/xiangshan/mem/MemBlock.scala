@@ -48,7 +48,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
-import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
+import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
@@ -264,12 +264,11 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
   val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
-  val l2_pf_sender_opt = coreParams.prefetcher.map(_ =>
-    BundleBridgeSource(() => new PrefetchRecv)
-  )
-  val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
-    BundleBridgeSource(() => new huancun.PrefetchRecv)
-  ) else None
+  // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
+  val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty) 
+    Some(BundleBridgeSource(() => new PrefetchRecv)) else None
+  val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty && coreParams.prefetcher.nonEmpty)
+    Some(BundleBridgeSource(() => new huancun.PrefetchRecv)) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -393,6 +392,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
+  val hartId = p(XSCoreParamsKey).HartId
   val redirect = RegNextWithEnable(io.redirect)
 
   private val dcache = outer.dcache.module
@@ -426,68 +426,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer)
   val storeMisalignBuffer = Module(new StoreMisalignBuffer)
-
-  val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
-  dcache.io.sms_agt_evict_req.ready := false.B
-  val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
-    case _: SMSParams =>
-      val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_stride, 2, Some(30.U))
-      sms.io_stride_en := false.B
-      sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
-      val mbistSmsPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSms", hasMbist)
-      sms
-  }
-  prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
-  val hartId = p(XSCoreParamsKey).HartId
-  val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
-    case _ =>
-      val l1Prefetcher = Module(new L1Prefetcher())
-      val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
-      l1Prefetcher.io.enable := enableL1StreamPrefetcher &&
-        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
-      l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
-      l1Prefetcher.l2PfqBusy := io.l2PfqBusy
-
-      // stride will train on miss or prefetch hit
-      for (i <- 0 until LduCnt) {
-        val source = loadUnits(i).io.prefetch_train_l1
-        l1Prefetcher.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
-          source.bits.miss || isFromStride(source.bits.meta_prefetch)
-        )
-        l1Prefetcher.stride_train(i).bits := source.bits
-        val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
-        l1Prefetcher.stride_train(i).bits.uop.pc := Mux(
-          loadUnits(i).io.s2_ptr_chasing,
-          RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec),
-          RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
-        )
-      }
-      for (i <- 0 until HyuCnt) {
-        val source = hybridUnits(i).io.prefetch_train_l1
-        l1Prefetcher.stride_train.drop(LduCnt)(i).valid := source.valid && source.bits.isFirstIssue && (
-          source.bits.miss || isFromStride(source.bits.meta_prefetch)
-        )
-        l1Prefetcher.stride_train.drop(LduCnt)(i).bits := source.bits
-        l1Prefetcher.stride_train.drop(LduCnt)(i).bits.uop.pc := Mux(
-          hybridUnits(i).io.ldu_io.s2_ptr_chasing,
-          RegNext(io.ooo_to_mem.hybridPc(i)),
-          RegNext(RegNext(io.ooo_to_mem.hybridPc(i)))
-        )
-      }
-      l1Prefetcher
-  }
-  // load prefetch to l1 Dcache
-  l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
-    case None =>
-      l1_pf_req.valid := false.B
-      l1_pf_req.bits := DontCare
-  }
-  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -541,62 +479,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.otherFastWakeup.take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
   val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyuSta
 
-  // prefetch to l1 req
-  // Stream's confidence is always 1
-  // (LduCnt + HyuCnt) l1_pf_reqs ?
-  loadUnits.foreach(load_unit => {
-    load_unit.io.prefetch_req.valid <> l1_pf_req.valid
-    load_unit.io.prefetch_req.bits <> l1_pf_req.bits
-  })
-
-  hybridUnits.foreach(hybrid_unit => {
-    hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
-    hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
-  })
-
-  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
-  // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
-  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
-  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
-
-  val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
-                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
-  val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch) ++
-                                 hybridUnits.map(_.io.canAcceptLowConfPrefetch)
-  l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
-    case i => {
-      if (LowConfPorts.contains(i)) {
-        loadUnits(i).io.canAcceptLowConfPrefetch
-      } else {
-        Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
-      }
-    }
-  }.reduce(_ || _)
-
-  // l1 pf fuzzer interface
-  val DebugEnableL1PFFuzzer = false
-  if (DebugEnableL1PFFuzzer) {
-    // l1 pf req fuzzer
-    val fuzzer = Module(new L1PrefetchFuzzer())
-    fuzzer.io.vaddr := DontCare
-    fuzzer.io.paddr := DontCare
-
-    // override load_unit prefetch_req
-    loadUnits.foreach(load_unit => {
-      load_unit.io.prefetch_req.valid <> fuzzer.io.req.valid
-      load_unit.io.prefetch_req.bits <> fuzzer.io.req.bits
-    })
-
-    // override hybrid_unit prefetch_req
-    hybridUnits.foreach(hybrid_unit => {
-      hybrid_unit.io.ldu_io.prefetch_req.valid <> fuzzer.io.req.valid
-      hybrid_unit.io.ldu_io.prefetch_req.bits <> fuzzer.io.req.bits
-    })
-
-    fuzzer.io.req.ready := l1_pf_req.ready
-  }
-
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrapper)
   val sbuffer = Module(new Sbuffer)
@@ -610,43 +492,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   dcache.io.lqEmpty := lsq.io.lqEmpty
-
-  // load/store prefetch to l2 cache
-  prefetcherOpt.foreach(sms_pf => {
-    l1PrefetcherOpt.foreach(l1_pf => {
-      val sms_pf_to_l2 = DelayNWithValid(sms_pf.io.l2_req, 2)
-      val l1_pf_to_l2 = DelayNWithValid(l1_pf.io.l2_req, 2)
-
-      outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
-      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
-      outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
-      outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 2, Some(true.B))
-
-      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
-
-      val l2_trace = Wire(new LoadPfDbBundle)
-      l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
-      val table = ChiselDB.createTable(s"L2PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
-      table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
-      table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
-
-      val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
-      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := l1_pf_to_l3.valid)
-      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := l1_pf_to_l3.bits)
-      outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 4, Some(true.B)))
-
-      val l3_trace = Wire(new LoadPfDbBundle)
-      l3_trace.paddr := outer.l3_pf_sender_opt.map(_.out.head._1.addr).getOrElse(0.U)
-      val l3_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
-      l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
-
-      XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
-      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
-      XSPerfAccumulate("l1pf_fire_l2", l1_pf_to_l2.valid)
-      XSPerfAccumulate("sms_fire_l2", !l1_pf_to_l2.valid && sms_pf_to_l2.valid)
-      XSPerfAccumulate("sms_block_by_l1pf", l1_pf_to_l2.valid && sms_pf_to_l2.valid)
-    })
-  })
 
   // ptw
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
@@ -679,6 +524,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
+  val StrideDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
+  val SmsDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -772,6 +620,112 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     }
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
+  }
+
+
+  /******************************************************************
+   * Prefetcher
+   *  - L1 site
+   *      Stride --> l1, l2, l3
+   *      SMS --> l2
+   *  - L2 site: provide tlb interface
+   *  - L1 prefetch request: set confidence
+   *  - L1 prefetcher: fuzzer interface
+   ******************************************************************/
+  
+  /** prefetcher site in L1 */
+  val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
+  val prefetcher = Module(new PrefetcherWrapper)
+  prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
+  // TODO: add pfetecher control bundles in csrCtrl
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable_agt := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable_pht := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_active_threshold := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_active_stride := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_stride
+  prefetcher.io.pfCtrlFromOOO.l1D_pf_train_on_hit := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_train_on_hit
+  prefetcher.io.pfCtrlFromOOO.l2_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable
+  prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
+  prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
+  prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc.map(x => RegNext(x))
+  prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc.map(x => RegNext(x)) ++ io.ooo_to_mem.hybridPc.map(x => RegNext(x))
+  prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
+  prefetcher.io.trainSource.s2_loadFireHint := loadUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
+  prefetcher.io.trainSource.s3_load := loadUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
+  prefetcher.io.trainSource.s3_ptrChasing := loadUnits.map(_.io.s3_ptr_chasing) ++ hybridUnits.map(_.io.ldu_io.s3_ptr_chasing)
+  prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
+  prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
+  prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
+  // fixme lyq: 0, 1 use parameters
+  dtlb_reqs(StrideDTLBPortIndex) <> prefetcher.io.tlb_req(0)
+  dtlb_reqs(SmsDTLBPortIndex) <> prefetcher.io.tlb_req(1)
+  prefetcher.io.pmp_resp(0) := pmp_check(StrideDTLBPortIndex).resp
+  prefetcher.io.pmp_resp(1) := pmp_check(SmsDTLBPortIndex).resp
+  l1_pf_req <> prefetcher.io.l1_pf_to_l1
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l2.pf_source)
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l2.l2_pf_en)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l3.l2_pf_en)
+  
+  /** prefetcher site in L2 */
+  dtlb_reqs(L2toL1DTLBPortIndex) <> io.l2_tlb_req
+  dtlb_reqs(L2toL1DTLBPortIndex).resp.ready := true.B
+  io.l2_pmp_resp := pmp_check(L2toL1DTLBPortIndex).resp
+
+  /** prefetch to l1 req */
+  // Stream's confidence is always 1
+  // (LduCnt + HyuCnt) l1_pf_reqs ?
+  loadUnits.foreach(load_unit => {
+    load_unit.io.prefetch_req.valid <> l1_pf_req.valid
+    load_unit.io.prefetch_req.bits <> l1_pf_req.bits
+  })
+  hybridUnits.foreach(hybrid_unit => {
+    hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
+    hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
+  })
+  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+  // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
+  val LowConfPorts = if (LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
+  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
+  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
+
+  val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
+                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
+  val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch) ++
+                                 hybridUnits.map(_.io.canAcceptLowConfPrefetch)
+  l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
+    case i => {
+      if (LowConfPorts.contains(i)) {
+        loadUnits(i).io.canAcceptLowConfPrefetch
+      } else {
+        Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
+      }
+    }
+  }.reduce(_ || _)
+  /** l1 pf fuzzer interface */
+  val DebugEnableL1PFFuzzer = false
+  if (DebugEnableL1PFFuzzer) {
+    // l1 pf req fuzzer
+    val fuzzer = Module(new L1PrefetchFuzzer())
+    fuzzer.io.vaddr := DontCare
+    fuzzer.io.paddr := DontCare
+
+    // override load_unit prefetch_req
+    loadUnits.foreach(load_unit => {
+      load_unit.io.prefetch_req.valid <> fuzzer.io.req.valid
+      load_unit.io.prefetch_req.bits <> fuzzer.io.req.bits
+    })
+
+    // override hybrid_unit prefetch_req
+    hybridUnits.foreach(hybrid_unit => {
+      hybrid_unit.io.ldu_io.prefetch_req.valid <> fuzzer.io.req.valid
+      hybrid_unit.io.ldu_io.prefetch_req.bits <> fuzzer.io.req.bits
+    })
+
+    fuzzer.io.req.ready := l1_pf_req.ready
   }
 
   for (i <- 0 until LduCnt) {
@@ -928,28 +882,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       loadUnits(i).io.stld_nuke_query(s) := stld_nuke_query(s)
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
-    // load prefetch train
-    prefetcherOpt.foreach(pf => {
-      // sms will train on all miss load sources
-      val source = loadUnits(i).io.prefetch_train
-      pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
-        source.valid,
-        source.valid && source.bits.isFirstIssue && source.bits.miss
-      )
-      pf.io.ld_in(i).bits := source.bits
-      val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
-      pf.io.ld_in(i).bits.uop.pc := Mux(
-        loadUnits(i).io.s2_ptr_chasing,
-        RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec),
-        RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
-      )
-    })
-    l1PrefetcherOpt.foreach(pf => {
-      // stream will train on all load sources
-      val source = loadUnits(i).io.prefetch_train_l1
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue
-      pf.io.ld_in(i).bits := source.bits
-    })
 
     // load to load fast forward: load(i) prefers data(i)
     val l2l_fwd_out = loadUnits.map(_.io.l2l_fwd_out) ++ hybridUnits.map(_.io.ldu_io.l2l_fwd_out)
@@ -1067,34 +999,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
     hybridUnits(i).io.ldu_io.lq_rep_full <> lsq.io.lq_rep_full
-    // load prefetch train
-    prefetcherOpt.foreach(pf => {
-      val source = hybridUnits(i).io.prefetch_train
-      pf.io.ld_in(LduCnt + i).valid := Mux(pf_train_on_hit,
-        source.valid,
-        source.valid && source.bits.isFirstIssue && source.bits.miss
-      )
-      pf.io.ld_in(LduCnt + i).bits := source.bits
-      pf.io.ld_in(LduCnt + i).bits.uop.pc := Mux(hybridUnits(i).io.ldu_io.s2_ptr_chasing, io.ooo_to_mem.hybridPc(i), RegNext(io.ooo_to_mem.hybridPc(i)))
-    })
-    l1PrefetcherOpt.foreach(pf => {
-      // stream will train on all load sources
-      val source = hybridUnits(i).io.prefetch_train_l1
-      pf.io.ld_in(LduCnt + i).valid := source.valid && source.bits.isFirstIssue &&
-                                       FuType.isLoad(source.bits.uop.fuType)
-      pf.io.ld_in(LduCnt + i).bits := source.bits
-      pf.io.st_in(StaCnt + i).valid := false.B
-      pf.io.st_in(StaCnt + i).bits := DontCare
-    })
-    prefetcherOpt.foreach(pf => {
-      val source = hybridUnits(i).io.prefetch_train
-      pf.io.st_in(StaCnt + i).valid := Mux(pf_train_on_hit,
-        source.valid,
-        source.valid && source.bits.isFirstIssue && source.bits.miss
-      ) && FuType.isStore(source.bits.uop.fuType)
-      pf.io.st_in(StaCnt + i).bits := source.bits
-      pf.io.st_in(StaCnt + i).bits.uop.pc := RegNext(io.ooo_to_mem.hybridPc(i))
-    })
 
     // load to load fast forward: load(i) prefers data(i)
     val l2l_fwd_out = loadUnits.map(_.io.l2l_fwd_out) ++ hybridUnits.map(_.io.ldu_io.l2l_fwd_out)
@@ -1188,32 +1092,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.cmoOpReq <> dcache.io.cmoOpReq
   lsq.io.cmoOpResp <> dcache.io.cmoOpResp
 
-  // Prefetcher
-  val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
-  val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
-  val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
-  prefetcherOpt match {
-  case Some(pf) =>
-    dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
-    pf.io.pmp_resp := pmp_check(PrefetcherDTLBPortIndex).resp
-  case None =>
-    dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
-    dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
-    dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
-  }
-  l1PrefetcherOpt match {
-    case Some(pf) =>
-      dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
-      pf.io.pmp_resp := pmp_check(StreamDTLBPortIndex).resp
-    case None =>
-        dtlb_reqs(StreamDTLBPortIndex) := DontCare
-        dtlb_reqs(StreamDTLBPortIndex).req.valid := false.B
-        dtlb_reqs(StreamDTLBPortIndex).resp.ready := true.B
-  }
-  dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
-  dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
-  io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
-
   // StoreUnit
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect
@@ -1290,25 +1168,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
     lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
     lsq.io.std.storeDataIn.foreach(_.bits.isFromLoadUnit := DontCare)
-
-
-    // store prefetch train
-    l1PrefetcherOpt.foreach(pf => {
-      // stream will train on all load sources
-      pf.io.st_in(i).valid := false.B
-      pf.io.st_in(i).bits := DontCare
-    })
-
-    prefetcherOpt.foreach(pf => {
-      pf.io.st_in(i).valid := Mux(pf_train_on_hit,
-        stu.io.prefetch_train.valid,
-        stu.io.prefetch_train.valid && stu.io.prefetch_train.bits.isFirstIssue && (
-          stu.io.prefetch_train.bits.miss
-          )
-      )
-      pf.io.st_in(i).bits := stu.io.prefetch_train.bits
-      pf.io.st_in(i).bits.uop.pc := RegEnable(RegEnable(io.ooo_to_mem.storePc(i), stu.io.s1_prefetch_spec), stu.io.s2_prefetch_spec)
-    })
 
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
@@ -2010,8 +1869,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(pmp)
       )
       ++ pmp_checkers.map(ModuleNode(_))
-      ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
-      ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
+      // TODO lyq: how to set after wrapper?
+      // ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
+      // ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
     )
     val rightResetTree = ResetGenNode(
       Seq(
