@@ -28,7 +28,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
-import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
 import utility._
