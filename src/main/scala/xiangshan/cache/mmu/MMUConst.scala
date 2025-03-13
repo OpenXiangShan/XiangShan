@@ -110,6 +110,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteFlagLen = 8
   val pteRswLen = 2
   val ptePPNLen = 44
+  val ptePaddrLen = 56
   val pteResLen = 7
   val ptePbmtLen = 2
   val pteNLen = 1

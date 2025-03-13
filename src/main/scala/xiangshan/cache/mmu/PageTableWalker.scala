@@ -177,9 +177,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
 
-  val l3addr = Wire(UInt(PAddrBits.W))
-  val l2addr = Wire(UInt(PAddrBits.W))
-  val l1addr = Wire(UInt(PAddrBits.W))
+  val l3addr = Wire(UInt(ptePaddrLen.W))
+  val l2addr = Wire(UInt(ptePaddrLen.W))
+  val l1addr = Wire(UInt(ptePaddrLen.W))
+  val hptw_addr = Wire(UInt(ptePaddrLen.W))
   val mem_addr = Wire(UInt(PAddrBits.W))
 
   l3addr := MakeAddr(satp.ppn, getVpnn(vpn, 3))
@@ -193,7 +194,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     l2addr := MakeAddr(satp.ppn, getVpnn(vpn, 2))
   }
   l1addr := MakeAddr(Mux(l2Hit, ppn, pte.getPPN()), getVpnn(vpn, 1))
-  mem_addr := Mux(af_level === 3.U, l3addr, Mux(af_level === 2.U, l2addr, l1addr))
+  hptw_addr := Mux(af_level === 3.U, l3addr, Mux(af_level === 2.U, l2addr, l1addr))
+  mem_addr := hptw_addr(PAddrBits - 1, 0)
 
   val hptw_resp = Reg(new HptwResp)
 
@@ -202,7 +204,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val full_gvpn_wire = pte.getPPN()
   val full_gvpn = Mux(update_full_gvpn_mem_resp, full_gvpn_wire, full_gvpn_reg)
 
-  val gpaddr = MuxCase(mem_addr, Seq(
+  val gpaddr = MuxCase(hptw_addr, Seq(
     (stage1Hit || onlyS2xlate) -> Cat(full_gvpn, 0.U(offLen.W)),
     !s_last_hptw_req -> Cat(MuxLookup(level, pte.getPPN())(Seq(
       3.U -> Cat(pte.getPPN()(ptePPNLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
