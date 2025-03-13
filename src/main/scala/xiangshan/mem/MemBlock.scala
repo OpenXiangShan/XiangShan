@@ -647,8 +647,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromOOO.l2_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
-  prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc.map(x => RegNext(x))
-  prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc.map(x => RegNext(x)) ++ io.ooo_to_mem.hybridPc.map(x => RegNext(x))
+  prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
+  prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_loadFireHint := loadUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_load := loadUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
