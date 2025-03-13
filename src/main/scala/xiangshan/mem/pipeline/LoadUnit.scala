@@ -1781,13 +1781,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
   // mispredict flush pipe
   io.toifu.bits.misPredict := DontCare
-  io.toifu.bits.misPredict.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
-  io.toifu.bits.misPredict.robIdx      := s3_out.bits.uop.robIdx
-  io.toifu.bits.misPredict.ftqIdx      := s3_out.bits.uop.ftqPtr
-  io.toifu.bits.misPredict.ftqOffset   := s3_out.bits.uop.ftqOffset
+  io.toifu.bits.misPredict.isRVC       := io.ldout.bits.uop.preDecodeInfo.isRVC
+  io.toifu.bits.misPredict.robIdx      := io.ldout.bits.uop.robIdx
+  io.toifu.bits.misPredict.ftqIdx      := io.ldout.bits.uop.ftqPtr
+  io.toifu.bits.misPredict.ftqOffset   := io.ldout.bits.uop.ftqOffset
   io.toifu.bits.misPredict.level       := RedirectLevel.flushAfter
-  io.toifu.bits.misPredict.cfiUpdate.target := s3_out.bits.uop.pc
-  io.toifu.bits.misPredict.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
+  io.toifu.bits.misPredict.cfiUpdate.target := io.ldout.bits.uop.pc
+  io.toifu.bits.misPredict.debug_runahead_checkpoint_id := io.ldout.bits.uop.debugInfo.runahead_checkpoint_id
 
   //to rob readpc
   io.readPc.robidx := io.ldout.bits.uop.robIdx

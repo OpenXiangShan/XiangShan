@@ -331,6 +331,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.robIdx                                    := s0_enqBits(enqIdx).robIdx
       enq.bits.status.fuType                                    := IQFuType.readFuType(VecInit(s0_enqBits(enqIdx).fuType.asBools), params.getFuCfgs.map(_.fuType))
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
+      val moreThanOnePred = PopCount(io.srcPred(enqIdx).map(_.pred)) >= 2.U
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
@@ -341,18 +342,25 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
-        enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
+        enq.bits.status.srcStatus(j).dataSources.value          := (if (j == 0)) {
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
                                                                         (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid)                              -> DataSource.pvt
                                                                       ))
+                                                                    } else if (j < 3) {
+                                                                      MuxCase(DataSource.reg, Seq(
+                                                                        (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
+                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
+                                                                        (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
+                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !moreThanOnePred)          -> DataSource.pvt
+                                                                      ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
                                                                       ))
-                                                                    })
+                                                                    }
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         enq.bits.status.srcStatus(j).exuSources.foreach(_       := 0.U.asTypeOf(ExuSource()))
         enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))
