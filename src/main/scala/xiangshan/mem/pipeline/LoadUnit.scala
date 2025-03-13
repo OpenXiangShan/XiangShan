@@ -1152,7 +1152,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
   val s2_data_select  = genRdataOH(s2_out.uop)
-  val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(3, 0))
+  val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(2, 0))
   val s2_frm_mabuf = s2_in.isFrmMisAlignBuf
   val s2_pbmt = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
@@ -1717,15 +1717,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s3_merged_data_frm_pipe(95,     32),
       s3_merged_data_frm_pipe(103,    40),
       s3_merged_data_frm_pipe(111,    48),
-      s3_merged_data_frm_pipe(119,    56),
-      s3_merged_data_frm_pipe(127,    64),
-      s3_merged_data_frm_pipe(127,    72),
-      s3_merged_data_frm_pipe(127,    80),
-      s3_merged_data_frm_pipe(127,    88),
-      s3_merged_data_frm_pipe(127,    96),
-      s3_merged_data_frm_pipe(127,   104),
-      s3_merged_data_frm_pipe(127,   112),
-      s3_merged_data_frm_pipe(127,   120),
+      s3_merged_data_frm_pipe(119,    56)
     ))
   }))
   val s3_picked_data_frm_pipe = VecInit((0 until LdDataDup).map(i => {
