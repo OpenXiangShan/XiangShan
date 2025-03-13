@@ -138,12 +138,12 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     for (i <- 0 until LD_TRAIN_WIDTH) {
       val source = io.trainSource.s3_load(i)
-      val primaryValid = source.valid && !source.bits.tlbMiss && !source.bits.is_from_hw_pf
+      val primaryValid = source.valid && (!source.bits.tlbMiss || source.bits.is_from_hw_pf)
       pf.io.ld_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
         primaryValid && source.bits.isFirstIssue && source.bits.miss
-      ) && isLoadAccess(source.bits.uop)
+      ) // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.uop.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
@@ -154,12 +154,12 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     for (i <- 0 until ST_TRAIN_WIDTH) {
       val source = io.trainSource.s3_store(i)
-      val primaryValid = source.valid && !source.bits.tlbMiss && !source.bits.is_from_hw_pf
+      val primaryValid = source.valid && (!source.bits.tlbMiss || source.bits.is_from_hw_pf)
       pf.io.st_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
         primaryValid && source.bits.isFirstIssue && source.bits.miss
-      ) && isStoreAccess(source.bits.uop)
+      ) // && isStoreAccess(source.bits.uop)
       pf.io.st_in(i).bits := source.bits
       pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
     }
@@ -179,17 +179,13 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       val source = io.trainSource.s3_load(i)
       pf.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
         source.bits.miss || isFromStride(source.bits.meta_prefetch)
-      ) && isLoadAccess(source.bits.uop)
+      ) // && isLoadAccess(source.bits.uop)
       pf.stride_train(i).bits := source.bits
       pf.stride_train(i).bits.uop.pc := Mux(
         io.trainSource.s3_ptrChasing(i),
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
-    }
-
-    for (i <- 0 until LD_TRAIN_WIDTH) {
-      val source = io.trainSource.s3_load(i)
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
