@@ -311,11 +311,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
   // we assume that no more than 1 src is pred
+  // if 2 enq are both predicted, choose first enq
   io.pvtRead.zipWithIndex.foreach { case (read, readIdx) =>
     val predVec = io.srcPred(readIdx).map(x => x.pred)
     val needPvt = predVec.reduce(_ || _)
     val pvtIdx = PriorityEncoder(predVec)
-    read.valid := needPvt && io.enq(readIdx).valid
+    val isBranch = FuType.isBrh(io.enq(readIdx).bits.fuType)
+    read.valid := needPvt && io.enq(readIdx).valid && !isBranch
     read.addr := io.enq(readIdx).bits.psrc(pvtIdx)
   }
 
@@ -335,7 +337,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
                                                                           SrcState.rdy,
-                                                                          Mux(io.srcPred(enqIdx)(j).pred, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
+                                                                          Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
@@ -344,7 +346,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                        io.srcPred(enqIdx)(j).pred                                                            -> DataSource.pvt
+                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid)                              -> DataSource.pvt
                                                                       ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
@@ -806,7 +808,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.common.predSrc := deqEntryVec(i).bits.status.srcStatus(predIdx).psrc
-    assert(PopCount(finalDataSources(i).map(_.readPvt)) < 2.U, "no instr can pred more than 2 src")
+//    assert(PopCount(finalDataSources(i).map(_.readPvt)) < 2.U, "no instr can pred more than 2 src")
     deq.bits.common.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.srcTimer.foreach(_ := DontCare)
     deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})

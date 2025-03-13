@@ -229,11 +229,11 @@ class CtrlBlockImp(
   private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
   private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
+  val lvpMisPredict = Wire(Vec(3, ValidIO(new Redirect)))
   private val memViolation = io.fromMem.violation
   private val oldestOneHotLvp = Redirect.selectOldestRedirect(lvpMisPredict)
-  private val oldestLvpRedirect = Mux1h(oldestOneHotLvp, lvpMisPredict)
+  private val oldestLvpRedirect = Mux1H(oldestOneHotLvp, lvpMisPredict)
   val loadReplay = Wire(ValidIO(new Redirect))
-  val lvpMisPredict = Vec(3, Wire(ValidIO(new Redirect)))
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.debugIsCtrl := false.B
@@ -1032,7 +1032,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
-  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(Vec(ValidIO(new Redirect))))
+  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(ValidIO(new Redirect)))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
   val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))

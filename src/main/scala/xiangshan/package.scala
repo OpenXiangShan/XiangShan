@@ -460,6 +460,8 @@ package object xiangshan {
 
     def getBranchType(func: UInt) = func(3, 1)
     def isBranchInvert(func: UInt) = func(0)
+    def isBranch(fuOpType: UInt) = fuOpType == beq || fuOpType == bne || fuOpType == blt || fuOpType == bge ||
+      fuOpType == bltu || fuOpType == bgeu
   }
 
   object MULOpType {
