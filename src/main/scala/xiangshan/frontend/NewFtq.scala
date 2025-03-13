@@ -36,6 +36,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.icache._
+import xiangshan.frontend.ifu._
 
 class FtqDebugBundle extends Bundle {
   val pc        = UInt(39.W)
