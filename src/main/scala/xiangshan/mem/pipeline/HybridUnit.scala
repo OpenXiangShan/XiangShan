@@ -105,7 +105,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val lq_rep_full  = Input(Bool())
 
       // misc
-      val s2_ptr_chasing = Output(Bool()) // provide right pc for hw prefetch
+      val s3_ptr_chasing = Output(Bool()) // provide right pc for hw prefetch
 
       // Load fast replay path
       val fast_rep_in  = Flipped(Decoupled(new LqWriteBundle))
@@ -138,11 +138,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     }
 
     // speculative for gated control
-    val s0_prefetch_spec = Output(Bool())
     val s1_prefetch_spec = Output(Bool())
+    val s2_prefetch_spec = Output(Bool())
     // prefetch
-    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
     val correctMissTrain          = Input(Bool())
@@ -1080,22 +1079,21 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.fast_uop.bits := RegNext(s1_out.uop)
 
   //
-  io.ldu_io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
+  val s2_ptr_chasing = RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
+  io.ldu_io.s3_ptr_chasing := RegEnable(s2_ptr_chasing, false.B, s2_fire)
 
-  // prefetch train
-  io.s0_prefetch_spec := s0_fire
+  // prefetch train --> s3
   io.s1_prefetch_spec := s1_fire
-  io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train.bits.miss          := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
-  io.prefetch_train.bits.meta_prefetch := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_prefetch, false.B)
-  io.prefetch_train.bits.meta_access   := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_access, false.B)
+  io.s2_prefetch_spec := s2_fire
+  val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch
+  io.prefetch_train.valid              := s2_prefetch_train_valid
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
+  // TODO lyq: use trace with bank conflict?
+  io.prefetch_train.bits.miss          := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss), s2_prefetch_train_valid)
+  io.prefetch_train.bits.meta_prefetch := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_prefetch, false.B), s2_prefetch_train_valid)
+  io.prefetch_train.bits.meta_access   := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_access, false.B), s2_prefetch_train_valid)
+  io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_in.isHWPrefetch)
 
-  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio && s2_ld_flow
-  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train_l1.bits.miss          := io.ldu_io.dcache.resp.bits.miss
-  io.prefetch_train_l1.bits.meta_prefetch := io.ldu_io.dcache.resp.bits.meta_prefetch
-  io.prefetch_train_l1.bits.meta_access   := io.ldu_io.dcache.resp.bits.meta_access
   if (env.FPGAPlatform){
     io.ldu_io.dcache.s0_pc := DontCare
     io.ldu_io.dcache.s1_pc := DontCare

@@ -15,6 +15,8 @@ import xiangshan.mem.L1PrefetchSource
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 
+case class StreamStrideParams() extends PrefetcherParams{}
+
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
   val REGION_SIZE = 1024
@@ -374,7 +376,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val pmp_resp = Flipped(new PMPRespBundle())
     val l1_req = DecoupledIO(new L1PrefetchReq())
     val l2_pf_addr = ValidIO(new L2PrefetchReq())
-    val l3_pf_addr = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
+    val l3_pf_addr = ValidIO(new L3PrefetchReq())
     val confidence = Input(UInt(1.W))
     val l2PfqBusy = Input(Bool())
   })
@@ -423,7 +425,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val req = new L2PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
   }, MLP_L2L3_SIZE))
-  val l3_pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), MLP_L2L3_SIZE))
+  val l3_pf_req_arb = Module(new RRArbiterInit(new L3PrefetchReq, MLP_L2L3_SIZE))
 
   val l1_opt_replace_vec = VecInit(l1_array.zip(l1_valids).map{case (e, v) => e.may_be_replace(v)})
   val l2_opt_replace_vec = VecInit(l2_array.zip(l2_valids).map{case (e, v) => e.may_be_replace(v)})
@@ -812,11 +814,15 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   for(i <- 0 until MLP_L2L3_SIZE) {
     val evict = s1_l2_alloc && (s1_l2_index === i.U)
     l3_pf_req_arb.io.in(i).valid := l2_array(i).can_send_pf(l2_valids(i)) && (l2_array(i).sink === SINK_L3) && !evict
-    l3_pf_req_arb.io.in(i).bits := l2_array(i).get_pf_addr()
+    l3_pf_req_arb.io.in(i).bits.addr := l2_array(i).get_pf_addr()
+    l3_pf_req_arb.io.in(i).bits.source := MuxLookup(l2_array(i).source.value, MemReqSource.Prefetch2L3Unknown.id.U)(Seq(
+      L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L3Stride.id.U,
+      L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L3Stream.id.U
+    ))
   }
 
   when(l3_pf_req_arb.io.out.valid) {
-    l2_array(l3_pf_req_arb.io.chosen).sent_vec := l2_array(l3_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l3_pf_req_arb.io.out.bits)
+    l2_array(l3_pf_req_arb.io.chosen).sent_vec := l2_array(l3_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l3_pf_req_arb.io.out.bits.addr)
   }
 
   // reset meta to avoid muti-hit problem
@@ -917,7 +923,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && enable && pf_ctrl.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
 
-  val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits)).reduce(_ || _)
+  val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits.addr)).reduce(_ || _)
   io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && enable && pf_ctrl.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
 }
