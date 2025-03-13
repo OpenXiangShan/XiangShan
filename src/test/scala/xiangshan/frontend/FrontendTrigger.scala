@@ -1,4 +1,4 @@
-package xiangshan.frontend
+package xiangshan.frontend.ifu
 
 import chisel3._
 import chiseltest._

@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.ifu
 
 import chisel3._
 import chisel3.util._
@@ -27,6 +27,10 @@ import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.frontend.BrType
+import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.icache._
 
 trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst {
@@ -54,32 +58,6 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
   }
 
   def NOP = "h4501".U(16.W)
-}
-
-object BrType {
-  def notCFI  = "b00".U
-  def branch  = "b01".U
-  def jal     = "b10".U
-  def jalr    = "b11".U
-  def apply() = UInt(2.W)
-}
-
-object ExcType { // TODO:add exctype
-  def notExc  = "b000".U
-  def apply() = UInt(3.W)
-}
-
-class PreDecodeInfo extends Bundle { // 8 bit
-  val valid  = Bool()
-  val isRVC  = Bool()
-  val brType = UInt(2.W)
-  val isCall = Bool()
-  val isRet  = Bool()
-  // val excType = UInt(3.W)
-  def isBr   = brType === BrType.branch
-  def isJal  = brType === BrType.jal
-  def isJalr = brType === BrType.jalr
-  def notCFI = brType === BrType.notCFI
 }
 
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {

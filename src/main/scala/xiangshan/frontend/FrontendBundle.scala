@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils.NamedUInt
 import xiangshan._
+import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.icache._
@@ -252,6 +253,26 @@ object ExceptionType extends NamedUInt(2) {
   }
 }
 
+object BrType extends NamedUInt(2) {
+  def notCFI: UInt = "b00".U(width.W)
+  def branch: UInt = "b01".U(width.W)
+  def jal:    UInt = "b10".U(width.W)
+  def jalr:   UInt = "b11".U(width.W)
+}
+
+class PreDecodeInfo extends Bundle { // 8 bit
+  val valid  = Bool()
+  val isRVC  = Bool()
+  val brType = UInt(2.W)
+  val isCall = Bool()
+  val isRet  = Bool()
+  // val excType = UInt(3.W)
+  def isBr   = brType === BrType.branch
+  def isJal  = brType === BrType.jal
+  def isJalr = brType === BrType.jalr
+  def notCFI = brType === BrType.notCFI
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs           = Vec(PredictWidth, UInt(32.W))
   val valid            = UInt(PredictWidth.W)
@@ -269,6 +290,15 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val pc           = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val ftqPtr       = new FtqPtr
   val topdown_info = new FrontendTopDownBundle
+}
+
+class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
+  // write to backend gpaddr mem
+  val gpaddrMem_wen   = Output(Bool())
+  val gpaddrMem_waddr = Output(UInt(log2Ceil(FtqSize).W)) // Ftq Ptr
+  // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
+  // TODO: avoid cross page entry in Ftq
+  val gpaddrMem_wdata = Output(new GPAMemEntry)
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {

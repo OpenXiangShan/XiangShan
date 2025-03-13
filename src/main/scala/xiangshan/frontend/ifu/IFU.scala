@@ -15,23 +15,16 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.ifu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utility.ChiselDB
 import xiangshan._
-import xiangshan.backend.GPAMemEntry
 import xiangshan.cache.mmu._
+import xiangshan.frontend._
 import xiangshan.frontend.icache._
-
-trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst {
-  def mmioBusWidth = 64
-  def mmioBusBytes = mmioBusWidth / 8
-  def maxInstrLen  = 32
-}
 
 trait HasIFUConst extends HasXSParameter {
   def addrAlign(addr: UInt, bytes: Int, highest: Int): UInt =
@@ -46,15 +39,6 @@ trait HasIFUConst extends HasXSParameter {
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
-}
-
-class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
-  // write to backend gpaddr mem
-  val gpaddrMem_wen   = Output(Bool())
-  val gpaddrMem_waddr = Output(UInt(log2Ceil(FtqSize).W)) // Ftq Ptr
-  // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
-  // TODO: avoid cross page entry in Ftq
-  val gpaddrMem_wdata = Output(new GPAMemEntry)
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {

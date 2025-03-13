@@ -36,6 +36,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.icache._
+import xiangshan.frontend.ifu._
 
 class FtqDebugBundle(implicit p: Parameters) extends XSBundle {
   val pc        = PrunedAddr(VAddrBits)
