@@ -28,7 +28,7 @@ import system.SoCParamsKey
 import xiangshan.XSCoreParamsKey
 import xiangshan.XSTileKey
 import device.DebugModule
-import utility.{IntBuffer, RegNextN}
+import utility.{IntBuffer, RegNextN, ResetGen}
 import freechips.rocketchip.tilelink.TLWidthWidget
 
 class StandAloneDebugModule (
@@ -60,7 +60,9 @@ class StandAloneDebugModule (
     io <> outer.debugModule.module.io
     outer.debugModule.module.io.reset := io.reset.asAsyncReset
     outer.debugModule.module.io.debugIO.reset := io.debugIO.reset.asAsyncReset
-    outer.debugModule.module.io.debugIO.systemjtag.foreach(_.reset := io.debugIO.systemjtag.get.reset.asAsyncReset)
+    outer.debugModule.module.io.debugIO.systemjtag.foreach(
+      _.reset := (withClockAndReset(io.debugIO.systemjtag.get.jtag.TCK, io.debugIO.systemjtag.get.reset.asAsyncReset) { ResetGen() })
+    )
     withClockAndReset(io.clock, io.reset.asAsyncReset) {
       outer.debugModule.module.io.resetCtrl.hartIsInReset := AsyncResetSynchronizerShiftReg(io.resetCtrl.hartIsInReset, 3, 0)
       io.resetCtrl.hartResetReq.foreach(req =>
