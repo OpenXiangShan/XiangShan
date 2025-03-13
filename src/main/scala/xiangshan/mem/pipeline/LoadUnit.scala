@@ -154,8 +154,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
     // prefetch
-    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train            = ValidIO(new LsPrefetchTrainBundle()) // provide prefetch info
+
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
@@ -192,7 +192,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val lq_rep_full  = Input(Bool())
 
     // misc
-    val s2_ptr_chasing = Output(Bool()) // provide right pc for hw prefetch
+    val s3_ptr_chasing = Output(Bool()) // provide right pc for hw prefetch
 
     // Load fast replay path
     val fast_rep_in  = Flipped(Decoupled(new LqWriteBundle))
@@ -1431,40 +1431,26 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_uop.valid := GatedValidRegNext(s1_fast_uop_valid) && (s2_valid && !s2_out.rep_info.need_rep && !s2_uncache && !(s2_prf && !s2_hw_prf)) && !s2_isvec && !s2_frm_mabuf
   io.fast_uop.bits := RegEnable(s1_out.uop, s1_fast_uop_valid)
 
-  //
-  io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
-
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at load s3 **
-  val s2_prefetch_train_valid = WireInit(false.B)
-  s2_prefetch_train_valid              := s2_valid && !s2_actually_uncache && (!s2_in.tlbMiss || s2_hw_prf)
-  io.prefetch_train.valid              := GatedValidRegNext(s2_prefetch_train_valid)
+  val s2_ptr_chasing = RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
+  val s2_prefetch_train_valid = s2_valid && !s2_actually_uncache
+  io.prefetch_train.valid := GatedValidRegNext(s2_prefetch_train_valid)
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
-  io.prefetch_train.bits.miss          := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
+  io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_valid)
-  io.prefetch_train.bits.meta_access   := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_valid)
-  io.prefetch_train.bits.isFinalSplit      := false.B
+  io.prefetch_train.bits.meta_access := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_valid)
+  io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_hw_prf)
+  io.prefetch_train.bits.isFinalSplit := false.B
   io.prefetch_train.bits.misalignWith16Byte := false.B
   io.prefetch_train.bits.misalignNeedWakeUp := false.B
   io.prefetch_train.bits.updateAddrValid := false.B
   io.prefetch_train.bits.isMisalign := false.B
   io.prefetch_train.bits.hasException := false.B
   io.s1_prefetch_spec := s1_fire
-  io.s2_prefetch_spec := s2_prefetch_train_valid
+  io.s2_prefetch_spec := s2_fire
+  io.s3_ptr_chasing := RegEnable(s2_ptr_chasing, false.B, s2_fire)
 
-  val s2_prefetch_train_l1_valid = WireInit(false.B)
-  s2_prefetch_train_l1_valid              := s2_valid && !s2_actually_uncache
-  io.prefetch_train_l1.valid              := GatedValidRegNext(s2_prefetch_train_l1_valid)
-  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_l1_valid)
-  io.prefetch_train_l1.bits.miss          := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_l1_valid)
-  io.prefetch_train_l1.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_l1_valid)
-  io.prefetch_train_l1.bits.meta_access   := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_l1_valid)
-  io.prefetch_train_l1.bits.isFinalSplit      := false.B
-  io.prefetch_train_l1.bits.misalignWith16Byte := false.B
-  io.prefetch_train_l1.bits.misalignNeedWakeUp := false.B
-  io.prefetch_train_l1.bits.updateAddrValid := false.B
-  io.prefetch_train_l1.bits.hasException := false.B
-  io.prefetch_train_l1.bits.isMisalign := false.B
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
