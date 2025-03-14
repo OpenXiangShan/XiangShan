@@ -182,10 +182,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
-      val cpu_poff = new Bundle() {
-        val fromCore = Input(Bool())
-        val toTile = Output(Bool())
-      }
       val cpu_critical_error = new Bundle() {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
@@ -219,8 +215,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
-      val l2_flush_en = Input(Bool())
-      val l2_flush_done = Output(Bool())
+      val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
+      val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
       val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
       val dft_out = if(hasMbist) Some(Output(new SramBroadcastBundle)) else None
       val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
@@ -242,10 +238,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.hartId.toCore := io.hartId.fromTile
     io.msiInfo.toCore := io.msiInfo.fromTile
     io.cpu_halt.toTile := io.cpu_halt.fromCore
-    io.cpu_poff.toTile := io.cpu_poff.fromCore
     io.cpu_critical_error.toTile := io.cpu_critical_error.fromCore
     io.msiAck.toTile := io.msiAck.fromCore
-    io.l2_flush_done := true.B //TODO connect CoupleedL2
     io.l3Miss.toCore := io.l3Miss.fromTile
     io.clintTime.toCore := io.clintTime.fromTile
     // trace interface
@@ -296,6 +290,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
       io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
       io.l2Miss := l2.io.l2Miss
+      io.l2_flush_done.foreach { _ := l2.io.l2FlushDone.getOrElse(false.B) }
+      l2.io.l2Flush.foreach { _ := io.l2_flush_en.getOrElse(false.B) }
 
       /* l2 tlb */
       io.l2_tlb_req.req.bits := DontCare
