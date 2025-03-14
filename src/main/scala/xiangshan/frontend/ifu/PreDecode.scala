@@ -18,29 +18,32 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility._
-import xiangshan._
+import utility.XSDebug
+import utility.XSError
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 
-class PreDecodeResp(implicit p: Parameters) extends XSBundle with PreDecodeHelper {
-  val pd           = Vec(PredictWidth, new PreDecodeInfo)
-  val hasHalfValid = Vec(PredictWidth, Bool())
-  // val expInstr = Vec(PredictWidth, UInt(32.W))
-  val instr      = Vec(PredictWidth, UInt(32.W))
-  val jumpOffset = Vec(PredictWidth, PrunedAddr(VAddrBits))
-//  val hasLastHalf = Bool()
-  val triggered = Vec(PredictWidth, TriggerAction())
-}
+class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
+  class PreDecodeIO(implicit p: Parameters) extends IfuBundle {
+    class PreDecodeReq(implicit p: Parameters) extends IfuBundle {
+      val data: Vec[UInt] =
+        if (HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
+      val pc: Vec[PrunedAddr] = Vec(PredictWidth, PrunedAddr(VAddrBits))
+    }
+    class PreDecodeResp(implicit p: Parameters) extends IfuBundle {
+      val pd:           Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
+      val hasHalfValid: Vec[Bool]          = Vec(PredictWidth, Bool())
+      val instr:        Vec[UInt]          = Vec(PredictWidth, UInt(32.W))
+      val jumpOffset:   Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
+    }
 
-class PreDecode(implicit p: Parameters) extends XSModule with PreDecodeHelper {
-  val io = IO(new Bundle() {
-    val in  = Input(ValidIO(new IfuToPreDecode))
-    val out = Output(new PreDecodeResp)
-  })
+    val req:  Valid[PreDecodeReq] = Flipped(ValidIO(new PreDecodeReq))
+    val resp: PreDecodeResp       = Output(new PreDecodeResp)
+  }
+  val io: PreDecodeIO = IO(new PreDecodeIO)
 
-  val data = io.in.bits.data
-//  val lastHalfMatch = io.in.lastHalfMatch
+  val data = io.req.bits.data
+
   val validStart, validEnd     = Wire(Vec(PredictWidth, Bool()))
   val h_validStart, h_validEnd = Wire(Vec(PredictWidth, Bool()))
 
@@ -70,30 +73,25 @@ class PreDecode(implicit p: Parameters) extends XSModule with PreDecodeHelper {
 
   for (i <- 0 until PredictWidth) {
     val inst = WireInit(rawInsts(i))
-    // val expander       = Module(new RVCExpander)
     currentIsRVC(i) := isRVC(inst)
-    val currentPC = io.in.bits.pc(i)
-    // expander.io.in             := inst
 
     val (brType, isCall, isRet) = getBrInfo(inst)
     val jalOffset               = getJalOffset(inst, currentIsRVC(i))
     val brOffset                = getBrOffset(inst, currentIsRVC(i))
 
-    io.out.hasHalfValid(i) := h_validStart(i)
+    io.resp.hasHalfValid(i) := h_validStart(i)
 
-    io.out.triggered(i) := DontCare // VecInit(Seq.fill(10)(false.B))
-
-    io.out.pd(i).valid := validStart(i)
-    io.out.pd(i).isRVC := currentIsRVC(i)
+    io.resp.pd(i).valid := validStart(i)
+    io.resp.pd(i).isRVC := currentIsRVC(i)
 
     // for diff purpose only
-    io.out.pd(i).brType := brType
-    io.out.pd(i).isCall := isCall
-    io.out.pd(i).isRet  := isRet
+    io.resp.pd(i).brType := brType
+    io.resp.pd(i).isCall := isCall
+    io.resp.pd(i).isRet  := isRet
 
     // io.out.expInstr(i)         := expander.io.out.bits
-    io.out.instr(i)      := inst
-    io.out.jumpOffset(i) := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    io.resp.instr(i)      := inst
+    io.resp.jumpOffset(i) := Mux(io.resp.pd(i).isBr, brOffset, jalOffset)
   }
 
   // the first half is always reliable
@@ -177,23 +175,23 @@ class PreDecode(implicit p: Parameters) extends XSModule with PreDecodeHelper {
   validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
   validH_ValidEndMismatch   := h_validEnd.zip(h_validEnd_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
 
-  XSError(io.in.valid && validStartMismatch, p"validStart mismatch\n")
-  XSError(io.in.valid && validEndMismatch, p"validEnd mismatch\n")
-  XSError(io.in.valid && validH_ValidStartMismatch, p"h_validStart mismatch\n")
-  XSError(io.in.valid && validH_ValidEndMismatch, p"h_validEnd mismatch\n")
+  XSError(io.req.valid && validStartMismatch, p"validStart mismatch\n")
+  XSError(io.req.valid && validEndMismatch, p"validEnd mismatch\n")
+  XSError(io.req.valid && validH_ValidStartMismatch, p"h_validStart mismatch\n")
+  XSError(io.req.valid && validH_ValidEndMismatch, p"h_validEnd mismatch\n")
 
 //  io.out.hasLastHalf := !io.out.pd(PredictWidth - 1).isRVC && io.out.pd(PredictWidth - 1).valid
 
   for (i <- 0 until PredictWidth) {
     XSDebug(
       true.B,
-      p"instr ${Hexadecimal(io.out.instr(i))}, " +
+      p"instr ${Hexadecimal(io.resp.instr(i))}, " +
         p"validStart ${Binary(validStart(i))}, " +
         p"validEnd ${Binary(validEnd(i))}, " +
-        p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
-        p"brType ${Binary(io.out.pd(i).brType)}, " +
-        p"isRet ${Binary(io.out.pd(i).isRet)}, " +
-        p"isCall ${Binary(io.out.pd(i).isCall)}\n"
+        p"isRVC ${Binary(io.resp.pd(i).isRVC)}, " +
+        p"brType ${Binary(io.resp.pd(i).brType)}, " +
+        p"isRet ${Binary(io.resp.pd(i).isRet)}, " +
+        p"isCall ${Binary(io.resp.pd(i).isCall)}\n"
     )
   }
 }
