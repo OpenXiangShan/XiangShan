@@ -1583,11 +1583,11 @@ class NewCSR(implicit val p: Parameters) extends Module
 
     val diffNonRegInterruptPendingEvent = DifftestModule(new DiffNonRegInterruptPendingEvent)
     diffNonRegInterruptPendingEvent.coreid           := hartId
-    diffNonRegInterruptPendingEvent.valid            := platformIRPMeipChange || platformIRPMtipChange || platformIRPMsipChange ||
+    diffNonRegInterruptPendingEvent.valid            := (platformIRPMeipChange || platformIRPMtipChange || platformIRPMsipChange ||
                                                         platformIRPSeipChange || platformIRPStipChange ||
                                                         platformIRPVseipChange || platformIRPVstipChange ||
                                                         fromAIAMeipChange || fromAIASeipChange ||
-                                                        lcofiReqChange
+                                                        lcofiReqChange) & !reset.asBool
     diffNonRegInterruptPendingEvent.platformIRPMeip  := platformIRP.MEIP
     diffNonRegInterruptPendingEvent.platformIRPMtip  := platformIRP.MTIP
     diffNonRegInterruptPendingEvent.platformIRPMsip  := platformIRP.MSIP
