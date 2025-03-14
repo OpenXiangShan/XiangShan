@@ -46,7 +46,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
         val fixedTarget:   Vec[PrunedAddr] = Vec(PredictWidth, PrunedAddr(VAddrBits))
         val jalTarget:     Vec[PrunedAddr] = Vec(PredictWidth, PrunedAddr(VAddrBits))
         val fixedMissPred: Vec[Bool]       = Vec(PredictWidth, Bool())
-        val faultType:     Vec[CheckInfo]  = Vec(PredictWidth, new CheckInfo)
+        val faultType:     Vec[UInt]       = Vec(PredictWidth, PreDecodeFaultType())
       }
       val stage1Out: S1Out = new S1Out
       val stage2Out: S2Out = new S2Out
@@ -138,15 +138,15 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   })
 
   io.resp.stage2Out.faultType.zipWithIndex.foreach { case (faultType, i) =>
-    faultType.value := MuxCase(
-      FaultType.noFault,
+    faultType := MuxCase(
+      PreDecodeFaultType.noFault,
       Seq(
-        jalFaultVecNext(i)  -> FaultType.jalFault,
-        jalrFaultVecNext(i) -> FaultType.jalrFault,
-        retFaultVecNext(i)  -> FaultType.retFault,
-        targetFault(i)      -> FaultType.targetFault,
-        notCFITakenNext(i)  -> FaultType.notCFIFault,
-        invalidTakenNext(i) -> FaultType.invalidTaken
+        jalFaultVecNext(i)  -> PreDecodeFaultType.jalFault,
+        jalrFaultVecNext(i) -> PreDecodeFaultType.jalrFault,
+        retFaultVecNext(i)  -> PreDecodeFaultType.retFault,
+        targetFault(i)      -> PreDecodeFaultType.targetFault,
+        notCFITakenNext(i)  -> PreDecodeFaultType.notCfiFault,
+        invalidTakenNext(i) -> PreDecodeFaultType.invalidTaken
       )
     )
   }

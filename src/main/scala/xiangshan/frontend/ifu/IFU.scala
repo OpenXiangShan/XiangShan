@@ -1079,14 +1079,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   wb_redirect := checkFlushWb.bits.misOffset.valid && wb_valid
 
-  /*write back flush type*/
-  val checkFaultType    = wb_check_result_stage2.faultType
-  val checkJalFault     = wb_valid && checkFaultType.map(_.isjalFault).reduce(_ || _)
-  val checkJalrFault    = wb_valid && checkFaultType.map(_.isjalrFault).reduce(_ || _)
-  val checkRetFault     = wb_valid && checkFaultType.map(_.isRetFault).reduce(_ || _)
-  val checkTargetFault  = wb_valid && checkFaultType.map(_.istargetFault).reduce(_ || _)
-  val checkNotCFIFault  = wb_valid && checkFaultType.map(_.notCFIFault).reduce(_ || _)
-  val checkInvalidTaken = wb_valid && checkFaultType.map(_.invalidTakenFault).reduce(_ || _)
+  /* write back flush type */
+  private val checkFaultType    = wb_check_result_stage2.faultType
+  private val checkJalFault     = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.jalFault).reduce(_ || _)
+  private val checkJalrFault    = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.jalrFault).reduce(_ || _)
+  private val checkRetFault     = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.retFault).reduce(_ || _)
+  private val checkTargetFault  = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.targetFault).reduce(_ || _)
+  private val checkNotCFIFault  = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.notCfiFault).reduce(_ || _)
+  private val checkInvalidTaken = wb_valid && checkFaultType.map(_ === PreDecodeFaultType.invalidTaken).reduce(_ || _)
 
   XSPerfAccumulate("predecode_flush_jalFault", checkJalFault)
   XSPerfAccumulate("predecode_flush_jalrFault", checkJalrFault)

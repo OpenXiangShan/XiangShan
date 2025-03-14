@@ -197,30 +197,3 @@ class PreDecode(implicit p: Parameters) extends XSModule with PreDecodeHelper {
     )
   }
 }
-
-/* ---------------------------------------------------------------------
- * Predict result check
- *
- * ---------------------------------------------------------------------
- */
-
-object FaultType {
-  def noFault      = "b000".U
-  def jalFault     = "b001".U // not CFI taken or invalid instruction taken
-  def retFault     = "b010".U // not CFI taken or invalid instruction taken
-  def targetFault  = "b011".U
-  def notCFIFault  = "b100".U // not CFI taken or invalid instruction taken
-  def invalidTaken = "b101".U
-  def jalrFault    = "b110".U
-  def apply()      = UInt(3.W)
-}
-
-class CheckInfo extends Bundle { // 8 bit
-  val value             = UInt(3.W)
-  def isjalFault        = value === FaultType.jalFault
-  def isjalrFault       = value === FaultType.jalrFault
-  def isRetFault        = value === FaultType.retFault
-  def istargetFault     = value === FaultType.targetFault
-  def invalidTakenFault = value === FaultType.invalidTaken
-  def notCFIFault       = value === FaultType.notCFIFault
-}
