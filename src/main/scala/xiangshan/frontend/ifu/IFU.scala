@@ -26,17 +26,6 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.frontend.icache._
 
-trait HasIFUConst extends HasXSParameter {
-  def addrAlign(addr: UInt, bytes: Int, highest: Int): UInt =
-    Cat(addr(highest - 1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
-  def fetchQueueSize = 2
-
-  def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
-    val byteOffset = (pc - start).toUInt
-    (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
-  }
-}
-
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
 }
@@ -102,8 +91,8 @@ class IfuWbToFtqDB(implicit p: Parameters) extends XSBundle {
 class NewIFU(implicit p: Parameters) extends XSModule
     with HasICacheParameters
     with HasXSParameter
-    with HasIFUConst
-    with HasPdConst
+    with FetchBlockHelper
+    with PreDecodeHelper
     with HasCircularQueuePtrHelper
     with HasPerfEvents
     with HasTlbConst {
@@ -973,9 +962,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(f3_req_is_mmio) {
     val inst = Cat(f3_mmio_data(1), f3_mmio_data(0))
 
-    val brType :: isCall :: isRet :: Nil = brInfo(inst)
-    val jalOffset                        = jal_offset(inst, mmio_is_RVC)
-    val brOffset                         = br_offset(inst, mmio_is_RVC)
+    val (brType, isCall, isRet) = getBrInfo(inst)
+    val jalOffset               = getJalOffset(inst, mmio_is_RVC)
+    val brOffset                = getBrOffset(inst, mmio_is_RVC)
 
     io.toIbuffer.bits.instrs(0) := Mux(mmioRVCExpander.io.ill, mmioRVCExpander.io.in, mmioRVCExpander.io.out.bits)
 

@@ -35,7 +35,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val pc:         Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
     }
 
-    class PredCheckerResp(implicit p: Parameters) extends IfuBundle with HasPdConst {
+    class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
       // to Ibuffer write port  (stage 1)
       class S1Out(implicit p: Parameters) extends IfuBundle {
         val fixedRange: Vec[Bool] = Vec(PredictWidth, Bool())
