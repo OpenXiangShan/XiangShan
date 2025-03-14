@@ -230,29 +230,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst {
   }
 }
 
-class IfuToF3PreDecode(implicit p: Parameters) extends XSBundle with HasPdConst {
-  val instr = Vec(PredictWidth, UInt(32.W))
-}
-
-class F3PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
-}
-class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
-  val io = IO(new Bundle() {
-    val in  = Input(new IfuToF3PreDecode)
-    val out = Output(new F3PreDecodeResp)
-  })
-  io.out.pd.zipWithIndex.map { case (pd, i) =>
-    pd.valid  := DontCare
-    pd.isRVC  := DontCare
-    pd.brType := brInfo(io.in.instr(i))(0)
-    pd.isCall := brInfo(io.in.instr(i))(1)
-    pd.isRet  := brInfo(io.in.instr(i))(2)
-  }
-
-}
-
-
 /* ---------------------------------------------------------------------
  * Predict result check
  *

@@ -604,14 +604,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_req_startAddr     = PrunedAddrInit(Cat(0.U(1.W), f3_ftq_req.startAddr.toUInt))
   val f3_ftq_req_nextStartAddr = PrunedAddrInit(Cat(0.U(1.W), f3_ftq_req.nextStartAddr.toUInt))
   // brType, isCall and isRet generation is delayed to f3 stage
-  val f3Predecoder = Module(new F3Predecoder)
+  private val f3PreDecoder = Module(new F3PreDecode)
 
-  f3Predecoder.io.in.instr := f3_instr
+  f3PreDecoder.io.instr := f3_instr
 
-  f3_pd.zipWithIndex.map { case (pd, i) =>
-    pd.brType := f3Predecoder.io.out.pd(i).brType
-    pd.isCall := f3Predecoder.io.out.pd(i).isCall
-    pd.isRet  := f3Predecoder.io.out.pd(i).isRet
+  f3_pd.zipWithIndex.foreach { case (pd, i) =>
+    pd.brType := f3PreDecoder.io.pd(i).brType
+    pd.isCall := f3PreDecoder.io.pd(i).isCall
+    pd.isRet  := f3PreDecoder.io.pd(i).isRet
   }
 
   val f3PdDiff = f3_pd_wire.zip(f3_pd).map { case (a, b) => a.asUInt =/= b.asUInt }.reduce(_ || _)
