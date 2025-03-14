@@ -346,14 +346,14 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   assert(PopCount(e0_mergeVec) <= 1.U, "Uncache buffer should not merge multiple entries")
 
   val e0_invalidVec = sizeMap(i => !states(i).isValid())
-  val e0_reject = do_uarch_drain || !e0_invalidVec.asUInt.orR || e0_rejectVec.reduce(_ || _)
   val (e0_mergeIdx, e0_canMerge) = PriorityEncoderWithFlag(e0_mergeVec)
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_allocWaitSame = e0_allocWaitSameVec.reduce(_ || _)
   val e0_sid = Mux(e0_canMerge, e0_mergeIdx, e0_allocIdx)
+  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
 
   // e0_fire is used to guarantee that it will not be rejected
-  when(e0_canMerge && e0_fire){
+  when(e0_canMerge && e0_req_valid){
     entries(e0_mergeIdx).update(e0_req)
   }.elsewhen(e0_canAlloc && e0_fire){
     entries(e0_allocIdx).set(e0_req)
