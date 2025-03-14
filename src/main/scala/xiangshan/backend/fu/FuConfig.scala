@@ -6,6 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.fu.fpu.{IntToFP, IntFPToVec}
+import xiangshan.backend.fu.vector.VcryptoPiped
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -161,7 +162,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu, vcrypp).contains(fuType)
   }
 
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
@@ -182,7 +183,7 @@ case class FuConfig (
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
-                            fuType == FuType.vidiv
+                            fuType == FuType.vidiv || fuType == FuType.vcrypp
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu
@@ -691,6 +692,44 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
   )
+
+  // Vector crypto piped
+  val VcrypPCfg = FuConfig (
+    name = "vcrypp",
+    fuType = FuType.vcrypp,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VcryptoPiped(cfg)(p).suggestName("Vcrypp")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, (v0 no use), vtype&vl
+    ),
+    piped = true,
+    writeVecRf = true,
+    latency = CertainLatency(1), // TODO: complete this
+    vconfigWakeUp = true, // TODO: complete this
+    maskWakeUp = true, // TODO: complete this
+    destDataBits = 128, // TODO: complete this
+    exceptionOut = Seq(illegalInstr), // TODO: complete this
+  )
+
+  // // Vector crypto non-piped
+  // val VcrypNPCfg = FuConfig (
+  //   name = "vcrypnp",
+  //   fuType = FuType.vcrypnp,
+  //   fuGen = (p: Parameters, cfg: FuConfig) => Module(new VcryptoNonPiped(cfg)(p).suggestName("Vcrypnp")),
+  //   srcData = Seq(
+  //     Seq(), // TODO: complete this
+  //   ),
+  //   piped = false,
+  //   writeVecRf = true, // TODO: complete this
+  //   writeV0Rf = true, // TODO: complete this
+  //   writeFpRf = false, // TODO: complete this
+  //   writeFflags = true, // TODO: complete this
+  //   latency = CertainLatency(2), // TODO: complete this
+  //   vconfigWakeUp = true, // TODO: complete this
+  //   maskWakeUp = true, // TODO: complete this
+  //   destDataBits = 128, // TODO: complete this
+  //   exceptionOut = Seq(illegalInstr), // TODO: complete this
+  //   needSrcFrm = false, // TODO: complete this
+  // )
 
   val FaluCfg = FuConfig(
     name = "falu",

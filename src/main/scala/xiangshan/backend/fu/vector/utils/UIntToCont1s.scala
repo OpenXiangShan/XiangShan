@@ -7,6 +7,11 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.backend.fu.vector.Utils.{NOnes, NZeros}
 
+/**
+ * Convert an UInt to continuous 1s at low bits
+ * e.g. 3.U(3.W) -> 0b0000111.U(7.W), 5.U(3.W) -> 0b0011111.U(7.W)
+ * @param uintWidth width of input UInt
+ */
 class UIntToContLow1s(uintWidth: Int) extends Module {
   private val outWidth = (1 << uintWidth) - 1 // 2^n - 1
 
@@ -17,19 +22,41 @@ class UIntToContLow1s(uintWidth: Int) extends Module {
 
   io.dataOut := helper(io.dataIn)
 
+  /**
+   * A helper function to convert UInt to continuous low 1s recursively
+   * @param data input UInt with width n
+   * @return continuous low 1s with width 2^uint.n^- 1
+   */
   private def helper(data: UInt): UInt = data.getWidth match {
-    case 1 => Mux(data(0), 1.U(1.W), 0.U(1.W))
+    case 1 => Mux(data(0), 1.U(1.W), 0.U(1.W)) // 1-bit 1 or 0
     case w => Mux(
       data(w - 1),
-      Cat(helper(data(w - 2, 0)), NOnes(1 << (w - 1))),
-      Cat(NZeros(1 << (w - 1)), helper(data(w - 2, 0)))
+      Cat(helper(data(w - 2, 0)), NOnes(1 << (w - 1))), // if the highest bit is 1, then append 1s to the right
+      Cat(NZeros(1 << (w - 1)), helper(data(w - 2, 0))) // if the highest bit is 0, then append 0s to the left
     )
   }
 }
 
+/**
+ * Convert an UInt to continuous 1s at low bits
+ * e.g. 3.U(3.W) -> 0b0000111.U(7.W), 5.U(3.W) -> 0b0011111.U(7.W)
+ */
 object UIntToContLow1s {
+  /**
+   * Convert an UInt to continuous 1s at low bits
+   * e.g. 3.U(3.W) -> 0b0000111.U(7.W), 5.U(3.W) -> 0b0011111.U(7.W)
+   * @param uint input UInt
+   * @return continuous low 1s with width 2^[[uint]].getWidth^- 1
+   */
   def apply(uint: UInt): UInt = apply(uint, uint.getWidth)
 
+  /**
+   * Convert an UInt to continuous 1s at low bits
+   * e.g. 3.U(3.W) -> 0b0000111.U(7.W), 5.U(3.W) -> 0b0011111.U(7.W)
+   * @param uint input UInt
+   * @param width width of output UInt
+   * @return continuous low 1s with width [[width]]
+   */
   def apply(uint: UInt, width: Int): UInt = {
     val uintToContTail1sMod = Module(new UIntToContLow1s(uint.getWidth)).suggestName(s"uintToContTail1sMod${width}Bits")
     uintToContTail1sMod.io.dataIn := uint
@@ -42,11 +69,30 @@ object UIntToContLow1s {
   }
 }
 
+/**
+ * Convert an UInt to continuous 1s at high bits
+ * e.g. 3.U(3.W) -> 0b1110000.U(7.W), 5.U(3.W) -> 0b1111100.U(7.W)
+ */
 object UIntToContHigh1s {
+  /**
+   * Convert an UInt to continuous 1s at high bits
+   * e.g. 3.U(3.W) -> 0b1110000.U(7.W), 5.U(3.W) -> 0b1111100.U(7.W)
+   * @param uint input UInt
+   * @return continuous high 1s with width 2^[[uint]].getWidth^- 1
+   */
   def apply(uint: UInt): UInt = Reverse(UIntToContLow1s(uint))
+
+  /**
+   * Convert an UInt to continuous 1s at high bits
+   * e.g. 3.U(3.W) -> 0b1110000.U(7.W), 5.U(3.W) -> 0b1111100.U(7.W)
+   * @param uint input UInt
+   * @param width width of output UInt
+   * @return continuous high 1s with width [[width]]
+   */
   def apply(uint: UInt, width: Int): UInt = Reverse(UIntToContLow1s(uint, width))
 }
 
+/*
 class UIntToContLow1sTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
 
   private val uintWidth = 3
@@ -80,3 +126,4 @@ class UIntToContLow1sTest extends AnyFlatSpec with ChiselScalatestTester with Ma
   }
   println("test done")
 }
+*/

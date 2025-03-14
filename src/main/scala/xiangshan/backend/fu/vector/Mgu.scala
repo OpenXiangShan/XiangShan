@@ -32,7 +32,9 @@ import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import yunsuan.vector._
 
 class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
+  /** Number of bytes in a vector */
   private val numBytes = vlen / 8
+  /** Width of byte index in a vector */
   private val byteWidth = log2Up(numBytes)
 
   val io = IO(new MguIO(vlen))
@@ -44,12 +46,16 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   val oldVd = in.oldVd
   val narrow = io.in.info.narrow
 
+  /** Use [[narrow]] to select the right vdIdx */
   private val vdIdx = Mux(narrow, info.vdIdx(2, 1), info.vdIdx)
 
+  /** Mask tail generator */
   private val maskTailGen = Module(new ByteMaskTailGen(vlen))
 
+  /** One-hot effective element width */
   private val eewOH = SewOH(info.eew).oneHot
 
+  /** One-hot vector element width */
   private val vstartMapVdIdx = elemIdxMapVdIdx(info.vstart)(2, 0) // 3bits 0~7
   private val vlMapVdIdx = elemIdxMapVdIdx(info.vl)(3, 0)         // 4bits 0~8
   private val uvlMax = numBytes.U >> info.eew
@@ -86,6 +92,9 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val vdVecByte = vd.asTypeOf(resVecByte)
   private val oldVdVecByte = oldVd.asTypeOf(resVecByte)
 
+  /**
+    * result = if (active) vd elif (agnostic) 0xff else oldVd
+    */
   for (i <- 0 until numBytes) {
     resVecByte(i) := MuxCase(oldVdVecByte(i), Seq(
       activeEn(i) -> vdVecByte(i),
@@ -103,15 +112,20 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val maskVd = maskVecByte.asUInt
 
   // the result of mask-generating inst
+  /** max vector destination index */
   private val maxVdIdx = 8
+  /** meaningful value of bits sequences number */
   private val meaningfulBitsSeq = Seq(16, 8, 4, 2)
+  /** all possible results of masked result under different element width */
   private val allPossibleResBit = Wire(Vec(4, Vec(maxVdIdx, UInt(vlen.W))))
 
-  for (sew <- 0 to 3) {
+  for (sew <- 0 to 3) { // for sew (0, 1, 2, 3), the element width is
     if (sew == 0) {
+      // if sew is 8, the 7-th result is to concatenate 16 bits of maskVd and 16*7 bits of oldVd
       allPossibleResBit(sew)(maxVdIdx - 1) := Cat(maskVd(meaningfulBitsSeq(sew) - 1, 0),
         oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
     } else {
+      // if not, the 7-th result is to concatenate 8 bits of maskVd, 8 bits of oldVd and 8 bits of oldVd
       allPossibleResBit(sew)(maxVdIdx - 1) := Cat(oldVd(vlen - 1, meaningfulBitsSeq(sew) * maxVdIdx),
         maskVd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
     }
@@ -136,6 +150,12 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   io.debugOnly.end := maskTailGen.io.in.end
   io.debugOnly.activeEn := activeEn
   io.debugOnly.agnosticEn := agnosticEn
+
+  /**
+   * Map element index to vector destination index
+   * @param elemIdx element index
+   * @return vector destination index
+   */
   def elemIdxMapVdIdx(elemIdx: UInt) = {
     require(elemIdx.getWidth >= log2Up(vlen))
     // 3 = log2(8)
@@ -167,16 +187,16 @@ class VldMgu(vlen: Int)(implicit p: Parameters) extends Mgu(vlen) {
 
 class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   val in = new Bundle {
-    val vd = Input(UInt(vlen.W))
-    val oldVd = Input(UInt(vlen.W))
-    val mask = Input(UInt(vlen.W))
-    val info = Input(new VecInfo)
-    val isIndexedVls = Input(Bool())
+    val vd = Input(UInt(vlen.W))     // result to be written to VReg[vd]
+    val oldVd = Input(UInt(vlen.W))  // VReg[vd]
+    val mask = Input(UInt(vlen.W))   // mask register of vd
+    val info = Input(new VecInfo)    // vector instruction info
+    val isIndexedVls = Input(Bool()) // is indexed vector load/store
   }
   val out = new Bundle {
-    val vd = Output(UInt(vlen.W))
-    val active = Output(UInt((vlen / 8).W))
-    val illegal = Output(Bool())
+    val vd = Output(UInt(vlen.W))           // result to be written to VReg[vd]
+    val active = Output(UInt((vlen / 8).W)) // active mask
+    val illegal = Output(Bool())            // illegal instruction
   }
   val debugOnly = Output(new Bundle {
     val vstartMapVdIdx = UInt()
@@ -189,17 +209,17 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
 }
 
 class VecInfo(implicit p: Parameters) extends Bundle {
-  val ta = Bool()
-  val ma = Bool()
-  val vl = Vl()
-  val vstart = Vl()
-  val eew = VSew()
-  val vsew = VSew()
-  val vdIdx = UInt(3.W) // 0~7
-  val vlmul = UInt(3.W)
+  val ta = Bool()       // tail agnostic
+  val ma = Bool()       // mask agnostic
+  val vl = Vl()         // vector length
+  val vstart = Vl()     // vector start
+  val eew = VSew()      // effective element width
+  val vsew = VSew()     // vector selected element width
+  val vdIdx = UInt(3.W) // 0~7, vector destination index
+  val vlmul = UInt(3.W) // 0~7, vector length multiplier
   val valid = Bool()
-  val narrow = Bool()
-  val dstMask = Bool()
+  val narrow = Bool()   // narrow instruction
+  val dstMask = Bool()  // destination mask
 }
 
 object VerilogMgu extends App {

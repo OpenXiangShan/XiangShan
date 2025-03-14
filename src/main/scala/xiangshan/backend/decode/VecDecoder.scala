@@ -11,6 +11,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
 import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType}
+import yunsuan.VcryppType
 import xiangshan.backend.decode.Zvbb._
 
 abstract class VecDecode extends XSDecodeBase {
@@ -819,6 +820,25 @@ object VecDecoder extends DecodeConstants {
     VS8R_V        -> VST(SrcType.X,   VstuType.vsr, whole = T),
   )
 
+  val vcrypto: Array[(BitPat, XSDecodeBase)] = Array(
+    // VFMACC_VV  -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfmacc , F, T, F, UopSplitType.VEC_VVV),
+    // VBREV_V    -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    // VSEXT_VF8  -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf8, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no), // vsext.vf8 vd, vs2, vm
+    VAESDF_VV     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesdf_vv, F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
+    VAESDF_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesdf_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+    VAESDM_VV     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesdm_vv, F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
+    VAESDM_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesdm_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+    VAESEF_VV     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesef_vv, F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
+    VAESEF_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesef_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+    VAESEM_VV     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesem_vv, F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
+    VAESEM_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesem_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+    VAESKF1_VI    -> OPIVI(   FuType.vcrypp, VcryppType.vaeskf1,   T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV),
+    VAESKF2_VI    -> OPIVI(   FuType.vcrypp, VcryppType.vaeskf2,   T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV),
+    VAESZ_VS      -> OPMVV(T, FuType.vcrypp, VcryppType.vaesz_vs,  F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+  )
+
+  val emptyArray: Array[(BitPat, XSDecodeBase)] = Array()
+
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++
-    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff ++ vls
+    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff ++ vls ++ vcrypto
 }

@@ -6,6 +6,12 @@ import chisel3.util.{BitPat, Mux1H}
 import xiangshan.backend.fu.vector.Bundles.VSew
 
 object Utils {
+  /**
+   * Convert a vector data to a vector of mask data
+   * @param vecData data from vector register
+   * @param vsew element width of the vector
+   * @return Vec(8, UInt) mask data vector
+   */
   def VecDataToMaskDataVec(vecData: UInt, vsew: UInt): Vec[UInt] = {
     val maskWidth = vecData.getWidth / 8
     val maskDataVec = Wire(Vec(8, UInt(maskWidth.W)))
@@ -21,7 +27,13 @@ object Utils {
     maskDataVec
   }
 
+  /**
+    * Generate a bit pattern of n ones as UInt.
+    */
   def NOnes(n: Int): UInt = bitPatToUInt(BitPat.Y(n))
 
+  /**
+    * Generate a bit pattern of n zeros as UInt.
+    */
   def NZeros(n: Int): UInt = bitPatToUInt(BitPat.N(n))
 }

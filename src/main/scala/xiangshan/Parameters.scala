@@ -452,8 +452,8 @@ case class XSCoreParameters
         ExeUnitParams("VFEX3", Seq(VfaluCfg), Seq(VfWB(port = 2, 1), V0WB(port = 2, 1), FpWB(port = 1, 1)), Seq(Seq(VfRD(3, 1)), Seq(VfRD(4, 1)), Seq(VfRD(5, 1)), Seq(V0RD(1, 1)), Seq(VlRD(1, 1)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX4", Seq(VfdivCfg, VidivCfg), Seq(VfWB(port = 3, 1), V0WB(port = 3, 1)), Seq(Seq(VfRD(3, 2)), Seq(VfRD(4, 2)), Seq(VfRD(5, 2)), Seq(V0RD(1, 2)), Seq(VlRD(1, 2)))),
-      ), numEntries = 10, numEnq = 2, numComp = 6),
+        ExeUnitParams("VFEX4", Seq(VfdivCfg, VidivCfg, VcrypPCfg), Seq(VfWB(port = 3, 1), V0WB(port = 3, 1)), Seq(Seq(VfRD(3, 2)), Seq(VfRD(4, 2)), Seq(VfRD(5, 2)), Seq(V0RD(1, 2)), Seq(VlRD(1, 2)))),
+      ), numEntries = 10, numEnq = 2, numComp = 6), // TODO: add vector-crypto units
     ),
       numPregs = vfPreg.numEntries,
       numDeqOutside = 0,
