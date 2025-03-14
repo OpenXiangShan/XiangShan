@@ -80,17 +80,6 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val pc              = Vec(PredictWidth, PrunedAddr(VAddrBits))
 }
 
-class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
-  val ftqOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
-  val jumpOffset = Vec(PredictWidth, PrunedAddr(VAddrBits))
-  val target     = PrunedAddr(VAddrBits)
-  val instrRange = Vec(PredictWidth, Bool())
-  val instrValid = Vec(PredictWidth, Bool())
-  val pds        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
-  val fire_in    = Bool()
-}
-
 class FetchToIBufferDB(implicit p: Parameters) extends XSBundle {
   val start_addr   = PrunedAddr(VAddrBits)
   val instr_count  = UInt(32.W)
@@ -212,7 +201,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val predChecker     = Module(new PredChecker)
   val frontendTrigger = Module(new FrontendTrigger)
   val (checkerIn, checkerOutStage1, checkerOutStage2) =
-    (predChecker.io.in, predChecker.io.out.stage1Out, predChecker.io.out.stage2Out)
+    (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
 
   /**
     ******************************************************************************
@@ -856,14 +845,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_instr_valid     = Wire(Vec(PredictWidth, Bool()))
 
   /*** prediction result check   ***/
-  checkerIn.ftqOffset  := f3_ftq_req.ftqOffset
-  checkerIn.jumpOffset := f3_jump_offset
-  checkerIn.target     := f3_ftq_req.nextStartAddr
-  checkerIn.instrRange := f3_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
-  checkerIn.instrValid := f3_instr_valid.asTypeOf(Vec(PredictWidth, Bool()))
-  checkerIn.pds        := f3_pd
-  checkerIn.pc         := f3_pc
-  checkerIn.fire_in    := RegNext(f2_fire, init = false.B)
+  checkerIn.bits.ftqOffset  := f3_ftq_req.ftqOffset
+  checkerIn.bits.jumpOffset := f3_jump_offset
+  checkerIn.bits.target     := f3_ftq_req.nextStartAddr
+  checkerIn.bits.instrRange := f3_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
+  checkerIn.bits.instrValid := f3_instr_valid.asTypeOf(Vec(PredictWidth, Bool()))
+  checkerIn.bits.pds        := f3_pd
+  checkerIn.bits.pc         := f3_pc
+  checkerIn.valid           := RegNext(f2_fire, init = false.B)
 
   /*** handle half RVI in the last 2 Bytes  ***/
 
