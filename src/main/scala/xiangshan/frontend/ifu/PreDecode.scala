@@ -22,11 +22,8 @@ import freechips.rocketchip.rocket.ExpandedInstruction
 import freechips.rocketchip.rocket.RVCDecoder
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
-import xiangshan.backend.fu.NewCSR.TriggerUtil
-import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.frontend.BrType
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
@@ -422,65 +419,4 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   }
   io.out.stage2Out.jalTarget.zipWithIndex.foreach { case (target, i) => target := jumpTargetsNext(i) }
 
-}
-
-class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
-  val io = IO(new Bundle() {
-    val frontendTrigger = Input(new FrontendTdataDistributeIO)
-    val triggered       = Output(Vec(PredictWidth, TriggerAction()))
-
-    val pds = Input(Vec(PredictWidth, new PreDecodeInfo))
-    val pc  = Input(Vec(PredictWidth, PrunedAddr(VAddrBits)))
-    val data = if (HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
-    else Input(Vec(PredictWidth, UInt(32.W)))
-  })
-
-  val data = io.data
-
-  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
-  else VecInit((0 until PredictWidth).map(i => data(i)))
-
-  val tdataVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
-  when(io.frontendTrigger.tUpdate.valid) {
-    tdataVec(io.frontendTrigger.tUpdate.bits.addr) := io.frontendTrigger.tUpdate.bits.tdata
-  }
-  val triggerEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B))) // From CSR, controlled by priv mode, etc.
-  triggerEnableVec := io.frontendTrigger.tEnableVec
-  XSDebug(triggerEnableVec.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
-
-  val triggerTimingVec = VecInit(tdataVec.map(_.timing))
-  val triggerChainVec  = VecInit(tdataVec.map(_.chain))
-
-  for (i <- 0 until TriggerNum) { PrintTriggerInfo(triggerEnableVec(i), tdataVec(i)) }
-
-  val debugMode            = io.frontendTrigger.debugMode
-  val triggerCanRaiseBpExp = io.frontendTrigger.triggerCanRaiseBpExp
-  // val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
-  val triggerHitVec = (0 until TriggerNum).map(j =>
-    TriggerCmpConsecutive(
-      // FIXME: TriggerCmpConsecutive is defined in backend. This should be written once backend uses PrunedAddr.
-      VecInit(io.pc.map(_.toUInt)),
-      tdataVec(j).tdata2,
-      tdataVec(j).matchType,
-      triggerEnableVec(j)
-    ).map(hit =>
-      hit && !tdataVec(j).select && !debugMode
-    )
-  ).transpose
-
-  for (i <- 0 until PredictWidth) {
-    val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
-    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, VecInit(triggerHitVec(i)), triggerTimingVec, triggerChainVec)
-
-    val actionVec     = VecInit(tdataVec.map(_.action))
-    val triggerAction = Wire(TriggerAction())
-    TriggerUtil.triggerActionGen(triggerAction, triggerCanFireVec, actionVec, triggerCanRaiseBpExp)
-
-    // Priority may select last when no trigger fire.
-    io.triggered(i) := triggerAction
-    XSDebug(
-      triggerCanFireVec.asUInt.orR,
-      p"Debug Mode: Predecode Inst No. ${i} has trigger action vec ${triggerCanFireVec.asUInt.orR}\n"
-    )
-  }
 }
