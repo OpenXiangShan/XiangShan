@@ -19,7 +19,7 @@ import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PreDecodeInfo
 
-class F3PreDecode(implicit p: Parameters) extends IfuModule with HasPdConst {
+class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class F3PreDecodeIO(implicit p: Parameters) extends IfuBundle {
     val instr: Vec[UInt]          = Input(Vec(PredictWidth, UInt(32.W)))
     val pd:    Vec[PreDecodeInfo] = Output(Vec(PredictWidth, new PreDecodeInfo))
@@ -27,10 +27,11 @@ class F3PreDecode(implicit p: Parameters) extends IfuModule with HasPdConst {
   val io: F3PreDecodeIO = IO(new F3PreDecodeIO)
 
   io.pd.zipWithIndex.foreach { case (pd, i) =>
-    pd.valid  := DontCare
-    pd.isRVC  := DontCare
-    pd.brType := brInfo(io.instr(i))(0)
-    pd.isCall := brInfo(io.instr(i))(1)
-    pd.isRet  := brInfo(io.instr(i))(2)
+    val (brType, isCall, isRet) = getBrInfo(io.instr(i))
+    pd.valid := DontCare
+    pd.isRVC := DontCare
+    pd.brType := brType
+    pd.isCall := isCall
+    pd.isRet  := isRet
   }
 }
