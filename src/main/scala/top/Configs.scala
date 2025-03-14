@@ -235,7 +235,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 2048,
           banks = 4,
-          clientCaches = Seq(L2Param())
+          fullAddressBits = 48,
+          clientCaches = tiles.map { core =>
+            val clientDirBytes = tiles.map{ t =>
+              t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
+            }.sum
+            val l2params = core.L2CacheParamsOpt.get
+            l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
+          }
         )),
         L3NBanks = 1
       )
@@ -277,12 +284,34 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
     ))
 })
 
+case class WithNSetL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+  case XSTileKey =>
+    val sets = n
+    up(XSTileKey).map(_.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
+        nSets = sets,
+        nWays = ways,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        replacer = Some("setplru"),
+        nMissEntries = 16,
+        nProbeEntries = 8,
+        nReleaseEntries = 18,
+        nMaxPrefetchEntry = 6,
+        enableTagEcc = true,
+        enableDataEcc = true,
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+      ))
+    ))
+})
+
 case class L2CacheConfig
 (
   size: String,
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
+  replacement: String = "drrip", 
   tp: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
@@ -306,6 +335,7 @@ case class L2CacheConfig
           vaddrBitsOpt = Some(p.GPAddrBitsSv48x4 - log2Up(p.dcacheParametersOpt.get.blockBytes)),
           isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
+        replacement = replacement,
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         tagECC = Some("secded"),
@@ -453,11 +483,25 @@ class FuzzConfig(dummy: Int = 0) extends Config(
     ++ new DefaultConfig(1)
 )
 
+// class DefaultConfig(n: Int = 1) extends Config(
+//   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+//     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+//     ++ WithNKBL1D(64, ways = 4)
+//     ++ new BaseConfig(n, true)
+// )
+
 class DefaultConfig(n: Int = 1) extends Config(
-  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
-    ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n, true)
+  L2CacheConfig("1KB", inclusive = true, banks = 1, replacement="plru", tp = false)
+    ++ WithNSetL1D(2, ways = 4)
+    ++ new MinimalConfig(n)
+    ++ new WithCHI
+)
+
+class MinimalL1L2Config(n: Int = 1) extends Config(
+  L2CacheConfig("1KB", inclusive = true, banks = 1, replacement="plru", tp = false)
+    ++ WithNSetL1D(2, ways = 4)
+    ++ new MinimalConfig(n)
+    ++ new WithCHI
 )
 
 class CVMConfig(n: Int = 1) extends Config(
@@ -475,8 +519,9 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
-    ++ new DefaultConfig(n)
+  // L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  // for EMU_CHI test
+  new DefaultConfig(n)
     ++ new WithCHI
 )
 
@@ -488,7 +533,9 @@ class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
-  (new KunminghuV2Config(n)).alter((site, here, up) => {
+  // (new KunminghuV2Config(n)).alter((site, here, up) => {
+  // for Upload Artifacts test, generate verilog
+  (new DefaultConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
   })
 )
