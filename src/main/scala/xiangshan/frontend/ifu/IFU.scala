@@ -61,12 +61,6 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
   def matchThisBlock(startAddr: UInt) = valid && middlePC === startAddr
 }
 
-class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
-  val data            = if (HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
-  val frontendTrigger = new FrontendTdataDistributeIO
-  val pc              = Vec(PredictWidth, UInt(VAddrBits.W))
-}
-
 class FetchToIBufferDB extends Bundle {
   val start_addr   = UInt(39.W)
   val instr_count  = UInt(32.W)
@@ -471,12 +465,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // preDecoderRegInIn.csrTriggerEnable := io.csrTriggerEnable
   // preDecoderRegIn.pc  := f2_pc
 
-  val preDecoderIn = preDecoder.io.in
-  preDecoderIn.valid                := f2_valid
-  preDecoderIn.bits.data            := f2_cut_data
-  preDecoderIn.bits.frontendTrigger := io.frontendTrigger
-  preDecoderIn.bits.pc              := f2_pc
-  val preDecoderOut = preDecoder.io.out
+  val preDecoderIn = preDecoder.io.req
+  preDecoderIn.valid     := f2_valid
+  preDecoderIn.bits.data := f2_cut_data
+  preDecoderIn.bits.pc   := f2_pc
+  val preDecoderOut = preDecoder.io.resp
 
   // val f2_expd_instr     = preDecoderOut.expInstr
   val f2_instr        = preDecoderOut.instr
