@@ -5,7 +5,7 @@
 // XiangShan is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
 // You may obtain a copy of Mulan PSL v2 at:
-//          http://license.coscl.org.cn/MulanPSL2
+//          https://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
@@ -28,8 +28,8 @@ class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper
 
   io.pd.zipWithIndex.foreach { case (pd, i) =>
     val (brType, isCall, isRet) = getBrInfo(io.instr(i))
-    pd.valid := DontCare
-    pd.isRVC := DontCare
+    pd.valid  := DontCare
+    pd.isRVC  := DontCare
     pd.brType := brType
     pd.isCall := isCall
     pd.isRet  := isRet
