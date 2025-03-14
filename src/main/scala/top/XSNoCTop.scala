@@ -246,7 +246,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
     val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
     val isNormal = lpState === sIDLE
-    val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(true.B)}
+    val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
     wfiState := WfiStateNext(wfiState, isWFI, isNormal, io.chi.rx.snp.flitpend, intSrc)
 
     if (WFIClockGate) {
