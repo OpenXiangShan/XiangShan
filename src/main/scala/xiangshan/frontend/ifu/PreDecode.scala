@@ -18,8 +18,6 @@ package xiangshan.frontend.ifu
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.ExpandedInstruction
-import freechips.rocketchip.rocket.RVCDecoder
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
@@ -254,24 +252,6 @@ class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
 
 }
 
-class RVCExpander(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle {
-    val in      = Input(UInt(32.W))
-    val fsIsOff = Input(Bool())
-    val out     = Output(new ExpandedInstruction)
-    val ill     = Output(Bool())
-  })
-
-  val decoder = new RVCDecoder(io.in, io.fsIsOff, XLEN, fLen, useAddiForMv = true)
-
-  if (HasCExtension) {
-    io.out := decoder.decode
-    io.ill := decoder.ill
-  } else {
-    io.out := decoder.passthrough
-    io.ill := false.B
-  }
-}
 
 /* ---------------------------------------------------------------------
  * Predict result check
