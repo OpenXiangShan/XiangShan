@@ -55,6 +55,10 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vl = srcVConfig.vl
 }
 
+/**
+ * Vector function unit with pipeline
+ * @param cfg function unit configuration
+ */
 class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasPipelineReg
   with VecFuncUnitAlias

@@ -32,7 +32,7 @@ import org.chipsalliance.cde.config.Parameters
 object AES128ShiftRowsFwd {
   def apply(src: UInt): UInt = {
     require(src.getWidth == 128)
-    // split src into 4 32-bit words
+    /** split [[src]] into 4 32-bit words */
     val srcVec = VecInit(src.asBools.grouped(32).map(VecInit(_).asUInt).toSeq)
     val dstVec = Wire(Vec(4, UInt(32.W)))
 
@@ -50,7 +50,7 @@ object AES128ShiftRowsFwd {
 object AES128ShiftRowsInv {
   def apply(src: UInt): UInt = {
     require(src.getWidth == 128)
-    // split src into 4 32-bit words
+    /** split [[src]] into 4 32-bit words */
     val srcVec = VecInit(src.asBools.grouped(32).map(VecInit(_).asUInt).toSeq)
     val dstVec = Wire(Vec(4, UInt(32.W)))
 
@@ -64,16 +64,19 @@ object AES128ShiftRowsInv {
   }
 }
 
+class AES128SubBytesBidirectionIO extends Bundle {
+  val src         = Input(UInt(128.W))
+  val isZeroRound = Input(Bool())
+  val isFwd       = Input(Bool())
+  val isFwd_1s    = Input(Bool())
+  val regEnable   = Input(Bool())
+  val result      = Output(UInt(128.W)) // the 2nd cycle
+}
+
 class AES128SubBytesBidirection extends Module {
-  val io = IO(new Bundle() {
-    val src       = Input(UInt(128.W))
-    val isFwd     = Input(Bool())
-    val regEnable = Input(Bool())
-    val result    = Output(UInt(128.W)) // the 2nd cycle
-  })
+  val io = IO(new AES128SubBytesBidirectionIO)
 
   val isFwd = io.isFwd
-  val isFwd_1s = RegEnable(isFwd, io.regEnable)
   val srcBytes = io.src.asTypeOf(Vec(16, UInt(8.W)))
 
   // 3 layer of modules for both direction, with the shared middle layer
@@ -92,7 +95,7 @@ class AES128SubBytesBidirection extends Module {
 
     val aesSbox3FwdOut  = SboxAesOut(aesSBox2Out)
     val aesSbox3InvOut  = SboxIaesOut(aesSBox2Out)
-    out := Mux(isFwd_1s, aesSbox3FwdOut, aesSbox3InvOut)
+    out := Mux(io.isFwd_1s, aesSbox3FwdOut, aesSbox3InvOut)
     // out := Mux(isFwd, aesSbox3FwdOut, aesSbox3InvOut)
   }
 

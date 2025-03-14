@@ -94,6 +94,10 @@ trait BitFieldsVec { this: Riscv32BitInst =>
     this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.OP_V
   }
 
+  def isVecCrypto = {
+    this.OPCODE5Bit === xiangshan.backend.decode.isa.bitfield.OPCODE5Bit.OP_VE
+  }
+
   def isOPIVV = {
     this.OPCODE === xiangshan.backend.decode.isa.bitfield.OPCODE7Bit.VECTOR_ARITH &&
       this.FUNCT3 === "b000".U
@@ -187,7 +191,7 @@ object OPCODE5Bit {
   val RESERVED_0 = "b11_010".U
   val JAL        = "b11_011".U
   val SYSTEM     = "b11_100".U
-  val RESERVED_1 = "b11_101".U
+  val OP_VE      = "b11_101".U
   val CUSTOM_3   = "b11_110".U
   val INSTge80b  = "b11_111".U
 }

@@ -34,7 +34,7 @@ import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFi
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.Zimop._
-import yunsuan.{VfaluType, VfcvtType}
+import yunsuan.{VfaluType, VfcvtType, VcryppType}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -1052,10 +1052,12 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
   val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
   val vstartIsNotZero = io.enq.vstart =/= 0.U
+  val isNeedVdVCryptoPiped = FuType.isVCryptoPiped(decodedInst.fuType) && VcryppType.needOldVd(decodedInst.fuOpType)
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
   decodedInst.vpu.isOpMask := isOpMask
-  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma || isFof || vstartIsNotZero
+  decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) ||isNarrow || isVlx ||
+                                   isVma || isFof || vstartIsNotZero || isNeedVdVCryptoPiped
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
@@ -1071,7 +1073,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.srcType(4) := SrcType.vp // vconfig
 
   val uopInfoGen = Module(new UopInfoGen)
-  uopInfoGen.io.in.preInfo.isVecArith := inst.isVecArith
+  uopInfoGen.io.in.preInfo.isVecArith := inst.isVecArith || inst.isVecCrypto
   uopInfoGen.io.in.preInfo.isVecMem := inst.isVecStore || inst.isVecLoad
   uopInfoGen.io.in.preInfo.isAmoCAS := inst.isAMOCAS
 

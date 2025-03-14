@@ -13,6 +13,10 @@ import yunsuan.VfpuType
 import yunsuan.VfmaType
 import yunsuan.vector.VectorFloatFMA
 
+/**
+ * Vector Fused Multiply-Add Unit
+ * @param cfg FuConfig
+ */
 class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfalu OpType not supported")
 
@@ -20,6 +24,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
+  require(dataWidth % dataWidthOfDataModule == 0, "dataWidth should be multiple of dataWidthOfDataModule in design")
 
   // io alias
   private val opcode  = fuOpType(3,0)
@@ -47,8 +52,8 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   //   Cat(vs2(95,64),  vs2(31,0)),
   //   Cat(vs2(127,96), vs2(63,32)),
   // )
-  private val vs2GroupedVec: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
-  private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  // private val vs2GroupedVec: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  // private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
   private val resultData = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val fflagsData = Wire(Vec(numVecModule, UInt(20.W)))
   val fp_aIsFpCanonicalNAN = Wire(Vec(numVecModule, Bool()))
@@ -56,40 +61,40 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val fp_cIsFpCanonicalNAN = Wire(Vec(numVecModule, Bool()))
   vfmas.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.io.fire         := io.in.valid
-      mod.io.fp_a         := vs2Split.io.outVec64b(i)
-      mod.io.fp_b         := vs1Split.io.outVec64b(i)
-      mod.io.fp_c         := oldVdSplit.io.outVec64b(i)
-      mod.io.widen_a      := Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i))
-      mod.io.widen_b      := Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i))
+      mod.io.fire         := io.in.valid // fire
+      mod.io.fp_a         := vs2Split.io.outVec64b(i) // vs2
+      mod.io.fp_b         := vs1Split.io.outVec64b(i) // vs1
+      mod.io.fp_c         := oldVdSplit.io.outVec64b(i) // oldVd
+      mod.io.widen_a      := Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)) // widen vs2
+      mod.io.widen_b      := Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)) // widen vs1
       mod.io.frs1         := 0.U     // already vf -> vv
       mod.io.is_frs1      := false.B // already vf -> vv
-      mod.io.uop_idx      := vuopIdx(0)
+      mod.io.uop_idx      := vuopIdx(0) // input from vecCtrl
       mod.io.is_vec       := true.B // Todo
-      mod.io.round_mode   := rm
-      mod.io.fp_format    := Mux(resWiden, vsew + 1.U, vsew)
-      mod.io.res_widening := resWiden
-      mod.io.op_code      := opcode
-      resultData(i) := mod.io.fp_result
-      fflagsData(i) := mod.io.fflags
+      mod.io.round_mode   := rm // input from vecCtrl
+      mod.io.fp_format    := Mux(resWiden, vsew + 1.U, vsew) // controled by fuOpType & vecCtrl
+      mod.io.res_widening := resWiden // controled by fuOpType
+      mod.io.op_code      := opcode // controled by fuOpType
+      resultData(i) := mod.io.fp_result // output result
+      fflagsData(i) := mod.io.fflags // output fflags
       fp_aIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
         ((vsew === VSew.e32) & (!vs2Split.io.outVec64b(i).head(32).andR)) |
           ((vsew === VSew.e16) & (!vs2Split.io.outVec64b(i).head(48).andR))
-        )
+        ) // a is canonical NAN
       fp_bIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
         ((vsew === VSew.e32) & (!vs1Split.io.outVec64b(i).head(32).andR)) |
           ((vsew === VSew.e16) & (!vs1Split.io.outVec64b(i).head(48).andR))
-        )
+        ) // b is canonical NAN
       fp_cIsFpCanonicalNAN(i) := !(opcode === VfmaType.vfmul) & vecCtrl.fpu.isFpToVecInst & (
         ((vsew === VSew.e32) & (!oldVdSplit.io.outVec64b(i).head(32).andR)) |
           ((vsew === VSew.e16) & (!oldVdSplit.io.outVec64b(i).head(48).andR))
-        )
+        ) // c is canonical NAN
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
       mod.io.fp_cIsFpCanonicalNAN := fp_cIsFpCanonicalNAN(i)
   }
 
-  val outFuOpType = outCtrl.fuOpType
+  // val outFuOpType = outCtrl.fuOpType
   val outWiden = outCtrl.fuOpType(4)
   val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val outVuopidx = outVecCtrl.vuopIdx(2, 0)
