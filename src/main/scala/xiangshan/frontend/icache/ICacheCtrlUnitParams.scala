@@ -15,7 +15,16 @@
 
 package xiangshan.frontend.icache
 
-import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
+import freechips.rocketchip.diplomacy.AddressSet
 
-abstract class ICacheBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters
+// for ICacheCtrlUnit
+case class ICacheCtrlUnitParams(
+    address:   AddressSet,
+    regWidth:  Int,
+    beatBytes: Int = 8
+) {
+  def RegBytes: Int = regWidth / 8
+
+  def EccCtrlOffset:  Int = 0
+  def EccIAddrOffset: Int = EccCtrlOffset + RegBytes
+}
