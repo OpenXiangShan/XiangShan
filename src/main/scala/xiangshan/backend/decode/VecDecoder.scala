@@ -13,6 +13,7 @@ import xiangshan._
 import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType}
 import yunsuan.VcryppType
 import xiangshan.backend.decode.Zvbb._
+import xiangshan.backend.decode.Zvkned._
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
