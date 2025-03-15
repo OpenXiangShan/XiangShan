@@ -597,9 +597,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       wakeupQueue.io.in.valid := s1_issuePtrOH(i).valid && s1_out(i).ready && fuCheck
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
       if (params.isStoreData) {
-        wakeupQueue.io.in.bits.debugInfo.issueTime_std := GTimer() + 1.U
+        wakeupQueue.io.in.bits.debugInfo.issueTime_std := GTimer()
       } else {
-        wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() + 1.U
+        wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer()
       }
       wakeupQueue.io.redirect := io.redirect
       io.fastWakeup.get(i) := wakeupQueue.io.out
@@ -659,12 +659,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         Mux(select_ptr_dup(i).valid, select_uop_dup(i), uop.bits))
       if (params.isStoreData) {
         io.fastWakeup.get(i).bits.debugInfo.selectTime_std := GTimer()
-        io.fastWakeup.get(i).bits.debugInfo.issueTime_std := GTimer() + 1.U
+        io.fastWakeup.get(i).bits.debugInfo.issueTime_std := GTimer()
         io.fastWakeup.get(i).bits.debugInfo.readyIssueTime_std := Mux(s1_issue_oldest_dup(i), readyTimeVec_dup(OHToUInt(oldest_sel_ptr_dup.bits)),
           Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U))
       } else {
         io.fastWakeup.get(i).bits.debugInfo.selectTime := GTimer()
-        io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer() + 1.U
+        io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer()
         io.fastWakeup.get(i).bits.debugInfo.readyIssueTime := Mux(s1_issue_oldest_dup(i), readyTimeVec_dup(OHToUInt(oldest_sel_ptr_dup.bits)),
           Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U))
       }

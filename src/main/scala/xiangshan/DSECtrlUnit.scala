@@ -250,9 +250,6 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       coreResetReg := false.B
     }
 
-    when (RegNextN(core_rst_end, 3)) {
-      resetVectorReg := 0.U
-    }
 
     io.core_reset := coreResetReg
     io.reset_vector := resetVectorReg
