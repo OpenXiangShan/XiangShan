@@ -98,11 +98,6 @@ class DebugModule(numCores: Int,defDTM: Boolean =true)(implicit p: Parameters) e
 
   lazy val module = new DebugModuleImp(this)
 }
-
-class DebugModuleEXdtm(numCores: Int)(implicit p: Parameters) extends DebugModule{
-  override def desiredName = "DebugModuleEXdtm"
-
-}
 case object EnableJtag extends Field[Bool]
 
 class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule(Map("TICK_DELAY" -> IntParam(tickDelay)))
