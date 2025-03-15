@@ -152,6 +152,8 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   // Why: the CPU may access out-of-range addresses. Let the RAM helper deal with it.
   val addressMem = Mem(numOutstanding, UInt((in.ar.bits.addr.getWidth - ramIndexBits).W))
   val arlenMem = Mem(numOutstanding, UInt(in.ar.bits.len.getWidth.W))
+  // Workaround: support WRAP burst type, 0: INCR, 1: WRAP
+  val arburstMem = Mem(numOutstanding, UInt(1.W))
 
   // accept a read request and send it to the external model
   val pending_read_req_valid = RegInit(false.B)
@@ -160,12 +162,22 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_read_need_req = pending_read_req_valid && !pending_read_req_ready
   val read_req_valid = pending_read_need_req || in.ar.valid
   val read_req_bits  = Mux(pending_read_need_req, pending_read_req_bits, in.ar.bits)
-  pending_read_req_ready := readRequest(read_req_valid, read_req_bits.addr, read_req_bits.id)
+  // Workaround: start address of WRAP burst must be aligned with data bus
+  val read_wrap_mask = ~Cat(
+    0.U((read_req_bits.addr.getWidth-read_req_bits.len.getWidth-ramIndexBits).W),
+    read_req_bits.len,
+    0.U(ramIndexBits.W))
+  val read_req_addr = Mux(
+    read_req_bits.burst === AXI4Parameters.BURST_WRAP,
+    read_req_bits.addr & read_wrap_mask, read_req_bits.addr)
+  // for WRAP burst, the address of read request is adjusted to wrap boundary
+  pending_read_req_ready := readRequest(read_req_valid, read_req_addr, read_req_bits.id)
 
   when (in.ar.fire) {
     pending_read_req_valid := true.B
     addressMem.write(read_req_bits.id, ramIndex(read_req_bits.addr))
     arlenMem.write(read_req_bits.id, read_req_bits.len)
+    arburstMem.write(read_req_bits.id, (read_req_bits.burst === AXI4Parameters.BURST_WRAP).asUInt)
   }.elsewhen (pending_read_req_ready) {
     pending_read_req_valid := false.B
   }
@@ -175,11 +187,21 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_req_valid = RegInit(VecInit.fill(2)(false.B))
   val pending_write_req_bits  = RegEnable(in.aw.bits, in.aw.fire)
   val pending_write_req_data  = RegEnable(in.w.bits, in.w.fire)
-  XSError(in.aw.fire && in.aw.bits.len === 0.U, "data must have more than one beat now")
+  // XSError(in.aw.fire && in.aw.bits.len === 0.U, "data must have more than one beat now")
   val pending_write_req_ready = Wire(Bool())
   val pending_write_need_req = pending_write_req_valid.last && !pending_write_req_ready
   val write_req_valid = pending_write_req_valid.head && (pending_write_need_req || in.w.valid && in.w.bits.last)
-  pending_write_req_ready := writeRequest(write_req_valid, pending_write_req_bits.addr, pending_write_req_bits.id)
+  val write_req_bits = Mux(in.w.fire && in.w.bits.last && in.aw.fire, in.aw.bits, pending_write_req_bits)
+  val write_wrap_mask = ~Cat(
+    0.U((write_req_bits.addr.getWidth-write_req_bits.len.getWidth-ramIndexBits).W),
+    write_req_bits.len,
+    0.U(ramIndexBits.W)
+  )
+  val write_req_addr = Mux(
+    write_req_bits.burst === AXI4Parameters.BURST_WRAP,
+    write_req_bits.addr & write_wrap_mask, write_req_bits.addr
+  )
+  pending_write_req_ready := writeRequest(write_req_valid, write_req_addr, write_req_bits.id)
 
   when (in.aw.fire) {
     pending_write_req_valid.head := true.B
@@ -197,9 +219,16 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
 
   // ram is written when write data fire
   val wdata_cnt = Counter(outer.burstLen)
-  val write_req_addr = Mux(in.aw.fire, in.aw.bits.addr, pending_write_req_bits.addr)
-  val write_req_index = ramIndex(write_req_addr) + wdata_cnt.value
+  // Workaround: support WRAP burst mode: write address should be aligned
+  val wdata_req = Mux(in.aw.fire, in.aw.bits, pending_write_req_bits)
+  val wdata_wrap_mask = ~Cat(0.U((ramOffsetBits-ramIndexBits-write_req_bits.len.getWidth).W), write_req_bits.len)
+  val write_req_index = Mux(
+    wdata_req.burst === AXI4Parameters.BURST_WRAP,
+    (ramIndex(wdata_req.addr) & wdata_wrap_mask) | (((ramIndex(wdata_req.addr) & ~wdata_wrap_mask) + wdata_cnt.value) & ~wdata_wrap_mask),
+    ramIndex(wdata_req.addr) + wdata_cnt.value
+  )
   when (in.w.fire) {
+    assert(pending_write_req_valid.head || in.aw.fire, "W channel cannot be asserted before AW channel!")
     ramHelper.write(
       addr = write_req_index,
       data = in.w.bits.data.asTypeOf(Vec(outer.beatBytes, UInt(8.W))),
@@ -225,8 +254,13 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val (read_resp_valid, read_resp_id) = readResponse((!has_read_resp || read_resp_last) && read_have_req_cnt)
   has_read_resp := (read_resp_valid && !read_resp_last) || pending_read_resp_valid
   val rdata_cnt = Counter(outer.burstLen)
-  val read_resp_addr = addressMem(r_resp.bits.id) + rdata_cnt.value
   val read_resp_len = arlenMem(r_resp.bits.id)
+  val read_resp_wrap_mask = ~Cat(0.U((ramOffsetBits-ramIndexBits-read_resp_len.getWidth).W), read_resp_len)
+  val read_resp_addr = Mux(
+    arburstMem(r_resp.bits.id) === 1.U,
+    (addressMem(r_resp.bits.id) & read_resp_wrap_mask) | (((addressMem(r_resp.bits.id) & ~read_resp_wrap_mask) + rdata_cnt.value) & ~read_resp_wrap_mask),
+    addressMem(r_resp.bits.id) + rdata_cnt.value
+  )
   r_resp.valid := read_resp_valid || pending_read_resp_valid
   r_resp.bits.id := Mux(pending_read_resp_valid, pending_read_resp_id, read_resp_id)
   // We cannot get the read data this cycle because the RAM helper has one-cycle latency.
