@@ -335,14 +335,18 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
-        enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
+        enq.bits.status.srcStatus(j).srcState                   := (if (j == 0) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
-                                                                          SrcState.rdy,
-                                                                          Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
+                                                                        SrcState.rdy,
+                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
+                                                                    } else if (j < 3) {
+                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
+                                                                        SrcState.rdy,
+                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !moreThanOnePred, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
-        enq.bits.status.srcStatus(j).dataSources.value          := (if (j == 0)) {
+        enq.bits.status.srcStatus(j).dataSources.value          := (if (j == 0) {
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
@@ -360,7 +364,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
                                                                       ))
-                                                                    }
+                                                                    })
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         enq.bits.status.srcStatus(j).exuSources.foreach(_       := 0.U.asTypeOf(ExuSource()))
         enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))

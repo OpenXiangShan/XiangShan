@@ -195,6 +195,10 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx))
   }
 
+  def needFlush(redirect: Redirect) : Bool = {
+    isNotBefore(this, redirect.robIdx)
+  }
+
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
 
   def lineHeadPtr(implicit p: Parameters): RobPtr = {

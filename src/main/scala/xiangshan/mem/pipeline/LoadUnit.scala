@@ -112,6 +112,12 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 class LoadToIfu(implicit p: Parameters) extends XSBundle {
   val loadvalue = Output(UInt(XLEN.W))
   val loadpc    = Output(UInt(VAddrBits.W))
+//  val misPredict = Output(new Redirect)
+}
+
+class LoadToPvt(implicit p: Parameters) extends XSBundle {
+  val loadvalue = Output(UInt(XLEN.W))
+  val pdest     = Output(UInt(PhyRegIdxWidth.W))
   val misPredict = Output(new Redirect)
 }
 
@@ -224,9 +230,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // lvp
     val toifu            = Valid(new LoadToIfu)
     val readPc           = new LoadReadPc
+    val toPvt            = Valid(new LoadToPvt)
   })
 
   dontTouch(io.toifu)
+  dontTouch(io.toPvt)
 
 
   PerfCCT.updateInstPos(io.ldin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
@@ -1779,15 +1787,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.toifu.valid := ldoutValid
   io.toifu.bits.loadpc := DontCare
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
+  io.toPvt.valid := ldoutValid
+  io.toPvt.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
+  io.toPvt.bits.pdest := io.ldout.bits.uop.pdest
   // mispredict flush pipe
-  io.toifu.bits.misPredict := DontCare
-  io.toifu.bits.misPredict.isRVC       := io.ldout.bits.uop.preDecodeInfo.isRVC
-  io.toifu.bits.misPredict.robIdx      := io.ldout.bits.uop.robIdx
-  io.toifu.bits.misPredict.ftqIdx      := io.ldout.bits.uop.ftqPtr
-  io.toifu.bits.misPredict.ftqOffset   := io.ldout.bits.uop.ftqOffset
-  io.toifu.bits.misPredict.level       := RedirectLevel.flushAfter
-  io.toifu.bits.misPredict.cfiUpdate.target := io.ldout.bits.uop.pc
-  io.toifu.bits.misPredict.debug_runahead_checkpoint_id := io.ldout.bits.uop.debugInfo.runahead_checkpoint_id
+  io.toPvt.bits.misPredict := DontCare
+  io.toPvt.bits.misPredict.isRVC       := io.ldout.bits.uop.preDecodeInfo.isRVC
+  io.toPvt.bits.misPredict.robIdx      := io.ldout.bits.uop.robIdx
+  io.toPvt.bits.misPredict.ftqIdx      := io.ldout.bits.uop.ftqPtr
+  io.toPvt.bits.misPredict.ftqOffset   := io.ldout.bits.uop.ftqOffset
+  io.toPvt.bits.misPredict.level       := RedirectLevel.flushAfter
+  io.toPvt.bits.misPredict.cfiUpdate.target := io.ldout.bits.uop.pc
+  io.toPvt.bits.misPredict.debug_runahead_checkpoint_id := io.ldout.bits.uop.debugInfo.runahead_checkpoint_id
 
   //to rob readpc
   io.readPc.robidx := io.ldout.bits.uop.robIdx

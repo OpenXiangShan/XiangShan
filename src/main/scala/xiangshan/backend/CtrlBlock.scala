@@ -35,7 +35,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatPredPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{DecodeToLvp, FtqPtr, FtqRead, Ftq_RF_Components}
-import xiangshan.mem.{LoadReadPc, LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LoadReadPc, LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
 
@@ -146,8 +146,8 @@ class CtrlBlockImp(
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   rename.io.pvtUpdate := DontCare
-  rat.io.pvtUpdate := DontCare
-  rename.io.pvtUpdateFrmRename <> rat.io.pvtUpdateFrmRename
+  rename.io.intSrcPred <> io.intSrcPred
+  rename.io.fpSrcPred <> io.fpSrcPred
   val intWbPred = intScheWbData.map(_.bits.pred)
   val existPred = intWbPred.reduce(_ || _)
   assert(PopCount(intWbPred) <= 4.U, "update more than 4 pvt at one time")
@@ -156,10 +156,8 @@ class CtrlBlockImp(
     intWbPred.zipWithIndex.foreach { case (pred, i) =>
       when (pred) {
         rename.io.pvtUpdate(i) := intWbPredSrc(i)
-        rat.io.pvtUpdate(i) := intWbPredSrc(i)
       }.otherwise {
         rename.io.pvtUpdate(i) := 0.U
-        rat.io.pvtUpdate(i) := 0.U
       }
     }
   }
@@ -238,10 +236,11 @@ class CtrlBlockImp(
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
-  lvpMisPredict.zip(io.lvpMisPredict).foreach{ case (sink, source) =>
+  lvpMisPredict.zip(rename.io.misPred).foreach{ case (sink, source) =>
     sink.valid := source.valid
     sink.bits := source.bits
   }
+  XSPerfAccumulate("misPred_redirect", oldestLvpRedirect.valid)
   // lvpMisPredict.valid := io.lvpMisPredict.valid
   // lvpMisPredict.bits := io.lvpMisPredict.bits
 
@@ -612,10 +611,8 @@ class CtrlBlockImp(
     decodePipeRename(i).ready := rename.io.in(i).ready
     rename.io.in(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i)
     rename.io.in(i).bits := decodePipeRename(i).bits
-    rename.io.pvtWen(i) := RegNext(io.decode2Lvp(i).pred)
-    rename.io.pvtWdata(i) := RegNext(io.decode2Lvp(i).predValue)
-    rat.io.pvtWen(i) := RegNext(io.decode2Lvp(i).pred)
-    rat.io.pvtWaddr(i) := rename.io.out(i).bits.pdest
+    rename.io.pvtWen(i) := RegEnable(io.decode2Lvp(i).pred, io.decode2Lvp(i).valid && io.decode2Lvp(i).pred)
+    rename.io.pvtWdata(i) := RegEnable(io.decode2Lvp(i).predValue, io.decode2Lvp(i).valid && io.decode2Lvp(i).pred)
     dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
   }
@@ -673,10 +670,6 @@ class CtrlBlockImp(
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
   rat.io.v0RenamePorts := rename.io.v0RenamePorts
   rat.io.vlRenamePorts := rename.io.vlRenamePorts
-  rat.io.pvtfull := rename.io.pvtfull
-  rat.io.pvtWriteFail := rename.io.pvtWriteFail
-  io.intSrcPred <> rat.io.intSrcPred
-  io.fpSrcPred <> rat.io.fpSrcPred
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
@@ -717,6 +710,7 @@ class CtrlBlockImp(
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
   rename.io.intPvtRead <> io.intPvtRead
+  rename.io.fromLoad <> io.loadToPvt
   rename.io.fpPvtRead <> io.fpPvtRead
 
   val renameOut = Wire(chiselTypeOf(rename.io.out))
@@ -1032,9 +1026,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
-  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(ValidIO(new Redirect)))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
   val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
+  val loadToPvt = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
   val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
   val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
 }

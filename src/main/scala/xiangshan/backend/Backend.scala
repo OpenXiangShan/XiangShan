@@ -49,7 +49,7 @@ import xiangshan.backend.issue.{IntScheduler, Scheduler, SchedulerArithImp, Sche
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.{DecodeToLvp, FtqPtr, FtqRead, PreDecodeInfo}
-import xiangshan.mem.{LoadReadPc, LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LoadReadPc, LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable
 
@@ -318,7 +318,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.req := ctrlBlock.io.toMem.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := ctrlBlock.io.toMem.lsqEnqIO.needAlloc
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
-  ctrlBlock.io.lvpMisPredict := io.lvpMisPredict
   ctrlBlock.io.intPvtRead <> intScheduler.io.pvtRead
   ctrlBlock.io.fpPvtRead <> fpScheduler.io.pvtRead
   ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
@@ -327,6 +326,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fpSrcPred <> fpScheduler.io.srcPred
   ctrlBlock.io.decode2Lvp <> io.decode2Lvp
   ctrlBlock.io.loadRdPc <> io.loadRdPc
+  ctrlBlock.io.loadToPvt <> io.loadToPvt
 
   val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
   intWriteBackDelayed.zip(wbDataPath.io.toIntPreg).map{ case (sink, source) =>
@@ -1108,7 +1108,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   }
   val debugRolling = new RobDebugRollingIO
 
-  val lvpMisPredict = Vec(backendParams.LduCnt, Flipped(Valid(new Redirect)))
+  val loadToPvt = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
   val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val topDownInfo = new TopDownInfo

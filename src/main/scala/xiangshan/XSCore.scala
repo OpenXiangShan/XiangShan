@@ -135,11 +135,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.csrCtrl <> backend.io.frontendCsrCtrl
   frontend.io.fencei <> backend.io.fenceio.fencei
   frontend.io.mem <> memBlock.io.loadtolvp
-  frontend.io.lvpMisPredict <> backend.io.lvpMisPredict
   frontend.io.readLvp <> backend.io.decode2Lvp
 
   backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
   backend.io.loadRdPc <> memBlock.io.loadRdPc
+  backend.io.loadToPvt <> memBlock.io.loadToPvt
 
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>

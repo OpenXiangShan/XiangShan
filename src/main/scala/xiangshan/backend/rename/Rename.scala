@@ -30,8 +30,7 @@ import xiangshan.backend.rob.{RobEnqIO, RobPtr}
 import xiangshan.mem.mdp._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.FuType._
-import xiangshan.mem.{EewLog2, GenUSWholeEmul}
-import xiangshan.mem.GenRealFlowNum
+import xiangshan.mem.{EewLog2, GenRealFlowNum, GenUSWholeEmul, LoadToPvt}
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.NewCSR.CSROoORead
@@ -104,11 +103,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val pvtWriteFail = Vec(RenameWidth, Output(Bool()))
     val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
     val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
+    val intSrcPred = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
+    val fpSrcPred = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
 //    val pvtUpdate = Input(UInt(PhyRegIdxWidth.W))
     val pvtWen = Vec(RenameWidth, Input(Bool()))
     val pvtWdata = Vec(RenameWidth, Input(UInt(XLEN.W)))
     val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
     val pvtUpdateFrmRename = Vec(RenameWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val fromLoad = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
+    val misPred = Vec(backendParams.LduCnt, ValidIO(new Redirect))
   })
 
   dontTouch(io.pvtfull)
@@ -143,23 +146,31 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   io.pvtfull := pvt.io.full
   io.pvtWriteFail := pvt.io.writeFail
-  pvt.io.flush := io.redirect.valid
+  pvt.io.flush := io.redirect
+  pvt.io.fromLoad <> io.fromLoad
+  io.misPred <> pvt.io.misPred
   //pvt update
+  //todo : when 2 consistent pvtwen are true, the firt pvtwdata will be ignore
   pvt.io.writePorts.zipWithIndex.foreach{ case (w, i) =>
-    w.wen := io.pvtWen(i) && !pvt.io.full
+    w.wen := io.pvtWen(i) && !pvt.io.full && io.out(i).valid
 //    w.addr := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
     w.addr := io.out(i).bits.pdest
     w.data := io.pvtWdata(i)
+    w.robIdx := io.out(i).bits.robIdx
   }
   // pvt read
   pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
+  pvt.io.intSrcPred.zip(io.intSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
+  pvt.io.fpSrcPred.zip(io.fpSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
   io.fpPvtRead.flatten.foreach(_.data := DontCare)
+  io.fpSrcPred.flatten.flatten.foreach(_.pred := DontCare)
 
   XSPerfAccumulate("read_pvt_total", PopCount(io.intPvtRead.flatten.map(_.valid)))
   XSPerfAccumulate("read_more_than1pvt", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
   XSPerfAccumulate("write_pvt_total", PopCount(io.pvtWen))
   XSPerfAccumulate("write_more_than1pvt", PopCount(io.pvtWen) > 1.U)
   XSPerfAccumulate("write_more_than2pvt", PopCount(io.pvtWen) > 2.U)
+  XSPerfAccumulate("misPred_total", PopCount(pvt.io.misPred.map(_.valid)))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: DecodedInst](reg_t: RegType, x: T): Bool = reg_t match {

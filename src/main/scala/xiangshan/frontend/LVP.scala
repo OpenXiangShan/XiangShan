@@ -37,7 +37,7 @@ trait HasLvpConst extends HasXSParameter {
 class LvpEntry(implicit p: Parameters) extends LvpBundle{
     val tag = UInt(LvpTagLen.W)
     val value = UInt(XLEN.W)
-    val confidence = UInt(6.W)
+    val confidence = UInt(log2Ceil(ThresHold).W)
 }
 
 class LoadToLvp(implicit p: Parameters) extends LvpBundle{
@@ -56,7 +56,6 @@ class DecodeToLvp(implicit p: Parameters) extends LvpBundle{
 class LvpIO(implicit p: Parameters) extends LvpBundle{
     val readPorts = Vec(DecodeWidth, new DecodeToLvp)
     val fromload = Vec(backendParams.LduCnt, new LoadToLvp)
-    val misPredict = Vec(backendParams.LduCnt, Output(Bool()))
 }
 class Lvp(implicit p: Parameters) extends LvpModule{
     val io = IO(new LvpIO)
@@ -83,28 +82,24 @@ class Lvp(implicit p: Parameters) extends LvpModule{
         }
     }
 
-    io.fromload.zipWithIndex.foreach{ case (load, i) =>
-        val index = load.pc(log2Ceil(EntryNum)-1, 0)
-        val tagMatch = LvpTable(index).tag === load.pc(LvpTagLen-1, 0)
+    io.fromload.zipWithIndex.foreach { case (load, i) =>
+        val index = load.pc(log2Ceil(EntryNum) - 1, 0)
+        val tagMatch = LvpTable(index).tag === load.pc(LvpTagLen - 1, 0)
         val valueMatch = load.loadvalue === LvpTable(index).value
         val confidentEnough = LvpTable(index).confidence >= ThresHold.U
 
-        when (load.loadvalid) {
+        when(load.loadvalid) {
             // write
-            when (!tagMatch) {
+            when(!tagMatch) {
                 // if don`t match, create new entry
-                LvpTableNext(index).tag := load.pc(LvpTagLen-1, 0)
+                LvpTableNext(index).tag := load.pc(LvpTagLen - 1, 0)
                 LvpTableNext(index).value := load.loadvalue
                 LvpTableNext(index).confidence := 0.U
             }.otherwise {
                 // if match, update confidence
-                // todo: flush when value mismatch
                 LvpTableNext(index).confidence := Mux(valueMatch, (Mux(confidentEnough, LvpTable(index).confidence, LvpTable(index).confidence + 1.U)), 0.U)
                 LvpTableNext(index).value := Mux(!valueMatch, load.loadvalue, LvpTable(index).value)
             }
-            io.misPredict(i) := tagMatch && confidentEnough && !valueMatch
-        }.otherwise {
-            io.misPredict(i) := false.B
         }
     }
     LvpTable := LvpTableNext

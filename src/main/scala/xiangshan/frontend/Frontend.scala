@@ -83,7 +83,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val ptw          = new TlbPtwIO()
     val backend      = new FrontendToCtrlIO
     val mem          = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToIfu)))
-    val lvpMisPredict = Vec(backendParams.LduCnt, Valid(new Redirect))
     val readLvp      = Vec(DecodeWidth, new DecodeToLvp)
     val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
     val sfence       = Input(new SfenceBundle)
@@ -210,7 +209,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   //IFU-lvp
   ifu.io.fromload := io.mem
-  io.lvpMisPredict := ifu.io.lvpMisPredict
   ifu.io.readLvp <> io.readLvp
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
