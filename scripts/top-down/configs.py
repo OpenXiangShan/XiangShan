@@ -27,6 +27,10 @@ xs_coarse_rename_map = {
 
     'IntFlStall': 'MergeFreelistStall',
     'FpFlStall': 'MergeFreelistStall',
+    'VecFlStall': 'MergeFreelistStall',
+    'V0FlStall': 'MergeFreelistStall',
+    'VlFlStall': 'MergeFreelistStall',
+    'MultiFlStall': 'MergeFreelistStall',
 
     'LoadTLBStall': 'MergeLoad',
     'LoadL1Stall': 'MergeLoad',
@@ -133,6 +137,10 @@ targets = {
 
     'IntFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: IntFlStall,\s+(\d+)',
     'FpFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FpFlStall,\s+(\d+)',
+    'VecFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: VecFlStall,\s+(\d+)',
+    'V0FlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: V0FlStall,\s+(\d+)',
+    'VlFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: VlFlStall,\s+(\d+)',
+    'MultiFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: MultiFlStall,\s+(\d+)',
 
     'LoadTLBStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadTLBStall,\s+(\d+)',
     'LoadL1Stall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadL1Stall,\s+(\d+)',
