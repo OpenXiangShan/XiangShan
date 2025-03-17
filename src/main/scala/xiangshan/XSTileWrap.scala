@@ -95,6 +95,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       }
       val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
       val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
+      val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
+      val pwrdown_req_n = Option.when(EnablePowerDown) (Input (Bool()))
+      val pwrdown_ack_n = Option.when(EnablePowerDown) (Output (Bool()))
+      val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
     val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(2, io.dft_reset))
@@ -121,6 +126,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     io.debugTopDown <> tile.module.io.debugTopDown
     tile.module.io.l3Miss := io.l3Miss
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
+    io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
+    io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
+    io.pwrdown_ack_n.foreach { _ := true.B }
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
