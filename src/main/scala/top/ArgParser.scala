@@ -27,7 +27,6 @@ import scala.annotation.tailrec
 import scala.sys.exit
 import chisel3.util.log2Up
 import utility._
-import device.IMSICBusType
 
 object ArgParser {
   // TODO: add more explainations
@@ -145,9 +144,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)
-        case "--imsic-bus-type" :: value :: tail =>
+        case "--imsic-use-tl" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(IMSICBusType = device.IMSICBusType.withName(value))
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
           }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
