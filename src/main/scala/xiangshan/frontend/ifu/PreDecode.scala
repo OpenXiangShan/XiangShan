@@ -31,10 +31,10 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
       val pc: Vec[PrunedAddr] = Vec(PredictWidth, PrunedAddr(VAddrBits))
     }
     class PreDecodeResp(implicit p: Parameters) extends IfuBundle {
-      val pd:           Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
-      val hasHalfValid: Vec[Bool]          = Vec(PredictWidth, Bool())
-      val instr:        Vec[UInt]          = Vec(PredictWidth, UInt(32.W))
-      val jumpOffset:   Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
+      val pd:         Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
+      val altValid:   Vec[Bool]          = Vec(PredictWidth, Bool())
+      val instr:      Vec[UInt]          = Vec(PredictWidth, UInt(32.W))
+      val jumpOffset: Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
     }
 
     val req:  Valid[PreDecodeReq] = Flipped(ValidIO(new PreDecodeReq))
@@ -42,46 +42,59 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   }
   val io: PreDecodeIO = IO(new PreDecodeIO)
 
-  val data = io.req.bits.data
+  // data is (16+1) * 2B raw instruction data if HasCExtension, otherwise 8 * 4B raw instruction data
+  private val data = io.req.bits.data
+  private val rawInsts =
+    if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
+    else VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val validStart, validEnd     = Wire(Vec(PredictWidth, Bool()))
-  val h_validStart, h_validEnd = Wire(Vec(PredictWidth, Bool()))
+  private class BoundInfo extends Bundle {
+    val isStart: Bool = Bool()
+    val isEnd:   Bool = Bool()
+  }
 
-  val validStart_half, validEnd_half     = Wire(Vec(PredictWidth, Bool()))
-  val h_validStart_half, h_validEnd_half = Wire(Vec(PredictWidth, Bool()))
+  // if the former fetch block's last 2 Bytes is a valid end, we need delimitation from data(0)
+  //   we compute the first half directly -> bound(0, PredictWidth/2-1) is correct
+  private val bound = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  //   and compute two cases of the second half in parallel, we can choose later and reduce latency
+  //     - case 1: data(PredictWidth/2-1) is a valid end, so data(PredictWidth/2) is a valid start
+  //               -> readBound(PredictWidth/2, PredictWidth-1) is correct
+  //     - case 2: data(PredictWidth/2) is a valid end, so data(PredictWidth/2+1) is a valid start
+  //               -> readBoundPlus1(PredictWidth/2, PredictWidth-1) is correct
+  //
+  //     compute directly: 0 -> 1 -> ... -> 32 => bound(0, PredictWidth-1)
+  //
+  //     ours:        first half 0  -> 1  -> ... -> 16 ->  |  => bound(0, PredictWidth/2-1)
+  //                                                       v
+  //           second half case1 17 -> 18 -> ... -> 32 -> Mux => bound(PredictWidth/2, PredictWidth-1)
+  //           second half case2 17 -> 18 -> ... -> 32 --/
+  //
+  //   NOTE: we use (PredictWidth/2, PredictWidth-1) only, but we still use Vec[PredictWidth] to simplify the code
+  private val rearBound      = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val rearBoundPlus1 = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
 
-  val validStart_halfPlus1, validEnd_halfPlus1     = Wire(Vec(PredictWidth, Bool()))
-  val h_validStart_halfPlus1, h_validEnd_halfPlus1 = Wire(Vec(PredictWidth, Bool()))
+  // otherwise, we need to delimitation from data(1), we provide as alternative bound, Ifu will choose one in s3 stage
+  //   similarly, we compute first half and two cases of second half in parallel to reduce latency
+  private val altBound          = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val altRearBound      = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val altRearBoundPlus1 = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
 
-  val validStart_diff, validEnd_diff     = Wire(Vec(PredictWidth, Bool()))
-  val h_validStart_diff, h_validEnd_diff = Wire(Vec(PredictWidth, Bool()))
+  // we also compute the whole block directly for differential testing, this will be optimized out in released code
+  private val boundDiff    = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val altBoundDiff = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
 
-  val currentIsRVC = Wire(Vec(PredictWidth, Bool()))
-
-  validStart_half.map(_ := false.B)
-  validEnd_half.map(_ := false.B)
-  h_validStart_half.map(_ := false.B)
-  h_validEnd_half.map(_ := false.B)
-
-  validStart_halfPlus1.map(_ := false.B)
-  validEnd_halfPlus1.map(_ := false.B)
-  h_validStart_halfPlus1.map(_ := false.B)
-  h_validEnd_halfPlus1.map(_ := false.B)
-
-  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i + 1), data(i))))
-  else VecInit((0 until PredictWidth).map(i => data(i)))
+  private val currentIsRVC = VecInit(rawInsts.map(isRVC))
 
   for (i <- 0 until PredictWidth) {
     val inst = WireInit(rawInsts(i))
-    currentIsRVC(i) := isRVC(inst)
 
     val (brType, isCall, isRet) = getBrInfo(inst)
     val jalOffset               = getJalOffset(inst, currentIsRVC(i))
     val brOffset                = getBrOffset(inst, currentIsRVC(i))
 
-    io.resp.hasHalfValid(i) := h_validStart(i)
+    io.resp.altValid(i) := altBound(i).isStart
 
-    io.resp.pd(i).valid := validStart(i)
+    io.resp.pd(i).valid := bound(i).isStart
     io.resp.pd(i).isRVC := currentIsRVC(i)
 
     // for diff purpose only
@@ -89,7 +102,6 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
     io.resp.pd(i).isCall := isCall
     io.resp.pd(i).isRet  := isRet
 
-    // io.out.expInstr(i)         := expander.io.out.bits
     io.resp.instr(i)      := inst
     io.resp.jumpOffset(i) := Mux(io.resp.pd(i).isBr, brOffset, jalOffset)
   }
@@ -97,97 +109,97 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   // the first half is always reliable
   for (i <- 0 until PredictWidth / 2) {
     val lastIsValidEnd = if (i == 0) { true.B }
-    else { validEnd(i - 1) || !HasCExtension.B }
-    validStart(i) := (lastIsValidEnd || !HasCExtension.B)
-    validEnd(i)   := validStart(i) && currentIsRVC(i) || !validStart(i) || !HasCExtension.B
+    else { bound(i - 1).isEnd || !HasCExtension.B }
+    bound(i).isStart := (lastIsValidEnd || !HasCExtension.B)
+    bound(i).isEnd   := bound(i).isStart && currentIsRVC(i) || !bound(i).isStart || !HasCExtension.B
 
     // prepared for last half match
-    val h_lastIsValidEnd = if (i == 0) { false.B }
-    else { h_validEnd(i - 1) || !HasCExtension.B }
-    h_validStart(i) := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd(i)   := h_validStart(i) && currentIsRVC(i) || !h_validStart(i) || !HasCExtension.B
+    val altLastIsValidEnd = if (i == 0) { false.B }
+    else { altBound(i - 1).isEnd || !HasCExtension.B }
+    altBound(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
+    altBound(i).isEnd   := altBound(i).isStart && currentIsRVC(i) || !altBound(i).isStart || !HasCExtension.B
   }
 
   for (i <- 0 until PredictWidth) {
     val lastIsValidEnd = if (i == 0) { true.B }
-    else { validEnd_diff(i - 1) || !HasCExtension.B }
-    validStart_diff(i) := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_diff(i)   := validStart_diff(i) && currentIsRVC(i) || !validStart_diff(i) || !HasCExtension.B
+    else { boundDiff(i - 1).isEnd || !HasCExtension.B }
+    boundDiff(i).isStart := (lastIsValidEnd || !HasCExtension.B)
+    boundDiff(i).isEnd   := boundDiff(i).isStart && currentIsRVC(i) || !boundDiff(i).isStart || !HasCExtension.B
 
     // prepared for last half match
-    val h_lastIsValidEnd = if (i == 0) { false.B }
-    else { h_validEnd_diff(i - 1) || !HasCExtension.B }
-    h_validStart_diff(i) := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_diff(i)   := h_validStart_diff(i) && currentIsRVC(i) || !h_validStart_diff(i) || !HasCExtension.B
+    val altLastIsValidEnd = if (i == 0) { false.B }
+    else { altBoundDiff(i - 1).isEnd || !HasCExtension.B }
+    altBoundDiff(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
+    altBoundDiff(i).isEnd := altBoundDiff(i).isStart && currentIsRVC(i) || !altBoundDiff(i).isStart || !HasCExtension.B
   }
 
   // assume PredictWidth / 2 is a valid start
   for (i <- PredictWidth / 2 until PredictWidth) {
     val lastIsValidEnd = if (i == PredictWidth / 2) { true.B }
-    else { validEnd_half(i - 1) || !HasCExtension.B }
-    validStart_half(i) := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_half(i)   := validStart_half(i) && currentIsRVC(i) || !validStart_half(i) || !HasCExtension.B
+    else { rearBound(i - 1).isEnd || !HasCExtension.B }
+    rearBound(i).isStart := (lastIsValidEnd || !HasCExtension.B)
+    rearBound(i).isEnd   := rearBound(i).isStart && currentIsRVC(i) || !rearBound(i).isStart || !HasCExtension.B
 
     // prepared for last half match
-    val h_lastIsValidEnd = if (i == PredictWidth / 2) { true.B }
-    else { h_validEnd_half(i - 1) || !HasCExtension.B }
-    h_validStart_half(i) := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_half(i)   := h_validStart_half(i) && currentIsRVC(i) || !h_validStart_half(i) || !HasCExtension.B
+    val altLastIsValidEnd = if (i == PredictWidth / 2) { true.B }
+    else { altRearBound(i - 1).isEnd || !HasCExtension.B }
+    altRearBound(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
+    altRearBound(i).isEnd := altRearBound(i).isStart && currentIsRVC(i) || !altRearBound(i).isStart || !HasCExtension.B
   }
 
   // assume PredictWidth / 2 + 1 is a valid start (and PredictWidth / 2 is last half of RVI)
   for (i <- PredictWidth / 2 + 1 until PredictWidth) {
     val lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
-    else { validEnd_halfPlus1(i - 1) || !HasCExtension.B }
-    validStart_halfPlus1(i) := (lastIsValidEnd || !HasCExtension.B)
-    validEnd_halfPlus1(i) := validStart_halfPlus1(i) && currentIsRVC(i) || !validStart_halfPlus1(i) || !HasCExtension.B
+    else { rearBoundPlus1(i - 1).isEnd || !HasCExtension.B }
+    rearBoundPlus1(i).isStart := (lastIsValidEnd || !HasCExtension.B)
+    rearBoundPlus1(i).isEnd := rearBoundPlus1(i).isStart && currentIsRVC(i) || !rearBoundPlus1(
+      i
+    ).isStart || !HasCExtension.B
 
     // prepared for last half match
-    val h_lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
-    else { h_validEnd_halfPlus1(i - 1) || !HasCExtension.B }
-    h_validStart_halfPlus1(i) := (h_lastIsValidEnd || !HasCExtension.B)
-    h_validEnd_halfPlus1(i) := h_validStart_halfPlus1(i) && currentIsRVC(i) || !h_validStart_halfPlus1(
+    val altLastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
+    else { altRearBoundPlus1(i - 1).isEnd || !HasCExtension.B }
+    altRearBoundPlus1(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
+    altRearBoundPlus1(i).isEnd := altRearBoundPlus1(i).isStart && currentIsRVC(i) || !altRearBoundPlus1(
       i
-    ) || !HasCExtension.B
+    ).isStart || !HasCExtension.B
   }
-  validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
-  validEnd_halfPlus1(PredictWidth / 2)   := true.B
+  // for xxxPlus1, PredictWidth / 2 must be a valid end, since we assume PredictWidth / 2 + 1 is a valid start
+  rearBoundPlus1(PredictWidth / 2).isStart    := false.B
+  rearBoundPlus1(PredictWidth / 2).isEnd      := true.B
+  altRearBoundPlus1(PredictWidth / 2).isStart := false.B
+  altRearBoundPlus1(PredictWidth / 2).isEnd   := true.B
 
-  // assume h_PredictWidth / 2 is an end
-  h_validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
-  h_validEnd_halfPlus1(PredictWidth / 2)   := true.B
-
-  // if PredictWidth / 2 - 1 is a valid end, PredictWidth / 2 is a valid start
+  // if PredictWidth / 2 - 1 is a valid end, PredictWidth / 2 is a valid start, then rearBound is correct
+  // otherwise, rearBoundPlus1 is correct
+  private val rearBoundCorrect    = bound(PredictWidth / 2 - 1).isEnd
+  private val altRearBoundCorrect = altBound(PredictWidth / 2 - 1).isEnd
   for (i <- PredictWidth / 2 until PredictWidth) {
-    validStart(i)   := Mux(validEnd(PredictWidth / 2 - 1), validStart_half(i), validStart_halfPlus1(i))
-    validEnd(i)     := Mux(validEnd(PredictWidth / 2 - 1), validEnd_half(i), validEnd_halfPlus1(i))
-    h_validStart(i) := Mux(h_validEnd(PredictWidth / 2 - 1), h_validStart_half(i), h_validStart_halfPlus1(i))
-    h_validEnd(i)   := Mux(h_validEnd(PredictWidth / 2 - 1), h_validEnd_half(i), h_validEnd_halfPlus1(i))
+    bound(i)    := Mux(rearBoundCorrect, rearBound(i), rearBoundPlus1(i))
+    altBound(i) := Mux(altRearBoundCorrect, altRearBound(i), altRearBoundPlus1(i))
   }
 
-  val validStartMismatch        = Wire(Bool())
-  val validEndMismatch          = Wire(Bool())
-  val validH_ValidStartMismatch = Wire(Bool())
-  val validH_ValidEndMismatch   = Wire(Bool())
+  private val startMismatch    = Wire(Bool())
+  private val endMismatch      = Wire(Bool())
+  private val altStartMismatch = Wire(Bool())
+  private val altEndMismatch   = Wire(Bool())
 
-  validStartMismatch        := validStart.zip(validStart_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
-  validEndMismatch          := validEnd.zip(validEnd_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
-  validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
-  validH_ValidEndMismatch   := h_validEnd.zip(h_validEnd_diff).map { case (a, b) => a =/= b }.reduce(_ || _)
+  startMismatch    := (bound zip boundDiff).map { case (a, b) => a.isStart =/= b.isStart }.reduce(_ || _)
+  endMismatch      := (bound zip boundDiff).map { case (a, b) => a.isEnd =/= b.isEnd }.reduce(_ || _)
+  altStartMismatch := (altBound zip altBoundDiff).map { case (a, b) => a.isStart =/= b.isStart }.reduce(_ || _)
+  altEndMismatch   := (altBound zip altBoundDiff).map { case (a, b) => a.isEnd =/= b.isEnd }.reduce(_ || _)
 
-  XSError(io.req.valid && validStartMismatch, p"validStart mismatch\n")
-  XSError(io.req.valid && validEndMismatch, p"validEnd mismatch\n")
-  XSError(io.req.valid && validH_ValidStartMismatch, p"h_validStart mismatch\n")
-  XSError(io.req.valid && validH_ValidEndMismatch, p"h_validEnd mismatch\n")
-
-//  io.out.hasLastHalf := !io.out.pd(PredictWidth - 1).isRVC && io.out.pd(PredictWidth - 1).valid
+  XSError(io.req.valid && startMismatch, p"start mismatch\n")
+  XSError(io.req.valid && endMismatch, p"end mismatch\n")
+  XSError(io.req.valid && altStartMismatch, p"altStart mismatch\n")
+  XSError(io.req.valid && altEndMismatch, p"altEnd mismatch\n")
 
   for (i <- 0 until PredictWidth) {
     XSDebug(
       true.B,
       p"instr ${Hexadecimal(io.resp.instr(i))}, " +
-        p"validStart ${Binary(validStart(i))}, " +
-        p"validEnd ${Binary(validEnd(i))}, " +
+        p"isStart ${Binary(bound(i).isStart)}, " +
+        p"isEnd ${Binary(bound(i).isEnd)}, " +
         p"isRVC ${Binary(io.resp.pd(i).isRVC)}, " +
         p"brType ${Binary(io.resp.pd(i).brType)}, " +
         p"isRet ${Binary(io.resp.pd(i).isRet)}, " +
