@@ -879,11 +879,11 @@ object FuConfig {
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
+    VfaluCfg, VfmaCfg, VfcvtCfg, VcrypPCfg, HyldaCfg, HystaCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg, VcrypPCfg
   )
 }
 
