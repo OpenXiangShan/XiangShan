@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import coupledL2.PrefetchCtrlFromCore
+import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -84,8 +85,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
-    val msiInfo = Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
-    val msiAck = Output(Bool())
+    val msiInfo = Input(ValidIO(new MsiInfoBundle))
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
@@ -262,7 +262,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.l2_flush_en := memBlock.io.outer_l2_flush_en
   io.power_down_en := memBlock.io.outer_power_down_en
   io.cpu_critical_error := memBlock.io.outer_cpu_critical_error
-  io.msiAck := memBlock.io.outer_msi_ack
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
