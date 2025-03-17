@@ -609,6 +609,8 @@ class CtrlBlockImp(
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
 
     decodePipeRename(i).ready := rename.io.in(i).ready
+    rename.io.pvtWen := VecInit.fill(RenameWidth)(false.B)
+    rename.io.pvtWdata := VecInit.fill(RenameWidth)(0.U)
     rename.io.in(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i)
     rename.io.in(i).bits := decodePipeRename(i).bits
     rename.io.pvtWen(i) := RegEnable(io.decode2Lvp(i).pred, io.decode2Lvp(i).valid && io.decode2Lvp(i).pred)
