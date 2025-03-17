@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import org.chipsalliance.cde.config.Parameters
+import utility.ParallelLookUp
 
 // 32bits shift right
 object SHR32 {
@@ -455,5 +456,57 @@ object MixInv {
         ByteDec(Seq(bytes(2), bytes(3), bytes(0), bytes(1))),
         ByteDec(Seq(bytes(1), bytes(2), bytes(3), bytes(0))),
         ByteDec(Seq(bytes(0), bytes(1), bytes(2), bytes(3))))
+  }
+}
+
+/**
+ * Performs the word rotation for AES key schedule
+ */
+object AESRotword {
+  def apply(bits: UInt): UInt = {
+    require(bits.getWidth == 32)
+    Cat(bits(7, 0), bits(31, 8))
+  }
+}
+
+/**
+ * Turn a round number into a round constant for AES.
+ * Note that the AES64KS1I instruction is defined such that the r argument is always in the range 0x0..0xA.
+ * Values of rnum outside the range 0x0..0xA do not decode to the AES64KS1I instruction.
+ * The 0xA case is used specifically for the AES-256 KeySchedule, and this function is never called in that case.
+ **/
+object AESDecodeRcon {
+  def apply(r: UInt): UInt = {
+    require(r.getWidth == 4)
+    // Choose the correct round constant based on the round number
+    val rcon = Wire(UInt(32.W)) // round constant
+    rcon := ParallelLookUp(r, Seq(
+      0x1.U(4.W) -> 0x00000001.U(32.W),
+      0x2.U(4.W) -> 0x00000002.U(32.W),
+      0x3.U(4.W) -> 0x00000004.U(32.W),
+      0x4.U(4.W) -> 0x00000008.U(32.W),
+      0x5.U(4.W) -> 0x00000010.U(32.W),
+      0x6.U(4.W) -> 0x00000020.U(32.W),
+      0x7.U(4.W) -> 0x00000040.U(32.W),
+      0x8.U(4.W) -> 0x00000080.U(32.W),
+      0x9.U(4.W) -> 0x0000001b.U(32.W),
+      0xa.U(4.W) -> 0x00000036.U(32.W)
+    ))
+    rcon
+  }
+}
+
+object Brev8 {
+  def apply(x: UInt): Vec[UInt] = {
+    val width = x.getWidth
+    require(width % 8 == 0)
+    val bytesNum = width / 8
+
+    val brev8Result = Wire(Vec(bytesNum, UInt(8.W)))
+    val xAsBytes = x.asTypeOf(brev8Result)
+    for (i <- 0 until bytesNum) {
+      brev8Result(i) := Reverse(xAsBytes(i))
+    }
+    brev8Result
   }
 }

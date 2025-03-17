@@ -833,7 +833,7 @@ object VecDecoder extends DecodeConstants {
     VAESEF_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesef_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
     VAESEM_VV     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesem_vv, F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
     VAESEM_VS     -> OPMVV(T, FuType.vcrypp, VcryppType.vaesem_vs, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
-    VAESKF1_VI    -> OPIVI(   FuType.vcrypp, VcryppType.vaeskf1,   T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV),
+    VAESKF1_VI    -> OPIVI(   FuType.vcrypp, VcryppType.vaeskf1,   T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV), // TODO: why?
     VAESKF2_VI    -> OPIVI(   FuType.vcrypp, VcryppType.vaeskf2,   T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV),
     VAESZ_VS      -> OPMVV(T, FuType.vcrypp, VcryppType.vaesz_vs,  F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
   )

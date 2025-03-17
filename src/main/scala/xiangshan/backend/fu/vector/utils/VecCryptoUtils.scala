@@ -66,9 +66,8 @@ object AES128ShiftRowsInv {
 
 class AES128SubBytesBidirectionIO extends Bundle {
   val src         = Input(UInt(128.W))
-  val isZeroRound = Input(Bool())
   val isFwd       = Input(Bool())
-  val isFwd_1s    = Input(Bool())
+  val isFwd_s1    = Input(Bool())
   val regEnable   = Input(Bool())
   val result      = Output(UInt(128.W)) // the 2nd cycle
 }
@@ -95,11 +94,55 @@ class AES128SubBytesBidirection extends Module {
 
     val aesSbox3FwdOut  = SboxAesOut(aesSBox2Out)
     val aesSbox3InvOut  = SboxIaesOut(aesSBox2Out)
-    out := Mux(io.isFwd_1s, aesSbox3FwdOut, aesSbox3InvOut)
+    out := Mux(io.isFwd_s1, aesSbox3FwdOut, aesSbox3InvOut)
     // out := Mux(isFwd, aesSbox3FwdOut, aesSbox3InvOut)
   }
 
   io.result := Cat(aesSboxOut.reverse)
+}
+
+class AES32SubBytesFwdIO extends Bundle {
+  val src         = Input(UInt(32.W))
+  val regEnable   = Input(Bool())
+  val result      = Output(UInt(32.W)) // the 2nd cycle
+}
+
+object AES32SubBytesFwd {
+  def apply(src: UInt, regEnable: Bool) = {
+    require(src.getWidth == 32)
+
+    val srcBytes   = src.asTypeOf(Vec(4, UInt(8.W)))
+    val outBytes = Wire(Vec(4, UInt(8.W)))
+
+    outBytes.zip(srcBytes) foreach { case (out, in) =>
+      val mid = Reg(Vec(18, Bool()))
+      when(regEnable) {
+        mid := SboxInv(SboxAesTop(in))
+      }
+      out := SboxAesOut(mid)
+    }
+
+    Cat(outBytes.reverse)
+  }
+}
+
+
+object SM4Subword {
+  def apply(src: UInt, regEnable: Bool): UInt = {
+    require(src.getWidth == 32)
+
+    val srcBytes   = src.asTypeOf(Vec(4, UInt(8.W)))
+    val outBytes = Wire(Vec(4, UInt(8.W)))
+
+    outBytes.zip(srcBytes) foreach { case (out, in) =>
+      val mid = Reg(Vec(18, Bool()))
+      when(regEnable) {
+        mid := SboxInv(SboxSm4Top(in))
+      }
+      out := SboxSm4Out(mid)
+    }
+    Cat(outBytes.reverse)
+  }
 }
 
 /*
@@ -215,3 +258,4 @@ object AES128MixColumnsInv {
   }
 }
 */
+
