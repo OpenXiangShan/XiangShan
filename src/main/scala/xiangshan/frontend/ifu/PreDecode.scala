@@ -79,10 +79,6 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   private val altRearBound      = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
   private val altRearBoundPlus1 = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
 
-  // we also compute the whole block directly for differential testing, this will be optimized out in released code
-  private val boundDiff    = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
-  private val altBoundDiff = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
-
   private val currentIsRVC = VecInit(rawInsts.map(isRVC))
 
   for (i <- 0 until PredictWidth) {
@@ -106,65 +102,45 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
     io.resp.jumpOffset(i) := Mux(io.resp.pd(i).isBr, brOffset, jalOffset)
   }
 
-  // the first half is always reliable
-  for (i <- 0 until PredictWidth / 2) {
-    val lastIsValidEnd = if (i == 0) { true.B }
-    else { bound(i - 1).isEnd || !HasCExtension.B }
-    bound(i).isStart := (lastIsValidEnd || !HasCExtension.B)
-    bound(i).isEnd   := bound(i).isStart && currentIsRVC(i) || !bound(i).isStart || !HasCExtension.B
+  def genBound(bound: Vec[BoundInfo], start: Int, end: Int, isAlt: Boolean = false): Unit = {
+    // when !HasCExtension, data is stepped by 4, and every data is a valid instruction start
+    // otherwise, data is stepped by 2, and data on pc+i*2 is:
+    //   - a valid instruction start iff data on pc+(i-1)*2 is a valid instruction end
+    //     - when i == startPoint, we need to check whether last half is a valid end
+    def checkThisIsStart(lastIsEnd: Bool): Bool =
+      if (!HasCExtension) true.B
+      else lastIsEnd
+    //   - a valid end iff:
+    //     - it is a valid start and is a RVC instruction
+    //     - or it is not a valid start (which implies pc+(i-1)*2 is a valid start)
+    def checkThisIsEnd(thisIsStart: Bool, thisIsRvc: Bool): Bool =
+      if (!HasCExtension) true.B
+      else thisIsStart && thisIsRvc || !thisIsStart
 
-    // prepared for last half match
-    val altLastIsValidEnd = if (i == 0) { false.B }
-    else { altBound(i - 1).isEnd || !HasCExtension.B }
-    altBound(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
-    altBound(i).isEnd   := altBound(i).isStart && currentIsRVC(i) || !altBound(i).isStart || !HasCExtension.B
+    // assume altBound is not start from a valid start, i.e. altBound(-1) is not a valid end
+    // assume other cases are start from a valid start, i.e.
+    //   - bound(-1) is a valid end
+    //   - rearBound(PredictWidth / 2 - 1) is a valid end
+    //   - rearBoundPlus1(PredictWidth / 2) is a valid end
+    //   - altRearBound(PredictWidth / 2 - 1) is a valid end
+    //   - altRearBoundPlus1(PredictWidth / 2) is a valid end
+    val startFromValid = !(start == 0 && isAlt)
+    for (i <- start until end) {
+      bound(i).isStart := checkThisIsStart(if (i == start) startFromValid.B else bound(i - 1).isEnd)
+      bound(i).isEnd   := checkThisIsEnd(bound(i).isStart, currentIsRVC(i))
+    }
   }
 
-  for (i <- 0 until PredictWidth) {
-    val lastIsValidEnd = if (i == 0) { true.B }
-    else { boundDiff(i - 1).isEnd || !HasCExtension.B }
-    boundDiff(i).isStart := (lastIsValidEnd || !HasCExtension.B)
-    boundDiff(i).isEnd   := boundDiff(i).isStart && currentIsRVC(i) || !boundDiff(i).isStart || !HasCExtension.B
+  genBound(bound, 0, PredictWidth / 2)
+  genBound(rearBound, PredictWidth / 2, PredictWidth)
+  genBound(rearBoundPlus1, PredictWidth / 2 + 1, PredictWidth)
 
-    // prepared for last half match
-    val altLastIsValidEnd = if (i == 0) { false.B }
-    else { altBoundDiff(i - 1).isEnd || !HasCExtension.B }
-    altBoundDiff(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
-    altBoundDiff(i).isEnd := altBoundDiff(i).isStart && currentIsRVC(i) || !altBoundDiff(i).isStart || !HasCExtension.B
-  }
+  genBound(altBound, 0, PredictWidth / 2, isAlt = true)
+  genBound(altRearBound, PredictWidth / 2, PredictWidth, isAlt = true)
+  genBound(altRearBoundPlus1, PredictWidth / 2 + 1, PredictWidth, isAlt = true)
 
-  // assume PredictWidth / 2 is a valid start
-  for (i <- PredictWidth / 2 until PredictWidth) {
-    val lastIsValidEnd = if (i == PredictWidth / 2) { true.B }
-    else { rearBound(i - 1).isEnd || !HasCExtension.B }
-    rearBound(i).isStart := (lastIsValidEnd || !HasCExtension.B)
-    rearBound(i).isEnd   := rearBound(i).isStart && currentIsRVC(i) || !rearBound(i).isStart || !HasCExtension.B
-
-    // prepared for last half match
-    val altLastIsValidEnd = if (i == PredictWidth / 2) { true.B }
-    else { altRearBound(i - 1).isEnd || !HasCExtension.B }
-    altRearBound(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
-    altRearBound(i).isEnd := altRearBound(i).isStart && currentIsRVC(i) || !altRearBound(i).isStart || !HasCExtension.B
-  }
-
-  // assume PredictWidth / 2 + 1 is a valid start (and PredictWidth / 2 is last half of RVI)
-  for (i <- PredictWidth / 2 + 1 until PredictWidth) {
-    val lastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
-    else { rearBoundPlus1(i - 1).isEnd || !HasCExtension.B }
-    rearBoundPlus1(i).isStart := (lastIsValidEnd || !HasCExtension.B)
-    rearBoundPlus1(i).isEnd := rearBoundPlus1(i).isStart && currentIsRVC(i) || !rearBoundPlus1(
-      i
-    ).isStart || !HasCExtension.B
-
-    // prepared for last half match
-    val altLastIsValidEnd = if (i == PredictWidth / 2 + 1) { true.B }
-    else { altRearBoundPlus1(i - 1).isEnd || !HasCExtension.B }
-    altRearBoundPlus1(i).isStart := (altLastIsValidEnd || !HasCExtension.B)
-    altRearBoundPlus1(i).isEnd := altRearBoundPlus1(i).isStart && currentIsRVC(i) || !altRearBoundPlus1(
-      i
-    ).isStart || !HasCExtension.B
-  }
   // for xxxPlus1, PredictWidth / 2 must be a valid end, since we assume PredictWidth / 2 + 1 is a valid start
+  // and, it must not be a valid start, otherwise, PredictWidth / 2 - 1 is a valid end and rearBound should be selected
   rearBoundPlus1(PredictWidth / 2).isStart    := false.B
   rearBoundPlus1(PredictWidth / 2).isEnd      := true.B
   altRearBoundPlus1(PredictWidth / 2).isStart := false.B
@@ -178,6 +154,13 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
     bound(i)    := Mux(rearBoundCorrect, rearBound(i), rearBoundPlus1(i))
     altBound(i) := Mux(altRearBoundCorrect, altRearBound(i), altRearBoundPlus1(i))
   }
+
+  // we also compute the whole block directly for differential testing, this will be optimized out in released code
+  private val boundDiff    = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+  private val altBoundDiff = WireInit(VecInit(Seq.fill(PredictWidth)(0.U.asTypeOf(new BoundInfo))))
+
+  genBound(boundDiff, 0, PredictWidth)
+  genBound(altBoundDiff, 0, PredictWidth, isAlt = true)
 
   private val startMismatch    = Wire(Bool())
   private val endMismatch      = Wire(Bool())
