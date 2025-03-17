@@ -472,10 +472,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val preDecoderOut = preDecoder.io.resp
 
   // val f2_expd_instr     = preDecoderOut.expInstr
-  val f2_instr        = preDecoderOut.instr
-  val f2_pd           = preDecoderOut.pd
-  val f2_jump_offset  = preDecoderOut.jumpOffset
-  val f2_hasHalfValid = preDecoderOut.hasHalfValid
+  val f2_instr       = preDecoderOut.instr
+  val f2_pd          = preDecoderOut.pd
+  val f2_jump_offset = preDecoderOut.jumpOffset
+  val f2_altValid    = preDecoderOut.altValid
   /* if there is a cross-page RVI instruction, and the former page has no exception,
    * whether it has exception is actually depends on the latter page
    */
@@ -563,7 +563,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_instr_range       = RegEnable(f2_instr_range, f2_fire)
   val f3_foldpc            = RegEnable(f2_foldpc, f2_fire)
-  val f3_hasHalfValid      = RegEnable(f2_hasHalfValid, f2_fire)
+  val f3_altValid          = RegEnable(f2_altValid, f2_fire)
   val f3_paddrs            = RegEnable(f2_paddrs, f2_fire)
   val f3_gpaddr            = RegEnable(f2_gpaddr, f2_fire)
   val f3_isForVSnonLeafPTE = RegEnable(f2_isForVSnonLeafPTE, f2_fire)
@@ -862,7 +862,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_lastHalf.middlePC := f3_ftq_req.nextStartAddr
   }
 
-  f3_instr_valid := Mux(f3_lastHalf.valid, f3_hasHalfValid, VecInit(f3_pd.map(inst => inst.valid)))
+  f3_instr_valid := Mux(f3_lastHalf.valid, f3_altValid, VecInit(f3_pd.map(inst => inst.valid)))
 
   /*** frontend Trigger  ***/
   frontendTrigger.io.pds  := f3_pd
