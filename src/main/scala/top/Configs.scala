@@ -475,7 +475,7 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  L2CacheConfig("1MB", inclusive = true, banks = 8, tp = false)
     ++ new DefaultConfig(n)
     ++ new WithCHI
 )
