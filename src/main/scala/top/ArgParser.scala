@@ -193,6 +193,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
           }), tail)
+        case "--sram-with-ctl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(hasSramCtl = true))
+          }), tail)
         case "--seperate-dm-bus" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(SeperateDMBus = true)
