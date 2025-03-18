@@ -109,7 +109,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val pvtWen = Vec(RenameWidth, Input(Bool()))
     val pvtWdata = Vec(RenameWidth, Input(UInt(XLEN.W)))
     val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
-    val pvtUpdateFrmRename = Vec(RenameWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fromLoad = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
     val misPred = Vec(backendParams.LduCnt, ValidIO(new Redirect))
   })
@@ -150,13 +149,25 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   pvt.io.fromLoad <> io.fromLoad
   io.misPred <> pvt.io.misPred
   //pvt update
-  //todo : when 2 consistent pvtwen are true, the firt pvtwdata will be ignore
+  //todo : when 2 consistent pvtwen are true, the second pvtwdata will be ignore
+  val pvtBufferValid = RegInit(VecInit.fill(RenameWidth)(false.B))
+  val pvtBufferData  = RegInit(VecInit.fill(RenameWidth)(0.U(XLEN.W)))
+  for (i <- 0 until RenameWidth) {
+    when(io.pvtWen(i) && !pvtBufferValid(i)) {
+      pvtBufferValid(i) := true.B
+      pvtBufferData(i)  := io.pvtWdata(i)
+    }
+  }
   pvt.io.writePorts.zipWithIndex.foreach{ case (w, i) =>
-    w.wen := io.pvtWen(i) && !pvt.io.full && io.out(i).valid
+    w.wen := pvtBufferValid(i) && !pvt.io.full && io.out(i).valid && !io.redirect.valid
 //    w.addr := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
     w.addr := io.out(i).bits.pdest
-    w.data := io.pvtWdata(i)
+    w.data := pvtBufferData(i)
     w.robIdx := io.out(i).bits.robIdx
+    when (w.wen || io.redirect.valid) {
+      pvtBufferValid(i) := false.B
+      pvtBufferData(i) := 0.U
+    }
   }
   // pvt read
   pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
@@ -391,11 +402,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     pvt.io.pvtUpdate := io.pvtUpdate
-    pvt.io.pvtUpdateFrmRename.zip(uops.map(_.pdest)).zip(io.out.map(_.valid)).zip(io.pvtWen).foreach{ case (((sink, source), valid), wen) =>
-      sink := Mux(valid && !wen, source, 0.U)
-    }
-    io.pvtUpdateFrmRename.zip(uops.map(_.pdest)).zip(io.out.map(_.valid)).zip(io.pvtWen).foreach{ case (((sink, source), valid), wen) =>
-      sink := Mux(valid && !wen, source, 0.U)
+    pvt.io.pvtUpdateFrmRename.zip(uops.map(_.pdest)).zip(io.out.map(_.valid)).foreach{ case ((sink, source), valid) =>
+      sink := Mux(valid, source, 0.U)
     }
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready

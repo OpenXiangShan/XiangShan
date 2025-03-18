@@ -93,6 +93,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     PerfCCT.updateInstPos(d.bits.debug_seqNum, PerfCCT.InstPos.AtDecode.id.U, d.valid, clock, reset)
   }
 
+  dontTouch(io.decode2Lvp)
   // io alias
   private val outReadys = io.out.map(_.ready)
   private val inValids = io.in.map(_.valid)
