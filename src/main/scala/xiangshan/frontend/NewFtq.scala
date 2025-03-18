@@ -215,13 +215,6 @@ class BpuFlushInfo(implicit p: Parameters) extends XSBundle with HasCircularQueu
   def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
 }
 
-class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  val req              = Decoupled(new FetchRequestBundle)
-  val redirect         = Valid(new BranchPredictionRedirect)
-  val topdown_redirect = Valid(new BranchPredictionRedirect)
-  val flushFromBpu     = new BpuFlushInfo
-}
-
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle {
   // write to backend pc mem
   val pc_mem_wen   = Output(Bool())

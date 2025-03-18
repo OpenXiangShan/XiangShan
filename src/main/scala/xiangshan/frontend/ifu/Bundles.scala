@@ -16,7 +16,9 @@
 package xiangshan.frontend.ifu
 
 import chisel3._
+import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
+import xiangshan.frontend.PrunedAddr
 
 /* ***
  * Naming:
@@ -37,4 +39,31 @@ object PreDecodeFaultType extends NamedUInt(3) {
   def notCfiFault:  UInt = "b100".U(width.W) // not CFI taken or invalid instruction taken
   def invalidTaken: UInt = "b101".U(width.W)
   def jalrFault:    UInt = "b110".U(width.W)
+}
+
+/* ***** Ifu last half ***** */
+// record the situation in which fallThruAddr falls into the middle of an RVI inst
+class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
+  val valid:    Bool       = Bool()
+  val middlePC: PrunedAddr = PrunedAddr(VAddrBits)
+}
+
+/* ***** DB ***** */
+class FetchToIBufferDB(implicit p: Parameters) extends IfuBundle {
+  val start_addr:   PrunedAddr = PrunedAddr(VAddrBits)
+  val instr_count:  UInt       = UInt(32.W)
+  val exception:    Bool       = Bool()
+  val is_cache_hit: Bool       = Bool()
+}
+
+class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
+  val start_addr:        PrunedAddr = PrunedAddr(VAddrBits)
+  val is_miss_pred:      Bool       = Bool()
+  val miss_pred_offset:  UInt       = UInt(32.W)
+  val checkJalFault:     Bool       = Bool()
+  val checkJalrFault:    Bool       = Bool()
+  val checkRetFault:     Bool       = Bool()
+  val checkTargetFault:  Bool       = Bool()
+  val checkNotCFIFault:  Bool       = Bool()
+  val checkInvalidTaken: Bool       = Bool()
 }

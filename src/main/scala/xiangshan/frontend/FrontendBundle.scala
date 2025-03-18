@@ -109,6 +109,17 @@ class IfuToICacheIO(implicit p: Parameters) extends XSBundle {
   val stall: Bool = Output(Bool())
 }
 
+class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
+  val req:              DecoupledIO[FetchRequestBundle] = Decoupled(new FetchRequestBundle)
+  val redirect:         Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
+  val topdown_redirect: Valid[BranchPredictionRedirect] = Valid(new BranchPredictionRedirect)
+  val flushFromBpu:     BpuFlushInfo                    = new BpuFlushInfo
+}
+
+class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
+  val pdWb: Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
+}
+
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
   val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
