@@ -906,7 +906,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     ))
   }
 
-  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+  TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)), XSPerfLevel.CRITICAL))
 
   val robTrueCommit = io.debugTopDown.fromRob.robTrueCommit
   TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
