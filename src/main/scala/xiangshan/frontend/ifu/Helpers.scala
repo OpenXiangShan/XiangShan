@@ -21,6 +21,7 @@ import utility.SignExt
 import xiangshan.HasXSParameter
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.BrType
+import xiangshan.frontend.icache.HasICacheParameters
 
 trait PreDecodeHelper extends HasXSParameter {
   def isRVC(inst: UInt): Bool = inst(1, 0) =/= 3.U
@@ -54,9 +55,30 @@ trait PreDecodeHelper extends HasXSParameter {
   }
 }
 
-trait FetchBlockHelper extends HasXSParameter {
+trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
   def getBasicBlockIdx(pc: UInt, start: UInt): UInt = {
     val byteOffset = pc - start
     (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
   }
+
+  def isNextLine(pc: UInt, startAddr: UInt): Bool =
+    startAddr(blockOffBits) ^ pc(blockOffBits)
+
+  def isLastInLine(pc: UInt): Bool =
+    pc(blockOffBits - 1, 0) === "b111110".U
+}
+
+trait PcCutHelper extends HasXSParameter {
+  // equal lower_result overflow bit
+  def PcCutPoint: Int = (VAddrBits / 4) - 1
+
+  def catPC(low: UInt, high: UInt, high1: UInt): UInt =
+    Mux(
+      low(PcCutPoint),
+      Cat(high1, low(PcCutPoint - 1, 0)),
+      Cat(high, low(PcCutPoint - 1, 0))
+    )
+
+  def catPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[UInt] =
+    VecInit(lowVec.map(catPC(_, high, high1)))
 }
