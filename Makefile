@@ -86,6 +86,11 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
+# enable or disable sram ctl maunally
+ifeq ($(SRAM_WITH_CTL),1)
+COMMON_EXTRA_ARGS += --sram-with-ctl
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
