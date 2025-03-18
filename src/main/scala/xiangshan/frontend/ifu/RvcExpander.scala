@@ -20,7 +20,7 @@ import freechips.rocketchip.rocket.ExpandedInstruction
 import freechips.rocketchip.rocket.RVCDecoder
 import org.chipsalliance.cde.config.Parameters
 
-class RVCExpander(implicit p: Parameters) extends IfuModule {
+class RvcExpander(implicit p: Parameters) extends IfuModule {
   class RVCExpanderIO(implicit p: Parameters) extends IfuBundle {
     val in:      UInt                = Input(UInt(32.W))
     val fsIsOff: Bool                = Input(Bool())
