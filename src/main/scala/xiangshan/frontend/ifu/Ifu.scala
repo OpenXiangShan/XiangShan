@@ -25,6 +25,7 @@ import utility.HasPerfEvents
 import utility.ParallelOR
 import utility.ParallelPosteriorityEncoder
 import utility.ParallelPriorityEncoder
+import utility.ValidHold
 import utility.XORFold
 import utility.XSDebug
 import utility.XSError
@@ -120,6 +121,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
     (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
 
+  private val s1_ready, s2_ready, s3_ready           = WireInit(false.B)
+  private val s0_fire, s1_fire, s2_fire, s3_fire     = WireInit(false.B)
+  private val s0_flush, s1_flush, s2_flush, s3_flush = WireInit(false.B)
+
   // Top-down
   private def numOfStage = 3
   require(numOfStage > 1, "Ifu numOfStage must be greater than 1")
@@ -195,9 +200,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s0_ftqReq     = fromFtq.req.bits
   private val s0_doubleline = fromFtq.req.bits.crossCacheline
-  private val s0_fire       = fromFtq.req.fire
-
-  private val s0_flush, s1_flush, s2_flush, s3_flush = WireInit(false.B)
+  s0_fire := fromFtq.req.fire
 
   private val s0_flushFromBpu = fromFtq.flushFromBpu.shouldFlushByStage2(s0_ftqReq.ftqIdx) ||
     fromFtq.flushFromBpu.shouldFlushByStage3(s0_ftqReq.ftqIdx)
@@ -210,8 +213,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_flush        := backendRedirect || mmioRedirect || wbRedirect
   s1_flush        := s2_flush
   s0_flush        := s1_flush || s0_flushFromBpu
-
-  private val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
   fromFtq.req.ready := s1_ready && io.fromICache.fetchReady
 
@@ -238,18 +239,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - calculate pc/half_pc/cut_ptr for every instruction
    * ***************************************************************************** */
 
-  private val s1_valid      = RegInit(false.B)
+  private val s1_valid      = ValidHold(s0_fire && !s0_flush, s1_fire, s1_flush)
   private val s1_ftqReq     = RegEnable(s0_ftqReq, s0_fire)
   private val s1_doubleline = RegEnable(s0_doubleline, s0_fire)
-  private val s1_fire       = s1_valid && s2_ready
 
+  s1_fire  := s1_valid && s2_ready
   s1_ready := s1_fire || !s1_valid
 
   assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_ftqReq.ftqIdx) && s1_valid))
-
-  when(s1_flush)(s1_valid := false.B)
-    .elsewhen(s0_fire && !s0_flush)(s1_valid := true.B)
-    .elsewhen(s1_fire)(s1_valid := false.B)
 
   private val s1_pcHigh      = s1_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
   private val s1_pcHighPlus1 = s1_pcHigh + 1.U
@@ -306,30 +303,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val icacheRespAllValid = WireInit(false.B)
 
-  private val s2_valid      = RegInit(false.B)
+  private val s2_valid      = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
   private val s2_ftqReq     = RegEnable(s1_ftqReq, s1_fire)
   private val s2_doubleline = RegEnable(s1_doubleline, s1_fire)
-  private val s2_fire       = s2_valid && s3_ready && icacheRespAllValid
 
+  s2_fire  := s2_valid && s3_ready && icacheRespAllValid
   s2_ready := s2_fire || !s2_valid
+
   // TODO: addr compare may be timing critical
   private val s2_iCacheAllRespWire =
     fromICache.valid &&
       fromICache.bits.vAddr(0) === s2_ftqReq.startAddr &&
       (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s2_ftqReq.nextlineStart || !s2_doubleline)
-  private val s2_iCacheAllRespReg = RegInit(false.B)
+  private val s2_iCacheAllRespReg = ValidHold(s2_valid && s2_iCacheAllRespWire && !s3_ready, s2_fire, s2_flush)
 
   icacheRespAllValid := s2_iCacheAllRespReg || s2_iCacheAllRespWire
 
   io.toICache.stall := !s3_ready
-
-  when(s2_flush)(s2_iCacheAllRespReg := false.B)
-    .elsewhen(s2_valid && s2_iCacheAllRespWire && !s3_ready)(s2_iCacheAllRespReg := true.B)
-    .elsewhen(s2_fire && s2_iCacheAllRespReg)(s2_iCacheAllRespReg := false.B)
-
-  when(s2_flush)(s2_valid := false.B)
-    .elsewhen(s1_fire && !s1_flush)(s2_valid := true.B)
-    .elsewhen(s2_fire)(s2_valid := false.B)
 
   private val s2_exceptionIn        = fromICache.bits.exception
   private val s2_isBackendException = fromICache.bits.isBackendException
@@ -482,10 +472,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - handle last half RVI instruction
    * ***************************************************************************** */
 
-  private val s3_valid      = RegInit(false.B)
+  // assign later
+  private val s3_valid = WireInit(false.B)
+
   private val s3_ftqReq     = RegEnable(s2_ftqReq, s2_fire)
   private val s3_doubleline = RegEnable(s2_doubleline, s2_fire)
-  private val s3_fire       = io.toIBuffer.fire
+  s3_fire := io.toIBuffer.fire
 
   private val s3_cutData = RegEnable(s2_cutData, s2_fire)
 
@@ -564,7 +556,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   when(s3_valid && !s3_ftqReq.ftqOffset.valid) {
     assert(
       s3_ftqReqStartAddr + (2 * PredictWidth).U >= s3_ftqReqNextStartAddr,
-      s"More tha ${2 * PredictWidth} Bytes fetch is not allowed!"
+      s"More than ${2 * PredictWidth} Bytes fetch is not allowed!"
     )
   }
 
@@ -613,9 +605,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.mmioCommitRead.mmioFtqPtr := RegNext(s3_ftqReq.ftqIdx - 1.U)
 
   // do mmio fetch only when pmp/pbmt shows it is a un-cacheable address and no exception occurs
-  /* FIXME: we do not distinguish pbmt is NC or IO now
-   *        but we actually can do speculative execution if pbmt is NC, maybe fix this later for performance
-   */
   private val s3_reqIsMmio =
     s3_valid && (s3_pmpMmio || Pbmt.isUncache(s3_itlbPbmt)) && !ExceptionType.hasException(s3_exception)
   private val mmioCommit = VecInit(io.robCommits.map { commit =>
@@ -649,24 +638,22 @@ class Ifu(implicit p: Parameters) extends IfuModule
     isFirstInstr := false.B
   }
 
-  when(s3_flush && !s3_reqIsMmio)(s3_valid := false.B)
-    .elsewhen(mmioF3Flush && s3_reqIsMmio && !s3_needNotFlush)(s3_valid := false.B)
-    .elsewhen(s2_fire && !s2_flush)(s3_valid := true.B)
-    .elsewhen(io.toIBuffer.fire && !s3_reqIsMmio)(s3_valid := false.B)
-    .elsewhen(s3_reqIsMmio && s3_mmioReqCommit)(s3_valid := false.B)
-
-  private val s3_mmioUseSnpc = RegInit(false.B)
+  s3_valid := ValidHold(
+    // infire: s2 -> s3 fire
+    s2_fire && !s2_flush,
+    // outfire: if req is mmio, wait for commit, else wait for IBuffer
+    Mux(s3_reqIsMmio, s3_mmioReqCommit, io.toIBuffer.fire),
+    // flush: if req is mmio, check whether mmio Fsm allow flush, else flush directly
+    Mux(s3_reqIsMmio, mmioF3Flush && !s3_needNotFlush, s3_flush)
+  )
+  dontTouch(s3_valid)
 
   private val (redirectFtqIdx, redirectFtqOffset) =
     (fromFtqRedirectReg.bits.ftqIdx, fromFtqRedirectReg.bits.ftqOffset)
   private val redirectMmioReq =
     fromFtqRedirectReg.valid && redirectFtqIdx === s3_ftqReq.ftqIdx && redirectFtqOffset === 0.U
 
-  when(RegNext(s2_fire && !s2_flush) && s3_reqIsMmio) {
-    s3_mmioUseSnpc := true.B
-  }.elsewhen(redirectMmioReq) {
-    s3_mmioUseSnpc := false.B
-  }
+  private val s3_mmioUseSnpc = ValidHold(RegNext(s2_fire && !s2_flush) && s3_reqIsMmio, redirectMmioReq)
 
   s3_ready := (io.toIBuffer.ready && (s3_mmioReqCommit || !s3_reqIsMmio)) || !s3_valid
 
@@ -693,12 +680,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     is(MmioFsmState.WaitResp) {
       when(fromUncache.fire) {
-        val isRVC      = fromUncache.bits.data(1, 0) =/= 3.U
-        val exception  = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
-        val needResend = !isRVC && s3_pAddr(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
+        val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
+        val exception = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
+        val needResend = !respIsRVC && s3_pAddr(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
         mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
         mmioException := exception
-        mmioIsRvc     := isRVC
+        mmioIsRvc     := respIsRVC
         mmioHasResend := needResend
         mmioData(0)   := fromUncache.bits.data(15, 0)
         mmioData(1)   := fromUncache.bits.data(31, 16)
@@ -766,7 +754,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     // normal mmio instruction
     is(MmioFsmState.Commited) {
-      mmioReset()
+      mmioReset() // includes mmioState := MmioFsmState.Idle
     }
   }
 
@@ -1002,17 +990,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
     * we set a flag to notify f3 that the last half flag need not be set.
     */
   // s3_fire is after wbValid
-  when(wbValid && RegNext(s3_hasLastHalf, init = false.B)
-    && wbCheckResultStage2.fixedMissPred(PredictWidth - 1) && !s3_fire && !RegNext(
-      s3_fire,
-      init = false.B
-    ) && !s3_flush) {
+  when(
+    wbValid && RegNext(s3_hasLastHalf, false.B) && wbCheckResultStage2.fixedMissPred(PredictWidth - 1) && !s3_fire &&
+      !RegNext(s3_fire, false.B) && !s3_flush
+  ) {
     s3_lastHalfDisabled := true.B
   }
 
   // wbValid and s3_fire are in same cycle
-  when(wbValid && RegNext(s3_hasLastHalf, init = false.B)
-    && wbCheckResultStage2.fixedMissPred(PredictWidth - 1) && s3_fire) {
+  when(wbValid && RegNext(s3_hasLastHalf, false.B) && wbCheckResultStage2.fixedMissPred(PredictWidth - 1) && s3_fire) {
     s3_lastHalf.valid := false.B
   }
 
