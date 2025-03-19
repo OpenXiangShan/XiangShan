@@ -50,6 +50,14 @@ object ROR32 {
   }
 }
 
+// 32bits Rotate shift
+object ROL32 {
+  def apply(bits: UInt, shamt: Int) = {
+    require(shamt>0 && shamt<32)
+    ROR32(bits, 32-shamt)
+  }
+}
+
 // 64bits Rotate shift
 object ROR64 {
   def apply(bits: UInt, shamt: Int) = {

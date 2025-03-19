@@ -18,26 +18,22 @@ package xiangshan.backend.fu.vector
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.decode.TruthTable
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import utility._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.util._
-import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.utils._
-import xiangshan.backend.fu.wrapper.VectorCvtTop
 import yunsuan.VcryppType
 import yunsuan.util.{GatedValidRegNext, LookupTree}
-import yunsuan.vector.SewOH
 
 
 /**
  * Pipelined vector crypto unit
  * @param cfg configuration
  */
-class VcryptoPiped(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VcryppType.dummy, "Vfcvt OpType not supported")
+class VcryptoPiped2(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VcryppType.dummy, "Vcrypp OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits
@@ -75,7 +71,6 @@ class VcryptoPiped(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUn
 //  private val illegalSew = true.B // TODO: modify it to "sew is not 32.U"
 
   val fire = io.in.valid
-  val fireReg = GatedValidRegNext(fire)
 
   private val isAesEncDec_1s = RegEnable(isAesEncDec, fire)
 
@@ -106,6 +101,89 @@ class VcryptoPiped(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUn
     vaesEncDec.io.result,
     vaesKeySchedule.io.result
   )
+
+  /**
+   * First, specify the output's tailing bits.
+   * An operation is done with several parameters: [[sew]]==32
+   * [[outVecCtrl.vta]] controls the output's tailing bits.
+   *   If vta==0, the output's tailing bits must be the same as the input's.
+   *   If vta==1, the output's tailing bits can be any value.
+   * [[outVecCtrl.vuopIdx]] is the operation's index.
+   *   Since these operatiosn has [[sew]]==32, so we need to specify the tail
+   */
+  private val numBytes = dataWidth / 8
+  private val maskTailGen = Module(new ByteMaskTailGen(dataWidth))
+
+  maskTailGen.io.in.begin := 0.U // consider vstart as 0
+  maskTailGen.io.in.end := outVl // TODO: confirm this source signal
+  maskTailGen.io.in.vma := false.B // no masks
+  maskTailGen.io.in.vta := outVecCtrl.vta // TODO: confirm this source signal
+  maskTailGen.io.in.vsew := sew
+  maskTailGen.io.in.maskUsed := ~(0.U(numBytes.W)) // no masks
+  maskTailGen.io.in.vdIdx := outVecCtrl.vuopIdx // TODO: confirm this source signal
+
+  private val activeEn = maskTailGen.io.out.activeEn
+  private val agnosticEn = maskTailGen.io.out.agnosticEn
+
+  private val byte1s: UInt = (~0.U(8.W)).asUInt
+  private val resVecByte = Wire(Vec(numBytes, UInt(8.W)))
+  private val vdVecByte = resultData.asTypeOf(resVecByte)
+  private val oldVdVecByte = outOldVd.asTypeOf(resVecByte)
+
+  /**
+   * result = if (active) vd elif (agnostic) 0xff else oldVd
+   */
+  for (i <- 0 until numBytes) {
+    resVecByte(i) := MuxCase(oldVdVecByte(i), Seq(
+      activeEn(i) -> vdVecByte(i),
+      agnosticEn(i) -> byte1s,
+    ))
+  }
+
+  /** Connect the output */
+  io.out.bits.res.data := resVecByte.asUInt
+}
+
+
+class VcryptoPiped5(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VcryppType.dummy, "Vcrypp OpType not supported")
+
+  // params alias
+  private val dataWidth = cfg.destDataBits
+  private val dataWidthOfDataModule = 128
+  private val numVecModule = dataWidth / dataWidthOfDataModule
+  require(numVecModule == 1, "SM4 module only supports 128-bit data width")
+
+  // io alias
+  // def vsm4k_vi  = "b00010000".U(OpTypeWidth.W) // Vector SM4 KeyExpansion
+  // def vsm4r_vv  = "b00010010".U(OpTypeWidth.W) // Vector SM4 Rounds vector-vector
+  // def vsm4r_vs  = "b00010011".U(OpTypeWidth.W) // Vector SM4 Rounds vector-scalar
+  private val isCipher = true.B
+  private val isAes = false.B
+  private val isSM4R = VecInit(
+    VcryppType.vsm4r_vv, VcryppType.vsm4r_vs
+  ).contains(fuOpType)
+
+  private val sew = 2.U(2.W) // SEW==32. Note it's used at 2nd cycle. TODO: modified later
+  private val sewVal = 32
+  //  private val illegalSew = true.B // TODO: modify it to "sew is not 32.U"
+
+  val fire = io.in.valid
+
+  // modules
+  private val sm4 = Module(new ShangMi4)
+  private val resultData = Wire(UInt(dataWidthOfDataModule.W))
+
+  /**
+   * [[sm4]]'s in connection
+   */
+  sm4.io.roundGroup   := vs1(2, 0)
+  sm4.io.roundKeys    := vs2
+  sm4.io.state        := oldVd
+  sm4.io.isSM4R       := isSM4R
+  sm4.io.regEnable    := fire
+
+  resultData := sm4.io.result
 
   /**
    * First, specify the output's tailing bits.
@@ -341,36 +419,60 @@ class GHash(implicit p: Parameters) extends XSModule {
 }
 
 
-class SM4IO extends Bundle {
-  val roundGroup    = Input(UInt(3.W)) // imm
-  val curr4RoundKey = Input(UInt(128.W)) // vs2
-  val regEnable     = Input(Bool())
-  val op            = Input(UInt(8.W))
-  val result        = Output(UInt(128.W))
+class ShangMi4IO extends Bundle {
+  val roundGroup = Input(UInt(3.W)) // imm
+  val roundKeys  = Input(UInt(128.W)) // vs2
+  val state      = Input(UInt(128.W)) // vd
+  val isSM4R     = Input(Bool())
+  val regEnable  = Input(Bool())
+  val result     = Output(UInt(128.W))
 }
 
 
-class SM4(implicit p: Parameters) extends XSModule {
-  val io = IO(new SM4IO)
+class ShangMi4(implicit p: Parameters) extends XSModule {
+  val io = IO(new ShangMi4IO)
+
 
   // SM4 Constant Key (CK)
-  private val ck = Wire(Vec(32, UInt(32.W)))
-  ck := VecInit(
-    0x00070E15.U, 0x1C232A31.U, 0x383F464D.U, 0x545B6269.U,
-    0x70777E85.U, 0x8C939AA1.U, 0xA8AFB6BD.U, 0xC4CBD2D9.U,
-    0xE0E7EEF5.U, 0xFC030A11.U, 0x181F262D.U, 0x343B4249.U,
-    0x50575E65.U, 0x6C737A81.U, 0x888F969D.U, 0xA4ABB2B9.U,
-    0xC0C7CED5.U, 0xDCE3EAF1.U, 0xF8FF060D.U, 0x141B2229.U,
-    0x30373E45.U, 0x4C535A61.U, 0x686F767D.U, 0x848B9299.U,
-    0xA0A7AEB5.U, 0xBCC3CAD1.U, 0xD8DFE6ED.U, 0xF4FB0209.U,
-    0x10171E25.U, 0x2C333A41.U, 0x484F565D.U, 0x646B7279.U
+  private val ckSeq: Seq[Long] = Seq(
+    0x00070E15L, 0x1C232A31L, 0x383F464DL, 0x545B6269L,
+    0x70777E85L, 0x8C939AA1L, 0xA8AFB6BDL, 0xC4CBD2D9L,
+    0xE0E7EEF5L, 0xFC030A11L, 0x181F262DL, 0x343B4249L,
+    0x50575E65L, 0x6C737A81L, 0x888F969DL, 0xA4ABB2B9L,
+    0xC0C7CED5L, 0xDCE3EAF1L, 0xF8FF060DL, 0x141B2229L,
+    0x30373E45L, 0x4C535A61L, 0x686F767DL, 0x848B9299L,
+    0xA0A7AEB5L, 0xBCC3CAD1L, 0xD8DFE6EDL, 0xF4FB0209L,
+    0x10171E25L, 0x2C333A41L, 0x484F565DL, 0x646B7279L
   )
+  private val ck = VecInit(ckSeq.map(_.U(32.W)))
 
-  val b = Wire(Vec(4, UInt(32.W)))
-  val s = Wire(Vec(4, UInt(32.W)))
-  val rk = Wire(Vec(8, UInt(32.W)))
-  val rnd = Wire(UInt(3.W))
-  rnd := io.roundGroup(2, 0)
+  val b           = Wire(Vec(4, UInt(32.W)))
+  val s           = Wire(Vec(4, UInt(32.W)))
+  val regEnable_s = Wire(Vec(4, Bool()))
+  val isSM4R_s    = Wire(Vec(5, Bool()))
+  val rk_s        = Wire(Vec(5, Vec(8, UInt(32.W))))
+  val x_s         = Wire(Vec(5, Vec(8, UInt(32.W))))
+  val rnd_s       = Wire(Vec(4, UInt(3.W)))
+
+  regEnable_s(0) := io.regEnable
+  for (lat <- 0 until 3) {
+    regEnable_s(lat + 1) := GatedValidRegNext(regEnable_s(lat))
+  }
+
+  isSM4R_s(0) := io.isSM4R
+  for (lat <- 0 until 4) {
+    isSM4R_s(lat + 1) := RegEnable(isSM4R_s(lat), regEnable_s(lat))
+    // connection for old values, NOTE: BY DEFAULT
+    for (i <- 0 until 8) {
+      rk_s(lat + 1)(i) := RegEnable(rk_s(lat)(i), regEnable_s(lat))
+      x_s (lat + 1)(i) := RegEnable(x_s (lat)(i), regEnable_s(lat))
+    }
+  }
+  rnd_s(0) := io.roundGroup(2, 0)
+  for (lat <- 0 until 3) {
+    rnd_s(lat + 1) := RegEnable(rnd_s(lat), regEnable_s(lat))
+  }
+
   //  let B : bits(32) = 0;
   //  let S : bits(32) = 0;
   //  let rk4 : bits(32) = 0;
@@ -379,37 +481,53 @@ class SM4(implicit p: Parameters) extends XSModule {
   //  let rk7 : bits(32) = 0;
   //  let rnd : bits(3) = uimm[2:0]; // Lower 3 bits
 
-
-  for (i <- 0 until 4) {
-    rk(i) := io.curr4RoundKey(32 * (i + 1) - 1, 32 * i)
+  for (i <- 4 until 8) { // by default
+    rk_s(0)(i) := 0.U
+    x_s (0)(i) := 0.U
   }
-  b(0) := rk(1) ^ rk(2) ^ rk(3) ^ ck(4 * rnd)
-    s(0) := SM4Subword(b(0))
+  for (i <- 0 until 4) {
+    rk_s(0)(i) := io.roundKeys(32 * (i + 1) - 1, 32 * i)
+    x_s (0)(i) := io.state    (32 * (i + 1) - 1, 32 * i)
+  }
+  b(0) := Mux(
+    isSM4R_s(0),
+    x_s (0)(1) ^ x_s (0)(2) ^ x_s (0)(3) ^ rk_s(0)(0),
+    rk_s(0)(1) ^ rk_s(0)(2) ^ rk_s(0)(3) ^ ck(Cat(rnd_s(0), 0.U(2.W)))
+  )
+  s(0) := SM4Subword(b(0), regEnable_s(0))
 
+  rk_s(1)(4) := SM4RoundKey(rk_s(1)(0), s(0))
+  x_s (1)(4) := SM4Round   (x_s (1)(0), s(0))
+  b(1) := Mux(
+    isSM4R_s(1),
+    x_s (1)(2) ^ x_s (1)(3) ^ x_s (1)(4) ^ rk_s(1)(1),
+    rk_s(1)(2) ^ rk_s(1)(3) ^ rk_s(1)(4) ^ ck(Cat(rnd_s(1), 1.U(2.W)))
+  )
+  s(1) := SM4Subword(b(1), regEnable_s(1))
 
-  //  foreach (i from eg_start to eg_len-1) {
-//    let (rk3 @ rk2 @ rk1 @ rk0) : bits(128) = get_velem(vs2, 128, i);
-//    B = rk1 ^ rk2 ^ rk3 ^ ck(4 * rnd);
-//    S = sm4_subword(B);
-//    rk4 = ROUND_KEY(rk0, S);
-//    B = rk2 ^ rk3 ^ rk4 ^ ck(4 * rnd + 1);
-//    S = sm4_subword(B);
-//    rk5 = ROUND_KEY(rk1, S);
-//    B = rk3 ^ rk4 ^ rk5 ^ ck(4 * rnd + 2);
-//    S = sm4_subword(B);
-//    rk6 = ROUND_KEY(rk2, S);
-//    B = rk4 ^ rk5 ^ rk6 ^ ck(4 * rnd + 3);
-//    S = sm4_subword(B);
-//    rk7 = ROUND_KEY(rk3, S);
-//    // Update the destination register.
-//    set_velem(vd, EGW=128, i, (rk7 @ rk6 @ rk5 @ rk4));
-//    }
-//  RETIRE_SUCCESS
-//  }
-//}
-//val round_key : bits(32) -> bits(32)
-//function ROUND_KEY(X, S) = ((X) ^ ((S) ^ ROL32((S), 13) ^ ROL32((S), 23)))
-//
+  rk_s(2)(5) := SM4RoundKey(rk_s(2)(1), s(1))
+  x_s (2)(5) := SM4Round   (x_s (2)(1), s(1))
+  b(2) := Mux(
+    isSM4R_s(2),
+    x_s (2)(3) ^ x_s (2)(4) ^ x_s (2)(5) ^ rk_s(2)(2),
+    rk_s(2)(3) ^ rk_s(2)(4) ^ rk_s(2)(5) ^ ck(Cat(rnd_s(2), 2.U(2.W)))
+  )
+  s(2) := SM4Subword(b(2), regEnable_s(2))
 
-  io.result := 0.U
+  rk_s(3)(6) := SM4RoundKey(rk_s(3)(2), s(2))
+  x_s (3)(6) := SM4Round   (x_s (3)(2), s(2))
+  b(3) := Mux(
+    isSM4R_s(3),
+    x_s (3)(4) ^ x_s (3)(5) ^ x_s (3)(6) ^ rk_s(3)(3),
+    rk_s(3)(4) ^ rk_s(3)(5) ^ rk_s(3)(6) ^ ck(Cat(rnd_s(3), 3.U(2.W)))
+  )
+  s(3) := SM4Subword(b(3), regEnable_s(3))
+
+  rk_s(4)(7) := SM4RoundKey(rk_s(4)(3), s(3))
+  x_s (4)(7) := SM4Round   (x_s (4)(3), s(3))
+  io.result := Mux(
+    isSM4R_s(4),
+    Cat(x_s (4)(7), x_s (4)(6), x_s (4)(5), x_s (4)(4)),
+    Cat(rk_s(4)(7), rk_s(4)(6), rk_s(4)(5), rk_s(4)(4))
+  )
 }
