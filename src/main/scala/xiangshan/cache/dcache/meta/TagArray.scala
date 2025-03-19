@@ -19,8 +19,9 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{SRAMTemplate, XSPerfAccumulate, ClockGate}
+import utility.{XSPerfAccumulate, ClockGate}
 import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)

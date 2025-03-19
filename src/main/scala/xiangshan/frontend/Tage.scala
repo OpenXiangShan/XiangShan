@@ -35,6 +35,7 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
+import utility.sram.FoldedSRAMTemplate
 import xiangshan._
 
 trait TageParams extends HasBPUConst with HasXSParameter {
@@ -158,6 +159,9 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
   val bt = Module(
     new FoldedSRAMTemplate(
       UInt(2.W),
+      setSplit = 2,
+      waySplit = 1,
+      dataSplit = 1,
       set = BtSize,
       width = foldWidth,
       way = numBr,

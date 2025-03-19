@@ -118,6 +118,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqDeqPtr = Output(new SqPtr)
     val exceptionAddr = new ExceptionAddrIO
     val loadMisalignFull = Input(Bool())
+    val misalignAllowSpec = Input(Bool())
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -126,6 +127,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val flushSbuffer = new SbufferFlushBundle
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
+    val rarValidCount = Output(UInt())
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -154,6 +156,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   io.lqDeqPtr := loadQueue.io.lqDeqPtr
   io.sqDeqPtr := storeQueue.io.sqDeqPtr
+  io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
     loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
@@ -212,6 +215,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.release             <> io.release
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.loadMisalignFull    := io.loadMisalignFull
+  loadQueue.io.misalignAllowSpec   := io.misalignAllowSpec
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec

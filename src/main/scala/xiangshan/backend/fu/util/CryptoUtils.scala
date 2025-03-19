@@ -467,6 +467,60 @@ object MixInv {
   }
 }
 
+object SHA2 {
+  private val sha256sum0cfg: Seq[Int] = Seq( 2, 13, 22)
+  private val sha256sum1cfg: Seq[Int] = Seq( 6, 11, 25)
+  private val sha512sum0cfg: Seq[Int] = Seq(28, 34, 39)
+  private val sha512sum1cfg: Seq[Int] = Seq(14, 18, 41)
+
+  private val sha256sig0cfg: Seq[Int] = Seq( 7, 18,  3)
+  private val sha256sig1cfg: Seq[Int] = Seq(17, 19, 10)
+  private val sha512sig0cfg: Seq[Int] = Seq( 1,  8,  7)
+  private val sha512sig1cfg: Seq[Int] = Seq(19, 61,  6)
+
+  private def sum(x: UInt, sew: Int, n: Int): UInt = {
+    require(x.getWidth >= sew, s"Invalid width: ${x.getWidth}")
+    val src = x(sew - 1, 0)
+    val config = (sew, n) match {
+      case (32, 0) => sha256sum0cfg
+      case (32, 1) => sha256sum1cfg
+      case (64, 0) => sha512sum0cfg
+      case (64, 1) => sha512sum1cfg
+      case _ => throw new IllegalArgumentException("Invalid sew or N")
+    }
+
+    val result = Wire(UInt(sew.W))
+    result := config.map(cfg => src.rotateRight(cfg)).reduce(_ ^ _)
+    result
+  }
+
+  def sha256sum0(x: UInt): UInt = sum(x, 32, 0)
+  def sha256sum1(x: UInt): UInt = sum(x, 32, 1)
+  def sha512sum0(x: UInt): UInt = sum(x, 64, 0)
+  def sha512sum1(x: UInt): UInt = sum(x, 64, 1)
+
+  private def sig(x: UInt, sew: Int, n: Int): UInt = {
+    require(x.getWidth >= sew, s"Invalid width: ${x.getWidth}")
+    val src = x(sew - 1, 0)
+    val config = (sew, n) match {
+      case (32, 0) => sha256sig0cfg
+      case (32, 1) => sha256sig1cfg
+      case (64, 0) => sha512sig0cfg
+      case (64, 1) => sha512sig1cfg
+      case _ => throw new IllegalArgumentException("Invalid sew or N")
+    }
+
+    val result = Wire(UInt(sew.W))
+    result := src.rotateRight(config(0)) ^ src.rotateRight(config(1)) ^ (src >> config(2)).asUInt
+    result
+  }
+
+  def sha256sig0(x: UInt): UInt = sig(x, 32, 0)
+  def sha256sig1(x: UInt): UInt = sig(x, 32, 1)
+  def sha512sig0(x: UInt): UInt = sig(x, 64, 0)
+  def sha512sig1(x: UInt): UInt = sig(x, 64, 1)
+}
+
 /**
  * Performs the word rotation for AES key schedule
  */

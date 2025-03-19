@@ -69,6 +69,10 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
+  // hash asid width
+  hashAsidWidth: Int = 3,
+  // hash vpn width
+  hashVpnWidth: Int = 6,
   // filter
   ifilterSize: Int = 8,
   dfilterSize: Int = 32,
@@ -106,6 +110,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteFlagLen = 8
   val pteRswLen = 2
   val ptePPNLen = 44
+  val ptePaddrLen = 56
   val pteResLen = 7
   val ptePbmtLen = 2
   val pteNLen = 1
