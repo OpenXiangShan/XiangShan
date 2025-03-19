@@ -83,8 +83,12 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
       (i.U === takenIdx) && predTaken
   })
 
+  // val jumpTargets = (0 until PredictWidth).map(i => {
+  //   (pcs(i) + io.preDecode.jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
+  // })
   val jumpTargets = (0 until PredictWidth).map(i => {
-    (pcs(i) + io.preDecode.jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
+    io.traceInsts(i).bits.target
+    // (pcs(i) + io.preDecode.jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
   })
   val seqTargets = (0 until PredictWidth).map(i => {
     pcs(i) + (Mux(pds(i).isRVC || !pds(i).valid, 2.U, 4.U))

@@ -41,6 +41,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
+  val addModuleTarget = TraceRTLChoose(addModule.io.target, SignExt(io.in.bits.ctrl.traceInfo.target, XLEN))
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
@@ -51,27 +52,23 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.robIdx := io.in.bits.ctrl.robIdx,
         _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
         _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
-        _.fullTarget := TraceRTLChoose(addModule.io.target, SignExt(io.in.bits.ctrl.traceInfo.target, XLEN)),
+        _.fullTarget := addModuleTarget,
         _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
           io.in.bits.ctrl.traceInfo.branchTaken(0) =/= io.in.bits.ctrl.predictInfo.get.taken,
         ),
         _.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0)),
         _.cfiUpdate.predTaken := dataModule.io.pred_taken,
-        _.cfiUpdate.target := addModule.io.target,
+        _.cfiUpdate.target := addModuleTarget,
         _.cfiUpdate.pc := io.in.bits.data.pc.get,
-        _.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target),
-        _.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target),
-        _.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target),
+        _.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModuleTarget),
+        _.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModuleTarget),
+        _.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModuleTarget),
         _.traceInfo := io.in.bits.ctrl.traceInfo,
       )
   }
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)
-    XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
-    XSError(io.in.valid && !io.in.bits.ctrl.traceInfo.isWrongPath &&
-      io.in.bits.ctrl.traceInfo.branchTaken(0) && (addModule.io.target =/= SignExt(io.in.bits.ctrl.traceInfo.target, XLEN)),
-      "when taken, addMod's target should equal to traceInfo's target")
-    // TraceInfo's target is the 'taken' target
+    XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Instruction at BranchUnit is not branch instruction in trace\n")
   }
 
   connect0LatencyCtrlSingal
