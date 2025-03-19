@@ -1502,6 +1502,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         dontTouch(r.bits.traceInfo)
         when (r.valid) {
           XSError(r.bits.pc =/= r.bits.traceInfo.pcVA, "ROB Enq: pc should be equal to traceInfo.pcVA")
+          when (isEmpty) {
+            XSError(r.bits.traceInfo.isWrongPath, "ROB's first instruction should not be wrongpath. Check tracertl after lastest redirect. The wrongPath mode check is wrong.")
+          }
         }
       }
     }
