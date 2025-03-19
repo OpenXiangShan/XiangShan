@@ -72,7 +72,8 @@ object FuType extends OHEnumeration {
   val vsegstu = addType(name = "vsegstu")
 
   // vec crypto
-  val vcrypp = addType(name = "vcrypp") // vector crypto pipelined
+  val vcrypp2 = addType(name = "vcrypp2") // vector crypto pipelined
+  val vcrypp5 = addType(name = "vcrypp5") // vector crypto pipelined
 
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
@@ -130,7 +131,8 @@ object FuType extends OHEnumeration {
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
   val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
-  val vecArith = vecOPI ++ vecOPF ++ Seq(vcrypp)
+  val vcrypto = Seq(vcrypp2, vcrypp5)
+  val vecArith = vecOPI ++ vecOPF ++ vcrypto
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
   val vecAll = vecVSET ++ vecArithOrMem
@@ -214,7 +216,7 @@ object FuType extends OHEnumeration {
 
   def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
 
-  def isVCryptoPiped(fuType: UInt): Bool = FuTypeOrR(fuType, vcrypp)
+  def isVCryptoPiped(fuType: UInt): Bool = FuTypeOrR(fuType, vcrypp2, vcrypp5)
 
   object FuTypeOrR {
     def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
@@ -266,7 +268,8 @@ object FuType extends OHEnumeration {
     vfma -> "vfma",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt",
-    vcrypp -> "vcrypp"
+    vcrypp2 -> "vcrypp2",
+    vcrypp5 -> "vcrypp5"
   )
 }
 

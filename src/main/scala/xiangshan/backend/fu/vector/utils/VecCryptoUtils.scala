@@ -24,6 +24,7 @@ import xiangshan.backend.fu.util._
 import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 
+
 /**
  * Vector AES encryption/decription utils
  */
@@ -46,6 +47,7 @@ object AES128ShiftRowsFwd {
   }
 }
 
+
 // AES inverse shift rows operation for 128-bit data
 object AES128ShiftRowsInv {
   def apply(src: UInt): UInt = {
@@ -64,6 +66,7 @@ object AES128ShiftRowsInv {
   }
 }
 
+
 class AES128SubBytesBidirectionIO extends Bundle {
   val src         = Input(UInt(128.W))
   val isFwd       = Input(Bool())
@@ -71,6 +74,7 @@ class AES128SubBytesBidirectionIO extends Bundle {
   val regEnable   = Input(Bool())
   val result      = Output(UInt(128.W)) // the 2nd cycle
 }
+
 
 class AES128SubBytesBidirection extends Module {
   val io = IO(new AES128SubBytesBidirectionIO)
@@ -101,11 +105,13 @@ class AES128SubBytesBidirection extends Module {
   io.result := Cat(aesSboxOut.reverse)
 }
 
+
 class AES32SubBytesFwdIO extends Bundle {
   val src         = Input(UInt(32.W))
   val regEnable   = Input(Bool())
   val result      = Output(UInt(32.W)) // the 2nd cycle
 }
+
 
 object AES32SubBytesFwd {
   def apply(src: UInt, regEnable: Bool) = {
@@ -144,6 +150,26 @@ object SM4Subword {
     Cat(outBytes.reverse)
   }
 }
+
+
+object SM4RoundKey {
+  def apply(X: UInt, S: UInt): UInt = {
+    require(X.getWidth == 32 && S.getWidth == 32)
+    val result = Wire(UInt(32.W))
+    result := X ^ S ^ ROL32(S, 13) ^ ROL32(S, 23)
+    result
+  }
+}
+
+object SM4Round {
+  def apply(X: UInt, S: UInt): UInt = {
+    require(X.getWidth == 32 && S.getWidth == 32)
+    val result = Wire(UInt(32.W))
+    result := X ^ S ^ ROL32(S, 2) ^ ROL32(S, 10) ^ ROL32(S, 18) ^ ROL32(S, 24)
+    result
+  }
+}
+
 
 /*
 object AES128MixColumns {
