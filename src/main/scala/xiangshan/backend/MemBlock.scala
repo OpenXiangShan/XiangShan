@@ -1312,6 +1312,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.memoryViolation := oldestRedirect
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+  if (env.TraceRTLMode) {
+    when (oldestRedirect.bits.traceInfo.isWrongPath) {
+      io.mem_to_ooo.memoryViolation.valid := false.B
+    }
+  }
 
   // lsq.io.uncache        <> uncache.io.lsq
   val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)

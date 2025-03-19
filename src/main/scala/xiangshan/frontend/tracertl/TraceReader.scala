@@ -146,6 +146,10 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     io.pcMatch.found  := Cat(traceBuffer.map(_.pcVA === io.pcMatch.pcVA)).orR
 
     // debug check
+    when (redirect.valid) {
+      XSError(redirect.bits.traceInfo.isWrongPath, "WrongPath instruction will not trigger redirect")
+    }
+
 
     // redirect check: instid should match with target
     // when redirect, record the info and check it after 4 cycle(after read from dpic)

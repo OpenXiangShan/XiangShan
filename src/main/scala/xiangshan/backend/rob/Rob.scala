@@ -1519,39 +1519,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       traceCollector.io.traceInfo(i) := uop.traceInfo
       // TODO: do expandInst check. traceinfo.inst and uop.inst
 
-      when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
-        XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
+      when (traceCollector.io.enable && io.commits.commitValid(i)) {
+        XSError(uop.traceInfo.isWrongPath, "WrongPath instruction should not commit. Should be flushed by older instr")
       }
-    }
-    (0 until CommitWidth).foreach{ case i =>
-      XSError(!io.commits.commitValid(0) && io.commits.isCommit && io.commits.commitValid(i),
-        "When CommitValid is true, CommitValid(0) should be true")
-    }
-  }
-
-  // TraceRTL Collect Commit Trace to check the correctness of the pipeline
-  if (env.TraceRTLMode) {
-    when (io.enq.canAccept) {
-      io.enq.req.map{ r =>
-        dontTouch(r.bits.traceInfo)
-        when (r.valid) {
-          XSError(r.bits.pc =/= r.bits.traceInfo.pcVA, "ROB Enq: pc should be equal to traceInfo.pcVA")
-        }
-      }
-    }
-
-    import xiangshan.frontend.tracertl.TraceCollector
-    val traceCollector = Module(new TraceCollector)
-    traceCollector.io.enable := io.commits.commitValid(0) && io.commits.isCommit
-    (0 until CommitWidth).foreach { case i =>
-      val uop = commitDebugUop(i)
-      val commitInfo = io.commits.info(i)
-      traceCollector.io.in(i).valid := io.commits.commitValid(i)
-      traceCollector.io.in(i).bits.pc := SignExt(uop.pc, XLEN)
-      traceCollector.io.in(i).bits.inst := uop.traceInfo.inst
-      traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
-      traceCollector.io.traceInfo(i) := uop.traceInfo
-      // TODO: do expandInst check. traceinfo.inst and uop.inst
 
       when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
         XSError(uop.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
