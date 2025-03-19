@@ -129,12 +129,16 @@ class Pvt(implicit p: Parameters) extends PvtModule{
         val index = veri.bits.pdest(log2Ceil(EntryNum)-1, 0)
         val entryMatch = PvtTable(index).robIdx === veri.bits.misPredict.robIdx && PvtTable(index).tag === veri.bits.pdest
         val misMatch = PvtTable(index).value =/= veri.bits.loadvalue && entryMatch
+        val sametime_read = io.readPorts.map { port =>
+            port.addr === PvtTable(index).tag && port.valid
+        }.reduce(_ || _)
         when (veri.valid) {
             val needCancel = WireInit(VecInit((0 until EntryNum).map(i => {
                 PvtTable(i).robIdx.needFlush(veri.bits.misPredict)
             })))
             // flush pvt selectively, used means that has influence to after instr
-            when (misMatch && PvtTable(index).used) {
+            // handle read and veri are valid at the same time
+            when (misMatch && (PvtTable(index).used || sametime_read)) {
                 PvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
                     when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
                 }
