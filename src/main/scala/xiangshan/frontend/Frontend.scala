@@ -478,6 +478,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   sigFromSrams.foreach({ case sig => sig.sramCtl := DontCare })
   if (hasSramCtl) {
-    sigFromSrams.get.sramCtl := io.sramTest.sramCtl.get.asTypeOf(new SramCtlBundle) // TODO: use valid bit field
+    val sramCtlBundle = io.sramTest.sramCtl.get.asTypeOf(new SramCtlBundle)
+    sigFromSrams.get.sramCtl.MCR := sramCtlBundle.MCR   // CFG[5 : 4]
+    sigFromSrams.get.sramCtl.MCW := sramCtlBundle.MCW   // CFG[7 : 6]
+    sigFromSrams.get.sramCtl.RCT := sramCtlBundle.RCT   // CFG[35 : 34]
+    sigFromSrams.get.sramCtl.WCT := sramCtlBundle.WCT   // CFG[37 : 36]
+    sigFromSrams.get.sramCtl.KP  := sramCtlBundle.KP    // CFG[40 : 38]
   }
 }
