@@ -16,6 +16,7 @@
 ***************************************************************************************/
 
 package xiangshan.transforms
+import com.thoughtworks.enableIf
 
 object Helpers {
 
@@ -24,14 +25,28 @@ object Helpers {
   }
 
   implicit class DefModuleHelper(defModule: firrtl.ir.DefModule) {
+    @enableIf(chisel3.BuildInfo.version.startsWith("6"))
     def mapStmt(f: firrtl.ir.Statement => firrtl.ir.Statement): firrtl.ir.DefModule = defModule match {
       case firrtl.ir.Module(info, name, ports, body) => firrtl.ir.Module(info, name, ports, f(body))
       case firrtl.ir.DefClass(info, name, ports, body) => firrtl.ir.DefClass(info, name, ports, f(body))
       case other: firrtl.ir.DefModule => other
     }
+    @enableIf(chisel3.BuildInfo.version.startsWith("7"))
+    def mapStmt(f: firrtl.ir.Statement => firrtl.ir.Statement): firrtl.ir.DefModule = defModule match {
+      case firrtl.ir.Module(info, name, public, layer, ports, body) => firrtl.ir.Module(info, name, public, layer, ports, f(body))
+      case firrtl.ir.DefClass(info, name, ports, body) => firrtl.ir.DefClass(info, name, ports, f(body))
+      case other: firrtl.ir.DefModule => other
+    }
 
+    @enableIf(chisel3.BuildInfo.version.startsWith("6"))
     def foreachStmt(f: firrtl.ir.Statement => Unit): Unit = defModule match {
       case firrtl.ir.Module(_, _, _, body) => f(body)
+      case firrtl.ir.DefClass(_, _, _, body) => f(body)
+      case _: firrtl.ir.DefModule =>
+    }
+    @enableIf(chisel3.BuildInfo.version.startsWith("7"))
+    def foreachStmt(f: firrtl.ir.Statement => Unit): Unit = defModule match {
+      case firrtl.ir.Module(_, _, _, _, _, body) => f(body)
       case firrtl.ir.DefClass(_, _, _, body) => f(body)
       case _: firrtl.ir.DefModule =>
     }

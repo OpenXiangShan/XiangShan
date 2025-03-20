@@ -714,7 +714,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tickCtr := satUpdate(tickCtr, TickWidth, !allocate.valid)
     when(allocate.valid) {
       updateMask(allocate.bits)         := true.B
-      updateCorrect(allocate.bits)      := DontCare // useless for alloc
+      updateCorrect(allocate.bits)      := 0.U // useless for alloc
       updateAlloc(allocate.bits)        := true.B
       updateUMask(allocate.bits)        := true.B
       updateU(allocate.bits)            := false.B

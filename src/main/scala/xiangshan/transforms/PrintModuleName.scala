@@ -16,6 +16,7 @@
 ***************************************************************************************/
 
 package xiangshan.transforms
+import com.thoughtworks.enableIf
 
 import utility.XSLog
 
@@ -33,9 +34,18 @@ class PrintModuleName extends firrtl.options.Phase {
     }
     val c = circuitAnno.circuit
 
+    @enableIf(chisel3.BuildInfo.version.startsWith("6"))
     def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
       case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en) =>
         firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en)
+      case other: firrtl.ir.Statement =>
+        other.mapStmt(onStmt)
+    }
+
+    @enableIf(chisel3.BuildInfo.version.startsWith("7"))
+    def onStmt(s: firrtl.ir.Statement): firrtl.ir.Statement = s match {
+      case firrtl.ir.Print(info, firrtl.ir.StringLit(string), args, clk, en, name) =>
+        firrtl.ir.Print(info, firrtl.ir.StringLit(XSLog.replaceFIRStr(string)), args, clk, en, name)
       case other: firrtl.ir.Statement =>
         other.mapStmt(onStmt)
     }

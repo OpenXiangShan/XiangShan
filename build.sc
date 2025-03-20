@@ -35,12 +35,12 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import scala.util.matching.Regex
 
-val defaultScalaVersion = "2.13.15"
+val defaultScalaVersion = "2.13.16"
 val pwd = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
 
 def defaultVersions = Map(
-  "chisel"        -> ivy"org.chipsalliance::chisel:6.7.0",
-  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.7.0",
+  "chisel"        -> ivy"org.chipsalliance::chisel:7.0.0-M2+588-cf353ccf-SNAPSHOT",
+  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:7.0.0-M2+588-cf353ccf-SNAPSHOT",
   "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
 )
 
@@ -58,7 +58,10 @@ trait HasChisel extends SbtModule {
   override def scalacOptions = super.scalacOptions() ++
     Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    chiselIvy.get,
+    ivy"com.thoughtworks.enableIf::enableif:1.2.0"
+  )
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
