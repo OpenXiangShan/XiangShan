@@ -18,9 +18,12 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import coupledL2.utils.SplittedSRAM
 import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import utility._
+import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 import xiangshan._
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
@@ -491,16 +494,19 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(
+    val ftb = Module(new SplittedSRAM(
       new FTBEntryWithTag,
       set = numSets,
       way = numWays,
+      dataSplit = 8,
       shouldReset = true,
       holdRead = false,
       singlePort = true,
-      withClockGate = true
+      clockGated = true,
+      hasMbist = hasMbist
     ))
-    val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
+    private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtb", hasMbist)
+    val ftb_r_entries   = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata = HoldUnless(
       ftb.io.r.resp.data,

@@ -27,6 +27,10 @@ xs_coarse_rename_map = {
 
     'IntFlStall': 'MergeFreelistStall',
     'FpFlStall': 'MergeFreelistStall',
+    'VecFlStall': 'MergeFreelistStall',
+    'V0FlStall': 'MergeFreelistStall',
+    'VlFlStall': 'MergeFreelistStall',
+    'MultiFlStall': 'MergeFreelistStall',
 
     'LoadTLBStall': 'MergeLoad',
     'LoadL1Stall': 'MergeLoad',
@@ -106,54 +110,58 @@ xs_fine_grain_rename_map = {
     'total_cycles': 'Cycles',
 }
 
-XS_CORE_PREFIX = r'\[PERF \]\[time=\s+\d+\] TOP\.SimTop\.l_soc\.core_with_l2\.core'
+XS_CORE_PREFIX = r'\[PERF \]\[time=\s+\d+\] SimTop\.l_soc\.core_with_l2\.core'
 
 targets = {
-    'NoStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: NoStall,\s+(\d+)',
+    'NoStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: NoStall,\s+(\d+)',
 
-    'OverrideBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: OverrideBubble,\s+(\d+)',
-    'FtqUpdateBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FtqUpdateBubble,\s+(\d+)',
-    'TAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: TAGEMissBubble,\s+(\d+)',
-    'SCMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: SCMissBubble,\s+(\d+)',
-    'ITTAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: ITTAGEMissBubble,\s+(\d+)',
-    'RASMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: RASMissBubble,\s+(\d+)',
-    'MemVioRedirectBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: MemVioRedirectBubble,\s+(\d+)',
-    'OtherRedirectBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: OtherRedirectBubble,\s+(\d+)',
-    'FtqFullStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FtqFullStall,\s+(\d+)',
+    'OverrideBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: OverrideBubble,\s+(\d+)',
+    'FtqUpdateBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FtqUpdateBubble,\s+(\d+)',
+    'TAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: TAGEMissBubble,\s+(\d+)',
+    'SCMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: SCMissBubble,\s+(\d+)',
+    'ITTAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: ITTAGEMissBubble,\s+(\d+)',
+    'RASMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: RASMissBubble,\s+(\d+)',
+    'MemVioRedirectBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: MemVioRedirectBubble,\s+(\d+)',
+    'OtherRedirectBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: OtherRedirectBubble,\s+(\d+)',
+    'FtqFullStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FtqFullStall,\s+(\d+)',
 
-    'ICacheMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: ICacheMissBubble,\s+(\d+)',
-    'ITLBMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: ITLBMissBubble,\s+(\d+)',
-    'BTBMissBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: BTBMissBubble,\s+(\d+)',
-    'FetchFragBubble': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FetchFragBubble,\s+(\d+)',
+    'ICacheMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: ICacheMissBubble,\s+(\d+)',
+    'ITLBMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: ITLBMissBubble,\s+(\d+)',
+    'BTBMissBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: BTBMissBubble,\s+(\d+)',
+    'FetchFragBubble': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FetchFragBubble,\s+(\d+)',
 
-    'DivStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: DivStall,\s+(\d+)',
-    'IntNotReadyStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: IntNotReadyStall,\s+(\d+)',
-    'FPNotReadyStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FPNotReadyStall,\s+(\d+)',
-    'MemNotReadyStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: MemNotReadyStall,\s+(\d+)',
+    'DivStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: DivStall,\s+(\d+)',
+    'IntNotReadyStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: IntNotReadyStall,\s+(\d+)',
+    'FPNotReadyStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FPNotReadyStall,\s+(\d+)',
+    'MemNotReadyStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: MemNotReadyStall,\s+(\d+)',
 
-    'IntFlStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: IntFlStall,\s+(\d+)',
-    'FpFlStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FpFlStall,\s+(\d+)',
+    'IntFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: IntFlStall,\s+(\d+)',
+    'FpFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FpFlStall,\s+(\d+)',
+    'VecFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: VecFlStall,\s+(\d+)',
+    'V0FlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: V0FlStall,\s+(\d+)',
+    'VlFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: VlFlStall,\s+(\d+)',
+    'MultiFlStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: MultiFlStall,\s+(\d+)',
 
-    'LoadTLBStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadTLBStall,\s+(\d+)',
-    'LoadL1Stall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadL1Stall,\s+(\d+)',
-    'LoadL2Stall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadL2Stall,\s+(\d+)',
-    'LoadL3Stall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadL3Stall,\s+(\d+)',
-    'LoadMemStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadMemStall,\s+(\d+)',
-    'StoreStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: StoreStall,\s+(\d+)',
-    'AtomicStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: AtomicStall,\s+(\d+)',
+    'LoadTLBStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadTLBStall,\s+(\d+)',
+    'LoadL1Stall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadL1Stall,\s+(\d+)',
+    'LoadL2Stall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadL2Stall,\s+(\d+)',
+    'LoadL3Stall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadL3Stall,\s+(\d+)',
+    'LoadMemStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadMemStall,\s+(\d+)',
+    'StoreStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: StoreStall,\s+(\d+)',
+    'AtomicStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: AtomicStall,\s+(\d+)',
 
-    'LoadVioReplayStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadVioReplayStall,\s+(\d+)',
-    'LoadMSHRReplayStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: LoadMSHRReplayStall,\s+(\d+)',
+    'LoadVioReplayStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadVioReplayStall,\s+(\d+)',
+    'LoadMSHRReplayStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: LoadMSHRReplayStall,\s+(\d+)',
 
-    'ControlRecoveryStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: ControlRecoveryStall,\s+(\d+)',
-    'MemVioRecoveryStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: MemVioRecoveryStall,\s+(\d+)',
-    'OtherRecoveryStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: OtherRecoveryStall,\s+(\d+)',
+    'ControlRecoveryStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: ControlRecoveryStall,\s+(\d+)',
+    'MemVioRecoveryStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: MemVioRecoveryStall,\s+(\d+)',
+    'OtherRecoveryStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: OtherRecoveryStall,\s+(\d+)',
 
-    'FlushedInsts': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: FlushedInsts,\s+(\d+)',
-    'OtherCoreStall': fr'{XS_CORE_PREFIX}.backend.ctrlBlock\.dispatch: OtherCoreStall,\s+(\d+)',
+    'FlushedInsts': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: FlushedInsts,\s+(\d+)',
+    'OtherCoreStall': fr'{XS_CORE_PREFIX}.backend.inner\.ctrlBlock\.dispatch: OtherCoreStall,\s+(\d+)',
 
-    "commitInstr": r"\[PERF \]\[time=\s+\d+\] TOP.SimTop.l_soc.core_with_l2.core.backend.ctrlBlock.rob: commitInstr,\s+(\d+)",
-    "total_cycles": r"\[PERF \]\[time=\s+\d+\] TOP.SimTop.l_soc.core_with_l2.core.backend.ctrlBlock.rob: clock_cycle,\s+(\d+)",
+    "commitInstr": r"\[PERF \]\[time=\s+\d+\] SimTop.l_soc.core_with_l2.core.backend.inner\.ctrlBlock.rob: commitInstr,\s+(\d+)",
+    "total_cycles": r"\[PERF \]\[time=\s+\d+\] SimTop.l_soc.core_with_l2.core.backend.inner\.ctrlBlock.rob: clock_cycle,\s+(\d+)",
 }
 
 

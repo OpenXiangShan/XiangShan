@@ -182,14 +182,14 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasOfFromPerfCntBundle {
+    Module(new CSRModule(s"Mhpmevent", new MhpmeventBundle) with HasOfFromPerfCntBundle {
       when(wen){
         reg.OF := wdata.OF
       }.elsewhen(ofFromPerfCnt) {
         reg.OF := ofFromPerfCnt
       }
     })
-      .setAddr(CSRs.mhpmevent3 - 3 + num)
+      .setAddr(CSRs.mhpmevent3 - 3 + num).suggestName(s"Mhpmevent$num")
   )
 
   val mscratch = Module(new CSRModule("Mscratch"))

@@ -1639,7 +1639,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.vlenb := vlenb
   }
 }
-*/
 class PFEvent(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
@@ -1665,3 +1664,4 @@ class PFEvent(implicit p: Parameters) extends XSModule {
     io.hpmevent(i) := perfEvents(i)
   }
 }
+*/

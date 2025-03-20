@@ -7,7 +7,7 @@ object CSROoORead {
    * "Read only" CSRs that can be fully pipelined when read in CSRR instruction.
    * Only read by csr instructions.
    */
-  val inOrderCsrReadList = List(
+  val waitForwardInOrderCsrReadList = List(
     CSRs.fflags,
     CSRs.fcsr,
     CSRs.vxsat,
@@ -19,5 +19,14 @@ object CSROoORead {
     CSRs.hstatus,
     CSRs.mnstatus,
     CSRs.dcsr,
+    CSRs.vtype,
+    CSRs.mireg,
+    CSRs.sireg,
+    CSRs.vsireg,
+  )
+  val blockBackwardInOrderCsrReadList = List(
+    CSRs.mireg,
+    CSRs.sireg,
+    CSRs.vsireg,
   )
 }

@@ -527,7 +527,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_ptw = mem_resp_from_ptw
   val refill_from_hptw = mem_resp_from_hptw
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
-  val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !hptw_bypassed
+  val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !(from_hptw(mem.d.bits.source) && hptw_bypassed)
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
@@ -628,6 +628,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
     mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
       llptw_out.bits.first_s2xlate_fault, llptw_stage1(llptw_out.bits.id),
+      // When G-stage triggers gpf | gaf, `first_s2xlate_fault` will be true
+      // So Here only including pf | af in Stage1, or Stage1Gpf (gpf = llptw_out.bits.h_resp.gpf)
       contiguous_pte_to_merge_ptwResp(
         if (HasBitmapCheck) Mux(llptw_out.bits.bitmapCheck.get.jmp_bitmap_check, llptw_out.bits.bitmapCheck.get.ptes.asUInt, resp_pte_sector(llptw_out.bits.id).asUInt) else resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af,
         true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf,
@@ -693,8 +695,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.n.map(_ := pte_in.n)
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
-      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(0.U, pbmte) || !pte_in.isLeaf())
-      ptw_resp.af := (if (!af_first) pte_in.isPf(0.U, pbmte) else true.B) && (af || (Mux(s2xlate === allStage, false.B, pte_in.isAf()) && !(hasS2xlate && gpf)))
+      // LLPTW will not handle onlyS2 situations
+      // noS2xlate. pf: allStagePf; af: af(pmp_af) || pte_in.isAf(ppn_af); gpf: never
+      // onlyStage1. pf: allStagePf; af: af(pmp_af) || pte_in.isAf(ppn_af); gpf: never
+      // allStage. pf: allStagePf; af: af(pmp_af) && !gpf; gpf: incoming parameter `gpf`
+      // priority: af (pmp check) > pf (pte check) > af (pte check)
+      val isPf = pte_in.isPf(0.U, pbmte) || !pte_in.isLeaf()
+      val isAf = pte_in.isAf() && (s2xlate === noS2xlate || s2xlate === onlyStage1) && !isPf
+      ptw_resp.pf := (if (af_first) !af else true.B) && isPf
+      ptw_resp.af := (if (af_first) true.B else !isPf) && (af || isAf)
       ptw_resp.cf := cfs(ptw_resp.ppn(sectortlbwidth - 1, 0))
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
@@ -703,7 +712,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_merge_resp.entry(i) := ptw_resp
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
-    ptw_merge_resp.not_super := not_super.B
+    val napot = ptw_merge_resp.entry(vpn(sectortlbwidth - 1, 0)).n.getOrElse(0.U)
+    ptw_merge_resp.not_super := not_super.B && !napot
     ptw_merge_resp.not_merge := hasS2xlate
     ptw_merge_resp
   }
@@ -728,13 +738,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     for (i <- 0 until tlbcontiguous) {
       val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
       val pbmt_equal = pte.entry(i).pbmt === pte.entry(OHToUInt(pte.pteidx)).pbmt
-      val n_equal = pte.entry(i).n.getOrElse(0.U) === pte.entry(OHToUInt(pte.pteidx)).n.getOrElse(0.U)
       val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
       val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
       val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
       val cf_equal = if (HasBitmapCheck) pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf else true.B
-      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && n_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
+      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
       ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
     }
     ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B

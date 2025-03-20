@@ -29,11 +29,12 @@ import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import coupledL2.tl2chi.{PortIO, CHIAsyncBridgeSink}
+import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
-import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
-import chisel3.experimental.{annotate, ChiselAnnotation}
+import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
+import chisel3.experimental.{ChiselAnnotation, annotate}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import utility.sram.SramBroadcastBundle
 
 import difftest.common.DifftestWiring
 import difftest.util.Profile
@@ -145,6 +146,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
+    private val hasMbist = tiles.head.hasMbist
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
@@ -170,6 +172,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
           val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
         })
       }
+      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val lp = Option.when(EnablePowerDown) (new LowPowerIO)
     })
     // imsic axi4lite io
     val imsic_axi4lite = wrapper.u_imsic_bus_top.module.axi4lite.map(x => IO(chiselTypeOf(x)))
@@ -177,9 +182,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val imsic_m_tl = wrapper.u_imsic_bus_top.tl_m.map(x => IO(chiselTypeOf(x.getWrappedValue)))
     val imsic_s_tl = wrapper.u_imsic_bus_top.tl_s.map(x => IO(chiselTypeOf(x.getWrappedValue)))
 
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen() })
-    val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen() }
-
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
+    val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
+    wrapper.core_with_l2.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
+    wrapper.core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
@@ -194,8 +200,87 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // input
     dontTouch(io)
 
-    core_with_l2.module.clock := clock
-    core_with_l2.module.reset := reset
+    /*
+     SoC control the sequence of power on/off with isolation/reset/clock 
+     */
+    val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
+    val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
+
+    /* Core+L2 reset when:
+     1. normal reset from SoC 
+     2. SoC initialize reset during Power on/off flow
+     */
+    val cpuReset = reset.asBool || !soc_rst_n
+
+    //Interrupt sources collect
+    val msip  = clint.head(0)
+    val mtip  = clint.head(1)
+    val meip  = plic.head(0)
+    val seip  = plic.last(0)
+    val nmi_31 = nmi.head(0)
+    val nmi_43 = nmi.head(1)
+    val msi_info_vld = core_with_l2.module.io.msiInfo.valid 
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
+
+    /*
+     * CPU Low Power State:
+     * 1. core+L2 Low power state transactions is triggered by l2 flush request from core CSR
+     * 2. wait L2 flush done
+     * 3. wait Core to wfi -> send out < io.o_cpu_no_op > 
+     */
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
+    val lpState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
+    val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
+    val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
+    val isWFI = core_with_l2.module.io.cpu_halt
+    val exitco = !io.chi.syscoreq & !io.chi.syscoack
+    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
+    io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
+
+    /*WFI clock Gating state
+     1. works only when lpState is IDLE means Core+L2 works in normal state
+     2. when Core is in wfi state, core+l2 clock is gated
+     3. only reset/interrupt/snoop could recover core+l2 clock 
+    */
+    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+    val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
+    val isNormal = lpState === sIDLE
+    val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
+    wfiState := WfiStateNext(wfiState, isWFI, isNormal, io.chi.rx.snp.flitpend, intSrc)
+
+    if (WFIClockGate) {
+      wfiGateClock := (wfiState === sGCLOCK)
+    }else {
+      wfiGateClock := false.B
+    }
+
+
+
+    /* during power down sequence, SoC reset will gate clock */
+    val pwrdownGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
+    pwrdownGateClock := !soc_rst_n && lpState === sPOFFREQ
+    /*
+     physical power off handshake: 
+     i_cpu_pwrdown_req_n
+     o_cpu_pwrdown_ack_n means all power is safely on 
+     */
+    val soc_pwrdown_n = io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B)
+    io.lp.foreach { lp => lp.o_cpu_pwrdown_ack_n := core_with_l2.module.io.pwrdown_ack_n.getOrElse(true.B) }
+
+
+    /* Core+L2 hardware initial clock gating as:
+     1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid 
+     2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state 
+     3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel  
+     */
+    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
+
+    dontTouch(wfiGateClock)
+    dontTouch(pwrdownGateClock)
+    dontTouch(cpuClockEn)
+
+    core_with_l2.module.clock := ClockGate(false.B, cpuClockEn, clock)
+    core_with_l2.module.reset := cpuReset.asAsyncReset
     core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
     core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
@@ -205,6 +290,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.hartResetReq := io.hartResetReq
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
+    core_with_l2.module.io.iso_en.foreach { _ := false.B }
+    core_with_l2.module.io.pwrdown_req_n.foreach { _ := true.B }
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
     traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
@@ -300,10 +387,10 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   XSNoCDiffTopChecker()
 }
 
-//TODO:
-//Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
-//To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
-//We will try one-step XS-Diff later
+// TODO:
+// Currently we use two-step XiangShan-Difftest, generating XS(with Diff Interface only) and Difftest seperately
+// To avoid potential interface problem between XS and Diff, we add Checker and CI(dual-core)
+// We will try one-step XS-Diff later
 object XSNoCDiffTopChecker {
   def apply(): Unit = {
     val verilog =

@@ -3,7 +3,7 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DiffFpWriteback, DiffIntWriteback, DiffVecWriteback, DifftestModule}
+import difftest.{DiffFpWriteback, DiffIntWriteback, DiffVecV0Writeback, DiffVecWriteback, DifftestModule}
 import utility.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
@@ -415,7 +415,19 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
       difftest.coreid := io.fromTop.hartId
       difftest.valid := out.fire
       difftest.address := out.bits.pdest
-      difftest.data := out.bits.data
+      difftest.data(0) := out.bits.data(63, 0)
+      difftest.data(1) := out.bits.data(127, 64)
+    })
+  }
+
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
+    v0WbArbiterOut.foreach(out => {
+      val difftest = DifftestModule(new DiffVecV0Writeback(V0PhyRegs))
+      difftest.coreid := io.fromTop.hartId
+      difftest.valid := out.fire
+      difftest.address := out.bits.pdest
+      difftest.data(0) := out.bits.data(63, 0)
+      difftest.data(1) := out.bits.data(127, 64)
     })
   }
 }

@@ -37,13 +37,13 @@ import huancun._
 import coupledL2._
 import coupledL2.prefetch._
 
-class BaseConfig(n: Int) extends Config((site, here, up) => {
+class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
   case CVMParamskey => CVMParameters()
   case PMParameKey => PMParameters()
-  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
+  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i, hasMbist = hasMbist) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(DebugModuleParams(
     nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
@@ -71,7 +71,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         DecodeWidth = 6,
         RenameWidth = 6,
         RobCommitWidth = 8,
-        FetchWidth = 4,
+        // FetchWidth = 4, // NOTE: make sure that FTQ SRAM width is not a prime number bigger than 256.
         VirtualLoadQueueSize = 24,
         LoadQueueRARSize = 24,
         LoadQueueRAWSize = 12,
@@ -457,7 +457,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n)
+    ++ new BaseConfig(n, true)
 )
 
 class CVMConfig(n: Int = 1) extends Config(
@@ -538,6 +538,22 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
       AlwaysBasicDB = false
     )
     case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true,
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+        sramClkDivBy2 = false,
+      )),
+    )
+  })
+)
+
+class FpgaDiffMinimalConfig(n: Int = 1) extends Config(
+  (new MinimalConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = true,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true,
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sramClkDivBy2 = false,
       )),

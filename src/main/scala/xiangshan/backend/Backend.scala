@@ -42,7 +42,8 @@ import xiangshan.backend.datapath._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PFEvent, PerfCounterIO}
+import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
+import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
@@ -63,7 +64,7 @@ class BackendImp(wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp
   val io = IO(new BackendIO()(p, wrapper.params))
   io <> wrapper.inner.module.io
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
@@ -863,6 +864,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   io.topDownInfo.noUopsIssued := RegNext(dataPath.io.topDownInfo.noUopsIssued)
 
+  private val cg = ClockGate.genTeSrc
+  dontTouch(cg)
+  if(hasMbist) {
+    cg.cgen := io.dft_cgen.get
+  } else {
+    cg.cgen := false.B
+  }
+
   if(backendParams.debugEn) {
     dontTouch(memScheduler.io)
     dontTouch(dataPath.io.toMemExu)
@@ -893,8 +902,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         // ))
       ))
     ))
-    ResetGen(leftResetTree, reset, sim = false)
-    ResetGen(rightResetTree, reset, sim = false)
+    ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
+    ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
   } else {
     io.frontendReset := DontCare
   }
@@ -1077,4 +1086,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   }
   val debugRolling = new RobDebugRollingIO
   val topDownInfo = new TopDownInfo
+  val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals)) else None
+  val dft_cgen = if(hasMbist) Some(Input(Bool())) else None
 }

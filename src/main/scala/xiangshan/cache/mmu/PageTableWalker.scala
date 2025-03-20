@@ -177,9 +177,10 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
 
-  val l3addr = Wire(UInt(PAddrBits.W))
-  val l2addr = Wire(UInt(PAddrBits.W))
-  val l1addr = Wire(UInt(PAddrBits.W))
+  val l3addr = Wire(UInt(ptePaddrLen.W))
+  val l2addr = Wire(UInt(ptePaddrLen.W))
+  val l1addr = Wire(UInt(ptePaddrLen.W))
+  val hptw_addr = Wire(UInt(ptePaddrLen.W))
   val mem_addr = Wire(UInt(PAddrBits.W))
 
   l3addr := MakeAddr(satp.ppn, getVpnn(vpn, 3))
@@ -193,7 +194,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     l2addr := MakeAddr(satp.ppn, getVpnn(vpn, 2))
   }
   l1addr := MakeAddr(Mux(l2Hit, ppn, pte.getPPN()), getVpnn(vpn, 1))
-  mem_addr := Mux(af_level === 3.U, l3addr, Mux(af_level === 2.U, l2addr, l1addr))
+  hptw_addr := Mux(af_level === 3.U, l3addr, Mux(af_level === 2.U, l2addr, l1addr))
+  mem_addr := hptw_addr(PAddrBits - 1, 0)
 
   val hptw_resp = Reg(new HptwResp)
 
@@ -202,7 +204,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val full_gvpn_wire = pte.getPPN()
   val full_gvpn = Mux(update_full_gvpn_mem_resp, full_gvpn_wire, full_gvpn_reg)
 
-  val gpaddr = MuxCase(mem_addr, Seq(
+  val gpaddr = MuxCase(hptw_addr, Seq(
     (stage1Hit || onlyS2xlate) -> Cat(full_gvpn, 0.U(offLen.W)),
     !s_last_hptw_req -> Cat(MuxLookup(level, pte.getPPN())(Seq(
       3.U -> Cat(pte.getPPN()(ptePPNLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
@@ -473,7 +475,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem.resp.fire && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level - 1.U
-    s_llptw_req := false.B
     gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
     update_full_gvpn_mem_resp := true.B
@@ -481,10 +482,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (bitmap_enable) {
         whether_need_bitmap_check := true.B
       } .otherwise {
+        s_llptw_req := false.B
         mem_addr_update := true.B
         whether_need_bitmap_check := false.B
       }
     } else {
+      s_llptw_req := false.B
       mem_addr_update := true.B
     }
   }
@@ -501,6 +504,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         whether_need_bitmap_check := false.B
       } .otherwise {
         mem_addr_update := true.B
+        s_llptw_req := false.B
         whether_need_bitmap_check := false.B
       }
     }
@@ -873,10 +877,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
         val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
         val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-        state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(ptes(index).isPf(0.U, s1Pbmte) || !ptes(index).isLeaf() || ptes(index).isAf() || ptes(index).isStage1Gpf(io.csr.vsatp.mode))
-                , state_last_hptw_req, Mux(bitmap_enable, state_bitmap_check, state_mem_out))
+        val allStageExcp = ptes(index).isPf(0.U, s1Pbmte) || !ptes(index).isLeaf() || ptes(index).isStage1Gpf(io.csr.vsatp.mode)
+        state(i) := Mux((entries(i).req_info.s2xlate === allStage && !allStageExcp),
+                        state_last_hptw_req,
+                        Mux(bitmap_enable, state_bitmap_check, state_mem_out))
         mem_resp_hit(i) := true.B
         entries(i).ppn := ptes(index).getPPN() // for last stage 2 translation
+        // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
         entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, ptes(index).isStage1Gpf(io.csr.vsatp.mode), false.B)
       }
     }

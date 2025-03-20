@@ -26,13 +26,15 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import coupledL2.utils.SplittedSRAM
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
+import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.backend.decode.ImmUnion
 import xiangshan.frontend.icache._
 
 class FtqDebugBundle extends Bundle {
@@ -76,7 +78,15 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SRAMTemplate(gen, FtqSize, withClockGate = true))
+    val sram = Module(new SplittedSRAM(
+      gen,
+      set = FtqSize,
+      way = 1,
+      dataSplit = 2,
+      singlePort = false,
+      clockGated = true,
+      hasMbist = hasMbist
+    ))
     sram.io.r.req.valid       := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i)               := sram.io.r.resp.data(0)
@@ -659,6 +669,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid(3)
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
 
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this

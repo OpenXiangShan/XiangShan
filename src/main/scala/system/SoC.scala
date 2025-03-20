@@ -95,11 +95,14 @@ case class SoCParameters
   NumIRSrc: Int = 256,
   UseXSNoCTop: Boolean = false,
   UseXSNoCDiffTop: Boolean = false,
+  UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
   SeperateDMBus: Boolean = false,
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  EnableDMAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false))
+  EnableDMAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  WFIClockGate: Boolean = false,
+  EnablePowerDown: Boolean = false
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
@@ -157,6 +160,9 @@ trait HasSoCParameter {
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
   val EnableDMAsyncBridge = if (SeperateDMBus && soc.EnableDMAsyncBridge.isDefined)
     soc.EnableDMAsyncBridge else None
+
+  val WFIClockGate = soc.WFIClockGate
+  val EnablePowerDown = soc.EnablePowerDown
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption && (cvm.KeyIDBits == 0)),

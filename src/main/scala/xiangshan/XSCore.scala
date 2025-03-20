@@ -35,6 +35,8 @@ import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
 import scala.collection.mutable.ListBuffer
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -110,6 +112,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2Miss = Bool()
       val l3Miss = Bool()
     })
+    val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
+    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
   })
 
   dontTouch(io.l2_flush_done)
@@ -280,5 +284,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   if (debugOpts.ResetGen) {
     backend.reset := memBlock.io.reset_backend
     frontend.reset := backend.io.frontendReset
+  }
+
+  if (hasMbist) {
+    memBlock.io.dft_reset.get := io.dft_reset.get
+    memBlock.io.dft.get := io.dft.get
+    frontend.io.dft.get := memBlock.io.dft_frnt.get
+    frontend.io.dft_reset.get := memBlock.io.dft_reset_frnt.get
+    backend.io.dft_cgen.get := memBlock.io.dft_bcknd.get.cgen
+    backend.io.dft_reset.get := memBlock.io.dft_reset_bcknd.get
   }
 }

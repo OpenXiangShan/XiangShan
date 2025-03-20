@@ -33,6 +33,8 @@ import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
+import utility.mbist.MbistPipeline
+import utility.sram.SRAMTemplate
 import xiangshan._
 
 trait HasSCParameter extends TageParams {}
@@ -80,9 +82,10 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     holdRead = true,
     singlePort = false,
     conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
-    withClockGate = true
+    withClockGate = true,
+    hasMbist = hasMbist
   ))
-
+  private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSc", hasMbist)
   // def getIdx(hist: UInt, pc: UInt) = {
   //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
   // }

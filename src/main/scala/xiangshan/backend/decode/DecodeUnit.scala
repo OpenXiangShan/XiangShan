@@ -899,9 +899,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.fromCSR.illegalInst.wrs_nto    && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWrsNto(decodedInst.fuOpType) ||
     (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
     (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm ||
-    io.fromCSR.illegalInst.cboZ       && isCboZero ||
-    io.fromCSR.illegalInst.cboCF      && (isCboClean || isCboFlush) ||
-    io.fromCSR.illegalInst.cboI       && isCboInval ||
+    (io.fromCSR.illegalInst.cboZ  || !HasCMO.B) && isCboZero ||
+    (io.fromCSR.illegalInst.cboCF || !HasCMO.B) && (isCboClean || isCboFlush) ||
+    (io.fromCSR.illegalInst.cboI  || !HasCMO.B) && isCboInval ||
     isAes64ks1iIllegal ||
     isAmocasQIllegal
 
