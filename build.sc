@@ -121,6 +121,9 @@ object utility extends HasChisel {
     ivy"com.lihaoyi::sourcecode:0.4.2",
   )
 
+  object test extends SbtTests with TestModule.ScalaTest {
+    override def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.7")
+  }
 }
 
 object yunsuan extends HasChisel {
