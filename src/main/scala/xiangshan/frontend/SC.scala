@@ -34,7 +34,7 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
-import utility.sram.SRAMTemplate
+import utility.sram.{SRAMTemplate, SRAMConflictBehavior}
 import xiangshan._
 
 trait HasSCParameter extends TageParams {}
