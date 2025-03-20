@@ -2183,6 +2183,9 @@ class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
   io_perf <> wrapper.inner.module.io_perf
 
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
+    ResetGen(
+      ResetGenNode(Seq(ModuleNode(wrapper.inner.module))),
+      reset, sim = false, io.sramTestBypass.fromL2Top.mbistReset
+    )
   }
 }
