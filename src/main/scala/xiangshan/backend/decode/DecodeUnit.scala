@@ -868,6 +868,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.v0Wen := false.B
   decodedInst.vlWen := false.B
 
+  // fill in exception vector
+  val vecException = Module(new VecExceptionGen)
+  vecException.io.inst := io.enq.ctrlFlow.instr
+  vecException.io.decodedInst := decodedInst
+  vecException.io.vtype := decodedInst.vpu.vtype
+  vecException.io.vstart := decodedInst.vpu.vstart
+
   private val isCboClean = CBO_CLEAN === io.enq.ctrlFlow.instr
   private val isCboFlush = CBO_FLUSH === io.enq.ctrlFlow.instr
   private val isCboInval = CBO_INVAL === io.enq.ctrlFlow.instr
@@ -882,6 +889,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   private val exceptionII =
     decodedInst.selImm === SelImm.INVALID_INSTR ||
+    vecException.io.illegalInst ||
     io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
     io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
     io.fromCSR.illegalInst.hfenceGVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_g ||
@@ -1084,7 +1092,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
   uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
   io.deq.isComplex := uopInfoGen.io.out.isComplex
-  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  io.deq.uopInfo.numOfUop := Mux(vecException.io.illegalInst, 1.U, uopInfoGen.io.out.uopInfo.numOfUop)
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
