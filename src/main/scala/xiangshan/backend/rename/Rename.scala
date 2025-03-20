@@ -174,9 +174,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   pvt.io.intSrcPred.zip(io.intSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
   pvt.io.fpSrcPred.zip(io.fpSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
   io.fpPvtRead.flatten.foreach(_.data := DontCare)
+  io.fpPvtRead.flatten.foreach(_.fail := DontCare)
   io.fpSrcPred.flatten.flatten.foreach(_.pred := DontCare)
 
-  XSPerfAccumulate("read_pvt_total", PopCount(io.intPvtRead.flatten.map(_.valid)))
+  XSPerfAccumulate("read_pvt_total", PopCount(io.intPvtRead.flatten.map( port => port.valid && !port.fail)))
   XSPerfAccumulate("read_more_than1pvt", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
   XSPerfAccumulate("write_pvt_total", PopCount(io.pvtWen))
   XSPerfAccumulate("write_more_than1pvt", PopCount(io.pvtWen) > 1.U)

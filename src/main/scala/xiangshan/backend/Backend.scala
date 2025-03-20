@@ -458,6 +458,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   memScheduler.io.fromOg2Resp.get := og2ForVector.io.toMemIQOg2Resp
   memScheduler.io.srcPred.map(x => x.map(x1 => x1.map(x2 => x2.pred := DontCare)))
   memScheduler.io.pvtRead.map(x => x.map(x1 => x1.data := DontCare))
+  memScheduler.io.pvtRead.map(x => x.map(x1 => x1.fail := DontCare))
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -485,6 +486,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfScheduler.io.fromOg2Resp.get := og2ForVector.io.toVfIQOg2Resp
   vfScheduler.io.srcPred.map(x => x.map(x1 => x1.map(x2 => x2.pred := DontCare)))
   vfScheduler.io.pvtRead.map(x => x.map(x1 => x1.data := DontCare))
+  vfScheduler.io.pvtRead.map(x => x.map(x1 => x1.fail := DontCare))
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush

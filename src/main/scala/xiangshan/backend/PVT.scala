@@ -31,6 +31,7 @@ class PvtReadPort(implicit p: Parameters) extends PvtBundle {
     val valid = Input(Bool())
     val addr = Input(UInt(PvtTagLen.W))
     val data = Output(UInt(XLEN.W))
+    val fail = Output(Bool()) // for verify and read at the same time
 }
 
 class PvtWritePort(implicit p: Parameters) extends PvtBundle {
@@ -112,6 +113,14 @@ class Pvt(implicit p: Parameters) extends PvtModule{
     for ((r, i) <- io.readPorts.zipWithIndex) {
         val rindex = r.addr(log2Ceil(EntryNum)-1, 0)
         r.data := PvtTable(rindex).value
+        val readFail = io.fromLoad.map{ veri =>
+            val veriIdx = veri.bits.pdest(log2Ceil(EntryNum)-1, 0)
+            val readConflict = veri.bits.pdest === r.addr && r.valid && veri.valid
+            val misPred = PvtTable(veriIdx).robIdx === veri.bits.misPredict.robIdx && veri.valid &&
+              PvtTable(veriIdx).tag === veri.bits.pdest && PvtTable(veriIdx).value =/= veri.bits.loadvalue
+            readConflict && misPred
+        }.reduce(_ || _)
+        r.fail := readFail
         when (r.valid) {
             PvtTableNext(rindex).used := true.B
             assert(PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr, "Pvt readports $i read a invalid entry")
@@ -129,16 +138,12 @@ class Pvt(implicit p: Parameters) extends PvtModule{
         val index = veri.bits.pdest(log2Ceil(EntryNum)-1, 0)
         val entryMatch = PvtTable(index).robIdx === veri.bits.misPredict.robIdx && PvtTable(index).tag === veri.bits.pdest
         val misMatch = PvtTable(index).value =/= veri.bits.loadvalue && entryMatch
-        val sametime_read = io.readPorts.map { port =>
-            port.addr === PvtTable(index).tag && port.valid
-        }.reduce(_ || _)
         when (veri.valid) {
             val needCancel = WireInit(VecInit((0 until EntryNum).map(i => {
                 PvtTable(i).robIdx.needFlush(veri.bits.misPredict)
             })))
             // flush pvt selectively, used means that has influence to after instr
-            // handle read and veri are valid at the same time
-            when (misMatch && (PvtTable(index).used || sametime_read)) {
+            when (misMatch && PvtTable(index).used) {
                 PvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
                     when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
                 }

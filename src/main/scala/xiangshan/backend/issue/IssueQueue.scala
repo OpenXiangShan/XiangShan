@@ -338,11 +338,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).srcState                   := (if (j == 0) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
                                                                         SrcState.rdy,
-                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
+                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !io.pvtRead(enqIdx).fail, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
                                                                     } else if (j < 3) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
                                                                         SrcState.rdy,
-                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !moreThanOnePred, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
+                                                                        Mux(io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !io.pvtRead(enqIdx).fail && !moreThanOnePred, SrcState.rdy, s0_enqBits(enqIdx).srcState(j)))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
                                                                     })
@@ -351,14 +351,14 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid)                              -> DataSource.pvt
+                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !io.pvtRead(enqIdx).fail)                              -> DataSource.pvt
                                                                       ))
                                                                     } else if (j < 3) {
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
                                                                         SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
                                                                         (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !moreThanOnePred)          -> DataSource.pvt
+                                                                        (io.srcPred(enqIdx)(j).pred && io.pvtRead(enqIdx).valid && !io.pvtRead(enqIdx).fail && !moreThanOnePred)          -> DataSource.pvt
                                                                       ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
