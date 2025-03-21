@@ -90,7 +90,7 @@ object ArgParser {
           }), tail)
         case "--hartidbits" :: hartidbits :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case MaxHartIdBits => hartidbits
+            case MaxHartIdBits => hartidbits.toInt
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
