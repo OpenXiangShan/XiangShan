@@ -30,7 +30,7 @@ abstract class LvpModule(implicit p: Parameters) extends XSModule with HasLvpCon
 
 trait HasLvpConst extends HasXSParameter {
     val LvpTagLen = 14
-    val ThresHold = 63
+    val ThresHold = 42
     val EntryNum = 256
 }
 

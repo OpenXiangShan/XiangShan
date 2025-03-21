@@ -1015,6 +1015,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   XSPerfAccumulate("issue_datasource_noreg", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) })
   }.reduce(_ +& _))
+  XSPerfAccumulate("issue_datasource_pvt", deqBeforeDly.map{ deq =>
+    PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.pvt && !SrcType.isNotReg(deq.bits.srcType(j)) })
+  }.reduce(_ +& _))
 
   XSPerfHistogram("issue_datasource_reg_hist", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) })
