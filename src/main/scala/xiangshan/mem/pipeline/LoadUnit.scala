@@ -1784,10 +1784,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
 
   //to lvp
-  io.toifu.valid := ldoutValid
+  io.toifu.valid := ldoutValid && s3_out.bits.uop.rfWen
   io.toifu.bits.loadpc := DontCare
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-  io.toPvt.valid := ldoutValid
+  io.toPvt.valid := ldoutValid && s3_out.bits.uop.rfWen
   io.toPvt.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
   io.toPvt.bits.pdest := io.ldout.bits.uop.pdest
   // mispredict flush pipe

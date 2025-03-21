@@ -255,7 +255,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
 
   io.decode2Lvp.zipWithIndex.foreach{ case (tolvp, i) =>
-    tolvp.valid := finalDecodedInst(i).fuType === FuType.ldu.U && io.out(i).fire
+    tolvp.valid := finalDecodedInst(i).fuType === FuType.ldu.U && io.out(i).fire && io.out(i).bits.rfWen
     tolvp.pc := finalDecodedInst(i).pc
   }
 
