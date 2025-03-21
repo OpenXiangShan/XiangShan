@@ -1590,7 +1590,7 @@ class NewCSR(implicit val p: Parameters) extends Module
                                                         platformIRPSeipChange || platformIRPStipChange ||
                                                         platformIRPVseipChange || platformIRPVstipChange ||
                                                         fromAIAMeipChange || fromAIASeipChange ||
-                                                        lcofiReqChange) & !reset.asBool
+                                                        lcofiReqChange || RegNext(reset.asBool)) & !reset.asBool
     diffNonRegInterruptPendingEvent.platformIRPMeip  := platformIRP.MEIP
     diffNonRegInterruptPendingEvent.platformIRPMtip  := platformIRP.MTIP
     diffNonRegInterruptPendingEvent.platformIRPMsip  := platformIRP.MSIP
