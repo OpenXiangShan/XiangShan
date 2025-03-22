@@ -13,9 +13,25 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.icache
+package xiangshan.frontend.ifu
 
+import chisel3._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
+import xiangshan.frontend.PreDecodeInfo
 
-abstract class ICacheBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters
+class F3PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
+  class F3PreDecodeIO(implicit p: Parameters) extends IfuBundle {
+    val instr: Vec[UInt]          = Input(Vec(PredictWidth, UInt(32.W)))
+    val pd:    Vec[PreDecodeInfo] = Output(Vec(PredictWidth, new PreDecodeInfo))
+  }
+  val io: F3PreDecodeIO = IO(new F3PreDecodeIO)
+
+  io.pd.zipWithIndex.foreach { case (pd, i) =>
+    val (brType, isCall, isRet) = getBrInfo(io.instr(i))
+    pd.valid  := DontCare
+    pd.isRVC  := DontCare
+    pd.brType := brType
+    pd.isCall := isCall
+    pd.isRet  := isRet
+  }
+}

@@ -13,9 +13,9 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.icache
+package xiangshan.frontend.ifu
 
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
+import xiangshan.XSModule
 
-abstract class ICacheBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters
+abstract class IfuModule(implicit p: Parameters) extends XSModule
