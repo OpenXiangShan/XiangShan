@@ -164,6 +164,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isLastInFtqEntry = Bool()
+  val debug_seqNum = InstSeqNum()
 }
 
 

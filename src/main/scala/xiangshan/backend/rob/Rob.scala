@@ -142,6 +142,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
+  PerfCCT.tick(clock, reset)
+
+  io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
+    PerfCCT.updateInstPos(wb.bits.debug_seqNum, PerfCCT.InstPos.AtWriteVal.id.U, wb.valid, clock, reset)
+  }
+
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
   val bankAddrWidth = log2Up(CommitWidth)
@@ -772,6 +778,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
     io.commits.info(i) := commitInfo(i)
     io.commits.robIdx(i) := deqPtrVec(i)
+    val deqDebugInst = debug_microOp(deqPtrVec(i).value)
+    PerfCCT.commitInstMeta(i.U, deqDebugInst.debug_seqNum, deqDebugInst.instrSize, io.commits.isCommit && io.commits.commitValid(i), clock, reset)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
     XSError(
