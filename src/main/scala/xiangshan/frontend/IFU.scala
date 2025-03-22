@@ -108,15 +108,15 @@ class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val fire_in    = Bool()
 }
 
-class FetchToIBufferDB extends Bundle {
-  val start_addr   = UInt(39.W)
+class FetchToIBufferDB(implicit p: Parameters) extends XSBundle {
+  val start_addr   = UInt(VAddrBits.W)
   val instr_count  = UInt(32.W)
   val exception    = Bool()
   val is_cache_hit = Bool()
 }
 
-class IfuWbToFtqDB extends Bundle {
-  val start_addr        = UInt(39.W)
+class IfuWbToFtqDB(implicit p: Parameters) extends XSBundle {
+  val start_addr        = UInt(VAddrBits.W)
   val is_miss_pred      = Bool()
   val miss_pred_offset  = UInt(32.W)
   val checkJalFault     = Bool()
