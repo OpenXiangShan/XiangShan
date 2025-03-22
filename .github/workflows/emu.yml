@@ -87,6 +87,15 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
+      - name: build MinimalL1L2Config Release emu
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --threads 8 --config MinimalL1L2Config --release
+      - name: run MinimalL1L2Config - Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          cat perf.log | sort
       - name: generate NOC XiangShan
         run: |
           make clean
