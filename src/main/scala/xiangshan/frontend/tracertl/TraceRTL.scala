@@ -32,6 +32,7 @@ class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
 
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val redirect = Bool()
+  val f2_flush = Bool()
   val f2_fire = Bool()
   val f3_fire = Bool()
   val ibuffer_fire = Bool()
@@ -88,6 +89,7 @@ if (env.TraceRTLMode) {
   // This wrong path aligner is used to to generate the wrong path trace insts
   // wrong path instr comes from "arch" path
   val traceAlignerWrongPath = Module(new TraceAlignWrongPath)
+  val traceFakeICacheWrapper = Module(new TraceFakeICacheWrapper)
 
   val traceWrongPathEmu = RegInit(false.B)
   if (TraceEnableWrongPathEmu) {
@@ -113,6 +115,7 @@ if (env.TraceRTLMode) {
 
   val concede2Bytes = RegEnable(
     !io.fromIFU.redirect &&
+    !io.fromIFU.f2_flush && // when f2_flush, then f2 will not continue with f3, clear f3's side-effect
     !traceDriver.io.out.endWithCFI &&
     (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
     false.B,
@@ -146,13 +149,18 @@ if (env.TraceRTLMode) {
     _.req.valid := io.fromIFU.f2_fire,
     _.req.bits.addr := io.fromIFU.f2_ftq_req.startAddr,
   )
+  traceFakeICacheWrapper.io.specifyField(
+    _.traceInsts := traceReader.io.traceInsts,
+    _.icacheDataIn := traceFakeICache.io.resp,
+  )
   traceAligner.io.specifyField(
     _.debug_valid := io.fromIFU.valid,
     _.traceInsts := traceReader.io.traceInsts,
     _.predStartAddr := io.fromIFU.predInfo.startAddr,
     _.instRange := io.fromIFU.predInfo.instRange,
     _.lastHalfValid := concede2Bytes,
-    _.icacheData := traceFakeICache.io.resp,
+    // _.icacheData := traceFakeICache.io.resp,
+    _.icacheData := traceFakeICacheWrapper.io.icacheDataOut,
   )
   traceAlignerWrongPath.io.specifyField(
     _.debug_valid := io.fromIFU.valid,

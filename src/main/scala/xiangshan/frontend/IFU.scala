@@ -623,6 +623,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     traceRTL.io.specifyField(
       _.fromIFU.specifyField(
         _.redirect := f3_flush,
+        _.f2_flush := f2_flush,
         _.f2_fire := f2_fire,
         _.f3_fire := f3_fire,
         _.ibuffer_fire :=  ibufferFireForTrace,
