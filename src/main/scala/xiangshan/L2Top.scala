@@ -326,6 +326,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           val l2 = l2cache.module
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
+          l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
         case l2cache: TL2TLCoupledL2 =>
       }
 
