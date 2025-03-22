@@ -39,6 +39,9 @@ class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val wb_enable = Bool()
   val valid = Bool()
 
+  // f3
+  val f3_ready = Bool()
+
   // IFU2
   val f2_ftq_req = Input(new FetchRequestBundle())
   // IFU3
@@ -113,14 +116,50 @@ if (env.TraceRTLMode) {
     }
   }
 
-  val concede2Bytes = RegEnable(
-    !io.fromIFU.redirect &&
-    !io.fromIFU.f2_flush && // when f2_flush, then f2 will not continue with f3, clear f3's side-effect
-    !traceDriver.io.out.endWithCFI &&
-    (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
-    false.B,
-    io.fromIFU.ibuffer_fire || io.fromIFU.redirect
-  )
+  // f2_flush comes from ftq, from instruction self-modify/changes
+  // when ibuffer block, but f2_flush comes from ftq <- pdwb, which is not blocked
+  val concede2BytesWire = !io.fromIFU.redirect &&
+      !io.fromIFU.f2_flush &&
+      !traceDriver.io.out.endWithCFI &&
+      (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B)
+  val concede2BytesNonBlock = RegInit(false.B)
+  val concede2BytesNonBlockValid = RegInit(false.B)
+  val concede2Bytes = RegInit(false.B)
+
+  // f2_flush is acutally from wb_stage(f4_stage)
+  when (io.fromIFU.redirect || io.fromIFU.f2_flush) {
+    // when redirect or f2_flush, then clear the concede2BytesNonBlock
+    concede2BytesNonBlock := false.B
+  }.elsewhen (io.fromIFU.valid && !concede2BytesNonBlockValid) {
+    // when f3_valid and not repeat set, then set the concede2BytesNonBlock
+    concede2BytesNonBlock := concede2BytesWire
+  }
+
+  when (io.fromIFU.redirect || io.fromIFU.f3_fire) {
+    // when f3_fire or redirect, clear
+    concede2BytesNonBlockValid := false.B
+  }.elsewhen (io.fromIFU.valid &&
+    !io.fromIFU.f3_ready) { // f3 not fire for ibuffer not ready
+    // when f3_valid and not blocked by tracertl, and blocked by ibuffer, then set
+    concede2BytesNonBlockValid := true.B
+  }
+
+  when (io.fromIFU.redirect || io.fromIFU.f2_flush) {
+    // when redirect or f2_flush, clear
+    concede2Bytes := false.B
+  }.elsewhen (io.fromIFU.f3_fire) {
+    // when f3_fire, then set
+    concede2Bytes := Mux(concede2BytesNonBlockValid, concede2BytesNonBlock, concede2BytesWire)
+  }
+
+  // val concede2Bytes = RegEnable(
+  //   !io.fromIFU.redirect &&
+  //   !io.fromIFU.f2_flush && // when f2_flush, then f2 will not continue with f3, clear f3's side-effect, f2_flush is actually from wb_stage(f4_stage)
+  //   !traceDriver.io.out.endWithCFI &&
+  //   (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
+  //   false.B,
+  //   io.fromIFU.ibuffer_fire || io.fromIFU.redirect || io.fromIFU.f2_flush
+  // )
   // !lastFetchRedirect && lastFetchTakenMore2B && !lastEndWithCFI
   val traceInstIFUCut = traceAligner.io.cutInsts
 

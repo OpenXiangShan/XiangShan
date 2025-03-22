@@ -627,6 +627,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         _.f2_fire := f2_fire,
         _.f3_fire := f3_fire,
         _.ibuffer_fire :=  ibufferFireForTrace,
+        _.f3_ready := f3_ready,
         _.wb_enable := wb_enable,
         _.valid := f3_valid,
         _.f2_ftq_req := f2_ftq_req,
@@ -697,6 +698,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f2_fire && !f2_flush )                               {f3_valid := true.B }
   .elsewhen(ibufferFireForIFU && !f3_req_is_mmio)                {f3_valid := false.B}
   .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                {f3_valid := false.B}
+
+  dontTouch(f3_flush)
+  dontTouch(f3_req_is_mmio)
+  dontTouch(mmioF3Flush)
+  dontTouch(f3_need_not_flush)
+  dontTouch(ibufferFireForIFU)
+  dontTouch(f3_mmio_req_commit)
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
 
