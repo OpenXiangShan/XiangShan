@@ -16,6 +16,6 @@
 package xiangshan.frontend.icache
 
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
+import xiangshan.XSModule
 
-abstract class ICacheBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters
+abstract class ICacheModule(implicit p: Parameters) extends XSModule with HasICacheParameters
