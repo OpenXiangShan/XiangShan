@@ -22,24 +22,6 @@ import xiangshan._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelLookUp
 
-// 32bits shift right
-object SHR32 {
-  def apply(bits: UInt, shamt: Int) = {
-    require(shamt>0 && shamt<32)
-    if(shamt == 31) Cat(0.U(63.W), bits(31))
-    else            Cat(0.U((32+shamt).W), bits(31,shamt))
-  }
-}
-
-// 64bits shift right
-object SHR64 {
-  def apply(bits: UInt, shamt: Int) = {
-    require(shamt>0 && shamt<64)
-    if(shamt == 63) Cat(bits(62,0), bits(63))
-    else            Cat(0.U(shamt.W), bits(63,shamt))
-  }
-}
-
 // 32bits Rotate shift
 object ROR32 {
   def apply(bits: UInt, shamt: Int) = {

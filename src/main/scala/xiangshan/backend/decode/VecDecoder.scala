@@ -15,6 +15,7 @@ import yunsuan.{VidivType, VcryppType}
 import xiangshan.backend.decode.Zvbb._
 import xiangshan.backend.decode.Zvkned._
 import xiangshan.backend.decode.Zvksed._
+import xiangshan.backend.decode.Zvknha._
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -840,6 +841,11 @@ object VecDecoder extends DecodeConstants {
     VSM4K_VI      -> OPIVI(   FuType.vcrypp5, VcryppType.vsm4k_vi,  T, F, F, selImm=SelImm.IMM_OPIVIU, UopSplitType.VEC_VXV),
     VSM4R_VV      -> OPMVV(T, FuType.vcrypp5, VcryppType.vsm4r_vv,  F, T, F, UopSplitType.VEC_VVV,  src1 = SrcType.no),
     VSM4R_VS      -> OPMVV(T, FuType.vcrypp5, VcryppType.vsm4r_vs,  F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
+
+    // Zvknha
+    VSHA2CH_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2ch_vv,  F, T, F, UopSplitType.VEC_VVV),
+    VSHA2CL_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2cl_vv,  F, T, F, UopSplitType.VEC_VVV),
+    VSHA2MS_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2ms_vv,  F, T, F, UopSplitType.VEC_VVV),
   )
 
   val emptyArray: Array[(BitPat, XSDecodeBase)] = Array()

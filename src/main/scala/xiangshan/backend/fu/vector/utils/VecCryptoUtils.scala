@@ -75,6 +75,12 @@ class AES128SubBytesBidirectionIO extends Bundle {
   val result      = Output(UInt(128.W)) // the 2nd cycle
 }
 
+class AES128SubBytesBidirection0LatIO extends Bundle {
+  val src         = Input(UInt(128.W))
+  val isFwd       = Input(Bool())
+  val result      = Output(UInt(128.W)) // the 2nd cycle
+}
+
 
 class AES128SubBytesBidirection extends Module {
   val io = IO(new AES128SubBytesBidirectionIO)
@@ -100,6 +106,32 @@ class AES128SubBytesBidirection extends Module {
     val aesSbox3InvOut  = SboxIaesOut(aesSBox2Out)
     out := Mux(io.isFwd_s1, aesSbox3FwdOut, aesSbox3InvOut)
     // out := Mux(isFwd, aesSbox3FwdOut, aesSbox3InvOut)
+  }
+
+  io.result := Cat(aesSboxOut.reverse)
+}
+
+
+class AES128SubBytesBidirection0Lat extends Module {
+  val io = IO(new AES128SubBytesBidirection0LatIO)
+
+  val isFwd = io.isFwd
+  val srcBytes = io.src.asTypeOf(Vec(16, UInt(8.W)))
+
+  // 3 layer of modules for both direction, with the shared middle layer
+  val aesSboxOut = Wire(Vec(16, UInt(8.W)))
+
+  (srcBytes zip aesSboxOut).foreach { case (in, out) =>
+    val aesSBox1FwdOut = SboxAesTop(in)
+    val aesSBox1InvOut = SboxIaesTop(in)
+
+    val aesSBox2In     = (aesSBox1FwdOut zip aesSBox1InvOut).map { case (fwd, inv) => Mux(isFwd, fwd, inv) }
+    val aesSBox2Out    = Wire(Vec(18, Bool())) // 1 cycle delay
+    aesSBox2Out := SboxInv(aesSBox2In)
+
+    val aesSbox3FwdOut  = SboxAesOut(aesSBox2Out)
+    val aesSbox3InvOut  = SboxIaesOut(aesSBox2Out)
+    out := Mux(isFwd, aesSbox3FwdOut, aesSbox3InvOut)
   }
 
   io.result := Cat(aesSboxOut.reverse)
@@ -133,6 +165,24 @@ object AES32SubBytesFwd {
 }
 
 
+object AES32SubBytesFwd0Lat {
+  def apply(src: UInt) = {
+    require(src.getWidth == 32)
+
+    val srcBytes   = src.asTypeOf(Vec(4, UInt(8.W)))
+    val outBytes = Wire(Vec(4, UInt(8.W)))
+
+    outBytes.zip(srcBytes) foreach { case (out, in) =>
+      val mid = Wire(Vec(18, Bool()))
+      mid := SboxInv(SboxAesTop(in))
+      out := SboxAesOut(mid)
+    }
+
+    Cat(outBytes.reverse)
+  }
+}
+
+
 object SM4Subword {
   def apply(src: UInt, regEnable: Bool): UInt = {
     require(src.getWidth == 32)
@@ -152,6 +202,23 @@ object SM4Subword {
 }
 
 
+object SM4Subword0Lat {
+  def apply(src: UInt): UInt = {
+    require(src.getWidth == 32)
+
+    val srcBytes   = src.asTypeOf(Vec(4, UInt(8.W)))
+    val outBytes = Wire(Vec(4, UInt(8.W)))
+
+    outBytes.zip(srcBytes) foreach { case (out, in) =>
+      val mid = Wire(Vec(18, Bool()))
+      mid := SboxInv(SboxSm4Top(in))
+      out := SboxSm4Out(mid)
+    }
+    Cat(outBytes.reverse)
+  }
+}
+
+
 object SM4RoundKey {
   def apply(X: UInt, S: UInt): UInt = {
     require(X.getWidth == 32 && S.getWidth == 32)
@@ -161,6 +228,7 @@ object SM4RoundKey {
   }
 }
 
+
 object SM4Round {
   def apply(X: UInt, S: UInt): UInt = {
     require(X.getWidth == 32 && S.getWidth == 32)
@@ -169,6 +237,8 @@ object SM4Round {
     result
   }
 }
+
+
 
 
 /*
