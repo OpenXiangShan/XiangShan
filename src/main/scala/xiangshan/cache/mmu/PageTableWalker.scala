@@ -153,10 +153,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val idle = RegInit(true.B)
   val finish = WireInit(false.B)
-  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
-
-  val pageFault = pte.isPf(level, s1Pbmte)
-  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
 
   val hptw_pageFault = RegInit(false.B)
   val hptw_accessFault = RegInit(false.B)
@@ -172,10 +168,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   } else {
     Mux(enableS2xlate, Mux(onlyS1xlate, pte.isAf(), false.B), pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
   }
+  val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
 
+  val pageFault = pte.isPf(level, s1Pbmte)
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
+
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish && !(find_pte && pte_valid)
+  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
 
   val l3addr = Wire(UInt(ptePaddrLen.W))
   val l2addr = Wire(UInt(ptePaddrLen.W))
@@ -232,7 +233,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   fake_h_resp.entry.vmid.map(_ := io.csr.hgatp.vmid)
   fake_h_resp.gpf := true.B
 
-  val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
   val fake_pte = WireInit(0.U.asTypeOf(new PteBundle()))
   fake_pte.perm.v := false.B // tell L1TLB this is fake pte
   fake_pte.ppn := ppn(ppnLen - 1, 0)
@@ -429,7 +429,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_pmp_check := true.B
   }
 
-  when(accessFault && idle === false.B){
+  when(accessFault && !io.hptw.req.valid && idle === false.B){
     s_pmp_check := true.B
     s_mem_req := true.B
     w_mem_resp := true.B
