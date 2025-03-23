@@ -399,7 +399,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // l3
   val l3Hit = if(EnableSv48) Some(Wire(Bool())) else None
-  val l3HitPPN = if(EnableSv48) Some(Wire(UInt(ppnLen.W))) else None
+  val l3HitPPN = if(EnableSv48) Some(Wire(UInt(gvpnLen.W))) else None
   val l3HitPbmt = if(EnableSv48) Some(Wire(UInt(ptePbmtLen.W))) else None
   val l3Pre = if(EnableSv48) Some(Wire(Bool())) else None
   val ptwl3replace = if(EnableSv48) Some(ReplacementPolicy.fromString(l2tlbParams.l3Replacer, l2tlbParams.l3Size)) else None
