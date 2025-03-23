@@ -4,10 +4,12 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import fudian.SignExt
 import xiangshan.RedirectLevel
+import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.frontend.tracertl.TraceRTLChoose
 import xiangshan.frontend.tracertl.ChiselRecordForField._
+import utility.XSPerfAccumulate
 
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
@@ -57,5 +59,13 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.res.data := jumpDataModule.io.result
+
+  val filterWP = TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath)
+  val misPred = redirect.cfiUpdate.isMisPred
+  XSPerfAccumulate("JumpNum", io.out.fire  && redirectValid && filterWP)
+  XSPerfAccumulate("JumpMisPred", io.out.fire && redirectValid && misPred && filterWP)
+  XSPerfAccumulate("JumpIndMisPred", io.out.fire && redirectValid && misPred && JumpOpType.jumpOpisJalr(func) && filterWP)
+  XSPerfAccumulate("JumpDirMisPred", io.out.fire && redirectValid && misPred && !JumpOpType.jumpOpisJalr(func) && filterWP)
+
   connect0LatencyCtrlSingal
 }

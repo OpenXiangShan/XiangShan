@@ -2,7 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import utility.{SignExt, XSError}
+import utility.{SignExt, XSError, XSPerfAccumulate}
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -70,6 +70,25 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
     dontTouch(io.in.bits.ctrl.traceInfo)
     XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Instruction at BranchUnit is not branch instruction in trace\n")
   }
+
+  val filterWP = TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath)
+  XSPerfAccumulate("BranchNum", io.out.fire && filterWP)
+  XSPerfAccumulate("BranchNumMisPred", io.out.fire &&
+    io.out.bits.res.redirect.get.valid &&
+    io.out.bits.res.redirect.get.bits.cfiUpdate.isMisPred &&
+    filterWP)
+
+  XSPerfAccumulate("BranchTakenNum", io.out.fire && addModule.io.taken && filterWP)
+  XSPerfAccumulate("BranchTakenNumMisPred", io.out.fire && addModule.io.taken &&
+    io.out.bits.res.redirect.get.valid &&
+    io.out.bits.res.redirect.get.bits.cfiUpdate.isMisPred &&
+    filterWP)
+
+  XSPerfAccumulate("BranchNonTakenNum", io.out.fire && !addModule.io.taken && filterWP)
+  XSPerfAccumulate("BranchNonTakenNumMisPred", io.out.fire && !addModule.io.taken &&
+    io.out.bits.res.redirect.get.valid &&
+    io.out.bits.res.redirect.get.bits.cfiUpdate.isMisPred &&
+    filterWP)
 
   connect0LatencyCtrlSingal
 }
