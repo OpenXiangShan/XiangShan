@@ -330,7 +330,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     // 3. s1 is napot(64KB) and s2 is also napot(64KB)
     val allStage_n = (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.level.getOrElse(0.U) =/= 0.U) ||
       (item.s2.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.n.getOrElse(0.U) =/= 0.U)
+      (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.n.getOrElse(0.U) =/= 0.U)
     this.n := MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.n.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.n.getOrElse(0.U),
