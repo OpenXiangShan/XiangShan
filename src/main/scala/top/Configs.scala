@@ -374,7 +374,8 @@ case class L3CacheConfig(size: String, ways: Int = 8, inclusive: Boolean = true,
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
         },
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
-        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
+        fakeLatency = 50
       ))
     )
 })
