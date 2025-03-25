@@ -18,7 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{ParallelPriorityEncoder, XSError}
+import utility.{ParallelOR, ParallelPriorityEncoder, XSError, XSPerfAccumulate}
 import xiangshan.frontend.{PreDecodeResp, PredCheckerResp, FaultType}
 
 // TracePredictChecker is just the same with the IFU's PredChecker
@@ -114,6 +114,40 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     stage2Out.jalTarget(i) := jumpTargets(i)
   })
   io.out.stage2Out := RegEnable(stage2Out, io.wb_enable)
+
+  val fixedMissPredIdx = ParallelPriorityEncoder(stage2Out.fixedMissPred)
+  XSPerfAccumulate("FixedMissPred", io.wb_enable && ParallelOR(stage2Out.fixedMissPred))
+  XSPerfAccumulate("FixedMissPredJalF", io.wb_enable && VecInit(jalFaultVec)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredRetF", io.wb_enable && VecInit(retFaultVec)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredTargetF", io.wb_enable && VecInit(targetFault)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredNonCFIF", io.wb_enable && VecInit(notCFITaken)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredInvTaken", io.wb_enable && VecInit(invalidTaken)(fixedMissPredIdx))
+
+  val jalIdxFaultVec = (0 until PredictWidth).map(i => {
+    pds(i).isJal &&
+      pds(i).valid && predRange(i) &&
+      (takenIdx > i.U && predTaken)
+  })
+  val jalTakenFaultVec = (0 until PredictWidth).map(i => {
+    pds(i).isJal &&
+      pds(i).valid && predRange(i) &&
+      !predTaken
+  })
+  XSPerfAccumulate("FixedMissPredJalIdxF", io.wb_enable && VecInit(jalIdxFaultVec)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredJalTakenF", io.wb_enable && VecInit(jalTakenFaultVec)(fixedMissPredIdx))
+
+  val retIdxFaultVec = (0 until PredictWidth).map(i => {
+    pds(i).isRet &&
+      pds(i).valid && predRange(i) &&
+      (takenIdx > i.U && predTaken)
+  })
+  val retTakenFaultVec = (0 until PredictWidth).map(i => {
+    pds(i).isRet &&
+      pds(i).valid && predRange(i) &&
+      !predTaken
+  })
+  XSPerfAccumulate("FixedMissPredRetIdxF", io.wb_enable && VecInit(retIdxFaultVec)(fixedMissPredIdx))
+  XSPerfAccumulate("FixedMissPredRetTakenF", io.wb_enable && VecInit(retTakenFaultVec)(fixedMissPredIdx))
 
   // debug
   when (io.wb_enable) {

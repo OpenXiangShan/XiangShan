@@ -1097,6 +1097,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
       io.toIbuffer.bits.enqEnable & io.toIbuffer.bits.valid,
       io.toIbuffer.bits.traceInfo)
   )
+
+  XSPerfAccumulate("WbHalfFlush", wb_valid && wb_half_flush)
+  XSPerfAccumulate("FixMissPred", wb_valid && ParallelOR(wb_check_result_stage2.fixedMissPred))
+  XSPerfAccumulate("WbHalfFlushAndFixMP", wb_valid && ParallelOR(wb_check_result_stage2.fixedMissPred) && wb_half_flush)
+  XSPerfAccumulate("WbHalfFlushOrFixMP", wb_valid && ParallelOR(wb_check_result_stage2.fixedMissPred) || wb_half_flush)
+
   if (!env.TraceRTLMode) {
     checkFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)} // use the pd valid
   }

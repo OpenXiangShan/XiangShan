@@ -1018,7 +1018,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ftb_entry_mem.io.raddr(i + IfuRedirectNum) := ftqIdxAhead(i).bits.value
 
     ftq_pd_mem.io.ren.get(i)  := ftqIdxAhead(i).valid
-    ftq_pd_mem.io.raddr(i)    := ftqIdxAhead(i).bits.value 
+    ftq_pd_mem.io.raddr(i)    := ftqIdxAhead(i).bits.value
   }
   ftq_redirect_mem.io.ren.get(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).valid, backendRedirect.valid)
   ftq_redirect_mem.io.raddr(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
