@@ -410,9 +410,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
 
-  instrUncache.io.req <> ifu.io.toUncache
-  ifu.io.fromUncache <> instrUncache.io.resp
+  instrUncache.io.fromIfu <> ifu.io.toUncache
+  ifu.io.fromUncache <> instrUncache.io.toIfu
   instrUncache.io.flush := false.B
+
   io.error <> RegNext(RegNext(icache.io.error))
 
   icache.io.hartId := io.hartId

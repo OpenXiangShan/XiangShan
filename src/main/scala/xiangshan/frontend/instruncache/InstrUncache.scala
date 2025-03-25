@@ -30,22 +30,8 @@ import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utils._
 import xiangshan.XSBundle
-import xiangshan.frontend.PrunedAddr
-
-class InsUncacheReq(implicit p: Parameters) extends XSBundle {
-  val addr: PrunedAddr = PrunedAddr(PAddrBits)
-}
-
-class InsUncacheResp(implicit p: Parameters) extends XSBundle {
-  val data:    UInt = UInt(32.W) // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo
-  val corrupt: Bool = Bool()
-}
-
-class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
-  val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
-  val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
-  val flush: Bool                        = Input(Bool())
-}
+import xiangshan.frontend.IfuToInstrUncacheIO
+import xiangshan.frontend.InstrUncacheToIfuIO
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
   override def shouldBeInlined: Boolean = false
@@ -61,18 +47,24 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasInstrUnc
   lazy val module: InstrUncacheImp = new InstrUncacheImp(this)
 }
 
-class InstrUncacheImp(outer: InstrUncache)
-    extends LazyModuleImp(outer)
+class InstrUncacheImp(outer: InstrUncache) extends LazyModuleImp(outer)
     with HasInstrUncacheParameters
     with HasTLDump {
+
+  class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
+    val fromIfu: IfuToInstrUncacheIO = Flipped(new IfuToInstrUncacheIO)
+    val toIfu:   InstrUncacheToIfuIO = new InstrUncacheToIfuIO
+    val flush:   Bool                = Input(Bool())
+  }
+
   val io: InstrUncacheIO = IO(new InstrUncacheIO)
 
   private val (bus, edge) = outer.clientNode.out.head
 
-  private val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
+  private val resp_arb = Module(new Arbiter(new InstrUncacheResp, cacheParams.nMMIOs))
 
-  private val req          = io.req
-  private val resp         = io.resp
+  private val req          = io.fromIfu.req
+  private val resp         = io.toIfu.resp
   private val mmio_acquire = bus.a
   private val mmio_grant   = bus.d
 

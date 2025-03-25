@@ -29,8 +29,8 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   class InstrUncacheEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheBundle {
     val id: UInt = Input(UInt(log2Up(cacheParams.nMMIOs).W))
     // client requests
-    val req:  DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
-    val resp: DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
+    val req:  DecoupledIO[InstrUncacheReq]  = Flipped(DecoupledIO(new InstrUncacheReq))
+    val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 
     val mmioAcquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
     val mmioGrant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
@@ -50,7 +50,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
   private val state = RegInit(State.Invalid)
 
-  private val req            = Reg(new InsUncacheReq)
+  private val req            = Reg(new InstrUncacheReq)
   private val respDataReg    = RegInit(0.U(MmioBusWidth.W))
   private val respCorruptReg = RegInit(false.B)
 
