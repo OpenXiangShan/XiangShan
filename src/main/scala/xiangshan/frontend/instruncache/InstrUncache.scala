@@ -1,21 +1,19 @@
-/***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend
+package xiangshan.frontend.instruncache
 
 import chisel3._
 import chisel3.util._
@@ -31,29 +29,19 @@ import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utils._
-import xiangshan.HasXSParameter
 import xiangshan.XSBundle
-import xiangshan.XSModule
-import xiangshan.frontend.icache.HasICacheParameters
-
-trait HasInstrMMIOConst extends HasXSParameter {
-  def mmioBusWidth = 64
-  def mmioBusBytes = mmioBusWidth / 8
-  def maxInstrLen  = 32
-}
+import xiangshan.frontend.PrunedAddr
 
 class InsUncacheReq(implicit p: Parameters) extends XSBundle {
   val addr: PrunedAddr = PrunedAddr(PAddrBits)
 }
 
-class InsUncacheResp(implicit p: Parameters) extends XSBundle with HasInstrMMIOConst {
-  val data:    UInt = UInt(maxInstrLen.W)
+class InsUncacheResp(implicit p: Parameters) extends XSBundle {
+  val data:    UInt = UInt(32.W) // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo
   val corrupt: Bool = Bool()
 }
 
-class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends XSBundle with HasICacheParameters
-    with HasInstrMMIOConst {
-  // FIXME: InstrUncache should not use ICacheParams, as it's not a submodule of ICache, but actually IFU's
+class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheBundle {
   val id: UInt = Input(UInt(log2Up(cacheParams.nMMIOs).W))
   // client requests
   val req:  DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
@@ -66,7 +54,7 @@ class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends XSBundle
 }
 
 // One miss entry deals with one mmio request
-class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule with HasInstrMMIOConst {
+class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule {
   val io: InstrMMIOEntryIO = IO(new InstrMMIOEntryIO(edge))
 
   private val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
@@ -74,7 +62,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   private val state = RegInit(s_invalid)
 
   private val req            = Reg(new InsUncacheReq)
-  private val respDataReg    = RegInit(0.U(mmioBusWidth.W))
+  private val respDataReg    = RegInit(0.U(MmioBusWidth.W))
   private val respCorruptReg = RegInit(false.B)
 
   // assign default values to output signals
@@ -104,12 +92,12 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 
   when(state === s_refill_req) {
-    val address_aligned = req.addr(req.addr.getWidth - 1, log2Ceil(mmioBusBytes))
+    val address_aligned = req.addr(req.addr.getWidth - 1, log2Ceil(MmioBusBytes))
     io.mmio_acquire.valid := true.B
     io.mmio_acquire.bits := edge.Get(
       fromSource = io.id,
-      toAddress = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
-      lgSize = log2Ceil(mmioBusBytes).U
+      toAddress = Cat(address_aligned, 0.U(log2Ceil(MmioBusBytes).W)),
+      lgSize = log2Ceil(MmioBusBytes).U
     )._2
 
     when(io.mmio_acquire.fire) {
@@ -130,7 +118,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 
   private def getDataFromBus(pc: PrunedAddr): UInt = {
-    val respData = Wire(UInt(maxInstrLen.W))
+    val respData = Wire(UInt(32.W))
     respData := Mux(
       pc(2, 1) === "b00".U,
       respDataReg(31, 0),
@@ -154,13 +142,13 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 }
 
-class InstrUncacheIO(implicit p: Parameters) extends XSBundle {
+class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
   val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
   val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
   val flush: Bool                        = Input(Bool())
 }
 
-class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+class InstrUncache()(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
   override def shouldBeInlined: Boolean = false
 
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
@@ -176,7 +164,7 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICachePa
 
 class InstrUncacheImp(outer: InstrUncache)
     extends LazyModuleImp(outer)
-    with HasICacheParameters
+    with HasInstrUncacheParameters
     with HasTLDump {
   val io: InstrUncacheIO = IO(new InstrUncacheIO)
 

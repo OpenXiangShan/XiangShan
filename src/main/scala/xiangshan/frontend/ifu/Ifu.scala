@@ -50,13 +50,13 @@ import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.IfuToICacheIO
-import xiangshan.frontend.InsUncacheReq
-import xiangshan.frontend.InsUncacheResp
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.PmpCheckBundle
+import xiangshan.frontend.instruncache.InsUncacheReq
+import xiangshan.frontend.instruncache.InsUncacheResp
 import xiangshan.frontend.mmioCommitRead
 
 class Ifu(implicit p: Parameters) extends IfuModule
