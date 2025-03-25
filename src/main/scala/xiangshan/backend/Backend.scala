@@ -718,6 +718,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     for (j <- toMem(i).indices) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.mem(i)(j).bits.loadDependency, io.mem.ldCancel)
       val needIssueTimeout = memExuBlocksHasLDU(i)(j) || memExuBlocksHasVecLoad(i)(j)
+      val olderUopComing =
+        if (needIssueTimeout)
+          bypassNetwork.io.toExus.mem(i)(j).valid && toMem(i)(j).valid && !toMem(i)(j).fire && (bypassNetwork.io.toExus.mem(i)(j).bits.robIdx < toMem(i)(j).bits.robIdx) // Older inst come from iq.
+        else
+          false.B
+
       val issueTimeout =
         if (needIssueTimeout)
           Counter(0 until 16, toMem(i)(j).valid && !toMem(i)(j).fire, bypassNetwork.io.toExus.mem(i)(j).fire)._2
@@ -725,7 +731,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
           false.B
 
       if (memScheduler.io.loadFinalIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
-        memScheduler.io.loadFinalIssueResp(i)(j).valid := issueTimeout
+        memScheduler.io.loadFinalIssueResp(i)(j).valid := issueTimeout || olderUopComing
         memScheduler.io.loadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.loadFinalIssueResp(i)(j).bits.resp := RespType.block
         memScheduler.io.loadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
@@ -735,7 +741,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       }
 
       if (memScheduler.io.vecLoadFinalIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
-        memScheduler.io.vecLoadFinalIssueResp(i)(j).valid := issueTimeout
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).valid := issueTimeout || olderUopComing
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.resp := RespType.block
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
@@ -751,7 +757,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
           bypassNetwork.io.toExus.mem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
           toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || issueTimeout
         ),
-        Option("bypassNetwork2toMemExus")
+        Option("bypassNetwork2toMemExus"),
+        isOlder = olderUopComing
       )
 
       if (memScheduler.io.memAddrIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
