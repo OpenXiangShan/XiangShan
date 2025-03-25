@@ -22,7 +22,6 @@ import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
-import xiangshan.frontend.PrunedAddr
 
 // One miss entry deals with one mmio request
 class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule {
@@ -50,87 +49,73 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
   private val state = RegInit(State.Invalid)
 
-  private val req            = Reg(new InstrUncacheReq)
-  private val respDataReg    = RegInit(0.U(MmioBusWidth.W))
-  private val respCorruptReg = RegInit(false.B)
-
-  // assign default values to output signals
-  io.req.ready  := false.B
-  io.resp.valid := false.B
-  io.resp.bits  := DontCare
-
-  io.mmioAcquire.valid := false.B
-  io.mmioAcquire.bits  := DontCare
-
-  io.mmioGrant.ready := false.B
-
+  // hold flush state
   private val needFlush = RegInit(false.B)
-
   when(io.flush && (state =/= State.Invalid) && (state =/= State.SendResp)) {
     needFlush := true.B
   }.elsewhen((state === State.SendResp) && needFlush) {
     needFlush := false.B
   }
 
-  // --------------------------------------------
-  // State.Invalid: receive requests
-  when(state === State.Invalid) {
-    io.req.ready := true.B
+  // receive request from InstrUncache
+  io.req.ready := state === State.Invalid
+  private val reqReg      = RegEnable(io.req.bits, 0.U.asTypeOf(io.req.bits), io.req.fire)
+  private val alignedAddr = reqReg.addr(reqReg.addr.getWidth - 1, log2Ceil(MmioBusBytes))
 
-    when(io.req.fire) {
-      req   := io.req.bits
-      state := State.RefillReq
-    }
-  }
+  // send tilelink request
+  io.mmioAcquire.valid := state === State.RefillReq
+  io.mmioAcquire.bits := edge.Get(
+    fromSource = io.id,
+    toAddress = Cat(alignedAddr, 0.U(log2Ceil(MmioBusBytes).W)),
+    lgSize = log2Ceil(MmioBusBytes).U
+  )._2
 
-  when(state === State.RefillReq) {
-    val alignedAddr = req.addr(req.addr.getWidth - 1, log2Ceil(MmioBusBytes))
-    io.mmioAcquire.valid := true.B
-    io.mmioAcquire.bits := edge.Get(
-      fromSource = io.id,
-      toAddress = Cat(alignedAddr, 0.U(log2Ceil(MmioBusBytes).W)),
-      lgSize = log2Ceil(MmioBusBytes).U
-    )._2
+  // receive tilelink response
+  io.mmioGrant.ready := state === State.RefillResp
+  private val respDataReg    = RegEnable(io.mmioGrant.bits.data, 0.U(MmioBusWidth.W), io.mmioGrant.fire)
+  private val respCorruptReg = RegEnable(io.mmioGrant.bits.corrupt, false.B, io.mmioGrant.fire)
 
-    when(io.mmioAcquire.fire) {
-      state := State.RefillResp
-    }
-  }
-
-  val (_, _, refillDone, _) = edge.addr_inc(io.mmioGrant)
-
-  when(state === State.RefillResp) {
-    io.mmioGrant.ready := true.B
-
-    when(io.mmioGrant.fire) {
-      assert(refillDone)
-      respDataReg    := io.mmioGrant.bits.data
-      respCorruptReg := io.mmioGrant.bits.corrupt // this includes bits.denied, as tilelink spec defines
-      state          := State.SendResp
-    }
-  }
-
-  private def getDataFromBus(pc: PrunedAddr): UInt = {
-    val respData = Wire(UInt(32.W))
-    respData := Mux(
-      pc(2, 1) === "b00".U,
+  // send response to InstrUncache
+  io.resp.valid := state === State.SendResp && !needFlush
+  io.resp.bits.data := Mux1H(
+    UIntToOH(reqReg.addr(2, 1)),
+    Seq(
       respDataReg(31, 0),
-      Mux(
-        pc(2, 1) === "b01".U,
-        respDataReg(47, 16),
-        Mux(pc(2, 1) === "b10".U, respDataReg(63, 32), Cat(0.U, respDataReg(63, 48)))
-      )
+      respDataReg(47, 16),
+      respDataReg(63, 32),
+      Cat(0.U(16.W), respDataReg(63, 48))
     )
-    respData
-  }
+  )
+  io.resp.bits.corrupt := respCorruptReg
 
-  when(state === State.SendResp) {
-    io.resp.valid        := !needFlush
-    io.resp.bits.data    := getDataFromBus(req.addr)
-    io.resp.bits.corrupt := respCorruptReg
-    // metadata should go with the response
-    when(io.resp.fire || needFlush) {
-      state := State.Invalid
+  // state transfer
+  switch(state) {
+    is(State.Invalid) {
+      when(io.req.fire) {
+        state := State.RefillReq
+      }
+    }
+
+    is(State.RefillReq) {
+      when(io.mmioAcquire.fire) {
+        state := State.RefillResp
+      }
+    }
+
+    is(State.RefillResp) {
+      when(io.mmioGrant.fire) {
+        // we request size <= mmio bus width, so we should be able to get full response in one beat,
+        // which means we can assert refillDone when io.mmioGrant.fire
+        val (_, _, refillDone, _) = edge.addr_inc(io.mmioGrant)
+        assert(refillDone)
+        state := State.SendResp
+      }
+    }
+
+    is(State.SendResp) {
+      when(io.resp.fire || needFlush) {
+        state := State.Invalid
+      }
     }
   }
 }
