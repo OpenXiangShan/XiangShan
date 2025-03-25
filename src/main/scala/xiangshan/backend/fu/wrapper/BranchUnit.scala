@@ -41,7 +41,12 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
-  val addModuleTarget = TraceRTLChoose(addModule.io.target, SignExt(io.in.bits.ctrl.traceInfo.target, XLEN))
+  // when taken, return traceInfo.target
+  // when not taken, return sequential target
+  val addModuleTarget = TraceRTLChoose(addModule.io.target,
+    Mux(io.in.bits.ctrl.traceInfo.branchTaken(0), SignExt(io.in.bits.ctrl.traceInfo.target, XLEN),
+    addModule.io.target))
+
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
