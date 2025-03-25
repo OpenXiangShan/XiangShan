@@ -26,6 +26,8 @@ import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.icache._
+import xiangshan.frontend.instruncache.InstrUncacheReq
+import xiangshan.frontend.instruncache.InstrUncacheResp
 
 class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val reasons    = Vec(TopDownCounters.NumStallReasons.id, Bool())
@@ -107,6 +109,14 @@ class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
 
 class IfuToICacheIO(implicit p: Parameters) extends XSBundle {
   val stall: Bool = Output(Bool())
+}
+
+class IfuToInstrUncacheIO(implicit p: Parameters) extends XSBundle {
+  val req: DecoupledIO[InstrUncacheReq] = DecoupledIO(new InstrUncacheReq)
+}
+
+class InstrUncacheToIfuIO(implicit p: Parameters) extends XSBundle {
+  val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
