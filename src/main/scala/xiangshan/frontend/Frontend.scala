@@ -46,6 +46,7 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
+import xiangshan.frontend.instruncache.InstrUncache
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false

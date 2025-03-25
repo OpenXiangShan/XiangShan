@@ -30,7 +30,6 @@ import utility._
 import system.SoCParamsKey
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
@@ -52,6 +51,8 @@ import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
+import xiangshan.frontend.instruncache.HasInstrUncacheConst
+
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -196,7 +197,7 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
 }
 
 // triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
-class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst {
+class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrUncacheConst {
   val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
   lazy val module = new InstrUncacheBufferImpl
 
@@ -208,9 +209,9 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasIn
       // only a.valid, a.ready, a.address can change
       // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
       out.a.bits.data := 0.U
-      out.a.bits.mask := Fill(mmioBusBytes, 1.U(1.W))
+      out.a.bits.mask := Fill(MmioBusBytes, 1.U(1.W))
       out.a.bits.opcode := 4.U // Get
-      out.a.bits.size := log2Ceil(mmioBusBytes).U
+      out.a.bits.size := log2Ceil(MmioBusBytes).U
       out.a.bits.source := 0.U
     }
   }
