@@ -318,7 +318,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val needPvt = predVec.reduce(_ || _)
     val pvtIdx = PriorityEncoder(predVec)
     val isBranch = FuType.isBrh(io.enq(readIdx).bits.fuType)
-    read.valid := needPvt && io.enq(readIdx).valid && !isBranch && io.enq(readIdx).bits.rfWen
+    read.valid := needPvt && io.enq(readIdx).valid && !isBranch && SrcType.isXp(io.enq(readIdx).bits.srcType(pvtIdx))
     read.addr := io.enq(readIdx).bits.psrc(pvtIdx)
   }
 
