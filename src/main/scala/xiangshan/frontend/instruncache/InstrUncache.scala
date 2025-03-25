@@ -15,25 +15,14 @@
 
 package xiangshan.frontend.instruncache
 
-import chisel3._
-import chisel3.util._
 import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
-import freechips.rocketchip.diplomacy.LazyModuleImp
-import freechips.rocketchip.tilelink.TLArbiter
-import freechips.rocketchip.tilelink.TLBundleA
-import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLClientNode
-import freechips.rocketchip.tilelink.TLEdgeOut
 import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
-import utils._
-import xiangshan.XSBundle
-import xiangshan.frontend.IfuToInstrUncacheIO
-import xiangshan.frontend.InstrUncacheToIfuIO
 
-class InstrUncache()(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
+class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
   override def shouldBeInlined: Boolean = false
 
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
@@ -45,70 +34,4 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasInstrUnc
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
 
   lazy val module: InstrUncacheImp = new InstrUncacheImp(this)
-}
-
-class InstrUncacheImp(outer: InstrUncache) extends LazyModuleImp(outer)
-    with HasInstrUncacheParameters
-    with HasTLDump {
-
-  class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
-    val fromIfu: IfuToInstrUncacheIO = Flipped(new IfuToInstrUncacheIO)
-    val toIfu:   InstrUncacheToIfuIO = new InstrUncacheToIfuIO
-    val flush:   Bool                = Input(Bool())
-  }
-
-  val io: InstrUncacheIO = IO(new InstrUncacheIO)
-
-  private val (bus, edge) = outer.clientNode.out.head
-
-  private val resp_arb = Module(new Arbiter(new InstrUncacheResp, cacheParams.nMMIOs))
-
-  private val req          = io.fromIfu.req
-  private val resp         = io.toIfu.resp
-  private val mmio_acquire = bus.a
-  private val mmio_grant   = bus.d
-
-  private val entry_alloc_idx = Wire(UInt())
-  private val req_ready       = WireInit(false.B)
-
-  // assign default values to output signals
-  bus.b.ready := false.B
-  bus.c.valid := false.B
-  bus.c.bits  := DontCare
-  bus.d.ready := false.B
-  bus.e.valid := false.B
-  bus.e.bits  := DontCare
-
-  private val entries = (0 until cacheParams.nMMIOs).map { i =>
-    val entry = Module(new InstrUncacheEntry(edge))
-
-    entry.io.id    := i.U(log2Up(cacheParams.nMMIOs).W)
-    entry.io.flush := io.flush
-
-    // entry req
-    entry.io.req.valid := (i.U === entry_alloc_idx) && req.valid
-    entry.io.req.bits  := req.bits
-    when(i.U === entry_alloc_idx) {
-      req_ready := entry.io.req.ready
-    }
-
-    // entry resp
-    resp_arb.io.in(i) <> entry.io.resp
-
-    entry.io.mmioGrant.valid := false.B
-    entry.io.mmioGrant.bits  := DontCare
-    when(mmio_grant.bits.source === i.U) {
-      entry.io.mmioGrant <> mmio_grant
-    }
-    entry
-  }
-
-  // override mmio_grant.ready to prevent x-propagation
-  mmio_grant.ready := true.B
-
-  entry_alloc_idx := PriorityEncoder(entries.map(m => m.io.req.ready))
-
-  req.ready := req_ready
-  resp <> resp_arb.io.out
-  TLArbiter.lowestFromSeq(edge, mmio_acquire, entries.map(_.io.mmioAcquire))
 }
