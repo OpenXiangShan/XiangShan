@@ -15,11 +15,14 @@
 
 package xiangshan.frontend.instruncache
 
-import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.HasXSParameter
 
 trait HasInstrUncacheConst {
   def MmioBusWidth: Int = 64
   def MmioBusBytes: Int = MmioBusWidth / 8
+
+  // we can't do speculative fetch in Mmio region, so more than 1 MmioEntry should be useless?
+  def nMmioEntry: Int = 1
 }
 
-trait HasInstrUncacheParameters extends HasICacheParameters with HasInstrUncacheConst
+trait HasInstrUncacheParameters extends HasXSParameter with HasInstrUncacheConst

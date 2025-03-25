@@ -17,13 +17,12 @@ package xiangshan.frontend.instruncache
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
 
-class InstrUncacheReq(implicit p: Parameters) extends XSBundle {
+class InstrUncacheReq(implicit p: Parameters) extends InstrUncacheBundle {
   val addr: UInt = Output(UInt(PAddrBits.W))
 }
 
-class InstrUncacheResp(implicit p: Parameters) extends XSBundle {
+class InstrUncacheResp(implicit p: Parameters) extends InstrUncacheBundle {
   val data:    UInt = UInt(32.W) // TODO: add a const for InstrLen, maybe in XSParameters, and use it all over the repo
   val corrupt: Bool = Bool()
 }

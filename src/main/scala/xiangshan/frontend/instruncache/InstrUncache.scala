@@ -28,7 +28,7 @@ class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncac
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "InstrUncache",
-      sourceId = IdRange(0, cacheParams.nMMIOs)
+      sourceId = IdRange(0, nMmioEntry)
     ))
   )
   val clientNode: TLClientNode = TLClientNode(Seq(clientParameters))
