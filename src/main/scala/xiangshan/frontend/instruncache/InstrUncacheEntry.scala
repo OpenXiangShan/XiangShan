@@ -26,7 +26,7 @@ import utils.NamedUInt
 // One miss entry deals with one mmio request
 class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule {
   class InstrUncacheEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheBundle {
-    val id: UInt = Input(UInt(log2Up(cacheParams.nMMIOs).W))
+    val id: UInt = Input(UInt(log2Up(nMmioEntry).W))
     // client requests
     val req:  DecoupledIO[InstrUncacheReq]  = Flipped(DecoupledIO(new InstrUncacheReq))
     val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)

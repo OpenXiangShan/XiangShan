@@ -38,7 +38,7 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
 
   private val (bus, edge) = wrapper.clientNode.out.head
 
-  private val respArbiter = Module(new Arbiter(new InstrUncacheResp, cacheParams.nMMIOs))
+  private val respArbiter = Module(new Arbiter(new InstrUncacheResp, nMmioEntry))
 
   private val req         = io.fromIfu.req
   private val resp        = io.toIfu.resp
@@ -56,10 +56,10 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  private val entries = (0 until cacheParams.nMMIOs).map { i =>
+  private val entries = (0 until nMmioEntry).map { i =>
     val entry = Module(new InstrUncacheEntry(edge))
 
-    entry.io.id    := i.U(log2Up(cacheParams.nMMIOs).W)
+    entry.io.id    := i.U(log2Up(nMmioEntry).W)
     entry.io.flush := io.flush
 
     // entry req
