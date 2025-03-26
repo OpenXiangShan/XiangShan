@@ -816,7 +816,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       mmio_exception                := ExceptionType.none
       mmio_is_RVC                   := false.B
       mmio_has_resend               := false.B
-      mmio_resend_addr              := 0.U
+      mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
       mmio_resend_gpaddr            := 0.U
       mmio_resend_isForVSnonLeafPTE := false.B
     }
@@ -829,7 +829,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_exception                := ExceptionType.none
     mmio_is_RVC                   := false.B
     mmio_has_resend               := false.B
-    mmio_resend_addr              := 0.U
+    mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
     mmio_resend_gpaddr            := 0.U
     mmio_resend_isForVSnonLeafPTE := false.B
     f3_mmio_data.map(_ := 0.U)
