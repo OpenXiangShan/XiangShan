@@ -648,7 +648,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val mmio_has_resend  = RegInit(false.B)
   val mmio_resend_addr = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
   // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val mmio_resend_gpaddr            = RegInit(0.U(PAddrBitsMax.W))
+  val mmio_resend_gpaddr            = RegInit(PrunedAddrInit(0.U(PAddrBitsMax.W)))
   val mmio_resend_isForVSnonLeafPTE = RegInit(false.B)
 
   // last instuction finish
@@ -772,7 +772,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         // also save itlb response
         mmio_exception                := exception
         mmio_resend_addr              := io.iTLBInter.resp.bits.paddr(0)
-        mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)
+        mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)(PAddrBitsMax - 1, 0)
         mmio_resend_isForVSnonLeafPTE := io.iTLBInter.resp.bits.isForVSnonLeafPTE(0)
       }
     }
@@ -817,7 +817,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       mmio_is_RVC                   := false.B
       mmio_has_resend               := false.B
       mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
-      mmio_resend_gpaddr            := 0.U
+      mmio_resend_gpaddr            := PrunedAddrInit(0.U(PAddrBitsMax.W))
       mmio_resend_isForVSnonLeafPTE := false.B
     }
   }
@@ -830,7 +830,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_is_RVC                   := false.B
     mmio_has_resend               := false.B
     mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
-    mmio_resend_gpaddr            := 0.U
+    mmio_resend_gpaddr            := PrunedAddrInit(0.U(PAddrBitsMax.W))
     mmio_resend_isForVSnonLeafPTE := false.B
     f3_mmio_data.map(_ := 0.U)
   }
@@ -961,7 +961,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_exception.map(_ === ExceptionType.gpf).reduce(_ || _)
   )
   io.toBackend.gpaddrMem_waddr        := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata.gpaddr := Mux(f3_req_is_mmio, mmio_resend_gpaddr, f3_gpaddr)
+  io.toBackend.gpaddrMem_wdata.gpaddr := Mux(f3_req_is_mmio, mmio_resend_gpaddr.toUInt, f3_gpaddr.toUInt)
   io.toBackend.gpaddrMem_wdata.isForVSnonLeafPTE := Mux(
     f3_req_is_mmio,
     mmio_resend_isForVSnonLeafPTE,

@@ -45,8 +45,8 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
    * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
    * (cases 56<x<=64 are handled by the backend datapath)
    */
-  val gpaddr:            UInt = UInt(PAddrBitsMax.W)
-  val isForVSnonLeafPTE: Bool = Bool()
+  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
+  val isForVSnonLeafPTE: Bool       = Bool()
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {

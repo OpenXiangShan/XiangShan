@@ -351,7 +351,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   toWayLookup.bits.vSetIdx           := s1_req_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
   toWayLookup.bits.ptag              := s1_req_ptags
-  toWayLookup.bits.gpaddr            := s1_req_gpaddr
+  toWayLookup.bits.gpaddr            := s1_req_gpaddr(PAddrBitsMax - 1, 0)
   toWayLookup.bits.isForVSnonLeafPTE := s1_req_isForVSnonLeafPTE
   toWayLookup.bits.meta_codes        := s1_meta_codes
   (0 until PortNumber).foreach { i =>
