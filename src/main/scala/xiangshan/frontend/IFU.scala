@@ -146,6 +146,22 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val fromICache = io.icacheInter.resp
   val (toUncache, fromUncache) = (io.uncacheInter.toUncache , io.uncacheInter.fromUncache)
 
+  /*** TraceReader at F3 Stage ***/
+  val traceRTL = Module(new TraceRTL)
+  dontTouch(traceRTL.io)
+
+  val tracePreDecoder = traceRTL.io.predecoder
+  val tracePredChecker =  traceRTL.io.checker
+  val traceChecker =  traceRTL.io.traceChecker
+
+  val traceBlock = traceRTL.io.block
+  val traceWrongPathEmu = traceRTL.io.traceWrongPathEmu
+  val traceAlignInsts = traceRTL.io.traceAlignInsts
+  val traceForceJump = traceRTL.io.traceForceJump
+  val ibufferFireForIFU = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
+  val ibufferFireForTrace = io.toIbuffer.fire
+  /** traceRTL module end */
+
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
   def numOfStage = 3
@@ -177,6 +193,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
     topdown_stages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
   }
   io.toIbuffer.bits.topdown_info := topdown_stages(numOfStage - 1)
+
+  if (env.TraceRTLMode)  {
+    when (traceBlock && traceRTL.io.fromIFU.valid) {
+      io.toIbuffer.bits.topdown_info.reasons.map(_ := false.B)
+      io.toIbuffer.bits.topdown_info.reasons(TopDownCounters.FlushedInsts.id) := true.B
+    }
+  }
+
   when (fromFtq.topdown_redirect.valid) {
     // only redirect from backend, IFU redirect itself is handled elsewhere
     when (fromFtq.topdown_redirect.bits.debugIsCtrl) {
@@ -231,20 +255,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val mmio = Bool()
   }
 
-  /*** TraceReader at F3 Stage ***/
-  val traceRTL = Module(new TraceRTL)
-  dontTouch(traceRTL.io)
-
-  val tracePreDecoder = traceRTL.io.predecoder
-  val tracePredChecker =  traceRTL.io.checker
-  val traceChecker =  traceRTL.io.traceChecker
-
-  val traceBlock = traceRTL.io.block
-  val traceWrongPathEmu = traceRTL.io.traceWrongPathEmu
-  val traceAlignInsts = traceRTL.io.traceAlignInsts
-  val traceForceJump = traceRTL.io.traceForceJump
-  val ibufferFireForIFU = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
-  val ibufferFireForTrace = io.toIbuffer.fire
 
 
   val preDecoder       = Module(new PreDecode)
