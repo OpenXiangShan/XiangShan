@@ -30,14 +30,14 @@ abstract class LvpModule(implicit p: Parameters) extends XSModule with HasLvpCon
 
 trait HasLvpConst extends HasXSParameter {
     val LvpTagLen = 14
-    val ThresHold = 42
+    val ThresHold = 64
     val EntryNum = 256
 }
 
 class LvpEntry(implicit p: Parameters) extends LvpBundle{
     val tag = UInt(LvpTagLen.W)
     val value = UInt(XLEN.W)
-    val confidence = UInt(log2Ceil(ThresHold).W)
+    val confidence = UInt((log2Down(ThresHold) + 1).W)
 }
 
 class LoadToLvp(implicit p: Parameters) extends LvpBundle{
