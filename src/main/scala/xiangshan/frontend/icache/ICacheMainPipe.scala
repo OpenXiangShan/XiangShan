@@ -28,24 +28,25 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqToICacheRequestBundle
+import xiangshan.frontend.PrunedAddr
 
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:       Bool      = Bool()
-  val vaddr:            Vec[UInt] = Vec(PortNumber, UInt(VAddrBits.W))
-  val data:             UInt      = UInt(blockBits.W)
-  val paddr:            Vec[UInt] = Vec(PortNumber, UInt(PAddrBits.W))
-  val exception:        Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val pmp_mmio:         Vec[Bool] = Vec(PortNumber, Bool())
-  val itlb_pbmt:        Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val backendException: Bool      = Bool()
+  val doubleline:       Bool            = Bool()
+  val vaddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val data:             UInt            = UInt(blockBits.W)
+  val paddr:            Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val exception:        Vec[UInt]       = Vec(PortNumber, UInt(ExceptionType.width.W))
+  val pmp_mmio:         Vec[Bool]       = Vec(PortNumber, Bool())
+  val itlb_pbmt:        Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
+  val backendException: Bool            = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
    * PAddrBitsMax(=56bit currently) is required for the frontend datapath due to the itlb ppn length limitation
    * (cases 56<x<=64 are handled by the backend datapath)
    */
-  val gpaddr:            UInt = UInt(PAddrBitsMax.W)
-  val isForVSnonLeafPTE: Bool = Bool()
+  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
+  val isForVSnonLeafPTE: Bool       = Bool()
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
@@ -199,7 +200,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     assert(
       (0 until PortNumber).map(i => s0_req_vSetIdx(i) === fromWayLookup.bits.vSetIdx(i)).reduce(_ && _),
       "vSetIdx from ftq and wayLookup mismatch! vaddr=0x%x ftq: vSet0=0x%x vSet1=0x%x wayLookup: vSet0=0x%x vSet1=0x%x",
-      s0_req_vaddr(0),
+      s0_req_vaddr(0).toUInt,
       s0_req_vSetIdx(0),
       s0_req_vSetIdx(1),
       fromWayLookup.bits.vSetIdx(0),
@@ -287,7 +288,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   toPMP.zipWithIndex.foreach { case (p, i) =>
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped do not do this now for timing
     p.valid     := s1_valid // && !ExceptionType.hasException(s1_itlb_exception(i))
-    p.bits.addr := s1_req_paddr(i)
+    p.bits.addr := s1_req_paddr(i).toUInt
     p.bits.size := 3.U
     p.bits.cmd  := TlbCmd.exec
   }
@@ -393,7 +394,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   (0 until PortNumber).foreach { i =>
     io.errors(i).valid              := (s2_meta_corrupt(i) || s2_data_corrupt(i)) && RegNext(s1_fire)
     io.errors(i).bits.report_to_beu := (s2_meta_corrupt(i) || s2_data_corrupt(i)) && RegNext(s1_fire)
-    io.errors(i).bits.paddr         := s2_req_paddr(i)
+    io.errors(i).bits.paddr         := s2_req_paddr(i).toUInt
     io.errors(i).bits.source        := DontCare
     io.errors(i).bits.source.tag    := s2_meta_corrupt(i)
     io.errors(i).bits.source.data   := s2_data_corrupt(i)
@@ -563,7 +564,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
     when(RegNext(s2_fire && s2_l2_corrupt(i))) {
       io.errors(i).valid              := true.B
       io.errors(i).bits.report_to_beu := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).bits.paddr         := RegNext(s2_req_paddr(i))
+      io.errors(i).bits.paddr         := RegNext(s2_req_paddr(i).toUInt)
       io.errors(i).bits.source.tag    := false.B
       io.errors(i).bits.source.data   := false.B
       io.errors(i).bits.source.l2     := true.B
