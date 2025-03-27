@@ -434,7 +434,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
-      l1Prefetcher.io.enable := Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
+      l1Prefetcher.io.enable := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -1864,9 +1864,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // For isVirt, mode check is unnecessary, as virt won't be 1 in M-mode.
     // Also, isVirt includes Hyper Insts, which don't care mode either.
 
-    val useBareAddr = 
+    val useBareAddr =
       (isVirt && vsatpNone && hgatpNone) ||
-      (!isVirt && (mode === CSRConst.ModeM)) || 
+      (!isVirt && (mode === CSRConst.ModeM)) ||
       (!isVirt && (mode =/= CSRConst.ModeM) && satpNone)
     val useSv39Addr =
       (isVirt && vsatpSv39) ||
