@@ -38,6 +38,7 @@ import huancun.PrefetchField
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistPipeline
+import utility.sram.SplittedSRAMTemplate
 import utility.sram.SRAMReadBus
 import utility.sram.SRAMTemplate
 import utility.sram.SRAMWriteBus
@@ -268,10 +269,12 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
   )
 
   private val tagArrays = (0 until PortNumber) map { bank =>
-    val tagArray = Module(new SRAMTemplate(
+    val tagArray = Module(new SplittedSRAMTemplate(
       new ICacheMetaEntry(),
       set = nSets / PortNumber,
       way = nWays,
+      waySplit = 2,
+      dataSplit = 1,
       shouldReset = true,
       holdRead = true,
       singlePort = true,
