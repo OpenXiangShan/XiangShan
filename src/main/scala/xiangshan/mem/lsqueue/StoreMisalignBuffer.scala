@@ -564,7 +564,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isvec
+  io.writeBack.valid := RegNext(req_valid && (bufferState === s_wb) && !req.isvec) && !io.storeOutValid
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
