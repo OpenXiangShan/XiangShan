@@ -37,13 +37,13 @@ import huancun._
 import coupledL2._
 import coupledL2.prefetch._
 
-class BaseConfig(n: Int, hasMbist: Boolean = false) extends Config((site, here, up) => {
+class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters()
   case CVMParamskey => CVMParameters()
   case PMParameKey => PMParameters()
-  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i, hasMbist = hasMbist) }
+  case XSTileKey => Seq.tabulate(n){ i => XSCoreParameters(HartId = i) }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(DebugModuleParams(
     nAbstractDataWords = (if (site(XLen) == 32) 1 else if (site(XLen) == 64) 2 else 4),
@@ -320,7 +320,9 @@ case class L2CacheConfig
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
-        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
+        hasMbist = p.hasMbist,
+        hasSramCtl = p.hasSramCtl,
       )),
       L2NBanks = banks
     ))
@@ -457,7 +459,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
-    ++ new BaseConfig(n, true)
+    ++ new BaseConfig(n)
 )
 
 class CVMConfig(n: Int = 1) extends Config(
