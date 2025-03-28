@@ -37,7 +37,9 @@ import utility._
 import utility.mbist.MbistInterface
 import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
+import utility.sram.SramCtlBundle
 import utility.sram.SramHelper
+import utility.sram.SramMbistBundle
 import xiangshan._
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
@@ -58,7 +60,7 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
   io <> wrapper.inner.module.io
   io_perf <> wrapper.inner.module.io_perf
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.sramTest.mbistReset)
   }
 }
 
@@ -96,8 +98,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
-    val dft       = if (hasMbist) Some(Input(new SramBroadcastBundle)) else None
-    val dft_reset = if (hasMbist) Some(Input(new DFTResetSignals)) else None
+    val sramTest = new Bundle() {
+      val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
+      val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
+    }
   })
 
   // decouped-frontend modules
@@ -462,13 +467,25 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   } else {
     None
   }
-  private val sigFromSrams = if (hasMbist) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val sigFromSrams = if (hasSramTest) Some(SramHelper.genBroadCastBundleTop()) else None
   private val cg           = ClockGate.genTeSrc
   dontTouch(cg)
+
+  sigFromSrams.foreach { case sig => sig.mbist := DontCare }
   if (hasMbist) {
-    sigFromSrams.get := io.dft.get
-    cg.cgen          := io.dft.get.cgen
+    sigFromSrams.get.mbist := io.sramTest.mbist.get
+    cg.cgen                := io.sramTest.mbist.get.cgen
   } else {
     cg.cgen := false.B
+  }
+
+  sigFromSrams.foreach { case sig => sig.sramCtl := DontCare }
+  if (hasSramCtl) {
+    val sramCtlBundle = io.sramTest.sramCtl.get.asTypeOf(new SramCtlBundle)
+    sigFromSrams.get.sramCtl.MCR := sramCtlBundle.MCR // CFG[5 : 4]
+    sigFromSrams.get.sramCtl.MCW := sramCtlBundle.MCW // CFG[7 : 6]
+    sigFromSrams.get.sramCtl.RCT := sramCtlBundle.RCT // CFG[35 : 34]
+    sigFromSrams.get.sramCtl.WCT := sramCtlBundle.WCT // CFG[37 : 36]
+    sigFromSrams.get.sramCtl.KP  := sramCtlBundle.KP  // CFG[40 : 38]
   }
 }

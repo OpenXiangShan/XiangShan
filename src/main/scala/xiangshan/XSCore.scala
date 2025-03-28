@@ -27,6 +27,8 @@ import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
 import utility._
+import utility.mbist.{MbistInterface, MbistPipeline}
+import utility.sram.{SramBroadcastBundle, SramMbistBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
@@ -35,8 +37,6 @@ import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
 import scala.collection.mutable.ListBuffer
-import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramHelper}
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -112,8 +112,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2Miss = Bool()
       val l3Miss = Bool()
     })
-    val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-    val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+    val sramTest = new Bundle() {
+      val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
+      val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
+    }
   })
 
   dontTouch(io.l2_flush_done)
@@ -287,11 +290,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
 
   if (hasMbist) {
-    memBlock.io.dft_reset.get := io.dft_reset.get
-    memBlock.io.dft.get := io.dft.get
-    frontend.io.dft.get := memBlock.io.dft_frnt.get
-    frontend.io.dft_reset.get := memBlock.io.dft_reset_frnt.get
-    backend.io.dft_cgen.get := memBlock.io.dft_bcknd.get.cgen
-    backend.io.dft_reset.get := memBlock.io.dft_reset_bcknd.get
+    memBlock.io.sramTestBypass.fromL2Top.mbist.get := io.sramTest.mbist.get
+    memBlock.io.sramTestBypass.fromL2Top.mbistReset.get := io.sramTest.mbistReset.get
+    frontend.io.sramTest.mbist.get := memBlock.io.sramTestBypass.toFrontend.mbist.get
+    frontend.io.sramTest.mbistReset.get := memBlock.io.sramTestBypass.toFrontend.mbistReset.get
+    backend.io.sramTest.mbist.get := memBlock.io.sramTestBypass.toBackend.mbist.get
+    backend.io.sramTest.mbistReset.get := memBlock.io.sramTestBypass.toBackend.mbistReset.get
+  }
+
+  if (hasSramCtl) {
+    memBlock.io.sramTestBypass.fromL2Top.sramCtl.get := io.sramTest.sramCtl.get
+    frontend.io.sramTest.sramCtl.get := memBlock.io.sramTestBypass.toFrontend.sramCtl.get
   }
 }
