@@ -166,6 +166,10 @@ else
 override SIM_ARGS += $(DEBUG_ARGS)
 endif
 
+ifeq ($(GSIM), 1)
+override SIM_ARGS += --difftest-config G
+endif
+
 # use RELEASE_ARGS for TopMain by default
 ifeq ($(PLDM), 1)
 TOPMAIN_ARGS += $(PLDM_ARGS)
@@ -279,6 +283,13 @@ emu: sim-verilog
 emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
+# gsim simulation
+gsim: sim-verilog
+	$(MAKE) -C ./difftest gsim SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+gsim-run: gsim
+	./build/gsim -b 0 -e 0 -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
+
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -300,4 +311,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: verilog sim-verilog emu gsim clean help init bump bsp $(REF_SO)
