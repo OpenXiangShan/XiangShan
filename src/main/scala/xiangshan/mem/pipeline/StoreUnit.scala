@@ -74,6 +74,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val s0_s1_valid = Output(Bool())
   })
 
+  PerfCCT.updateInstPos(io.stin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.stin.valid, clock, reset)
+
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
 
   // Pipeline
