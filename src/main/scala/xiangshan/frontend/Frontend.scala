@@ -36,7 +36,10 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistInterface
 import utility.mbist.MbistPipeline
-import utility.sram.{SramBroadcastBundle, SramCtlBundle, SramMbistBundle, SramHelper}
+import utility.sram.SramBroadcastBundle
+import utility.sram.SramCtlBundle
+import utility.sram.SramHelper
+import utility.sram.SramMbistBundle
 import xiangshan._
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
@@ -468,21 +471,21 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   private val cg           = ClockGate.genTeSrc
   dontTouch(cg)
 
-  sigFromSrams.foreach({ case sig => sig.mbist := DontCare})
+  sigFromSrams.foreach { case sig => sig.mbist := DontCare }
   if (hasMbist) {
     sigFromSrams.get.mbist := io.sramTest.mbist.get
-    cg.cgen          := io.sramTest.mbist.get.cgen
+    cg.cgen                := io.sramTest.mbist.get.cgen
   } else {
     cg.cgen := false.B
   }
 
-  sigFromSrams.foreach({ case sig => sig.sramCtl := DontCare })
+  sigFromSrams.foreach { case sig => sig.sramCtl := DontCare }
   if (hasSramCtl) {
     val sramCtlBundle = io.sramTest.sramCtl.get.asTypeOf(new SramCtlBundle)
-    sigFromSrams.get.sramCtl.MCR := sramCtlBundle.MCR   // CFG[5 : 4]
-    sigFromSrams.get.sramCtl.MCW := sramCtlBundle.MCW   // CFG[7 : 6]
-    sigFromSrams.get.sramCtl.RCT := sramCtlBundle.RCT   // CFG[35 : 34]
-    sigFromSrams.get.sramCtl.WCT := sramCtlBundle.WCT   // CFG[37 : 36]
-    sigFromSrams.get.sramCtl.KP  := sramCtlBundle.KP    // CFG[40 : 38]
+    sigFromSrams.get.sramCtl.MCR := sramCtlBundle.MCR // CFG[5 : 4]
+    sigFromSrams.get.sramCtl.MCW := sramCtlBundle.MCW // CFG[7 : 6]
+    sigFromSrams.get.sramCtl.RCT := sramCtlBundle.RCT // CFG[35 : 34]
+    sigFromSrams.get.sramCtl.WCT := sramCtlBundle.WCT // CFG[37 : 36]
+    sigFromSrams.get.sramCtl.KP  := sramCtlBundle.KP  // CFG[40 : 38]
   }
 }
