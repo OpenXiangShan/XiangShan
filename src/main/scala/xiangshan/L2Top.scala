@@ -284,9 +284,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2 = l2cache.get.module
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
-      l2.io.dft.zip(io.sramTestIn.mbist).foreach({case(a, b) => a.mbist := b})
-      l2.io.dft.foreach({case a => a.sramCtl := DontCare })
-      l2.io.dft_reset.zip(io.sramTestIn.mbistReset).foreach({case(a, b) => a := b})
+      l2.io.sramTest.mbist.zip(io.sramTestIn.mbist).foreach({ case (a, b) => a := b })
+      l2.io.sramTest.mbistReset.zip(io.sramTestIn.mbistReset).foreach({ case (a, b) => a := b })
+      l2.io.sramTest.sramCtl.zip(io.sramTestIn.sramCtl).foreach({ case (a, b) => a := b })
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
@@ -375,7 +375,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       ResetGen(ResetGenNode(Seq(
         CellNode(reset_core),
         ModuleNode(inner.module)
-      )), reset, sim = false, io.sramTest.mbistReset)
+      )), reset, sim = false, io.sramTestIn.mbistReset)
     } else {
       reset_core := DontCare
     }
