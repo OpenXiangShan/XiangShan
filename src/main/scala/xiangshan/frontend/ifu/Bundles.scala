@@ -16,6 +16,7 @@
 package xiangshan.frontend.ifu
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 import xiangshan.frontend.PrunedAddr
@@ -50,20 +51,20 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
 
 /* ***** DB ***** */
 class FetchToIBufferDB(implicit p: Parameters) extends IfuBundle {
-  val start_addr:   PrunedAddr = PrunedAddr(VAddrBits)
-  val instr_count:  UInt       = UInt(32.W)
-  val exception:    Bool       = Bool()
-  val is_cache_hit: Bool       = Bool()
+  val startAddr:  UInt = UInt(VAddrBits.W) // do not use PrunedAddr for DB
+  val instrCount: UInt = UInt(32.W)        // magic number: just uint32_t field
+  val exception:  Bool = Bool()
+  val isCacheHit: Bool = Bool()
 }
 
 class IfuWbToFtqDB(implicit p: Parameters) extends IfuBundle {
-  val start_addr:        PrunedAddr = PrunedAddr(VAddrBits)
-  val is_miss_pred:      Bool       = Bool()
-  val miss_pred_offset:  UInt       = UInt(32.W)
-  val checkJalFault:     Bool       = Bool()
-  val checkJalrFault:    Bool       = Bool()
-  val checkRetFault:     Bool       = Bool()
-  val checkTargetFault:  Bool       = Bool()
-  val checkNotCFIFault:  Bool       = Bool()
-  val checkInvalidTaken: Bool       = Bool()
+  val startAddr:         UInt = UInt(VAddrBits.W) // do not use PrunedAddr for DB
+  val isMissPred:        Bool = Bool()
+  val missPredOffset:    UInt = UInt(log2Ceil(PredictWidth).W)
+  val checkJalFault:     Bool = Bool()
+  val checkJalrFault:    Bool = Bool()
+  val checkRetFault:     Bool = Bool()
+  val checkTargetFault:  Bool = Bool()
+  val checkNotCFIFault:  Bool = Bool()
+  val checkInvalidTaken: Bool = Bool()
 }

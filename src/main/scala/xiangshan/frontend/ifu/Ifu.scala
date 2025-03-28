@@ -1115,18 +1115,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val ifuWbToFtqTable            = ChiselDB.createTable(s"IfuWbToFtq$hartId", new IfuWbToFtqDB)
 
   private val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
-  fetchIBufferDumpData.start_addr  := s3_ftqReq.startAddr
-  fetchIBufferDumpData.instr_count := PopCount(io.toIBuffer.bits.enqEnable)
+  fetchIBufferDumpData.startAddr  := s3_ftqReq.startAddr.toUInt
+  fetchIBufferDumpData.instrCount := PopCount(io.toIBuffer.bits.enqEnable)
   fetchIBufferDumpData.exception :=
     (s3_perfInfo.except0 && io.toIBuffer.fire) ||
       (s3_perfInfo.hit0Except1 && io.toIBuffer.fire) ||
       (s3_perfInfo.miss0Except1 && io.toIBuffer.fire)
-  fetchIBufferDumpData.is_cache_hit := s3_hit
+  fetchIBufferDumpData.isCacheHit := s3_hit
 
   private val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
-  ifuWbToFtqDumpData.start_addr        := wbFtqReq.startAddr
-  ifuWbToFtqDumpData.is_miss_pred      := checkFlushWb.bits.misOffset.valid
-  ifuWbToFtqDumpData.miss_pred_offset  := checkFlushWb.bits.misOffset.bits
+  ifuWbToFtqDumpData.startAddr         := wbFtqReq.startAddr.toUInt
+  ifuWbToFtqDumpData.isMissPred        := checkFlushWb.bits.misOffset.valid
+  ifuWbToFtqDumpData.missPredOffset    := checkFlushWb.bits.misOffset.bits
   ifuWbToFtqDumpData.checkJalFault     := checkJalFault
   ifuWbToFtqDumpData.checkJalrFault    := checkJalrFault
   ifuWbToFtqDumpData.checkRetFault     := checkRetFault
