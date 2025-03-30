@@ -337,7 +337,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       allStage -> allStage_n,
       noS2xlate -> item.s1.entry.n.getOrElse(0.U)
     ))
-    this.vmid := item.s1.entry.vmid.getOrElse(0.U)
+    this.vmid := Mux(item.s2xlate === onlyStage2, item.s2.entry.vmid.getOrElse(0.U), item.s1.entry.vmid.getOrElse(0.U))
     this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
     this.s2xlate := item.s2xlate
@@ -1324,7 +1324,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     )
 
     val vpn_hit = level_match
-    val vmid_hit = Mux(this.s2xlate === allStage, s2.entry.vmid.getOrElse(0.U) === vmid, true.B)
+    val vmid_hit = s1.entry.vmid.getOrElse(0.U) === vmid
     val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid)
     val all_onlyS1_hit = vpn_hit && vmid_hit && vasid_hit
     Mux(this.s2xlate === noS2xlate, noS2_hit,
