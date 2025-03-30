@@ -340,9 +340,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_errors = wayMap((w: Int) => s1_meta_valids(w) && dcacheParameters.tagCode.decode(encTag_resp(w)).error).asUInt
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_ecc_eq_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
-  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && s1_meta_valids(w)).asUInt
   val s1_tag_ecc_match_way = wayMap((w: Int) => s1_tag_ecc_eq_way(w) && s1_meta_valids(w)).asUInt
   val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
+  val s1_real_tag_match_way = Wire(UInt(nWays.W))
+  s1_real_tag_match_way := Mux(
+    GatedValidRegNext(s0_fire),
+    wayMap((w: Int) => io.tag_resp(w)(tagBits - 1, 0) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt,
+    RegEnable(s1_real_tag_match_way, 0.U.asTypeOf(s1_real_tag_match_way.cloneType), s1_valid)
+  )
 
   val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
@@ -374,9 +379,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
   val s1_way_en = Mux(
-    RegEnable(!io.pseudo_error.valid, false.B, s0_fire),
-    Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way),
-    Mux(ParallelORR(s1_tag_match_way), s1_tag_match_way, s1_repl_way_en)
+    RegEnable(io.pseudo_error.valid, false.B, s0_fire),
+    Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en),
+    Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
   )
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
@@ -395,7 +400,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
-  val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
+  val s2_tag_match_way = RegEnable(s1_real_tag_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val (s2_has_permission, _, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
 
