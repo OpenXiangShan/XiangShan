@@ -119,10 +119,10 @@ jobs:
         if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
-          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           echo "$SPEC_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
           tail -n 39 $SPEC_DIR/score.txt >> $GITHUB_STEP_SUMMARY
-          echo "```" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
           echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
@@ -135,9 +135,9 @@ jobs:
 
           if ! grep -q '^{\s*}$' $SPEC_DIR/err_ckps.json; then
             echo "### :sos: Failed Tests" >> $GITHUB_STEP_SUMMARY  
-            echo "```" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
             cat $SPEC_DIR/err_ckps.json >> $GITHUB_STEP_SUMMARY
-            echo "```" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
       # - name: Upload result
