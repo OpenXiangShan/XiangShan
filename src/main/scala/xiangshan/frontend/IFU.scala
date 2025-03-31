@@ -38,8 +38,8 @@ trait HasIFUConst extends HasXSParameter {
     Cat(addr(highest - 1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
   def fetchQueueSize = 2
 
-  def getBasicBlockIdx(pc: UInt, start: UInt): UInt = {
-    val byteOffset = pc - start
+  def getBasicBlockIdx(pc: PrunedAddr, start: PrunedAddr): UInt = {
+    val byteOffset = (pc - start).toUInt
     (byteOffset - instBytes.U)(log2Ceil(PredictWidth), instOffsetBits)
   }
 }
@@ -87,36 +87,36 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
 // the middle of an RVI inst
 class LastHalfInfo(implicit p: Parameters) extends XSBundle {
   val valid    = Bool()
-  val middlePC = UInt(VAddrBits.W)
-  def matchThisBlock(startAddr: UInt) = valid && middlePC === startAddr
+  val middlePC = PrunedAddr(VAddrBits)
+  def matchThisBlock(startAddr: PrunedAddr): Bool = valid && middlePC === startAddr
 }
 
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data            = if (HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
   val frontendTrigger = new FrontendTdataDistributeIO
-  val pc              = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc              = Vec(PredictWidth, PrunedAddr(VAddrBits))
 }
 
 class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val ftqOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
-  val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
-  val target     = UInt(VAddrBits.W)
+  val jumpOffset = Vec(PredictWidth, PrunedAddr(VAddrBits))
+  val target     = PrunedAddr(VAddrBits)
   val instrRange = Vec(PredictWidth, Bool())
   val instrValid = Vec(PredictWidth, Bool())
   val pds        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc         = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc         = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val fire_in    = Bool()
 }
 
-class FetchToIBufferDB extends Bundle {
-  val start_addr   = UInt(39.W)
+class FetchToIBufferDB(implicit p: Parameters) extends XSBundle {
+  val start_addr   = PrunedAddr(VAddrBits)
   val instr_count  = UInt(32.W)
   val exception    = Bool()
   val is_cache_hit = Bool()
 }
 
-class IfuWbToFtqDB extends Bundle {
-  val start_addr        = UInt(39.W)
+class IfuWbToFtqDB(implicit p: Parameters) extends XSBundle {
+  val start_addr        = PrunedAddr(VAddrBits)
   val is_miss_pred      = Bool()
   val miss_pred_offset  = UInt(32.W)
   val checkJalFault     = Bool()
@@ -145,13 +145,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   def numOfStage = 3
   // equal lower_result overflow bit
   def PcCutPoint = (VAddrBits / 4) - 1
-  def CatPC(low: UInt, high: UInt, high1: UInt): UInt =
-    Mux(
+  def CatPC(low: UInt, high: UInt, high1: UInt): PrunedAddr =
+    PrunedAddrInit(Mux(
       low(PcCutPoint),
       Cat(high1, low(PcCutPoint - 1, 0)),
       Cat(high, low(PcCutPoint - 1, 0))
-    )
-  def CatPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[UInt] = VecInit(lowVec.map(CatPC(_, high, high1)))
+    ))
+  def CatPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[PrunedAddr] = VecInit(lowVec.map(CatPC(_, high, high1)))
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
   // bubble events in IFU, only happen in stage 1
@@ -241,7 +241,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_valid      = fromFtq.req.valid
   val f0_ftq_req    = fromFtq.req.bits
   val f0_doubleLine = fromFtq.req.bits.crossCacheline
-  val f0_vSetIdx    = VecInit(get_idx(f0_ftq_req.startAddr), get_idx(f0_ftq_req.nextlineStart))
+  val f0_vSetIdx    = VecInit(get_idx(f0_ftq_req.startAddr.toUInt), get_idx(f0_ftq_req.nextlineStart.toUInt))
   val f0_fire       = fromFtq.req.fire
 
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
@@ -425,10 +425,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_cut_ptr      = RegEnable(f1_cut_ptr, f1_fire)
   val f2_resend_vaddr = RegEnable(f1_ftq_req.startAddr + 2.U, f1_fire)
 
-  def isNextLine(pc: UInt, startAddr: UInt) =
+  def isNextLine(pc: PrunedAddr, startAddr: PrunedAddr): Bool =
     startAddr(blockOffBits) ^ pc(blockOffBits)
 
-  def isLastInLine(pc: UInt) =
+  def isLastInLine(pc: PrunedAddr): Bool =
     pc(blockOffBits - 1, 0) === "b111110".U
 
   val f2_foldpc = VecInit(f2_pc.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
@@ -598,7 +598,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
     ***********************************************************************
     */
-  val f3_half_snpc = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
+  val f3_half_snpc = Wire(Vec(PredictWidth, PrunedAddr(VAddrBits)))
   for (i <- 0 until PredictWidth) {
     if (i == (PredictWidth - 2)) {
       f3_half_snpc(i) := CatPC(f3_pc_last_lower_result_plus2, f3_pc_high, f3_pc_high_plus1)
@@ -618,8 +618,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_resend_vaddr      = RegEnable(f2_resend_vaddr, f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
-  val f3_ftq_req_startAddr     = Cat(0.U(1.W), f3_ftq_req.startAddr)
-  val f3_ftq_req_nextStartAddr = Cat(0.U(1.W), f3_ftq_req.nextStartAddr)
+  val f3_ftq_req_startAddr     = PrunedAddrInit(Cat(0.U(1.W), f3_ftq_req.startAddr.toUInt))
+  val f3_ftq_req_nextStartAddr = PrunedAddrInit(Cat(0.U(1.W), f3_ftq_req.nextStartAddr.toUInt))
   // brType, isCall and isRet generation is delayed to f3 stage
   val f3Predecoder = Module(new F3Predecoder)
 
@@ -646,9 +646,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val mmio_exception   = RegInit(0.U(ExceptionType.width.W))
   val mmio_is_RVC      = RegInit(false.B)
   val mmio_has_resend  = RegInit(false.B)
-  val mmio_resend_addr = RegInit(0.U(PAddrBits.W))
+  val mmio_resend_addr = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
   // NOTE: we dont use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val mmio_resend_gpaddr            = RegInit(0.U(PAddrBitsMax.W))
+  val mmio_resend_gpaddr            = RegInit(PrunedAddrInit(0.U(PAddrBitsMax.W)))
   val mmio_resend_isForVSnonLeafPTE = RegInit(false.B)
 
   // last instuction finish
@@ -772,7 +772,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
         // also save itlb response
         mmio_exception                := exception
         mmio_resend_addr              := io.iTLBInter.resp.bits.paddr(0)
-        mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)
+        mmio_resend_gpaddr            := io.iTLBInter.resp.bits.gpaddr(0)(PAddrBitsMax - 1, 0)
         mmio_resend_isForVSnonLeafPTE := io.iTLBInter.resp.bits.isForVSnonLeafPTE(0)
       }
     }
@@ -816,8 +816,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
       mmio_exception                := ExceptionType.none
       mmio_is_RVC                   := false.B
       mmio_has_resend               := false.B
-      mmio_resend_addr              := 0.U
-      mmio_resend_gpaddr            := 0.U
+      mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
+      mmio_resend_gpaddr            := PrunedAddrInit(0.U(PAddrBitsMax.W))
       mmio_resend_isForVSnonLeafPTE := false.B
     }
   }
@@ -829,8 +829,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_exception                := ExceptionType.none
     mmio_is_RVC                   := false.B
     mmio_has_resend               := false.B
-    mmio_resend_addr              := 0.U
-    mmio_resend_gpaddr            := 0.U
+    mmio_resend_addr              := PrunedAddrInit(0.U(PAddrBits.W))
+    mmio_resend_gpaddr            := PrunedAddrInit(0.U(PAddrBitsMax.W))
     mmio_resend_isForVSnonLeafPTE := false.B
     f3_mmio_data.map(_ := 0.U)
   }
@@ -842,8 +842,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // send itlb request in m_sendTLB state
   io.iTLBInter.req.valid                   := (mmio_state === m_sendTLB) && f3_req_is_mmio
   io.iTLBInter.req.bits.size               := 3.U
-  io.iTLBInter.req.bits.vaddr              := f3_resend_vaddr
-  io.iTLBInter.req.bits.debug.pc           := f3_resend_vaddr
+  io.iTLBInter.req.bits.vaddr              := f3_resend_vaddr.toUInt
+  io.iTLBInter.req.bits.debug.pc           := f3_resend_vaddr.toUInt
   io.iTLBInter.req.bits.cmd                := TlbCmd.exec
   io.iTLBInter.req.bits.isPrefetch         := false.B
   io.iTLBInter.req.bits.kill               := false.B // IFU use itlb for mmio, doesn't need sync, set it to false
@@ -862,7 +862,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.resp.ready := (mmio_state === m_tlbResp) && f3_req_is_mmio
 
   io.pmp.req.valid     := (mmio_state === m_sendPMP) && f3_req_is_mmio
-  io.pmp.req.bits.addr := mmio_resend_addr
+  io.pmp.req.bits.addr := mmio_resend_addr.toUInt
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd  := TlbCmd.exec
 
@@ -957,7 +957,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val enqVec = io.toIbuffer.bits.enqEnable
     val allocateSeqNum = VecInit((0 until PredictWidth).map { i =>
       val idx  = PopCount(enqVec.take(i + 1))
-      val pc   = f3_pc(i)
+      val pc   = f3_pc(i).toUInt
       val code = io.toIbuffer.bits.instrs(i)
       PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
     })
@@ -978,7 +978,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     f3_exception.map(_ === ExceptionType.gpf).reduce(_ || _)
   )
   io.toBackend.gpaddrMem_waddr        := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata.gpaddr := Mux(f3_req_is_mmio, mmio_resend_gpaddr, f3_gpaddr)
+  io.toBackend.gpaddrMem_wdata.gpaddr := Mux(f3_req_is_mmio, mmio_resend_gpaddr.toUInt, f3_gpaddr.toUInt)
   io.toBackend.gpaddrMem_wdata.isForVSnonLeafPTE := Mux(
     f3_req_is_mmio,
     mmio_resend_isForVSnonLeafPTE,
@@ -1156,8 +1156,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSDebug(
     checkRetFault,
     "startAddr:%x  nextstartAddr:%x  taken:%d    takenIdx:%d\n",
-    wb_ftq_req.startAddr,
-    wb_ftq_req.nextStartAddr,
+    wb_ftq_req.startAddr.toUInt,
+    wb_ftq_req.nextStartAddr.toUInt,
     wb_ftq_req.ftqOffset.valid,
     wb_ftq_req.ftqOffset.bits
   )
