@@ -26,12 +26,11 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import coupledL2.utils.SplittedSRAM
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.ChiselDB
 import utility.mbist.MbistPipeline
-import utility.sram.SRAMTemplate
+import utility.sram.SplittedSRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
@@ -78,13 +77,13 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for (i <- 0 until numRead) {
-    val sram = Module(new SplittedSRAM(
+    val sram = Module(new SplittedSRAMTemplate(
       gen,
       set = FtqSize,
       way = 1,
       dataSplit = 2,
       singlePort = false,
-      clockGated = true,
+      withClockGate = true,
       hasMbist = hasMbist
     ))
     sram.io.r.req.valid       := io.ren(i)
