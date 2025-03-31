@@ -69,49 +69,49 @@ jobs:
           echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
           echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
 
-      # - name: Clean Up
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Clean Up
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
-      # - name: Build EMU with DRAMsim3
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     if [ -e "$SPEC_DIR/emu" ]; then
-      #       mkdir -p $NOOP_HOME/build
-      #       cp $SPEC_DIR/emu $NOOP_HOME/build/emu
-      #     else
-      #       python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
-      #         --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-      #         --with-dramsim3 --threads 16                                  \
-      #         --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-      #         --llvm-profdata llvm-profdata
-      #       mkdir -p $SPEC_DIR
-      #       cp $NOOP_HOME/build/emu $SPEC_DIR/emu
-      #     fi
+      - name: Build EMU with DRAMsim3
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          if [ -e "$SPEC_DIR/emu" ]; then
+            mkdir -p $NOOP_HOME/build
+            cp $SPEC_DIR/emu $NOOP_HOME/build/emu
+          else
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
+              --with-dramsim3 --threads 16                                  \
+              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
+              --llvm-profdata llvm-profdata
+            mkdir -p $SPEC_DIR
+            cp $NOOP_HOME/build/emu $SPEC_DIR/emu
+          fi
 
-      # - name: Run SPEC CPU2006 checkpoints
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     cd $PERF_HOME
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
-      #       -L "$NODE_SERVER_LIST"
-      #     find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
+      - name: Run SPEC CPU2006 checkpoints
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          cd $PERF_HOME
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
+            -L "$NODE_SERVER_LIST"
+          find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
 
-      # - name: Report SPEC CPU2006 score
-      #   if: steps.determine_run.outputs.run_biweekly == 'true'
-      #   run: |
-      #     cd $PERF_HOME
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
-      #       --check --dump-json-path $SPEC_DIR/err_ckps.json
-      #     python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
-      #       --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
-      #       > $SPEC_DIR/score.txt
-      #     # mkdir $GITHUB_WORKSPACE/result
-      #     # cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
-      #     # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
+      - name: Report SPEC CPU2006 score
+        if: steps.determine_run.outputs.run_biweekly == 'true'
+        run: |
+          cd $PERF_HOME
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR \
+            --check --dump-json-path $SPEC_DIR/err_ckps.json
+          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
+            > $SPEC_DIR/score.txt
+          # mkdir $GITHUB_WORKSPACE/result
+          # cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
+          # cp $SPEC_DIR/score.txt $GITHUB_WORKSPACE/result/score.txt
 
       - name: Summary result
         if: steps.determine_run.outputs.run_biweekly == 'true'
