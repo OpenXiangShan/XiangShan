@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
+import xiangshan.frontend.PrunedAddr
 
 /* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
  * Notes:
@@ -41,8 +42,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
   // NOTE: we don't use GPAddrBits here, refer to ICacheMainPipe.scala L43-48 and PR#3795
-  val gpaddr:            UInt = UInt(PAddrBitsMax.W)
-  val isForVSnonLeafPTE: Bool = Bool()
+  val gpaddr:            PrunedAddr = PrunedAddr(PAddrBitsMax)
+  val isForVSnonLeafPTE: Bool       = Bool()
 }
 
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
@@ -50,14 +51,14 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGPFEntry
 
   // for compatibility
-  def vSetIdx:           Vec[UInt] = entry.vSetIdx
-  def waymask:           Vec[UInt] = entry.waymask
-  def ptag:              Vec[UInt] = entry.ptag
-  def itlb_exception:    Vec[UInt] = entry.itlb_exception
-  def itlb_pbmt:         Vec[UInt] = entry.itlb_pbmt
-  def meta_codes:        Vec[UInt] = entry.meta_codes
-  def gpaddr:            UInt      = gpf.gpaddr
-  def isForVSnonLeafPTE: Bool      = gpf.isForVSnonLeafPTE
+  def vSetIdx:           Vec[UInt]  = entry.vSetIdx
+  def waymask:           Vec[UInt]  = entry.waymask
+  def ptag:              Vec[UInt]  = entry.ptag
+  def itlb_exception:    Vec[UInt]  = entry.itlb_exception
+  def itlb_pbmt:         Vec[UInt]  = entry.itlb_pbmt
+  def meta_codes:        Vec[UInt]  = entry.meta_codes
+  def gpaddr:            PrunedAddr = gpf.gpaddr
+  def isForVSnonLeafPTE: Bool       = gpf.isForVSnonLeafPTE
 }
 
 class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {

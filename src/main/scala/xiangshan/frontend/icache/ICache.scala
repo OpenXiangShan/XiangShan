@@ -172,11 +172,11 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     lineSel
   }
 
-  def getBlkAddr(addr:        UInt): UInt = (addr >> blockOffBits).asUInt
+  def getBlkAddr(addr:        PrunedAddr): UInt = (addr >> blockOffBits).asUInt
   def getPhyTagFromBlk(addr:  UInt): UInt = (addr >> (pgUntagBits - blockOffBits)).asUInt
   def getIdxFromBlk(addr:     UInt): UInt = addr(idxBits - 1, 0)
-  def getPaddrFromPtag(vaddr: UInt, ptag: UInt): UInt = Cat(ptag, vaddr(pgUntagBits - 1, 0))
-  def getPaddrFromPtag(vaddrVec: Vec[UInt], ptagVec: Vec[UInt]): Vec[UInt] =
+  def getPaddrFromPtag(vaddr: PrunedAddr, ptag: UInt): PrunedAddr = PrunedAddrInit(Cat(ptag, vaddr(pgUntagBits - 1, 0)))
+  def getPaddrFromPtag(vaddrVec: Vec[PrunedAddr], ptagVec: Vec[UInt]): Vec[PrunedAddr] =
     VecInit((vaddrVec zip ptagVec).map { case (vaddr, ptag) => getPaddrFromPtag(vaddr, ptag) })
 }
 
