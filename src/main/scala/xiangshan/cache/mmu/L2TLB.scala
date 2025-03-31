@@ -348,7 +348,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   }
 
   def outReady(source: UInt, port: Int): Bool = {
-    MuxLookup(source, true.B,
+    MuxLookup(source, true.B)(
       (0 until PtwWidth).map(i => i.U -> outArb(i).in(port).ready))
   }
 

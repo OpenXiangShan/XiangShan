@@ -29,9 +29,7 @@ object Generator {
         RunFirrtlTransformAnnotation(new PrintControl),
         RunFirrtlTransformAnnotation(new PrintModuleName)
       )
-      case _ => Seq(
-        CIRCTTargetAnnotation(CIRCTTarget.Verilog)
-      ) ++ firtoolOpts.map(opt => FirtoolOption(opt))
+      case _ => firtoolOpts.map(FirtoolOption.apply).toSeq
     }
 
     (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(mod _) +: annotations)

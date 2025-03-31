@@ -22,8 +22,8 @@ SIM_TOP = SimTop
 FPGATOP = top.TopMain
 SIMTOP  = top.SimTop
 
-TOP_V = $(BUILD_DIR)/$(TOP).v
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+TOP_V = $(BUILD_DIR)/$(TOP).sv
+SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).sv
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
@@ -37,28 +37,28 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
-# firtool check and download
-FIRTOOL_VERSION = 1.61.0
-FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
-FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
-CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
-ifeq ($(MFC),1)
-ifeq ($(FIRTOOL_PATH),)
-ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
-$(info [INFO] Firtool not found in your PATH.)
-$(info [INFO] Downloading from $(FIRTOOL_URL))
-$(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
-endif
-FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
-endif
-endif
+# # firtool check and download
+# FIRTOOL_VERSION = 1.61.0
+# FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
+# FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
+# CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
+# ifeq ($(MFC),1)
+# ifeq ($(FIRTOOL_PATH),)
+# ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
+# $(info [INFO] Firtool not found in your PATH.)
+# $(info [INFO] Downloading from $(FIRTOOL_URL))
+# $(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
+# endif
+# FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
+# endif
+# endif
 
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
-FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
-SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-MFC_ARGS = --dump-fir $(FIRTOOL_ARGS) \
+FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).sv.conf"
+SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).sv.conf"
+MFC_ARGS = --dump-fir --target systemverilog \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
@@ -77,7 +77,7 @@ override SIM_ARGS += --with-dramsim3
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-perf --fpga-platform
+RELEASE_ARGS += --disable-perf --fpga-platform --firtool-opt --ignore-read-enable-mem
 DEBUG_ARGS   += --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
@@ -106,7 +106,7 @@ $(TOP_V): $(SCALA_FILE)
 		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(TOP).v
+	$(SPLIT_VERILOG) $(BUILD_DIR) $(TOP).sv
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(BUILD_DIR)"
 endif
 	$(SED_CMD) $@
@@ -128,7 +128,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(SIM_TOP).v
+	$(SPLIT_VERILOG) $(BUILD_DIR) $(SIM_TOP).sv
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(BUILD_DIR)"
 endif
 	$(SED_CMD) $@

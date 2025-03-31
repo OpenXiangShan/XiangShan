@@ -1,6 +1,8 @@
 package utils
 
 import chisel3._
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.DebugOptionsKey
 import chisel3.util.experimental.BoringUtils
 
 import scala.collection.mutable.ListBuffer
@@ -17,18 +19,23 @@ object HardenXSPerfAccumulate {
                         name: String,
                         perfCnt: T,
                         wire: Boolean = false // perfCnt direct connection
-                      ): Unit = {
+                      )(implicit p: Parameters): Unit = {
     if (enabled) {
       val id = register(perfCnt, name)
       println(s"# Hardened Counter $id: $name")
 
-      val helper = Module(new LogPerfHelper)
-      val perfClean = helper.io.clean
-
       val counter = RegInit(0.U(64.W)).suggestName(name + "Counter")
       val next_counter = WireInit(0.U(64.W)).suggestName(name + "Next")
       next_counter := counter + perfCnt.asTypeOf(UInt(64.W))
-      counter := Mux(perfClean, 0.U, next_counter)
+      
+      val env = p(DebugOptionsKey)
+      if (!env.FPGAPlatform) {
+        val helper = Module(new LogPerfHelper)
+        val perfClean = helper.io.clean
+        counter := Mux(perfClean, 0.U, next_counter)
+      } else {
+        counter := next_counter
+      }
 
       val probe = WireInit(0.U(64.W))
       if (wire)

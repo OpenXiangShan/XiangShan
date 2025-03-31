@@ -175,9 +175,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.dse_epoch := dseCtrl.module.io.epoch
     io.dse_max_instr := dseCtrl.module.io.max_instr_cnt
 
+    lazy val io_perf = HardenXSPerfAccumulate.reclaim()
+
     // input
     dontTouch(dma)
     dontTouch(io)
+    dontTouch(io_perf)
     dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs

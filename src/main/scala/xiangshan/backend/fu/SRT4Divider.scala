@@ -181,7 +181,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
 
   // obtaining 1st quotient
   val rSumInitTrunc = Cat(0.U(1.W), rSumInit(itn_len - 4, itn_len - 4 - 4 + 1)) // 0.00___
-  val mInitPos1 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b00100".U(5.W),
+  val mInitPos1 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b00100".U(5.W))(
     Array(
       0.U -> "b00100".U(5.W),
       1.U -> "b00100".U(5.W),
@@ -193,7 +193,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
       7.U -> "b01000".U(5.W),
     )
   )
-  val mInitPos2 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b01100".U(5.W),
+  val mInitPos2 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b01100".U(5.W))(
     Array(
       0.U -> "b01100".U(5.W),
       1.U -> "b01110".U(5.W),
@@ -410,7 +410,7 @@ class SRT4QDS(len: Int, itn_len: Int) extends Module {
         csa1.io.in(1) := trunc25(remCarryX16)
         csa2.io.in(2) := trunc25(dXq)
       }
-      csa1.io.in(2) := MuxLookup(dForLookup, "b0000000".U, mLookUpTable.minus_m(i))
+      csa1.io.in(2) := MuxLookup(dForLookup, "b0000000".U)(mLookUpTable.minus_m(i))
       csa2.io.in(0) := csa1.io.out(0)
       csa2.io.in(1) := csa1.io.out(1)(5, 0) << 1
       (csa2.io.out(0) + (csa2.io.out(1)(5, 0) << 1))(6)
