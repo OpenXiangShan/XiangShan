@@ -250,7 +250,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // top-down info
   memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
-  frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr.bits := backend.io.debugTopDown.fromRob.robHeadVaddr.bits
+  frontend.io.debugTopDown.robHeadVaddr.valid := backend.io.debugTopDown.fromRob.robHeadVaddr.valid
   io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
   io.debugTopDown.robTrueCommit := backend.io.debugRolling.robTrueCommit
   backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch

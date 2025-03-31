@@ -29,12 +29,12 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
-  val startAddr:        UInt   = UInt(VAddrBits.W)
-  val nextlineStart:    UInt   = UInt(VAddrBits.W)
-  val ftqIdx:           FtqPtr = new FtqPtr
-  val isSoftPrefetch:   Bool   = Bool()
-  val backendException: UInt   = UInt(ExceptionType.width.W)
-  def crossCacheline:   Bool   = startAddr(blockOffBits - 1) === 1.U
+  val startAddr:        PrunedAddr = PrunedAddr(VAddrBits)
+  val nextlineStart:    PrunedAddr = PrunedAddr(VAddrBits)
+  val ftqIdx:           FtqPtr     = new FtqPtr
+  val isSoftPrefetch:   Bool       = Bool()
+  val backendException: UInt       = UInt(ExceptionType.width.W)
+  def crossCacheline:   Bool       = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): IPrefetchReq = {
     this.startAddr      := info.startAddr
@@ -174,8 +174,8 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     toITLB(i).valid             := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
     toITLB(i).bits              := DontCare
     toITLB(i).bits.size         := 3.U
-    toITLB(i).bits.vaddr        := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
-    toITLB(i).bits.debug.pc     := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
+    toITLB(i).bits.vaddr        := Mux(s1_need_itlb(i), s1_req_vaddr(i).toUInt, s0_req_vaddr(i).toUInt)
+    toITLB(i).bits.debug.pc     := Mux(s1_need_itlb(i), s1_req_vaddr(i).toUInt, s0_req_vaddr(i).toUInt)
     toITLB(i).bits.cmd          := TlbCmd.exec
     toITLB(i).bits.no_translate := false.B
   }
@@ -187,9 +187,9 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
     * Receive resp from ITLB
     ******************************************************************************
     */
-  private val s1_req_paddr_wire = VecInit(fromITLB.map(_.bits.paddr(0)))
+  private val s1_req_paddr_wire = VecInit(fromITLB.map(tlbRequest => PrunedAddrInit(tlbRequest.bits.paddr(0))))
   private val s1_req_paddr_reg = VecInit((0 until PortNumber).map { i =>
-    RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))
+    RegEnable(s1_req_paddr_wire(i), PrunedAddrInit(0.U(PAddrBits.W)), tlb_valid_pulse(i))
   })
   private val s1_req_paddr = VecInit((0 until PortNumber).map { i =>
     Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))
@@ -277,7 +277,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   private val s1_meta_ptags  = fromMeta.tags
   private val s1_meta_valids = fromMeta.entryValid
 
-  private def getWaymask(paddrs: Vec[UInt]): Vec[UInt] = {
+  private def getWaymask(paddrs: Vec[PrunedAddr]): Vec[UInt] = {
     val ptags = paddrs.map(get_phy_tag)
     val tag_eq_vec =
       VecInit((0 until PortNumber).map(p => VecInit((0 until nWays).map(w => s1_meta_ptags(p)(w) === ptags(p)))))
@@ -363,7 +363,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   toWayLookup.bits.vSetIdx           := s1_req_vSetIdx
   toWayLookup.bits.waymask           := s1_waymasks
   toWayLookup.bits.ptag              := s1_req_ptags
-  toWayLookup.bits.gpaddr            := s1_req_gpaddr
+  toWayLookup.bits.gpaddr            := s1_req_gpaddr(PAddrBitsMax - 1, 0)
   toWayLookup.bits.isForVSnonLeafPTE := s1_req_isForVSnonLeafPTE
   toWayLookup.bits.meta_codes        := s1_meta_codes
   (0 until PortNumber).foreach { i =>
@@ -387,11 +387,11 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
       PopCount(s1_waymasks_vec(0)) > 1.U,
       s1_req_ptags(0),
       get_idx(s1_req_vaddr(0)),
-      s1_req_vaddr(0),
+      s1_req_vaddr(0).toUInt,
       PopCount(s1_waymasks_vec(1)) > 1.U && s1_doubleline,
       s1_req_ptags(1),
       get_idx(s1_req_vaddr(1)),
-      s1_req_vaddr(1)
+      s1_req_vaddr(1).toUInt
     )
   }
 
@@ -403,7 +403,7 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   toPMP.zipWithIndex.foreach { case (p, i) =>
     // if itlb has exception, paddr can be invalid, therefore pmp check can be skipped
     p.valid     := s1_valid // !ExceptionType.hasException(s1_itlb_exception(i))
-    p.bits.addr := s1_req_paddr(i)
+    p.bits.addr := s1_req_paddr(i).toUInt
     p.bits.size := 3.U
     p.bits.cmd  := TlbCmd.exec
   }
