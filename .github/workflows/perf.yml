@@ -12,9 +12,9 @@ on:
         description: 'Commit SHA to run the workflow on'
         required: false
         default: ''
-  # only for test push
-  push:
-    branches: [ ci-perf-yml ]
+  #only for test push
+  # push:
+  #   branches: [ ci-perf-yml ]
 
 
 jobs:
@@ -28,14 +28,13 @@ jobs:
       - name: Set test commit
         id: set_test_commit
         run: |
-          # if [ "${{ github.event.inputs.test_commit }}" = "" ]; then
-          #   echo "Using latest commit."
-          #   echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          # else
-          #   echo "Using specified commit: ${{ github.event.inputs.test_commit }}"
-          #   echo "commit_sha=${{ github.event.inputs.test_commit }}" >> $GITHUB_OUTPUT
-          # fi
-          echo "commit_sha=0e64db5c81cde95a11dd794ec8aa5f65ac6d534b" >> $GITHUB_OUTPUT
+          if [ "${{ github.event.inputs.test_commit }}" = "" ]; then
+            echo "Using latest commit."
+            echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "Using specified commit: ${{ github.event.inputs.test_commit }}"
+            echo "commit_sha=${{ github.event.inputs.test_commit }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Determine if this is the biweekly run
         id: determine_run
