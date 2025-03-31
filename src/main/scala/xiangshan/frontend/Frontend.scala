@@ -78,7 +78,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId       = Input(UInt(hartIdLen.W))
-    val reset_vector = Input(UInt(PAddrBits.W))
+    val reset_vector = Input(PrunedAddr(PAddrBits))
     val fencei       = Input(Bool())
     val ptw          = new TlbPtwIO()
     val backend      = new FrontendToCtrlIO
@@ -96,7 +96,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
     val resetInFrontend = Output(Bool())
     val debugTopDown = new Bundle {
-      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+      val robHeadVaddr = Flipped(Valid(PrunedAddr(VAddrBits)))
     }
     val sramTest = new Bundle() {
       val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
@@ -214,13 +214,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   }
 
   val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
-  val checkTarget    = Wire(Vec(DecodeWidth, UInt(VAddrBits.W)))
+  val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
 
   for (i <- 0 until DecodeWidth) {
     checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
     checkTarget(i) := Mux(
       ftq.io.toBackend.newest_entry_ptr.value === checkTargetPtr(i).value,
-      ftq.io.toBackend.newest_entry_target,
+      PrunedAddrInit(ftq.io.toBackend.newest_entry_target),
       checkPcMem((checkTargetPtr(i) + 1.U).value).startAddr
     )
   }
@@ -310,7 +310,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   }
 
   def checkNotTakenPC = {
-    val prevNotTakenPC    = Reg(UInt(VAddrBits.W))
+    val prevNotTakenPC    = Reg(PrunedAddr(VAddrBits))
     val prevIsRVC         = Reg(Bool())
     val prevNotTakenValid = RegInit(0.B)
 
@@ -343,7 +343,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
     XSError(
       prevNotTakenValid && ibuffer.io.out(0).fire &&
-        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc,
+        prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= PrunedAddrInit(ibuffer.io.out(0).bits.pc),
       "not-taken br should have same pc\n"
     )
     when(needFlush) {
@@ -354,7 +354,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   def checkTakenPC = {
     val prevTakenFtqPtr = Reg(new FtqPtr)
     val prevTakenValid  = RegInit(0.B)
-    val prevTakenTarget = Wire(UInt(VAddrBits.W))
+    val prevTakenTarget = Wire(PrunedAddr(VAddrBits))
     prevTakenTarget := checkPcMem((prevTakenFtqPtr + 1.U).value).startAddr
 
     for (i <- 0 until DecodeWidth - 1) {
@@ -367,7 +367,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       XSError(
         ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken &&
           ibuffer.io.out(i + 1).fire &&
-          checkTarget(i) =/= ibuffer.io.out(i + 1).bits.pc,
+          checkTarget(i) =/= PrunedAddrInit(ibuffer.io.out(i + 1).bits.pc),
         "taken instr should follow target pc\n"
       )
     }
@@ -382,7 +382,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
     XSError(
       prevTakenValid && ibuffer.io.out(0).fire &&
-        prevTakenTarget =/= ibuffer.io.out(0).bits.pc,
+        prevTakenTarget =/= PrunedAddrInit(ibuffer.io.out(0).bits.pc),
       "taken instr should follow target pc\n"
     )
     when(needFlush) {
@@ -423,7 +423,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   icache.io.hartId := io.hartId
 
-  itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
   io.resetInFrontend       := reset.asBool
