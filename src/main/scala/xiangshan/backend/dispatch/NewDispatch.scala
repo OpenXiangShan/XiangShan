@@ -165,7 +165,14 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val fromRename = io.fromRename
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
   val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DynInst))))
-  fromRenameUpdate := fromRename
+
+  // Update ftqidx to dispatch: Due to branch instructions/store compression, the required ftqidx should correspond to the ftqidx of the last instruction in the compressed robentry.
+  for (i <- 0 until RenameWidth) {
+    fromRenameUpdate(i) := fromRename(i)
+    fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
+    fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
+  }
+
   val renameWidth = io.fromRename.size
   val issueQueueCount = io.IQValidNumVec
   val issueQueueNum = allIssueParams.size

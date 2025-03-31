@@ -16,7 +16,7 @@ class TraceParams(
 class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = new Bundle {
     val fromEncoder    = Input(new FromEncoder)
-    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe))
+    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited))
   }
   val out = new Bundle {
     val toPcMem        = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
