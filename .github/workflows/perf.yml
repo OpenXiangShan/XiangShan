@@ -118,23 +118,23 @@ jobs:
       - name: Summary result
         if: steps.determine_run.outputs.run_biweekly == 'true'
         run: |
-          echo "### :rocket: Performance test result" >> $GITHUB_STEP_SUMMARY
+          echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo "```" >> $GITHUB_STEP_SUMMARY
           echo "$SPEC_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
           tail -n 39 $SPEC_DIR/score.txt >> $GITHUB_STEP_SUMMARY
           echo "```" >> $GITHUB_STEP_SUMMARY
           
-          echo "### :rainbow: Key indicators" >> $GITHUB_STEP_SUMMARY
+          echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
           echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
           TOTAL_SCORE=$(grep "SPEC2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
           INT_SCORE=$(grep "SPECint2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
-          FP_SCORE=$(grep "SPECfp2006/GHz::" $SPEC_DIR/score.txt | awk '{print $NF}')
+          FP_SCORE=$(grep "SPECfp2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
 
           if ! grep -q '^{\s*}$' $SPEC_DIR/err_ckps.json; then
-            echo "### :sos: err_ckps" >> $GITHUB_STEP_SUMMARY  
+            echo "### :sos: Failed Tests" >> $GITHUB_STEP_SUMMARY  
             echo "```" >> $GITHUB_STEP_SUMMARY
             cat $SPEC_DIR/err_ckps.json >> $GITHUB_STEP_SUMMARY
             echo "```" >> $GITHUB_STEP_SUMMARY
