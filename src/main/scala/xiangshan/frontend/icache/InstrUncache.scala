@@ -35,7 +35,7 @@ import xiangshan.WfiReqBundle
 import xiangshan.frontend._
 
 class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
-  val addr: UInt = UInt(PAddrBits.W)
+  val addr: PrunedAddr = PrunedAddr(PAddrBits)
 }
 
 class InsUncacheResp(implicit p: Parameters) extends ICacheBundle {
@@ -123,7 +123,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     }
   }
 
-  private def getDataFromBus(pc: UInt): UInt = {
+  private def getDataFromBus(pc: PrunedAddr): UInt = {
     val respData = Wire(UInt(maxInstrLen.W))
     respData := Mux(
       pc(2, 1) === "b00".U,
