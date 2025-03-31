@@ -48,6 +48,7 @@ import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import chisel3.experimental.BundleLiterals._
+import chisel3.util.experimental.decode.TruthTable
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -76,7 +77,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
       val blockCommit = Input(Bool())
-      val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthInPipe)
+      val traceCommitInfo = new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited)
     }
     val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
@@ -262,13 +263,42 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed,
-  // That is Necessary when exceptions happen.
-  // Update the ftqOffset to correctly notify the frontend which instructions have been committed.
-  // Instructions in multiple Ftq entries compressed to one RobEntry do not occur.
+  /*
+    decode iretireEncoded => iretires, instrSize
+    (instrNum((log2Ceil(RenameWidth + 1)).W), iretire(IretireWidthInPipe.W), encode(IretireWidthEncode.W))
+    val instrSizeTable = Seq(
+      (1, 1, 1), (1, 2, 2),
+      (2, 2, 3), (2, 3, 4), (2, 4, 5),
+      (3, 3, 6), (3, 4, 7), (3, 5, 8), (3, 6, 9),
+      (4, 4, 10), (4, 5, 11), (4, 6, 12), (4, 7, 13), (4, 8, 14),
+      (5, 5, 15), (5, 6, 16), (5, 7, 17), (5, 8, 18), (5, 9, 19), (5, 10, 20),
+      (6, 6, 21), (6, 7, 22), (6, 8, 23), (6, 9, 24), (6, 10, 25), (6, 11, 26), (6, 12, 27),
+    )
+  */
+  val iretireCommit = Wire(Vec(CommitWidth, UInt(IretireWidthCommited.W)))
+  val instrSizeCommit   = Wire(Vec(CommitWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+  val instrSizeTable = (1 to RenameWidth).map( instrNum =>
+    (instrNum to (2 * instrNum)).map(iretireNum => (instrNum, iretireNum))
+  ).flatten
+
+  rawInfo.zip(instrSizeCommit).zip(iretireCommit).map { case((raw, instr), iretire) =>
+    iretire := chisel3.util.experimental.decode.decoder(
+      raw.traceBlockInPipe.iretire,
+      TruthTable(
+        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._2.U(IretireWidthCommited.W)))},
+        BitPat.N(IretireWidthCommited))
+    )
+    instr := chisel3.util.experimental.decode.decoder(
+      raw.traceBlockInPipe.iretire,
+      TruthTable(
+        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._1.U((log2Ceil(RenameWidth + 1)).W)))},
+        BitPat.N((log2Ceil(RenameWidth + 1))))
+    )
+  }
+
   for (i <- 0 until CommitWidth) {
-    val lastOffset = (rawInfo(i).traceBlockInPipe.iretire - (1.U << rawInfo(i).traceBlockInPipe.ilastsize.asUInt).asUInt) + rawInfo(i).ftqOffset
-    commitInfo(i).ftqOffset := Mux(CommitType.isFused(rawInfo(i).commitType), rawInfo(i).ftqOffset, lastOffset)
+    commitInfo(i).ftqOffset := 0.U
+    commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit
   }
 
   // data for debug
@@ -783,7 +813,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     io.commits.info(i) := commitInfo(i)
     io.commits.robIdx(i) := deqPtrVec(i)
     val deqDebugInst = debug_microOp(deqPtrVec(i).value)
-    PerfCCT.commitInstMeta(i.U, deqDebugInst.debug_seqNum, deqDebugInst.instrSize, io.commits.isCommit && io.commits.commitValid(i), clock, reset)
+    PerfCCT.commitInstMeta(i.U, deqDebugInst.debug_seqNum, instrSizeCommit(i), io.commits.isCommit && io.commits.commitValid(i), clock, reset)
 
     io.commits.walkValid(i) := shouldWalkVec(i)
     XSError(
@@ -986,10 +1016,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
+  private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
-    req => FuType.isStore(req.bits.fuType)
-  })
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
   for (i <- 0 until RobSize) {
@@ -1229,8 +1257,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isCommit = io.commits.isCommit
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
-  val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
-  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit) +& fuseCommitCnt
+  val fuseCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.debug_fusionNum.getOrElse(0.U), 0.U) }.reduce(_ +& _), isCommit)
+  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(instrSizeCommit).map { case (v, instrSize) => Mux(v, instrSize, 0.U) }.reduce(_ +& _), isCommit)
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
   when(isCommitReg){
@@ -1256,7 +1284,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     traceBlocks(i).bits.ftqIdx.foreach(_ := rawInfo(i).ftqIdx)
     traceBlocks(i).bits.ftqOffset.foreach(_ := rawInfo(i).ftqOffset)
     traceBlockInPipe(i).itype := rawInfo(i).traceBlockInPipe.itype
-    traceBlockInPipe(i).iretire := rawInfo(i).traceBlockInPipe.iretire
+    traceBlockInPipe(i).iretire := iretireCommit(i)
     traceBlockInPipe(i).ilastsize := rawInfo(i).traceBlockInPipe.ilastsize
     traceValids(i) := io.commits.isCommit && io.commits.commitValid(i)
     // exception only occur in block(0).
@@ -1368,11 +1396,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
   XSPerfAccumulate("waitStoreCycle", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
   XSPerfAccumulate("robHeadPC", io.commits.info(0).debug_pc.getOrElse(0.U))
-  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.instrSize > 1.U }))
-  (2 to RenameWidth).foreach(i =>
-    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => io.commits.isCommit && valid && info.instrSize === i.U }))
+  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize > 1.U }))
+  (1 to RenameWidth).foreach(i =>
+    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
   )
-  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => Mux(io.commits.isCommit && valid && info.instrSize > 1.U, info.instrSize, 0.U) }.reduce(_ +& _))
+  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
   val dispatchLatency = commitDebugUop.map(uop => uop.debugInfo.dispatchTime - uop.debugInfo.renameTime)
   val enqRsLatency = commitDebugUop.map(uop => uop.debugInfo.enqRsTime - uop.debugInfo.dispatchTime)
   val selectLatency = commitDebugUop.map(uop => uop.debugInfo.selectTime - uop.debugInfo.enqRsTime)
@@ -1501,6 +1529,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     for (i <- 0 until CommitWidth) {
       val uop = commitDebugUop(i)
       val commitInfo = io.commits.info(i)
+      val instrSize = instrSizeCommit(i)
       val ptr = deqPtrVec(i).value
       val exuOut = dt_exuDebug(ptr)
       val eliminatedMove = dt_eliminatedMove(ptr)
@@ -1522,9 +1551,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.wpdest := commitInfo.debug_pdest.get
       difftest.wdest := Mux(isVLoad, instr.VD, commitInfo.debug_ldest.get)
       difftest.otherwpdest := debug_VecOtherPdest(ptr)
-      difftest.nFused := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+      difftest.nFused := instrSize - 1.U
       when(difftest.valid) {
-        assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
+        assert(instrSize >= 1.U)
       }
       if (env.EnableDifftest) {
         val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)

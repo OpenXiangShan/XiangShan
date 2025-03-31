@@ -19,6 +19,7 @@ package xiangshan.backend.rename
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode.TruthTable
 import utility._
 import utils._
 import xiangshan._
@@ -53,6 +54,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val singleStep = Input(Bool())
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new DecodedInst)))
+    // valid vec not clear by fusion(used by compress)
+    val validVec = Vec(RenameWidth, Input(Bool()))
+    val isFusionVec = Vec(RenameWidth, Input(Bool()))
+    val fusionCross2FtqVec = Vec(RenameWidth, Input(Bool()))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
     // ssit read result
     val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
@@ -165,16 +170,36 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
 
-  compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
-    sink.valid := source.valid && !io.singleStep
+  val isLastFtqVec = io.in.map(_.bits.lastInFtqEntry)
+  val isFusionVec = io.isFusionVec
+  val canRobCompressVec = io.in.map(_.bits.canRobCompress)
+  // count crossftq num in may same robentry
+  val crossFtqNumVec = Wire(Vec(RenameWidth, Bool()))
+  // identify cross odd ftqentry
+  val oddFtqVec = Wire(Vec(RenameWidth, Bool()))
+  val fusionValidVec = isFusionVec.zip(io.fusionCross2FtqVec).map { case (isFusion, cross2Ftq) => isFusion & !cross2Ftq }
+    for (i <- 0 until RenameWidth) {
+    if (i == 0) {
+      crossFtqNumVec(i) := canRobCompressVec(i) && isLastFtqVec(i)
+      oddFtqVec(i) := false.B
+    } else {
+      crossFtqNumVec(i) := (crossFtqNumVec(i - 1) ^ isLastFtqVec(i)) && canRobCompressVec(i)
+      oddFtqVec(i) := crossFtqNumVec(i - 1) && isLastFtqVec(i)
+    }
+  }
+  dontTouch(crossFtqNumVec)
+  dontTouch(oddFtqVec)
+  compressUnit.io.in.zip(io.in).zip(io.validVec).foreach{ case((sink, source), valid) =>
+    sink.valid := valid && !io.singleStep
     sink.bits := source.bits
   }
+  compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
   val compressMasksVec = compressUnit.io.out.masks
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.zip(needRobFlags).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
+  val validCount = PopCount(io.in.zip(needRobFlags).zip(io.validVec).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = GatedValidRegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
@@ -279,6 +304,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
+  val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+
   io.out.zipWithIndex.foreach{ case (o, i) =>
     o.bits.debug_seqNum := io.in(i).bits.debug_seqNum
   }
@@ -315,6 +342,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitBit := io.waittable(i)
 
     uops(i).replayInst := false.B // set by IQ or MemQ
+    uops(i).crossFtq := false.B
+    uops(i).crossFtqCommit := 0.U
+    uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
+    uops(i).stdwriteNeed := false.B
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
@@ -343,8 +374,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !io.in(0).valid || canOut
 
-    uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
-    uops(i).instrSize := instrSizesVec(i)
+    uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
+    instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
+    uops(i).fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse))
     val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numUops := 0.U
@@ -352,17 +384,37 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     if (i > 0) {
       when(!needRobFlags(i - 1)) {
+        val numFusion = PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+        val numuops = instrSizesVec(i) - numFusion
+        dontTouch(numFusion)
+        dontTouch(numuops)
         uops(i).firstUop := false.B
         uops(i).ftqPtr := uops(i - 1).ftqPtr
         uops(i).ftqOffset := uops(i - 1).ftqOffset
-        uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
-        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
+        uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
-      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
+      uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+      if (i < RenameWidth - 1) {
+        uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
+        uops(i).crossFtq := uops(i + 1).crossFtq
+        uops(i).stdwriteNeed := uops(i + 1).stdwriteNeed
+      }
+    }.elsewhen(needRobFlags(i)) {
+      uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
+      uops(i).crossFtq := uops(i).crossFtqCommit(1) || (uops(i).crossFtqCommit(0) && !isLastFtqVec(i))
+      uops(i).stdwriteNeed := FuType.isStore(uops(i).fuType)
+    }
+    if (i < RenameWidth - 1){
+      when(!needRobFlags(i)) {
+        uops(i).commitType := uops(i + 1).commitType
+        // for store/load/brh/jmp need to flush pipe if compress rob should store the last predecodeinfo
+        uops(i).preDecodeInfo.isRVC := uops(i + 1).preDecodeInfo.isRVC
+      }
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
@@ -460,48 +512,64 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
    * trace begin
    */
-  // note: fusionInst can't robcompress
   val inVec = io.in.map(_.bits)
   val isRVCVec = inVec.map(_.preDecodeInfo.isRVC)
-  val isFusionVec = inVec.map(_.commitType).map(ctype => CommitType.isFused(ctype))
-
-  val canRobCompressVec = compressUnit.io.out.canCompressVec
-  val iLastSizeVec = isRVCVec.map(isRVC => Mux(isRVC, Ilastsize.HalfWord, Ilastsize.Word))
-  val halfWordNumVec = isRVCVec.map(isRVC => Mux(isRVC, 1.U, 2.U))
-  val halfWordNumMatrix = (0 until RenameWidth).map(
-    i => compressMasksVec(i).asBools.zipWithIndex.map{ case(mask, j) =>
-      Mux(mask, halfWordNumVec(j), 0.U)
+  val nonRVCNumVec = (0 until RenameWidth).map{
+    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
+      case (mask, isRVC) => (mask && !isRVC).asUInt
     }
+  }
+
+  /*
+  encode: instrNum, nonRVCNum => commitinfo.iretire
+  (instrNum((log2Ceil(RenameWidth + 1)).W), nonRVCNum(IretireWidthInPipe.W), encode(IretireWidthEncode.W))
+  val instrSizeTable = Seq(
+    (1, 0, 1), (1, 1, 2),
+    (2, 0, 3), (2, 1, 4), (2, 2, 5),
+    (3, 0, 6), (3, 1, 7), (3, 2, 8), (3, 3, 9),
+    (4, 0, 10), (4, 1, 11), (4, 2, 12), (4, 3, 13), (4, 4, 14),
+    (5, 0, 15), (5, 1, 16), (5, 2, 17), (5, 3, 18), (5, 4, 19), (5, 5, 20),
+    (6, 0, 21), (6, 1, 22), (6, 2, 23), (6, 3, 24), (6, 4, 25), (6, 5, 26), (6, 6, 27),
   )
+   */
+
+  val instrSizeTable = (1 to RenameWidth).map{ instrNum =>
+    (0 to instrNum).map( nonRVCNum => (instrNum, nonRVCNum) )
+  }.flatten
 
   for (i <- 0 until RenameWidth) {
     // iretire
-    uops(i).traceBlockInPipe.iretire := Mux(canRobCompressVec(i),
-      halfWordNumMatrix(i).reduce(_ +& _),
-      (if(i < RenameWidth -1) Mux(isFusionVec(i), halfWordNumVec(i+1), 0.U) else 0.U) +& halfWordNumVec(i)
+    val nonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
+    nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
+    uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
+      (instrSize(i) ## nonRVCNum),
+      TruthTable(
+        instrSizeTable.zipWithIndex.map { case (table, encode) =>
+          (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
+            BitPat((encode + 1).U(IretireWidthEncoded.W)))
+        },
+        BitPat.N(IretireWidthEncoded)
+      )
     )
-
     // ilastsize
-    val tmp = i
-    val lastIsRVC = WireInit(false.B)
-    (tmp until RenameWidth).map { j =>
-      when(compressMasksVec(i)(j)) {
-        lastIsRVC := io.in(j).bits.preDecodeInfo.isRVC
+    val lastIsRVC = isRVCVec(i)
+    when (!needRobFlags(i)) {
+      if (i + 1 < RenameWidth) {
+        uops(i).traceBlockInPipe.ilastsize := uops(i + 1).traceBlockInPipe.ilastsize
+        uops(i).traceBlockInPipe.itype := uops(i + 1).traceBlockInPipe.itype
       }
+    }.elsewhen(needRobFlags(i)) {
+      uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
+      
+      // CSR systemop instruction excluding ebreak & ecall
+      val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
+      val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
+      uops(i).traceBlockInPipe.itype := Mux(
+        isXret,
+        Itype.ExpIntReturn,
+        Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+      )
     }
-    uops(i).traceBlockInPipe.ilastsize := Mux(canRobCompressVec(i),
-      Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
-      (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
-    )
-
-    // CSR systemop instruction excluding ebreak & ecall
-    val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
-    val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
-    uops(i).traceBlockInPipe.itype := Mux(
-      isXret,
-      Itype.ExpIntReturn,
-      Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
-    )
   }
   /**
    * trace end
@@ -607,6 +675,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
     dontTouch(genSnapshot)
+    fusionValidVec.foreach{ fusionValid =>
+      dontTouch(fusionValid)
+    }
   }
   intFreeList.io.snpt := io.snpt
   fpFreeList.io.snpt := io.snpt
