@@ -35,7 +35,7 @@ trait FauFTBParams extends HasXSParameter with HasBPUConst {
   def BR_OFFSET_LEN  = 12
   def JMP_OFFSET_LEN = 20
 
-  def getTag(pc: UInt) = pc(tagSize + instOffsetBits - 1, instOffsetBits)
+  def getTag(pc: PrunedAddr): UInt = pc(tagSize + instOffsetBits - 1, instOffsetBits)
 }
 
 class FauFTBEntry(implicit p: Parameters) extends FTBEntry()(p) {}

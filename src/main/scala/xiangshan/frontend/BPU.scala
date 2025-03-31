@@ -107,9 +107,9 @@ trait BPUUtils extends HasXSParameter {
     )
   }
 
-  def getFallThroughAddr(start: UInt, carry: Bool, pft: UInt) = {
-    val higher = start.head(VAddrBits - log2Ceil(PredictWidth) - instOffsetBits)
-    Cat(Mux(carry, higher + 1.U, higher), pft, 0.U(instOffsetBits.W))
+  def getFallThroughAddr(start: PrunedAddr, carry: Bool, pft: UInt): PrunedAddr = {
+    val higher = start(VAddrBits - 1, log2Ceil(PredictWidth) + instOffsetBits)
+    PrunedAddrInit(Cat(Mux(carry, higher + 1.U, higher), pft, 0.U(instOffsetBits.W)))
   }
 
   def foldTag(tag: UInt, l: Int): UInt = {
@@ -122,7 +122,7 @@ trait BPUUtils extends HasXSParameter {
 class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
 
-  val s0_pc = Vec(numDup, UInt(VAddrBits.W))
+  val s0_pc = Vec(numDup, PrunedAddr(VAddrBits))
 
   val folded_hist    = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
   val s1_folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
@@ -139,11 +139,11 @@ class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUCon
 class BasePredictorOutput(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val reset_vector = Input(UInt(PAddrBits.W))
+  val reset_vector = Input(PrunedAddr(PAddrBits))
   val in           = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
-  // val flush_out = Valid(UInt(VAddrBits.W))
+  // val flush_out = Valid(PrunedAddr(VAddrBits))
 
   val fauftb_entry_in      = Input(new FTBEntry)
   val fauftb_entry_hit_in  = Input(Bool())
@@ -199,16 +199,20 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   when(modified_reset) {
     s1_pc_dup.map(_ := io.reset_vector)
   }
+  //  FIXME: Potential problems here. Ideally, we should modify SegmentedAddrNext to support PrunedAddr.
+  //   However, we are not doing this now because SegmentedAddrNext is in submodule.
+  //   This should be fixed after PrunedAddr is merged to master.
+  // TODO: Check the generated Verilog whether this works or not
   val s2_pc_dup = s1_pc_dup.zip(io.s1_fire).map { case (s1_pc, s1_fire) =>
-    SegmentedAddrNext(s1_pc, pcSegments, s1_fire, Some("s2_pc"))
+    PrunedAddrInit(SegmentedAddrNext(s1_pc.toUInt, pcSegments, s1_fire, Some("s2_pc")).getAddr())
   }
   val s3_pc_dup = s2_pc_dup.zip(io.s2_fire).map { case (s2_pc, s2_fire) =>
-    SegmentedAddrNext(s2_pc, s2_fire, Some("s3_pc"))
+    PrunedAddrInit(SegmentedAddrNext(s2_pc.toUInt, pcSegments, s2_fire, Some("s3_pc")).getAddr())
   }
 
   io.out.s1.pc := s1_pc_dup
-  io.out.s2.pc := s2_pc_dup.map(_.getAddr())
-  io.out.s3.pc := s3_pc_dup.map(_.getAddr())
+  io.out.s2.pc := s2_pc_dup
+  io.out.s3.pc := s3_pc_dup
 
   val perfEvents: Seq[(String, UInt)] = Seq()
 
@@ -229,7 +233,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq   = new BpuToFtqIO()
   val ftq_to_bpu   = Flipped(new FtqToBpuIO)
   val ctrl         = Input(new BPUCtrl)
-  val reset_vector = Input(UInt(PAddrBits.W))
+  val reset_vector = Input(PrunedAddr(PAddrBits))
 }
 
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
@@ -286,10 +290,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_ready_dup, s2_ready_dup, s3_ready_dup                                  = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup = dup(WireInit(0.U(VAddrBits.W)))
-  val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map { case (s0_pc, s0_stall) =>
-    RegEnable(s0_pc, !s0_stall)
-  }
+  val s0_pc_dup     = dup(PrunedAddrInit(0.U(VAddrBits.W)))
+  val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map { case (s0_pc, s0_stall) => RegEnable(s0_pc, !s0_stall) }
   when(modified_reset) {
     s0_pc_reg_dup.map(_ := io.reset_vector)
   }
@@ -324,7 +326,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s3_ahead_fh_oldest_bits_dup =
     RegEnable(s2_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s2_fire_dup(1))
 
-  val npcGen_dup         = Seq.tabulate(numDup)(n => new PhyPriorityMuxGenerator[UInt])
+  val npcGen_dup         = Seq.tabulate(numDup)(n => new PhyPriorityMuxGenerator[PrunedAddr])
   val foldedGhGen_dup    = Seq.tabulate(numDup)(n => new PhyPriorityMuxGenerator[AllFoldedHistories])
   val ghistPtrGen_dup    = Seq.tabulate(numDup)(n => new PhyPriorityMuxGenerator[CGHPtr])
   val lastBrNumOHGen_dup = Seq.tabulate(numDup)(n => new PhyPriorityMuxGenerator[UInt])
@@ -596,7 +598,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   class PreviousPredInfo extends Bundle {
     val hit         = Vec(numDup, Bool())
-    val target      = Vec(numDup, UInt(VAddrBits.W))
+    val target      = Vec(numDup, PrunedAddr(VAddrBits))
     val lastBrPosOH = Vec(numDup, Vec(numBr + 1, Bool()))
     val taken       = Vec(numDup, Bool())
     val takenMask   = Vec(numDup, Vec(numBr, Bool()))
@@ -905,12 +907,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.update            := io.ftq_to_bpu.update
   predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)
   // Move the update pc registers out of predictors.
-  predictors.io.update.bits.pc := SegmentedAddrNext(
-    io.ftq_to_bpu.update.bits.pc,
+  predictors.io.update.bits.pc := PrunedAddrInit(SegmentedAddrNext(
+    io.ftq_to_bpu.update.bits.pc.toUInt,
     pcSegments,
     io.ftq_to_bpu.update.valid,
     Some("predictors_io_update_pc")
-  ).getAddr()
+  ).getAddr())
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)
@@ -1036,7 +1038,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // val updatedGh = oldGh.update(shift, taken && addIntoHist)
   for ((npcGen, do_redirect) <- npcGen_dup zip do_redirect_dup)
-    npcGen.register(do_redirect.valid, do_redirect.bits.cfiUpdate.target, Some("redirect_target"), 2)
+    npcGen.register(do_redirect.valid, PrunedAddrInit(do_redirect.bits.cfiUpdate.target), Some("redirect_target"), 2)
   for (((foldedGhGen, do_redirect), updated_fh) <- foldedGhGen_dup zip do_redirect_dup zip updated_fh_dup)
     foldedGhGen.register(do_redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
   for (((ghistPtrGen, do_redirect), updated_ptr) <- ghistPtrGen_dup zip do_redirect_dup zip updated_ptr_dup)
@@ -1172,7 +1174,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")
   XSDebug(io.ftq_to_bpu.redirect.valid, p"Redirect from ftq\n")
 
-  XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire_dup(0), s0_pc_dup(0))
+  XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire_dup(0), s0_pc_dup(0).toUInt)
   XSDebug(
     "[BP1] v=%d r=%d cr=%d fire=%d             flush=%d pc=%x\n",
     s1_valid_dup(0),
@@ -1180,7 +1182,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s1_components_ready_dup(0),
     s1_fire_dup(0),
     s1_flush_dup(0),
-    s1_pc
+    s1_pc.toUInt
   )
   XSDebug(
     "[BP2] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
@@ -1190,7 +1192,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s2_fire_dup(0),
     s2_redirect_dup(0),
     s2_flush_dup(0),
-    s2_pc
+    s2_pc.toUInt
   )
   XSDebug(
     "[BP3] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
@@ -1200,11 +1202,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s3_fire_dup(0),
     s3_redirect_dup(0),
     s3_flush_dup(0),
-    s3_pc
+    s3_pc.toUInt
   )
   XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
-  XSDebug("resp.s1.target=%x\n", resp.s1.getTarget(0))
-  XSDebug("resp.s2.target=%x\n", resp.s2.getTarget(0))
+  XSDebug("resp.s1.target=%x\n", resp.s1.getTarget(0).toUInt)
+  XSDebug("resp.s2.target=%x\n", resp.s2.getTarget(0).toUInt)
   // XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
   // XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
   // XSDebug("s2_ghist: %b\n", s2_ghist.predHist)

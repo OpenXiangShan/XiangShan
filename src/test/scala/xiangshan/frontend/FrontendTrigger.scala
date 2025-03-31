@@ -7,10 +7,11 @@ import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
 import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
+import xiangshan.frontend.PrunedAddrInit
 
 
 class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
-  val defaultConfig = (new DefaultConfig).alterPartial {
+  implicit val defaultConfig: org.chipsalliance.cde.config.Parameters = (new DefaultConfig).alterPartial {
     case XSCoreParamsKey => XSCoreParameters()
   }.alter((site, here, up) => {
     case LogUtilsOptionsKey => LogUtilsOptions(
@@ -24,7 +25,7 @@ class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Ma
 
   behavior of "FrontendTrigger"
   it should "run" in {
-    test(new FrontendTrigger()(defaultConfig)).withAnnotations(Seq(VerilatorBackendAnnotation)) {
+    test(new FrontendTrigger()).withAnnotations(Seq(VerilatorBackendAnnotation)) {
       m: FrontendTrigger =>
         m.io.frontendTrigger.debugMode.poke(false.B)
         m.io.frontendTrigger.tEnableVec.map(_.poke(false.B))
@@ -35,7 +36,7 @@ class FrontendTriggerTest extends AnyFlatSpec with ChiselScalatestTester with Ma
         m.io.frontendTrigger.tUpdate.bits.tdata.matchType.poke(3.U)
         m.io.frontendTrigger.tUpdate.bits.tdata.tdata2.poke("h1234_567f".U)
         m.io.pc.zipWithIndex.map { case (pc, i) =>
-          pc.poke((0x1234_5676 + 2 * i).U)
+          pc.poke(PrunedAddrInit((0x1234_5676 + 2 * i).U))
         }
         for (_ <- 0 until 4) { m.clock.step() }
         m.io.triggered.zipWithIndex.map { case (action, i) =>

@@ -22,6 +22,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.{HasXSParameter, XSBundle, XSModule}
+import xiangshan.frontend.PrunedAddr
 
 // this file contains common building blocks that can be shared by ICache and DCache
 // this is the common parameter base for L1 ICache and L1 DCache
@@ -79,9 +80,11 @@ trait HasL1CacheParameters extends HasXSParameter
   def refillWords = refillBytes / wordBytes
 
   def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt
+  def get_phy_tag(paddr: PrunedAddr): UInt = (paddr >> pgUntagBits).asUInt
   def get_vir_tag(vaddr: UInt) = (vaddr >> untagBits).asUInt
   def get_tag(addr: UInt) = get_phy_tag(addr)
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
+  def get_idx(addr: PrunedAddr) = addr(untagBits-1, blockOffBits)
   def get_untag(addr: UInt) = addr(pgUntagBits-1, 0)
   def get_block(addr: UInt) = addr >> blockOffBits
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits

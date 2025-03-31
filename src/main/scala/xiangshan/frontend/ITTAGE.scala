@@ -53,8 +53,8 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
     ctr < (1 << (ctrBits - 1)).U
   val UAONA_bits = 4
 
-  def targetGetRegion(target: UInt): UInt = target(VAddrBits - 1, TargetOffsetBits)
-  def targetGetOffset(target: UInt): UInt = target(TargetOffsetBits - 1, 0)
+  def targetGetRegion(target: PrunedAddr): UInt = target(VAddrBits - 1, TargetOffsetBits)
+  def targetGetOffset(target: PrunedAddr): UInt = target(TargetOffsetBits - 1, 0)
 
   lazy val TotalBits: Int = ITTageTableInfos.map {
     case (s, h, t) => {
@@ -70,12 +70,12 @@ abstract class ITTageModule(implicit p: Parameters)
     extends XSModule with ITTageParams with BPUUtils {}
 
 class ITTageReq(implicit p: Parameters) extends ITTageBundle {
-  val pc          = UInt(VAddrBits.W)
+  val pc          = PrunedAddr(VAddrBits)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
 }
 
 class ITTageOffset(implicit p: Parameters) extends ITTageBundle {
-  val offset      = UInt(TargetOffsetBits.W)
+  val offset      = PrunedAddr(TargetOffsetBits)
   val pointer     = UInt(log2Ceil(RegionNums).W)
   val usePCRegion = Bool()
 }
@@ -87,7 +87,7 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 }
 
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
-  val pc    = UInt(VAddrBits.W)
+  val pc    = PrunedAddr(VAddrBits)
   val ghist = UInt(HistoryLength.W)
   // update tag and ctr
   val valid   = Bool()
@@ -111,13 +111,13 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams {
   val providerCtr       = UInt(ITTageCtrBits.W)
   val altProviderCtr    = UInt(ITTageCtrBits.W)
   val allocate          = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
-  val providerTarget    = UInt(VAddrBits.W)
-  val altProviderTarget = UInt(VAddrBits.W)
+  val providerTarget    = PrunedAddr(VAddrBits)
+  val altProviderTarget = PrunedAddr(VAddrBits)
   val pred_cycle        = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 
   override def toPrintable =
-    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
-      p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget)})"
+    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget.toUInt)}), " +
+      p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget.toUInt)})"
 }
 
 class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
@@ -250,13 +250,15 @@ class ITTageTable(
     val ctr           = UInt(ITTageCtrBits.W)
     val target_offset = new ITTageOffset()
     val useful        = Bool() // Due to the bitMask the useful bit needs to be at the lowest bit
+    val paddingBit    = UInt(1.W)
   }
 
+  // The least significant bit of offset is pruned
   val ittageEntrySz = 1 + tagLen + ITTageCtrBits + ITTageUsBits + TargetOffsetBits + log2Ceil(RegionNums) + 1
   require(ittageEntrySz == (new ITTageEntry).getWidth)
 
   // pc is start address of basic block, most 2 branch inst in block
-  def getUnhashedIdx(pc: UInt): UInt = (pc >> instOffsetBits).asUInt
+  def getUnhashedIdx(pc: PrunedAddr): UInt = (pc >> instOffsetBits).asUInt
 
   val s0_valid        = io.req.valid
   val s0_pc           = io.req.bits.pc
@@ -363,6 +365,7 @@ class ITTageTable(
     io.update.target_offset,
     io.update.old_target_offset
   )
+  update_wdata.paddingBit := DontCare
 
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
@@ -375,24 +378,24 @@ class ITTageTable(
     val tag = s0_tag
     XSDebug(
       io.req.fire,
-      p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+      p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.pc.toUInt)}, " +
         p"idx=$idx, tag=$tag\n"
     )
     XSDebug(
       RegNext(io.req.fire) && s1_req_rhit,
       p"ITTageTableResp: idx=$s1_idx, hit:${s1_req_rhit}, " +
-        p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target_offset.offset)}\n"
+        p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target_offset.offset.toUInt)}\n"
     )
     XSDebug(
       io.update.valid,
-      p"update ITTAGE Table: pc:${Hexadecimal(u.pc)}}, " +
+      p"update ITTAGE Table: pc:${Hexadecimal(u.pc.toUInt)}}, " +
         p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCtr}, " +
-        p"target:${Hexadecimal(u.target_offset.offset)}, old_target:${Hexadecimal(u.old_target_offset.offset)}\n"
+        p"target:${Hexadecimal(u.target_offset.offset.toUInt)}, old_target:${Hexadecimal(u.old_target_offset.offset.toUInt)}\n"
     )
     XSDebug(
       io.update.valid,
       p"update ITTAGE Table: writing tag:${update_tag}, " +
-        p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target_offset.offset)}" +
+        p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target_offset.offset.toUInt)}" +
         p" in idx $update_idx\n"
     )
     XSDebug(RegNext(io.req.fire) && !s1_req_rhit, "TageTableResp: no hits!\n")
@@ -443,9 +446,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
   val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire(3))
 
-  val s2_tageTarget        = Wire(UInt(VAddrBits.W))
-  val s2_providerTarget    = Wire(UInt(VAddrBits.W))
-  val s2_altProviderTarget = Wire(UInt(VAddrBits.W))
+  val s2_tageTarget        = Wire(PrunedAddr(VAddrBits))
+  val s2_providerTarget    = Wire(PrunedAddr(VAddrBits))
+  val s2_altProviderTarget = Wire(PrunedAddr(VAddrBits))
   val s2_provided          = Wire(Bool())
   val s2_provider          = Wire(UInt(log2Ceil(ITTageNTables).W))
   val s2_altProvided       = Wire(Bool())
@@ -576,22 +579,22 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     req_pointer := region_r_target_offset(i).pointer
   }
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
-  val region_targets = Wire(Vec(ITTageNTables, UInt(VAddrBits.W)))
+  val region_targets = Wire(Vec(ITTageNTables, PrunedAddr(VAddrBits)))
   for (i <- 0 until ITTageNTables) {
-    region_targets(i) := Mux(
+    region_targets(i) := PrunedAddrInit(Mux(
       rTable.io.resp_hit(i) && !region_r_target_offset(i).usePCRegion,
-      Cat(rTable.io.resp_region(i), region_r_target_offset(i).offset),
-      Cat(targetGetRegion(s2_pc_dup(0).getAddr()), region_r_target_offset(i).offset)
-    )
+      Cat(rTable.io.resp_region(i), region_r_target_offset(i).offset.toUInt),
+      Cat(targetGetRegion(s2_pc_dup(0)), region_r_target_offset(i).offset.toUInt)
+    ))
   }
 
-  val providerCatTarget = providerInfo.maskTarget.zipWithIndex.map {
-    case (mask, i) => mask & region_targets(i)
-  }.reduce(_ | _)
+  val providerCatTarget = PrunedAddrInit(providerInfo.maskTarget.zipWithIndex.map {
+    case (mask, i) => mask & region_targets(i).toUInt
+  }.reduce(_ | _))
 
-  val altproviderCatTarget = altProviderInfo.maskTarget.zipWithIndex.map {
-    case (mask, i) => mask & region_targets(i)
-  }.reduce(_ | _)
+  val altproviderCatTarget = PrunedAddrInit(altProviderInfo.maskTarget.zipWithIndex.map {
+    case (mask, i) => mask & region_targets(i).toUInt
+  }.reduce(_ | _))
 
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerCatTarget),
@@ -811,9 +814,14 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   if (debug) {
     val s2_resps_regs = RegEnable(s2_resps, io.s2_fire(3))
-    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3))
-    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1)
-    XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n", debug_pc_s2, io.out.s2.getTarget(3), s2_provided)
+    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3).toUInt)
+    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1.toUInt)
+    XSDebug(
+      "s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n",
+      debug_pc_s2.toUInt,
+      io.out.s2.getTarget(3).toUInt,
+      s2_provided
+    )
     for (i <- 0 until ITTageNTables) {
       XSDebug(
         "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
@@ -821,11 +829,11 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         VecInit(s2_resps_regs(i).valid).asUInt,
         s2_resps_regs(i).bits.ctr,
         s2_resps_regs(i).bits.u,
-        s2_resps_regs(i).bits.target_offset.offset
+        s2_resps_regs(i).bits.target_offset.offset.toUInt
       )
     }
   }
-  XSDebug(updateValid, p"pc: ${Hexadecimal(update_pc)}, target: ${Hexadecimal(update.full_target)}\n")
+  XSDebug(updateValid, p"pc: ${Hexadecimal(update_pc.toUInt)}, target: ${Hexadecimal(update.full_target.toUInt)}\n")
   XSDebug(updateValid, updateMeta.toPrintable + p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
 
