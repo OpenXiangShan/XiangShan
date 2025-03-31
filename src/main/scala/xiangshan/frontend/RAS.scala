@@ -27,7 +27,7 @@ import scala.{Tuple2 => &}
 
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
-    val retAddr = UInt(VAddrBits.W)
+    val retAddr = PrunedAddr(VAddrBits)
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
@@ -45,14 +45,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val io = IO(new Bundle {
       val push_valid = Input(Bool())
       val pop_valid = Input(Bool())
-      val spec_new_addr = Input(UInt(VAddrBits.W))
+      val spec_new_addr = Input(PrunedAddr(VAddrBits))
 
       val recover_sp = Input(UInt(log2Up(rasSize).W))
       val recover_top = Input(new RASEntry)
       val recover_valid = Input(Bool())
       val recover_push = Input(Bool())
       val recover_pop = Input(Bool())
-      val recover_new_addr = Input(UInt(VAddrBits.W))
+      val recover_new_addr = Input(PrunedAddr(VAddrBits))
 
       val sp = Output(UInt(log2Up(rasSize).W))
       val top = Output(new RASEntry)
