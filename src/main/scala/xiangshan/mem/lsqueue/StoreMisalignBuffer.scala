@@ -156,11 +156,21 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val canEnq = !req_valid && !reqRedirect && reqSelValid
   val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
 
+  val s2_reqSelPort = RegNext(reqSelPort)
+  val req_can_do = (0 until enqPortNum).map {
+    case i =>
+      !io.enq(i).revoke && s2_reqSelPort === i.U
+  }.reduce(_|_)
+
   when(canEnq) {
     connectSamePort(req, reqSelBits)
     req.portIndex := reqSelPort
     req_valid := true.B
   }
+  when (req_valid && req_can_do) {
+    req_valid := false.B
+  }
+
   val cross4KBPageEnq = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
     when(
@@ -216,15 +226,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.sqControl.toStoreQueue.withSameUop := io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx && io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx && req.isvec && robMatch && isCrossPage
 
   //state transition
-  val s2_reqSelPort = RegNext(reqSelPort)
-  val req_can_do = (0 until enqPortNum).map {
-    case i =>
-      !io.enq(i).revoke && s2_reqSelPort === i.U
-  }.reduce(_|_)
-
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary) {
+      when(cross4KBPageBoundary && req_can_do) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
