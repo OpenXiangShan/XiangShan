@@ -355,7 +355,8 @@ case class XSCoreParameters
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
-  hasMbist:Boolean = false
+  hasMbist: Boolean = false,
+  wfiResume: Boolean = true
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -907,4 +908,6 @@ trait HasXSParameter {
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
   def hasMbist               = coreParams.hasMbist
+
+  def wfiResume              = coreParams.wfiResume
 }

@@ -24,6 +24,7 @@ import system.SoCParamsKey
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.util.AsyncQueueParams
+import xiangshan.XSTileKey
 
 case class YamlConfig(
   PmemRanges: Option[List[MemoryRange]],
@@ -31,7 +32,8 @@ case class YamlConfig(
   EnableCHIAsyncBridge: Option[Boolean],
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
-  DebugModuleBaseAddr: Option[BigInt]
+  DebugModuleBaseAddr: Option[BigInt],
+  WFIResume: Option[Boolean]
 )
 
 object YamlParser {
@@ -69,6 +71,11 @@ object YamlParser {
     yamlConfig.DebugModuleBaseAddr.foreach { addr =>
       newConfig = newConfig.alter((site, here, up) => {
         case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = addr))
+      })
+    }
+    yamlConfig.EnableCHIAsyncBridge.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = enable))
       })
     }
     newConfig
