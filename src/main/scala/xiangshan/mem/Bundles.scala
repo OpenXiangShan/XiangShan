@@ -359,7 +359,7 @@ object Bundles {
   }
 
   class MisalignBufferEnqIO(implicit p: Parameters) extends XSBundle {
-    val req = DecoupledIO(new LsPipelineBundle)
+    val req = DecoupledIO(new LqWriteBundle)
     val revoke = Output(Bool())
   }
 }

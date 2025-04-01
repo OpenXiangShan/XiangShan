@@ -414,10 +414,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                       GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
                       !s1_trigger_breakpoint && !s1_trigger_debug_mode
   val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
-    !s1_frm_mabuf && !s1_isCbo && s1_in.s0_isMisalign && !s1_in.s0_misalignWith16Byte &&
+    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
     GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
   io.misalign_enq.req.valid := s1_toMisalignBufferValid
-  io.misalign_enq.req.bits := s1_in
+  io.misalign_enq.req.bits.fromLsPipelineBundle(s1_in)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -486,7 +486,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
   val s2_misalignBufferNack = !io.misalign_enq.revoke &&
-    RegEnable(s1_toMisalignBufferValid && !io.misalign_enq.ready, false.B, s1_fire)
+    RegEnable(s1_toMisalignBufferValid && !io.misalign_enq.req.ready, false.B, s1_fire)
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)

@@ -191,7 +191,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val reqSelCanEnq = UIntToOH(reqSelPort)
 
   io.enq.zipWithIndex.map{
-    case (reqPort, index) => reqPort.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
+    case (reqPort, index) => reqPort.req.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
   }
 
   io.toVecStoreMergeBuffer.zipWithIndex.map{
