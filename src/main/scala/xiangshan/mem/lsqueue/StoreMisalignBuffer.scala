@@ -167,7 +167,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     req.portIndex := reqSelPort
     req_valid := true.B
   }
-  when (req_valid && req_can_do) {
+  when (req_valid && !req_can_do) {
     req_valid := false.B
   }
 
