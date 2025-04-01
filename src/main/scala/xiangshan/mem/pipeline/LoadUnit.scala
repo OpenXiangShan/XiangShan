@@ -199,7 +199,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_rep_out = Decoupled(new LqWriteBundle)
 
     // to misalign buffer
-    val misalign_buf = Decoupled(new LqWriteBundle)
+    val misalign_enq = Decoupled(new LqWriteBundle)
     val misalign_allow_spec = Input(Bool())
 
     // Load RAR rollback
