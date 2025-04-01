@@ -883,8 +883,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
 
   val fusedVec = (0 until RenameWidth).map{ case i =>
     if (i == 0) false.B
-    else (io.fromRename(i-1).fire && !io.fromRename(i).valid &&
-         CommitType.isFused(io.fromRename(i-1).bits.commitType))
+    else (io.fromRename(i-1).fire && !io.fromRename(i).valid && io.fromRename(i-1).bits.fusionNum =/= 0.U)
   }
 
   val decodeReason = RegNextN(io.stallReason.reason, 2)
