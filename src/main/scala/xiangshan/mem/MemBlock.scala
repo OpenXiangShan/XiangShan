@@ -1241,6 +1241,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // connect misalignBuffer
     storeMisalignBuffer.io.req(i) <> stu.io.misalign_buf
+    storeMisalignBuffer.io.req_can_do(i) <> stu.io.misalign_can_do
 
     if (i == 0) {
       stu.io.misalign_stin  <> storeMisalignBuffer.io.splitStoreReq
@@ -1864,9 +1865,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // For isVirt, mode check is unnecessary, as virt won't be 1 in M-mode.
     // Also, isVirt includes Hyper Insts, which don't care mode either.
 
-    val useBareAddr = 
+    val useBareAddr =
       (isVirt && vsatpNone && hgatpNone) ||
-      (!isVirt && (mode === CSRConst.ModeM)) || 
+      (!isVirt && (mode === CSRConst.ModeM)) ||
       (!isVirt && (mode =/= CSRConst.ModeM) && satpNone)
     val useSv39Addr =
       (isVirt && vsatpSv39) ||
