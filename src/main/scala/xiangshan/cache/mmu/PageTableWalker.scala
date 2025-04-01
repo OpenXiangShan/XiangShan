@@ -160,6 +160,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val stage1Hit = RegEnable(io.req.bits.stage1Hit, io.req.fire)
   val stage1 = RegEnable(io.req.bits.stage1, io.req.fire)
   val hptw_resp_stage2 = Reg(Bool())
+  val first_gvpn_check_fail = RegInit(false.B)
 
   // use accessfault repersent bitmap check failed
   val pte_isAf = Mux(bitmap_enable, pte.isAf() || bitmap_checkfailed, pte.isAf())
@@ -215,7 +216,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     0.U(offLen.W))
   ))
   val gvpn_gpf =
-    !(hptw_pageFault || hptw_accessFault || ((pageFault || ppn_af) && pte_valid)) &&
+    (!(hptw_pageFault || hptw_accessFault || ((pageFault || ppn_af) && pte_valid)) &&
     Mux(
       s2xlate && io.csr.hgatp.mode === Sv39x4,
       full_gvpn(ptePPNLen - 1, GPAddrBitsSv39x4 - offLen) =/= 0.U,
@@ -224,7 +225,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         full_gvpn(ptePPNLen - 1, GPAddrBitsSv48x4 - offLen) =/= 0.U,
         false.B
       )
-    )
+    )) || first_gvpn_check_fail
 
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
@@ -365,6 +366,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       need_last_s2xlate := false.B
       when(check_gpa_high_fail){
         mem_addr_update := true.B
+        first_gvpn_check_fail := true.B
       }.otherwise{
         s_last_hptw_req := false.B
       }
@@ -374,6 +376,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       val check_gpa_high_fail = Mux(io.csr.hgatp.mode === Sv39x4, allstage_gpaddr(allstage_gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(io.csr.hgatp.mode === Sv48x4, allstage_gpaddr(allstage_gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
       when(check_gpa_high_fail){
         mem_addr_update := true.B
+        first_gvpn_check_fail := true.B
       }.otherwise{
         need_last_s2xlate := true.B
         s_hptw_req := false.B
@@ -404,7 +407,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       need_last_s2xlate := false.B
     }
   }
-  
+
   when(io.hptw.req.fire && s_last_hptw_req === false.B) {
     w_last_hptw_resp := false.B
     s_last_hptw_req := true.B
@@ -550,6 +553,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         s_llptw_req := true.B
         mem_addr_update := false.B
         accessFault := false.B
+        first_gvpn_check_fail := false.B
       }
       finish := true.B
     }
@@ -564,6 +568,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_mem_resp := true.B
     accessFault := false.B
     mem_addr_update := false.B
+    first_gvpn_check_fail := false.B
     s_hptw_req := true.B
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
