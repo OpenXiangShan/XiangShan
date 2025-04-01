@@ -96,7 +96,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
+    val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
