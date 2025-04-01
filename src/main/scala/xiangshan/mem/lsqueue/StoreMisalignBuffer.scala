@@ -157,7 +157,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
 
   val s2_reqSelPort = RegNext(reqSelPort)
-  val req_can_do = (0 until enqPortNum).map {
+  val s2_req_can_do = (0 until enqPortNum).map {
     case i =>
       !io.enq(i).revoke && s2_reqSelPort === i.U
   }.reduce(_|_)
@@ -167,7 +167,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     req.portIndex := reqSelPort
     req_valid := true.B
   }
-  when (req_valid && !req_can_do) {
+  when (req_valid && !s2_req_can_do) {
     req_valid := false.B
   }
 
@@ -228,13 +228,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary && req_can_do) {
+      when(cross4KBPageBoundary && s2_req_can_do) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid && req_can_do) {
+        when (req_valid && s2_req_can_do) {
           bufferState := s_split
           isCrossPage := false.B
         }
