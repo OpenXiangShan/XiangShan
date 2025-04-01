@@ -983,7 +983,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
     // connect misalignBuffer
-    loadMisalignBuffer.io.req(i) <> loadUnits(i).io.misalign_buf
+    loadMisalignBuffer.io.enq(i) <> loadUnits(i).io.misalign_enq
 
     if (i == MisalignWBPort) {
       loadUnits(i).io.misalign_ldin  <> loadMisalignBuffer.io.splitLoadReq
@@ -1242,7 +1242,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // connect misalignBuffer
-    storeMisalignBuffer.io.req(i) <> stu.io.misalign_buf
+    storeMisalignBuffer.io.enq(i) <> stu.io.misalign_enq
 
     if (i == 0) {
       stu.io.misalign_stin  <> storeMisalignBuffer.io.splitStoreReq

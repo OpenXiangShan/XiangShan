@@ -358,4 +358,8 @@ object Bundles {
     val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
   }
 
+  class MisalignBufferEnqIO(implicit p: Parameters) extends XSBundle {
+    val req = DecoupledIO(new LsPipelineBundle)
+    val revoke = Output(Bool())
+  }
 }

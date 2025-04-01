@@ -116,7 +116,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(Decoupled(new LqWriteBundle)))
+    val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
     val rob             = Flipped(new RobLsqIO)
     val splitLoadReq    = Decoupled(new LsPipelineBundle)
     val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
@@ -143,18 +143,18 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
   io.loadMisalignFull := req_valid
 
-  (0 until io.req.length).map{i =>
+  (0 until io.enq.length).map{i =>
     if (i == 0) {
-      io.req(0).ready := !req_valid && io.req(0).valid
+      io.enq(0).req.ready := !req_valid && io.enq(0).req.valid
     }
     else {
-      io.req(i).ready := !io.req.take(i).map(_.ready).reduce(_ || _) && !req_valid && io.req(i).valid
+      io.enq(i).req.ready := !io.enq.take(i).map(_.req.ready).reduce(_ || _) && !req_valid && io.enq(i).req.valid
     }
   }
 
 
-  val select_req_bit   = ParallelPriorityMux(io.req.map(_.valid), io.req.map(_.bits))
-  val select_req_valid = io.req.map(_.valid).reduce(_ || _)
+  val select_req_bit   = ParallelPriorityMux(io.enq.map(_.req.valid), io.enq.map(_.req.bits))
+  val select_req_valid = io.enq.map(_.req.valid).reduce(_ || _)
   val canEnqValid = !req_valid && !select_req_bit.uop.robIdx.needFlush(io.redirect) && select_req_valid
   when(canEnqValid) {
     req := select_req_bit
