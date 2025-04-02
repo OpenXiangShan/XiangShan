@@ -96,7 +96,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
-    val req             = Vec(enqPortNum, Flipped(Decoupled(new LsPipelineBundle)))
+    val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
     val rob             = Flipped(new RobLsqIO)
     val splitStoreReq   = Decoupled(new LsPipelineBundle)
     val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
@@ -141,10 +141,10 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // enqueue
   // s1:
-  val s1_req = VecInit(io.req.map(_.bits))
-  val s1_valid = VecInit(io.req.map(x => x.valid))
+  val s1_req = VecInit(io.enq.map(_.req.bits))
+  val s1_valid = VecInit(io.enq.map(x => x.req.valid))
 
-  val s1_index = (0 until io.req.length).map(_.asUInt)
+  val s1_index = (0 until io.enq.length).map(_.asUInt)
   val reqSel = selectOldest(s1_valid, s1_req, s1_index)
 
   val reqSelValid = reqSel._1(0)
@@ -156,15 +156,22 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val canEnq = !req_valid && !reqRedirect && reqSelValid
   val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
 
+  val s2_reqSelValid = GatedRegNext(reqSelValid)
+  val s2_reqSelPort = GatedRegNext(reqSelPort)
+  val s2_misalign_can_split = (0 until enqPortNum).map {
+    case i =>
+      !io.enq(i).revoke && s2_reqSelPort === i.U && s2_reqSelValid
+  }.reduce(_|_)
+
   when(canEnq) {
     connectSamePort(req, reqSelBits)
     req.portIndex := reqSelPort
-    req_valid := !reqSelBits.hasException
+    req_valid := true.B
   }
   val cross4KBPageEnq = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
     when(
-      reqSelValid && !reqSelBits.hasException &&
+      reqSelValid &&
       (isAfter(req.uop.robIdx, reqSelBits.uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSelBits.uop.robIdx) && req.uop.uopIdx > reqSelBits.uop.uopIdx)) &&
       bufferState === s_idle
     ) {
@@ -180,8 +187,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val reqSelCanEnq = UIntToOH(reqSelPort)
 
-  io.req.zipWithIndex.map{
-    case (reqPort, index) => reqPort.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
+  io.enq.zipWithIndex.map{
+    case (reqPort, index) => reqPort.req.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)
   }
 
   io.toVecStoreMergeBuffer.zipWithIndex.map{
@@ -218,18 +225,17 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary) {
+      when(cross4KBPageBoundary && s2_misalign_can_split) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid) {
+        when (req_valid && s2_misalign_can_split) {
           bufferState := s_split
           isCrossPage := false.B
         }
       }
-
     }
 
     is (s_split) {
