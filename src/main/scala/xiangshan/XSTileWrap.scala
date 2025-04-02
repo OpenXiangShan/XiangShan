@@ -26,7 +26,7 @@ import freechips.rocketchip.util._
 import system.HasSoCParameter
 import device.{IMSICAsync, MsiInfoBundle}
 import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
-import utility.sram.SramBroadcastBundle
+import utility.sram.{SramBroadcastBundle, SramMbistBundle}
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
 
@@ -92,8 +92,11 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
       }
-      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val sramTest = new Bundle() {
+        val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
+        val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+        val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
+      }
       val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
       val pwrdown_req_n = Option.when(EnablePowerDown) (Input (Bool()))
@@ -101,9 +104,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
-    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(2, io.dft_reset))
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(2, io.dft_reset)))
-    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(2, io.dft_reset))
+    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(2, io.sramTest.mbistReset))
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(2, io.sramTest.mbistReset)))
+    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(2, io.sramTest.mbistReset))
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
@@ -115,8 +118,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
-    tile.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
-    tile.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
+    tile.module.io.sramTest.mbist.zip(io.sramTest.mbist).foreach({case(a, b) => a := b})
+    tile.module.io.sramTest.mbistReset.zip(io.sramTest.mbistReset).foreach({case(a, b) => a := b})
+    tile.module.io.sramTest.sramCtl.zip(io.sramTest.sramCtl).foreach({case(a, b) => a := b})
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.hartIsInReset := tile.module.io.hartIsInReset
@@ -161,7 +165,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       // Modules are reset one by one
       // reset ----> SYNC --> XSTile
       val resetChain = Seq(Seq(tile.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, io.dft_reset)
+      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, io.sramTest.mbistReset)
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)

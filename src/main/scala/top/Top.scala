@@ -23,14 +23,14 @@ import chisel3.experimental.dataview._
 import difftest.DifftestModule
 import xiangshan._
 import utils._
+import utility._
+import utility.sram.{SramMbistBundle, SramBroadcastBundle}
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.CHILogger
 import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import openLLC.TargetBinder._
 import cc.xiangshan.openncb._
-import utility._
-import utility.sram.SramBroadcastBundle
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
@@ -332,8 +332,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-      core.module.io.dft.foreach(dontTouch(_) := 0.U.asTypeOf(new SramBroadcastBundle))
-      core.module.io.dft_reset.foreach(dontTouch(_) := 0.U.asTypeOf(new DFTResetSignals))
+      core.module.io.sramTest.mbist.foreach(dontTouch(_) := 0.U.asTypeOf(new SramMbistBundle))
+      core.module.io.sramTest.mbistReset.foreach(dontTouch(_) := 0.U.asTypeOf(new DFTResetSignals))
+      core.module.io.sramTest.sramCtl.foreach(dontTouch(_) := 0.U)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 
