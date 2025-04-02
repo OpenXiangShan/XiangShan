@@ -1,55 +1,37 @@
-/***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.icache
 
 import annotation.unused
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.regmapper._
-import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.LazyModule
+import freechips.rocketchip.diplomacy.LazyModuleImp
+import freechips.rocketchip.diplomacy.SimpleDevice
+import freechips.rocketchip.regmapper.RegField
+import freechips.rocketchip.regmapper.RegFieldDesc
+import freechips.rocketchip.regmapper.RegReadFn
+import freechips.rocketchip.regmapper.RegWriteFn
+import freechips.rocketchip.tilelink.TLRegisterNode
 import org.chipsalliance.cde.config.Parameters
-import utils._
-
-case class L1ICacheCtrlParams(
-    address:   AddressSet,
-    regWidth:  Int,
-    beatBytes: Int = 8
-) {
-  def regBytes: Int = regWidth / 8
-
-  def eccctrlOffset:  Int = 0
-  def ecciaddrOffset: Int = eccctrlOffset + regBytes
-}
-
-class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
-  // ecc control
-  val ecc_enable: Bool = Output(Bool())
-  // ecc inject
-  val injecting:    Bool                               = Output(Bool())
-  val metaRead:     DecoupledIO[ICacheReadBundle]      = DecoupledIO(new ICacheReadBundle)
-  val metaReadResp: ICacheMetaRespBundle               = Input(new ICacheMetaRespBundle)
-  val metaWrite:    DecoupledIO[ICacheMetaWriteBundle] = DecoupledIO(new ICacheMetaWriteBundle)
-  val dataWrite:    DecoupledIO[ICacheDataWriteBundle] = DecoupledIO(new ICacheDataWriteBundle)
-}
+import utils.NamedUInt
+import xiangshan.frontend.PrunedAddrInit
 
 // currently for ECC control only
-class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends LazyModule {
+class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) extends LazyModule {
   lazy val module = new ICacheCtrlUnitImp(this)
 
   // register tilelink node
@@ -62,164 +44,187 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
     concurrency = 1
   )
 
-  class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasICacheParameters {
+  class ICacheCtrlUnitImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
+      with HasICacheParameters
+      with ICacheMetaHelper {
+    class ICacheCtrlUnitIO(implicit p: Parameters) extends ICacheBundle {
+      // ecc control
+      val eccEnable: Bool = Output(Bool())
+      // ecc inject
+      val injecting: Bool            = Output(Bool())
+      val metaRead:  MetaReadBundle  = new MetaReadBundle
+      val metaWrite: MetaWriteBundle = new MetaWriteBundle
+      val dataWrite: DataWriteBundle = new DataWriteBundle
+    }
+
     val io: ICacheCtrlUnitIO = IO(new ICacheCtrlUnitIO)
 
-    // eccctrl.ierror: inject error code
+    // eccCtrl.ierror: inject error code
     private def nInjError: Int = 8
-    private object eccctrlInjError extends NamedUInt(log2Up(nInjError)) {
-      def notEnabled:    UInt = 0.U(width.W) // try to inject when ECC check is not enabled
-      def targetInvalid: UInt = 1.U(width.W) // try to inject to invalid(rsvd) eccctrl.itarget
-      def notFound:      UInt = 2.U(width.W) // try to inject to ecciaddr.paddr does not exist in ICache
+    private object EccCtrlInjError extends NamedUInt(log2Up(nInjError)) {
+      def NotEnabled:    UInt = 0.U(width.W) // try to inject when ECC check is not enabled
+      def TargetInvalid: UInt = 1.U(width.W) // try to inject to invalid(rsvd) eccCtrl.itarget
+      def NotFound:      UInt = 2.U(width.W) // try to inject to eccIAddr.pAddr does not exist in ICache
       @unused
-      def rsvd3: UInt = 3.U(width.W)
+      def Rsvd3: UInt = 3.U(width.W)
       @unused
-      def rsvd4: UInt = 4.U(width.W)
+      def Rsvd4: UInt = 4.U(width.W)
       @unused
-      def rsvd5: UInt = 5.U(width.W)
+      def Rsvd5: UInt = 5.U(width.W)
       @unused
-      def rsvd6: UInt = 6.U(width.W)
+      def Rsvd6: UInt = 6.U(width.W)
       @unused
-      def rsvd7: UInt = 7.U(width.W)
+      def Rsvd7: UInt = 7.U(width.W)
     }
-    // eccctrl.istatus: inject status
+    // eccCtrl.istatus: inject status
     private def nInjStatus: Int = 8
-    private object eccctrlInjStatus extends NamedUInt(log2Up(nInjStatus)) {
-      def idle:     UInt = 0.U(width.W)
-      def working:  UInt = 1.U(width.W)
-      def injected: UInt = 2.U(width.W)
-      def error:    UInt = 7.U(width.W)
+    private object EccCtrlInjStatus extends NamedUInt(log2Up(nInjStatus)) {
+      def Idle:     UInt = 0.U(width.W)
+      def Working:  UInt = 1.U(width.W)
+      def Injected: UInt = 2.U(width.W)
+      def Error:    UInt = 7.U(width.W)
       @unused
-      def rsvd3: UInt = 3.U(width.W)
+      def Rsvd3: UInt = 3.U(width.W)
       @unused
-      def rsvd4: UInt = 4.U(width.W)
+      def Rsvd4: UInt = 4.U(width.W)
       @unused
-      def rsvd5: UInt = 5.U(width.W)
+      def Rsvd5: UInt = 5.U(width.W)
       @unused
-      def rsvd6: UInt = 6.U(width.W)
+      def Rsvd6: UInt = 6.U(width.W)
     }
-    // eccctrl.itarget: inject target
+    // eccCtrl.itarget: inject target
     private def nInjTarget: Int = 4
-    private object eccctrlInjTarget extends NamedUInt(log2Up(nInjTarget)) {
-      def metaArray: UInt = 0.U(width.W)
-      def dataArray: UInt = 2.U(width.W)
+    private object EccCtrlInjTarget extends NamedUInt(log2Up(nInjTarget)) {
+      def MetaArray: UInt = 0.U(width.W)
+      def DataArray: UInt = 2.U(width.W)
       @unused
-      def rsvd1: UInt = 1.U(width.W)
+      def Rsvd1: UInt = 1.U(width.W)
       @unused
-      def rsvd3: UInt = 3.U(width.W)
+      def Rsvd3: UInt = 3.U(width.W)
     }
-    private class eccctrlBundle extends Bundle {
-      val ierror:  UInt = eccctrlInjError()  // inject error code, read-only, valid only when istatus === error
-      val istatus: UInt = eccctrlInjStatus() // inject status, read-only
-      val itarget: UInt = eccctrlInjTarget() // inject target
+    private class EccCtrlBundle extends Bundle {
+      val iError:  UInt = EccCtrlInjError()  // inject error code, read-only, valid only when istatus === error
+      val iStatus: UInt = EccCtrlInjStatus() // inject status, read-only
+      val iTarget: UInt = EccCtrlInjTarget() // inject target
       val inject:  Bool = Bool()             // request to inject, write-only, read 0
       val enable:  Bool = Bool()             // enable ECC
     }
-    private object eccctrlBundle {
-      def default: eccctrlBundle = {
-        val x = Wire(new eccctrlBundle)
-        x.ierror  := eccctrlInjError.notEnabled
-        x.istatus := eccctrlInjStatus.idle
-        x.itarget := eccctrlInjTarget.metaArray
+    private object EccCtrlBundle {
+      def default: EccCtrlBundle = {
+        val x = Wire(new EccCtrlBundle)
+        x.iError  := EccCtrlInjError.NotEnabled
+        x.iStatus := EccCtrlInjStatus.Idle
+        x.iTarget := EccCtrlInjTarget.MetaArray
         x.inject  := false.B
         x.enable  := true.B
         x
       }
     }
 
-    private class ecciaddrBundle extends Bundle {
-      val paddr: UInt = UInt(PAddrBits.W) // inject position physical address
+    private class EccIAddrBundle extends Bundle {
+      val pAddr: UInt = UInt(PAddrBits.W) // inject position physical address
     }
-    private object ecciaddrBundle {
-      def default: ecciaddrBundle = {
-        val x = Wire(new ecciaddrBundle)
-        x.paddr := 0.U
+    private object EccIAddrBundle {
+      def default: EccIAddrBundle = {
+        val x = Wire(new EccIAddrBundle)
+        x.pAddr := 0.U
         x
       }
     }
 
-    private val eccctrl  = RegInit(eccctrlBundle.default)
-    private val ecciaddr = RegInit(ecciaddrBundle.default)
+    private val eccCtrl  = RegInit(EccCtrlBundle.default)
+    private val eccIAddr = RegInit(EccIAddrBundle.default)
 
     // sanity check
-    require(params.regWidth >= eccctrl.asUInt.getWidth)
-    require(params.regWidth >= ecciaddr.asUInt.getWidth)
+    require(params.regWidth >= eccCtrl.asUInt.getWidth)
+    require(params.regWidth >= eccIAddr.asUInt.getWidth)
 
     // control signal
-    io.ecc_enable := eccctrl.enable
-    io.injecting  := eccctrl.istatus === eccctrlInjStatus.working
+    io.eccEnable := eccCtrl.enable
+    io.injecting := eccCtrl.iStatus === EccCtrlInjStatus.Working
 
     // inject position
-    private val ivirIdx  = get_idx(ecciaddr.paddr)
-    private val iphyTag  = get_tag(ecciaddr.paddr)
-    private val iwaymask = RegInit(0.U(nWays.W)) // read from metaArray, valid after istate === is_readMetaResp
+    private val iVSetIdx = get_idx(eccIAddr.pAddr)
+    private val iPAddr   = eccIAddr.pAddr
+    private val iWaymask =
+      RegInit(0.U(nWays.W)) // read from metaArray, valid after iState === InjectFsmState.readMetaResp
 
     // inject FSM
-    private val is_idle :: is_readMetaReq :: is_readMetaResp :: is_writeMeta :: is_writeData :: Nil =
-      Enum(5)
-    private val istate = RegInit(is_idle)
+    private def nInjectFsmState: Int = 5
+    private object InjectFsmState extends NamedUInt(log2Up(nInjectFsmState)) {
+      // scala ask identifier that begins with uppercase cannot be used in pattern matching like `X :: Nil = Enum()`
+      // but we want UpperCamelCase for constants for better readability, so we dont use Enum() here
+      def Idle:         UInt = 0.U(width.W)
+      def ReadMetaReq:  UInt = 1.U(width.W)
+      def ReadMetaResp: UInt = 2.U(width.W)
+      def WriteMeta:    UInt = 3.U(width.W)
+      def WriteData:    UInt = 4.U(width.W)
+    }
+    private val iState = RegInit(InjectFsmState.Idle)
 
-    io.metaRead.valid             := istate === is_readMetaReq
-    io.metaRead.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
-    io.metaRead.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(ivirIdx))
-    io.metaRead.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
-    io.metaRead.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
+    io.metaRead.req.valid             := iState === InjectFsmState.ReadMetaReq
+    io.metaRead.req.bits.isDoubleLine := false.B // we inject into first cacheline and ignore the rest port
+    io.metaRead.req.bits.vSetIdx      := VecInit(Seq.fill(PortNumber)(iVSetIdx))
+    io.metaRead.req.bits.waymask   := VecInit(Seq.fill(PortNumber)(VecInit(Seq.fill(nWays)(false.B)))) // dontcare
+    io.metaRead.req.bits.blkOffset := 0.U(blockBits.W)                                                 // dontcare
 
-    io.metaWrite.valid := istate === is_writeMeta
-    io.metaWrite.bits.generate(
-      tag = iphyTag,
-      idx = ivirIdx,
-      waymask = iwaymask,
-      bankIdx = ivirIdx(0),
+    io.metaWrite.req.valid := iState === InjectFsmState.WriteMeta
+    io.metaWrite.req.bits.generate(
+      tag = get_phy_tag(iPAddr),
+      idx = iVSetIdx,
+      waymask = iWaymask,
+      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 
-    io.dataWrite.valid := istate === is_writeData
-    io.dataWrite.bits.generate(
+    io.dataWrite.req.valid := iState === InjectFsmState.WriteData
+    io.dataWrite.req.bits.generate(
       data = 0.U, // inject poisoned data, don't care actual data
-      idx = ivirIdx,
-      waymask = iwaymask,
-      bankIdx = ivirIdx(0),
+      idx = iVSetIdx,
+      waymask = iWaymask,
+      bankIdx = iVSetIdx(0),
       poison = true.B
     )
 
-    switch(istate) {
-      is(is_idle) {
-        when(eccctrl.istatus === eccctrlInjStatus.working) {
+    switch(iState) {
+      is(InjectFsmState.Idle) {
+        when(eccCtrl.iStatus === EccCtrlInjStatus.Working) {
           // we need to read meta first to get waymask, whether itarget is metaArray or dataArray
-          istate := is_readMetaReq
+          iState := InjectFsmState.ReadMetaReq
         }
       }
-      is(is_readMetaReq) {
-        when(io.metaRead.fire) {
-          istate := is_readMetaResp
+      is(InjectFsmState.ReadMetaReq) {
+        when(io.metaRead.req.fire) {
+          iState := InjectFsmState.ReadMetaResp
         }
       }
-      is(is_readMetaResp) {
+      is(InjectFsmState.ReadMetaResp) {
         // metaArray ensures resp is valid one cycle after req
-        val waymask = VecInit((0 until nWays).map { w =>
-          io.metaReadResp.entryValid.head(w) && io.metaReadResp.tags.head(w) === iphyTag
-        }).asUInt
-        iwaymask := waymask
+        val waymask = getWaymask(PrunedAddrInit(iPAddr), io.metaRead.resp.tags.head, io.metaRead.resp.entryValid.head)
+        iWaymask := waymask
         when(!waymask.orR) {
           // not hit, refuse to inject
-          istate          := is_idle
-          eccctrl.istatus := eccctrlInjStatus.error
-          eccctrl.ierror  := eccctrlInjError.notFound
+          iState          := InjectFsmState.Idle
+          eccCtrl.iStatus := EccCtrlInjStatus.Error
+          eccCtrl.iError  := EccCtrlInjError.NotFound
         }.otherwise {
-          istate := Mux(eccctrl.itarget === eccctrlInjTarget.metaArray, is_writeMeta, is_writeData)
+          iState := Mux(
+            eccCtrl.iTarget === EccCtrlInjTarget.MetaArray,
+            InjectFsmState.WriteMeta,
+            InjectFsmState.WriteData
+          )
         }
       }
-      is(is_writeMeta) {
-        when(io.metaWrite.fire) {
-          istate          := is_idle
-          eccctrl.istatus := eccctrlInjStatus.injected
+      is(InjectFsmState.WriteMeta) {
+        when(io.metaWrite.req.fire) {
+          iState          := InjectFsmState.Idle
+          eccCtrl.iStatus := EccCtrlInjStatus.Injected
         }
       }
-      is(is_writeData) {
-        when(io.dataWrite.fire) {
-          istate          := is_idle
-          eccctrl.istatus := eccctrlInjStatus.injected
+      is(InjectFsmState.WriteData) {
+        when(io.dataWrite.req.fire) {
+          iState          := InjectFsmState.Idle
+          eccCtrl.iStatus := EccCtrlInjStatus.Injected
         }
       }
     }
@@ -242,7 +247,7 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         reset = Option(0)
       )
 
-    private def eccctrlRegField(x: eccctrlBundle): RegField =
+    private def eccctrlRegField(x: EccCtrlBundle): RegField =
       RegField(
         params.regWidth,
         RegReadFn { ready =>
@@ -250,9 +255,9 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
           res.inject := false.B // read always 0
           when(ready) {
             // if istatus is injected or error, clear it after read
-            when(x.istatus === eccctrlInjStatus.injected || x.istatus === eccctrlInjStatus.error) {
-              x.istatus := eccctrlInjStatus.idle
-              x.ierror  := eccctrlInjError.notEnabled
+            when(x.iStatus === EccCtrlInjStatus.Injected || x.iStatus === EccCtrlInjStatus.Error) {
+              x.iStatus := EccCtrlInjStatus.Idle
+              x.iError  := EccCtrlInjError.NotEnabled
             }
           }
           // always read valid
@@ -260,23 +265,23 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         },
         RegWriteFn { (valid, data) =>
           when(valid) {
-            val req = data.asTypeOf(new eccctrlBundle)
+            val req = data.asTypeOf(new EccCtrlBundle)
             x.enable := req.enable
-            when(req.inject && x.istatus === eccctrlInjStatus.idle) {
+            when(req.inject && x.iStatus === EccCtrlInjStatus.Idle) {
               // if istatus is not idle, ignore the inject request
               when(req.enable === false.B) {
                 // check if enable is not valid
-                x.istatus := eccctrlInjStatus.error
-                x.ierror  := eccctrlInjError.notEnabled
-              }.elsewhen(req.itarget =/= eccctrlInjTarget.metaArray && req.itarget =/= eccctrlInjTarget.dataArray) {
+                x.iStatus := EccCtrlInjStatus.Error
+                x.iError  := EccCtrlInjError.NotEnabled
+              }.elsewhen(req.iTarget =/= EccCtrlInjTarget.MetaArray && req.iTarget =/= EccCtrlInjTarget.DataArray) {
                 // check if itarget is not valid
-                x.istatus := eccctrlInjStatus.error
-                x.ierror  := eccctrlInjError.targetInvalid
+                x.iStatus := EccCtrlInjStatus.Error
+                x.iError  := EccCtrlInjError.TargetInvalid
               }.otherwise {
-                x.istatus := eccctrlInjStatus.working
+                x.iStatus := EccCtrlInjStatus.Working
               }
             }
-            x.itarget := req.itarget
+            x.iTarget := req.iTarget
             // istatus is read-only, ignore req.istatus
             // ierror is read-only, ignore req.ierror
           }
@@ -286,12 +291,12 @@ class ICacheCtrlUnit(params: L1ICacheCtrlParams)(implicit p: Parameters) extends
         eccctrlRegDesc
       )
 
-    private def ecciaddrRegField(x: ecciaddrBundle): RegField =
+    private def ecciaddrRegField(x: EccIAddrBundle): RegField =
       RegField(params.regWidth, x.asUInt, ecciaddrRegDesc)
 
     node.regmap(
-      params.eccctrlOffset  -> Seq(eccctrlRegField(eccctrl)),
-      params.ecciaddrOffset -> Seq(ecciaddrRegField(ecciaddr))
+      params.EccCtrlOffset  -> Seq(eccctrlRegField(eccCtrl)),
+      params.EccIAddrOffset -> Seq(ecciaddrRegField(eccIAddr))
     )
   }
 }
