@@ -131,12 +131,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // buffer control:
   //  - s_idle:  Idle
+  //  - s_prealloc: PreAllocate an valid entry
   //  - s_split: Split miss-aligned store into aligned stores
   //  - s_req:   Send split store to sta and get result from sta
   //  - s_resp:  Responds to a split store access request
   //  - s_wb:    writeback yo rob/vecMergeBuffer
   //  - s_block: Wait for this instr to reach the head of Rob.
-  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(6)
+  val s_idle :: s_prealloc :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(7)
   val bufferState    = RegInit(s_idle)
 
   // enqueue
@@ -156,19 +157,17 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val canEnq = !req_valid && !reqRedirect && reqSelValid
   val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
 
+  val s2_reqSelValid = GatedRegNext(reqSelValid)
   val s2_reqSelPort = RegNext(reqSelPort)
-  val s2_req_can_do = (0 until enqPortNum).map {
+  val s2_misalign_can_split = (0 until enqPortNum).map {
     case i =>
-      !io.enq(i).revoke && s2_reqSelPort === i.U
+      !io.enq(i).revoke && s2_reqSelPort === i.U && s2_reqSelValid
   }.reduce(_|_)
 
   when(canEnq) {
     connectSamePort(req, reqSelBits)
     req.portIndex := reqSelPort
     req_valid := true.B
-  }
-  when (req_valid && !s2_req_can_do) {
-    req_valid := false.B
   }
 
   val cross4KBPageEnq = WireInit(false.B)
@@ -228,18 +227,25 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary && s2_req_can_do) {
+      when(cross4KBPageBoundary) {
         when(robMatch) {
-          bufferState := s_split
+          bufferState := s_prealloc
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid && s2_req_can_do) {
-          bufferState := s_split
+        when (req_valid) {
+          bufferState := s_prealloc
           isCrossPage := false.B
         }
       }
+    }
 
+    is (s_prealloc) {
+      when (s2_misalign_can_split) {
+        bufferState := s_split
+      } .otherwirse {
+        bufferState := s_idle
+      }
     }
 
     is (s_split) {
