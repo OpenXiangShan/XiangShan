@@ -1327,7 +1327,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   if (env.TraceRTLMode) {
-    when (oldestRedirect.bits.traceInfo.isWrongPath) {
+    when (oldestRedirect.bits.traceInfo.isWrongPath || oldestRedirect.bits.traceInfo.isFastSim) {
       io.mem_to_ooo.memoryViolation.valid := false.B
     }
   }

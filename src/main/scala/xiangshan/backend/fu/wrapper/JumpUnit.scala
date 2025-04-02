@@ -36,7 +36,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   val redirect = io.out.bits.res.redirect.get.bits
   val redirectValid = io.out.bits.res.redirect.get.valid
-  redirectValid := io.in.valid && !jumpDataModule.io.isAuipc && TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath)
+  redirectValid := io.in.valid && !jumpDataModule.io.isAuipc && TraceRTLChoose(true.B, !io.in.bits.ctrl.traceInfo.isWrongPath && !io.in.bits.ctrl.traceInfo.hasTriggeredExuRedirect)
   redirect := 0.U.asTypeOf(redirect)
   redirect.specifyField(
     _.level := RedirectLevel.flushAfter,

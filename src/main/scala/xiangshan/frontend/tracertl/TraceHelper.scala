@@ -37,10 +37,19 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val fastSimulation = UInt(8.W)
   val InstID = UInt(64.W)
 
-  def isFastSim = fastSimulation(0)
+  def isFastSim = fastSimulation(0) === 1.U
   def arthiSrc0 = memoryAddrVA
   def arthiSrc1 = memoryAddrPA
   def arthiSrcAt(i: Int): UInt = Seq(arthiSrc0, arthiSrc1)(i)
+  def isTaken = branchTaken(0) === 1.U
+  def isException = exception =/= 0.U
+  def isBranch = branchType =/= 0.U
+
+  def seqPC = pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U)
+  def targeEqSeq = target === seqPC
+  def nextPC = Mux(((isBranch && isTaken) || isException), target,
+                  pcVA + Mux(inst(1, 0) === 0x3.U, 4.U, 2.U))
+  def nextEqSeq = nextPC === seqPC
 }
 
 

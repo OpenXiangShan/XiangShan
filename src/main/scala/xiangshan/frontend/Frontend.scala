@@ -26,6 +26,7 @@ import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.tracertl.ChiselRecordForField._
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -362,7 +363,7 @@ class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
 
   ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
-  ibuffer.io.flush := needFlush
+  ibuffer.io.flush := needFlush || TraceRTLChoose(false.B, io.backend.toFtq.redirect.valid) // why add one cycle delay?
   ibuffer.io.ControlRedirect := FlushControlRedirect
   ibuffer.io.MemVioRedirect := FlushMemVioRedirect
   ibuffer.io.ControlBTBMissBubble := FlushControlBTBMiss

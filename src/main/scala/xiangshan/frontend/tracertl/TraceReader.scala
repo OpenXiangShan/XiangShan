@@ -33,12 +33,14 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
   // we need to know the bpu result to know if the branch should redirect or not
 //  val bpuPredInfo = new TracePredInfoBundle
   val isWrongPath = Bool()
+  val hasTriggeredExuRedirect = Bool()
 
   def hasException = exception =/= 0.U
   def isForceJump = exception(7)
 
   def initMoreFromRaw() = {
     isWrongPath := false.B
+    hasTriggeredExuRedirect := false.B
   }
 }
 

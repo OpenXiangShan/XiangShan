@@ -38,6 +38,7 @@ import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.frontend.tracertl.{TraceRTLDontCareValue}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -326,6 +327,95 @@ class CtrlBlockImp(
     }
   }
 
+  // FastSim Fast Recovery
+  val fastSimTriRedValid = RegInit(false.B)
+  val fastSimTriRedIdx = WireInit(0.U(log2Up(DecodeWidth).W))
+  val fastSimFlushBackward = WireInit(false.B)
+  if (env.TraceRTLMode) {
+    val decodeOut = decode.io.out
+    for (i <- 0 until DecodeWidth) {
+      XSError(decodeOut(i).fire && decodeOut(i).bits.traceInfo.isWrongPath && decodeOut(i).bits.traceInfo.isFastSim,
+        "FastSim should not have wrong path instruction")
+    }
+
+    val fastInstMisPredVec = VecInit((0 until DecodeWidth).map { i =>
+      val u = decodeOut(i).bits
+      !decode.io.redirect && // no redirect
+      decodeOut(i).bits.traceInfo.isFastSim &&
+      decodeOut(i).fire && (u.traceInfo.branchType =/= 0.U) &&
+      (u.pred_taken =/= u.traceInfo.branchTaken) && // pred_taken is not branchTaken
+      !u.traceInfo.nextEqSeq && // nextPC is the sequential pc
+      (u.traceInfo.exception === 0.U) // no exception
+      // when target equal nextPC, wrongpath check cannot work, there will be valid inst
+      // so we can not pre-flush.
+    })
+
+    val fastInstMisPred = fastInstMisPredVec.reduce(_ || _)
+    val fastInstMisPredIdx = PriorityEncoder(fastInstMisPredVec.asUInt)
+    val fastInstMisPredIdxReg = Reg(chiselTypeOf(fastInstMisPredIdx))
+    val misPredUop = decodeOut(fastInstMisPredIdx).bits
+
+    // val instMisPredNextIdx = fastInstMisPredIdx + 1.U
+    // when (fastInstMisPredIdx =/= (DecodeWidth - 1).U) {
+    //   XSError(fastInstMisPred && decodeOut(instMisPredNextIdx).valid && (misPredUop.traceInfo.target =/= decodeOut(instMisPredNextIdx).bits.pc),
+    //     "FastSim mispredict's next instruction should not be valid(no wrongpath)")
+    // }
+
+    // override redirect to frontend
+    // val alreadyRedirectValid = s6_flushFromRobValid || s3_redirectGen.valid
+    val aheadExuRedConlict = RegNext(oldestExuRedirect.valid)
+    val aheadOtherConflit = s1_robFlushRedirect.valid || s5_flushFromRobValidAhead
+
+    val toFtqRedirect = io.frontend.toFtq.redirect
+    val toFtqFtqIdxAhead = io.frontend.toFtq.ftqIdxAhead
+    val rValid = RegInit(false.B)
+    val rValidWire = !(aheadExuRedConlict || aheadOtherConflit) && fastInstMisPred
+    val rBits = Reg(chiselTypeOf(toFtqRedirect.bits))
+
+    when (rValid) {// should valid/redirect for one cycle
+      rValid := false.B
+    }
+    when (rename.io.out(fastInstMisPredIdxReg).fire || rename.io.redirect.valid) {
+      fastSimTriRedValid := false.B
+    }
+    when (decodeOut(fastInstMisPredIdx).fire && rValidWire) {
+      rValid := true.B
+      fastSimTriRedValid := true.B
+    }
+    fastSimTriRedIdx := fastInstMisPredIdxReg
+    fastSimFlushBackward := rValid
+
+    when (rValid) {
+      toFtqRedirect.valid := true.B
+      toFtqRedirect.bits := rBits
+    }
+
+    when (decodeOut(fastInstMisPredIdx).fire && rValidWire) {
+      fastInstMisPredIdxReg := fastInstMisPredIdx
+
+      toFtqFtqIdxAhead(0).valid := true.B
+      toFtqFtqIdxAhead(0).bits := misPredUop.ftqPtr
+
+      rBits := 0.U.asTypeOf(rBits)
+      rBits.specifyField(
+        _.level := RedirectLevel.flushAfter,
+        _.robIdx := 0.U.asTypeOf(new RobPtr), // ?
+        _.ftqIdx := misPredUop.ftqPtr,
+        _.ftqOffset := misPredUop.ftqOffset,
+        _.fullTarget := misPredUop.traceInfo.target,
+        _.cfiUpdate.isMisPred := true.B,
+        _.cfiUpdate.taken := misPredUop.traceInfo.isTaken,
+        _.cfiUpdate.predTaken := misPredUop.pred_taken,
+        _.cfiUpdate.target := misPredUop.traceInfo.nextPC,
+        _.cfiUpdate.pc := misPredUop.pc,
+        _.cfiUpdate.backendIAF := false.B,
+        _.cfiUpdate.backendIPF := false.B,
+        _.cfiUpdate.backendIGPF := false.B,
+        _.traceInfo := misPredUop.traceInfo,
+      )
+    }
+  }
+
   for (i <- 0 until DecodeWidth) {
     gpaMem.io.fromIFU := io.frontend.fromIfu
     gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
@@ -340,7 +430,7 @@ class CtrlBlockImp(
   decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
   decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
-  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid || fastSimFlushBackward
 
   // add decode Buf for in.ready better timing
   val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
@@ -453,6 +543,17 @@ class CtrlBlockImp(
     decodePipeRename(i).ready := rename.io.in(i).ready
     rename.io.in(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i)
     rename.io.in(i).bits := decodePipeRename(i).bits
+  }
+
+  when (fastSimTriRedValid) {
+    rename.io.in(fastSimTriRedIdx).bits.traceInfo.hasTriggeredExuRedirect := true.B
+
+    // clear the follow wrong path instruction (that cannot be avoid by simple wrong-path check)
+    (0 until RenameWidth).foreach { case i =>
+      when (i.U > fastSimTriRedIdx) {
+        rename.io.in(i).valid := false.B
+      }
+    }
   }
 
   for (i <- 0 until RenameWidth - 1) {

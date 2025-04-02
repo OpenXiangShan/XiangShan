@@ -31,7 +31,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.tracertl.TraceFastSimOoO
+import xiangshan.frontend.tracertl.{TraceFastSimOoO, TraceRTLChoose}
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -177,7 +177,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
 
   io.out.zipWithIndex.foreach { case (inst, i) =>
-    inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.fromRob.isResumeVType)
+    inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.fromRob.isResumeVType) && TraceRTLChoose(true.B, !io.redirect)
     inst.bits := finalDecodedInst(i)
     inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
     inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))
@@ -209,6 +209,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
           inst.bits.vlWen := false.B
 
           inst.bits.traceDynaInfo.eliminateOoO := !TraceFastSimOoO.needOoO(inst.bits.fuType)
+
+          // disable flush pipe for performance and also avoid conflict with FastRedirect
+          inst.bits.flushPipe := false.B
         }
       }
     }

@@ -68,6 +68,7 @@ object TraceRTLDontCare {
 object TraceFastSimOoO {
   val needOoOFuType = Seq(
     FuType.jmp, FuType.brh, FuType.csr, // cfi
+    // FuType.jmp, FuType.brh, FuType.csr, // cfi
     // FuType.ldu, FuType.stu, FuType.mou, // ls
     // FuType.vldu, FuType.vstu, FuType.vsegldu, FuType.vsegstu // vls
   )
