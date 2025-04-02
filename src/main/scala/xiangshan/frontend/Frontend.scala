@@ -165,12 +165,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  icache.io.ftqPrefetch <> ftq.io.toPrefetch
-  icache.io.softPrefetch <> io.softPrefetch
+  // ICache-Memblock
+  icache.io.softPrefetchReq <> io.softPrefetch
 
   // IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
-  ftq.io.toIfu.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
+  ftq.io.toIfu.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
 
   ftq.io.fromIfu <> ifu.io.ftqInter.toFtq
   bpu.io.ftq_to_bpu <> ftq.io.toBpu
@@ -178,22 +178,19 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
 
   ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
 
-  // IFU-ICache
-  icache.io.fetch.req <> ftq.io.toICache.req
-  ftq.io.toICache.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
+  // ICache-Ftq
+  icache.io.fromFtq <> ftq.io.toICache
+  // override fetchReq.ready to sync with Ifu
+  ftq.io.toICache.fetchReq.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
+  icache.io.flush                := ftq.io.icacheFlush
 
-  ifu.io.icacheInter.resp <> icache.io.fetch.resp
-  ifu.io.icacheInter.icacheReady       := icache.io.toIFU
-  ifu.io.icacheInter.topdownIcacheMiss := icache.io.fetch.topdownIcacheMiss
-  ifu.io.icacheInter.topdownItlbMiss   := icache.io.fetch.topdownItlbMiss
-  icache.io.stop                       := ifu.io.icacheStop
-  icache.io.flush                      := ftq.io.icacheFlush
+  // Ifu-ICache
+  ifu.io.fromICache <> icache.io.toIfu
+  ifu.io.toICache <> icache.io.fromIfu
 
-  ifu.io.icachePerfInfo := icache.io.perfInfo
-
-  icache.io.csr_pf_enable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
-
-  icache.io.fencei := RegNext(io.fencei)
+  // ICache-Backend
+  icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
+  icache.io.fencei      := RegNext(io.fencei)
 
   // IFU-Ibuffer
   ifu.io.toIbuffer <> ibuffer.io.in

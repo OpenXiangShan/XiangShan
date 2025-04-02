@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils.NamedUInt
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
@@ -77,17 +78,34 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
   }
 }
 
-class IFUICacheIO(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val icacheReady       = Output(Bool())
-  val resp              = ValidIO(new ICacheMainPipeResp)
-  val topdownIcacheMiss = Output(Bool())
-  val topdownItlbMiss   = Output(Bool())
+class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
+  val req:              FtqICacheInfo = new FtqICacheInfo
+  val backendException: UInt          = ExceptionType()
 }
 
-class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val pcMemRead        = Vec(5, new FtqICacheInfo)
-  val readValid        = Vec(5, Bool())
-  val backendException = Bool()
+class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
+  val req:                Vec[FtqICacheInfo] = Vec(5, new FtqICacheInfo)
+  val readValid:          Vec[Bool]          = Vec(5, Bool())
+  val isBackendException: Bool               = Bool()
+}
+
+class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
+  // NOTE: req.bits must be prepare in T cycle
+  // while req.valid is set true in T + 1 cycle
+  val fetchReq:     DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
+  val prefetchReq:  DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
+  val flushFromBpu: BpuFlushInfo                     = new BpuFlushInfo
+}
+
+class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
+  val fetchResp:  Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
+  val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
+  val fetchReady: Bool                    = Output(Bool())
+}
+
+class IfuToICacheIO(implicit p: Parameters) extends XSBundle {
+  val stall: Bool = Output(Bool())
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
@@ -107,12 +125,11 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioLastCommit = Input(Bool())
 }
 
-object ExceptionType {
-  def width: Int  = 2
-  def none:  UInt = "b00".U(width.W)
-  def pf:    UInt = "b01".U(width.W) // instruction page fault
-  def gpf:   UInt = "b10".U(width.W) // instruction guest page fault
-  def af:    UInt = "b11".U(width.W) // instruction access fault
+object ExceptionType extends NamedUInt(2) {
+  def none: UInt = "b00".U(width.W)
+  def pf:   UInt = "b01".U(width.W) // instruction page fault
+  def gpf:  UInt = "b10".U(width.W) // instruction guest page fault
+  def af:   UInt = "b11".U(width.W) // instruction access fault
 
   def hasException(e: UInt):             Bool = e =/= none
   def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
@@ -243,7 +260,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, UInt(ExceptionType.width.W))
+  val exceptionType    = Vec(PredictWidth, ExceptionType())
   val crossPageIPFFix  = Vec(PredictWidth, Bool())
   val illegalInstr     = Vec(PredictWidth, Bool())
   val triggered        = Vec(PredictWidth, TriggerAction())
