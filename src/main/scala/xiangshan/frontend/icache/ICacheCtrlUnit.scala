@@ -170,8 +170,8 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     io.metaWrite.req.valid := iState === InjectFsmState.WriteMeta
     io.metaWrite.req.bits.generate(
-      tag = get_phy_tag(iPAddr),
-      idx = iVSetIdx,
+      phyTag = get_phy_tag(iPAddr),
+      vSetIdx = iVSetIdx,
       waymask = iWaymask,
       bankIdx = iVSetIdx(0),
       poison = true.B
@@ -180,7 +180,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     io.dataWrite.req.valid := iState === InjectFsmState.WriteData
     io.dataWrite.req.bits.generate(
       data = 0.U, // inject poisoned data, don't care actual data
-      idx = iVSetIdx,
+      vSetIdx = iVSetIdx,
       waymask = iWaymask,
       bankIdx = iVSetIdx(0),
       poison = true.B
