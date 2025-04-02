@@ -1053,11 +1053,12 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
   val vstartIsNotZero = io.enq.vstart =/= 0.U
   val isNeedVdVCryptoPiped = FuType.isVCryptoPiped(decodedInst.fuType) && VcryppType.needOldVd(decodedInst.fuOpType)
+  val isNeedVdVCryptoNonPiped = FuType.isVCryptoNonPiped(decodedInst.fuType) && VcryppType.needOldVd(decodedInst.fuOpType)
   decodedInst.vpu.isNarrow := isNarrow
   decodedInst.vpu.isDstMask := isDstMask
   decodedInst.vpu.isOpMask := isOpMask
   decodedInst.vpu.isDependOldVd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) ||isNarrow || isVlx ||
-                                   isVma || isFof || vstartIsNotZero || isNeedVdVCryptoPiped
+                                   isVma || isFof || vstartIsNotZero || isNeedVdVCryptoPiped || isNeedVdVCryptoNonPiped
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U

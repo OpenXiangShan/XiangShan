@@ -67,7 +67,7 @@ object AES128ShiftRowsInv {
 }
 
 
-class AES128SubBytesBidirectionIO extends Bundle {
+class AES128SubBytesShareIO extends Bundle {
   val src         = Input(UInt(128.W))
   val isFwd       = Input(Bool())
   val isFwd_s1    = Input(Bool())
@@ -75,15 +75,15 @@ class AES128SubBytesBidirectionIO extends Bundle {
   val result      = Output(UInt(128.W)) // the 2nd cycle
 }
 
-class AES128SubBytesBidirection0LatIO extends Bundle {
+class AES128SubBytesShare0LatIO extends Bundle {
   val src         = Input(UInt(128.W))
   val isFwd       = Input(Bool())
   val result      = Output(UInt(128.W)) // the 2nd cycle
 }
 
 
-class AES128SubBytesBidirection extends Module {
-  val io = IO(new AES128SubBytesBidirectionIO)
+class AES128SubBytesShare extends Module {
+  val io = IO(new AES128SubBytesShareIO)
 
   val isFwd = io.isFwd
   val srcBytes = io.src.asTypeOf(Vec(16, UInt(8.W)))
@@ -112,8 +112,8 @@ class AES128SubBytesBidirection extends Module {
 }
 
 
-class AES128SubBytesBidirection0Lat extends Module {
-  val io = IO(new AES128SubBytesBidirection0LatIO)
+class AES128SubBytesShare0Lat extends Module {
+  val io = IO(new AES128SubBytesShare0LatIO)
 
   val isFwd = io.isFwd
   val srcBytes = io.src.asTypeOf(Vec(16, UInt(8.W)))

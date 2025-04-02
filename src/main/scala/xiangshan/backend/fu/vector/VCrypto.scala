@@ -73,45 +73,45 @@ class VcryptoPiped2(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncU
   val fire = io.in.valid
 
   private val isAesEncDec_1s = RegEnable(isAesEncDec, fire)
-  val test_28Enc = Module(new AES128EncryptDecrypt0Lat)
-  test_28Enc.io.state := 0.U
-  test_28Enc.io.rkey := 0.U
-  test_28Enc.io.op := 0.U
-  val sdffds = test_28Enc.io.result
-  dontTouch(sdffds)
-
-  val test_28Key = Module(new AES128KeySchedule0Lat)
-  test_28Key.io.round := 0.U
-  test_28Key.io.currRndKey := 0.U
-  test_28Key.io.prevRndKey := 0.U
-  test_28Key.io.isKf2 := false.B
-  val sdfuys = test_28Key.io.result
-  dontTouch(sdfuys)
-
-  val test_hangM = Module(new VecShangMi40Lat)
-  test_hangM.io.roundGroup := 0.U
-  test_hangM.io.roundKeys := 0.U
-  test_hangM.io.state := 0.U
-  test_hangM.io.isSM4R := false.B
-  val sdfds = test_hangM.io.result
-  dontTouch(sdfds)
-
-  val test_HACom = Module(new VecSHACompress0Lat)
-  test_HACom.io.curr := (0.U, 0.U, 0.U, 0.U, 0.U, 0.U, 0.U, 0.U)
-  test_HACom.io.messageSchedPlusC(0) := 0.U
-  test_HACom.io.messageSchedPlusC(1) := 0.U
-  test_HACom.io.messageSchedPlusC(2) := 0.U
-  test_HACom.io.messageSchedPlusC(3) := 0.U
-  test_HACom.io.isVSHA2cl := false.B
-  val sdfs = test_HACom.io.next
-  dontTouch(sdfs)
-
-  val test_HAMes = Module(new VecSHAMessageWords0Lat)
-  test_HAMes.io.wordsLow := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
-  test_HAMes.io.wordsMid := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
-  test_HAMes.io.wordsHigh := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
-  val werwer = test_HAMes.io.out
-  dontTouch(werwer)
+//  val test_28Enc = Module(new AES128EncryptDecrypt0Lat)
+//  test_28Enc.io.state := 0.U
+//  test_28Enc.io.rkey := 0.U
+//  test_28Enc.io.op := 0.U
+//  val sdffds = test_28Enc.io.result
+//  dontTouch(sdffds)
+//
+//  val test_28Key = Module(new AES128KeySchedule0Lat)
+//  test_28Key.io.round := 0.U
+//  test_28Key.io.currRndKey := 0.U
+//  test_28Key.io.prevRndKey := 0.U
+//  test_28Key.io.isKf2 := false.B
+//  val sdfuys = test_28Key.io.result
+//  dontTouch(sdfuys)
+//
+//  val test_hangM = Module(new VecShangMi40Lat)
+//  test_hangM.io.roundGroup := 0.U
+//  test_hangM.io.roundKeys := 0.U
+//  test_hangM.io.state := 0.U
+//  test_hangM.io.isSM4R := false.B
+//  val sdfds = test_hangM.io.result
+//  dontTouch(sdfds)
+//
+//  val test_HACom = Module(new VecSHACompress0Lat)
+//  test_HACom.io.curr := (0.U, 0.U, 0.U, 0.U, 0.U, 0.U, 0.U, 0.U)
+//  test_HACom.io.messageSchedPlusC(0) := 0.U
+//  test_HACom.io.messageSchedPlusC(1) := 0.U
+//  test_HACom.io.messageSchedPlusC(2) := 0.U
+//  test_HACom.io.messageSchedPlusC(3) := 0.U
+//  test_HACom.io.isVSHA2cl := false.B
+//  val sdfs = test_HACom.io.next
+//  dontTouch(sdfs)
+//
+//  val test_HAMes = Module(new VecSHAMessageWords0Lat)
+//  test_HAMes.io.wordsLow := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
+//  test_HAMes.io.wordsMid := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
+//  test_HAMes.io.wordsHigh := (0.U(128.W)).asTypeOf(Vec(4, UInt(32.W)))
+//  val werwer = test_HAMes.io.out
+//  dontTouch(werwer)
 
   // generate verilog of each module, and output to files
 
@@ -186,7 +186,7 @@ class VcryptoPiped2(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncU
   io.out.bits.res.data := resVecByte.asUInt
 }
 
-class VcryptoPiped4(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+class VcryptoNonPiped(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VcryppType.dummy, "Vcrypp OpType not supported")
 
   // params alias
@@ -206,20 +206,34 @@ class VcryptoPiped4(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncU
 
   val fire = io.in.valid
 
-  // modules 
+  // modules
   private val sha2 = Module(new VecSHA2)
   private val resultData = Wire(UInt(dataWidthOfDataModule.W))
+  private val resultDataReg = Reg(UInt(dataWidthOfDataModule.W))
+  private val outNotFired = RegInit(false.B)
 
   /**
    * [[sha2]]'s in connection
    */
-  sha2.io.vs1Val    := vs1
-  sha2.io.vs2Val    := vs2
-  sha2.io.oldVdVal  := oldVd
-  sha2.io.op        := fuOpType(1, 0)
-  sha2.io.regEnable := fire
+  sha2.io.in.bits.vs1Val    := vs1
+  sha2.io.in.bits.vs2Val    := vs2
+  sha2.io.in.bits.oldVdVal  := oldVd
+  sha2.io.in.bits.op        := fuOpType(1, 0)
+  sha2.io.in.valid := io.in.valid
+  io.in.ready := sha2.io.in.ready && !outNotFired
 
-  resultData := sha2.io.result
+  when (io.out.fire) {
+    outNotFired := false.B
+  }.elsewhen (io.out.valid && !io.out.ready) {
+    outNotFired := true.B
+  }
+  when (io.out.valid) {
+    resultDataReg := resultData
+  }
+
+  resultData := Mux(outNotFired, resultDataReg, sha2.io.out.bits)
+  io.out.valid := outNotFired || sha2.io.out.valid
+
 
   /**
    * First, specify the output's tailing bits.
@@ -289,7 +303,7 @@ class VcryptoPiped5(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncU
 
   val fire = io.in.valid
 
-  // modules 
+  // modules
   private val sm4 = Module(new VecShangMi4)
   private val resultData = Wire(UInt(dataWidthOfDataModule.W))
 
@@ -386,7 +400,7 @@ class AES128EncryptDecrypt(implicit p: Parameters) extends XSModule {
   val isFinalRound_s1  = RegEnable(isFinalRound, io.regEnable)
 
   // sub-bytes
-  val sbox = Module(new AES128SubBytesBidirection)
+  val sbox = Module(new AES128SubBytesShare)
   sbox.io.src         := Mux(isFwd, srEnc, srDec)
   sbox.io.isFwd       := isFwd
   sbox.io.isFwd_s1    := isFwd_s1
@@ -485,56 +499,56 @@ class AES128KeySchedule(implicit p: Parameters) extends XSModule {
 }
 
 
-class VecGHashIO extends Bundle {
-  val partialHash = Input(UInt(128.W)) // vd
-  val CipherText  = Input(UInt(128.W)) // vs1
-  val HashSubkey  = Input(UInt(128.W)) // vs2
-  val regEnable   = Input(Bool())
-  val isAddMul    = Input(Bool())
-  val result      = Output(UInt(128.W))
-}
-
-
-class VecGHash(implicit p: Parameters) extends XSModule {
-  val io = IO(new VecGHashIO)
-  private val y = io.partialHash
-  private val x = io.CipherText
-  private val h = io.HashSubkey
-  private val regEnable = io.regEnable
-  private val isAddMul = io.isAddMul
-
-  private val z = Wire(UInt(128.W))
-  private val s = Cat(Brev8(y ^ x).reverse)
-  for (bit <- 0 until 128) {
-    when(s(bit)) {
-      z := z ^ h
-    }
-    val reduce = h(127)
-    h := h << 1
-    when(reduce) {
-      h := h ^ 0x87.U
-    }
-  }
-
-  //   let Y = (get_velem(vd,EGW=128,i)); // current partial-hash
-  //   let X = get_velem(vs1,EGW=128,i); // block cipher output
-  //   let H = brev8(get_velem(vs2,EGW=128,i)); // Hash subkey
-  //   let Z : bits(128) = 0;
-  //   let S = brev8(Y ^ X);
-  //   for (int bit = 0; bit < 128; bit++) {
-  //     if bit_to_bool(S[bit])
-  //     Z ^= H
-  //     bool reduce = bit_to_bool(H[127]);
-  //     H = H << 1; // left shift H by 1
-  //     if (reduce)
-  //     H ^= 0x87; // Reduce using x^7 + x^2 + x^1 + 1 polynomial
-  //     }
-  //   let result = brev8(Z); // bit reverse bytes to get back to GCM standard ordering
-  //   set_velem(vd, EGW=128, i, result);
-
-
-  io.result := 0.U
-}
+//class VecGHashIO extends Bundle {
+//  val partialHash = Input(UInt(128.W)) // vd
+//  val CipherText  = Input(UInt(128.W)) // vs1
+//  val HashSubkey  = Input(UInt(128.W)) // vs2
+//  val regEnable   = Input(Bool())
+//  val isAddMul    = Input(Bool())
+//  val result      = Output(UInt(128.W))
+//}
+//
+//
+//class VecGHash(implicit p: Parameters) extends XSModule {
+//  val io = IO(new VecGHashIO)
+//  private val y = io.partialHash
+//  private val x = io.CipherText
+//  private val h = io.HashSubkey
+//  private val regEnable = io.regEnable
+//  private val isAddMul = io.isAddMul
+//
+//  private val z = Wire(UInt(128.W))
+//  private val s = Cat(Brev8(y ^ x).reverse)
+//  for (bit <- 0 until 128) {
+//    when(s(bit)) {
+//      z := z ^ h
+//    }
+//    val reduce = h(127)
+//    h := h << 1
+//    when(reduce) {
+//      h := h ^ 0x87.U
+//    }
+//  }
+//
+//  //   let Y = (get_velem(vd,EGW=128,i)); // current partial-hash
+//  //   let X = get_velem(vs1,EGW=128,i); // block cipher output
+//  //   let H = brev8(get_velem(vs2,EGW=128,i)); // Hash subkey
+//  //   let Z : bits(128) = 0;
+//  //   let S = brev8(Y ^ X);
+//  //   for (int bit = 0; bit < 128; bit++) {
+//  //     if bit_to_bool(S[bit])
+//  //     Z ^= H
+//  //     bool reduce = bit_to_bool(H[127]);
+//  //     H = H << 1; // left shift H by 1
+//  //     if (reduce)
+//  //     H ^= 0x87; // Reduce using x^7 + x^2 + x^1 + 1 polynomial
+//  //     }
+//  //   let result = brev8(Z); // bit reverse bytes to get back to GCM standard ordering
+//  //   set_velem(vd, EGW=128, i, result);
+//
+//
+//  io.result := 0.U
+//}
 
 
 class VecShangMi4IO extends Bundle {
@@ -672,165 +686,246 @@ class VecSHAState extends Bundle {
   }
 }
 
-class VecSHACompressIO(implicit p: Parameters) extends XSBundle {
-  val curr = Input(new VecSHAState)
-  val messageSchedPlusC = Input(Vec(4, UInt(32.W)))
-  val isVSHA2cl = Input(Bool())
-  val regEnable_s = Input(Vec(3, Bool()))
+class VecSHAComp1StepIO(implicit p: Parameters) extends XSBundle {
+  val oldStates = Input(new VecSHAState)
+  val word = Input(UInt(32.W))
 
-  val next = Output(new VecSHAState)
+  val newStates = Output(new VecSHAState)
+}
+
+/**
+ * 1 step of SHA-256 compression
+ */
+class VecSHAComp1Step(implicit  p: Parameters) extends XSModule {
+  private def ch(x: UInt, y: UInt, z: UInt): UInt = (x & y) ^ ((~x).asUInt & z)
+  private def maj(x: UInt, y: UInt, z: UInt): UInt = (x & y) ^ (x & z) ^ (y & z)
+
+  val io = IO(new VecSHAComp1StepIO)
+  val old = io.oldStates
+  val word = io.word
+
+  val tmp1 = Wire(UInt(32.W))
+  val tmp2 = Wire(UInt(32.W))
+  tmp1 := old.h + SHA2.sha256sum1(old.e) + ch(old.e, old.f, old.g) + word
+  tmp2 := SHA2.sha256sum0(old.a) + maj(old.a, old.b, old.c)
+
+  io.newStates := (tmp1 + tmp2, old.a, old.b, old.c, old.d + tmp1, old.e, old.f, old.g)
+}
+
+class VecSHACompressInput(implicit p: Parameters) extends XSBundle {
+  val curr = new VecSHAState
+  val messageSchedPlusC = Vec(4, UInt(32.W))
+  val isVSHA2cl = Bool()
+}
+
+class VecSHACompressIO(implicit p: Parameters) extends XSBundle {
+  val in = Flipped(DecoupledIO(new VecSHACompressInput))
+  val out = ValidIO(new VecSHAState)
 }
 
 class VecSHACompress(implicit p: Parameters) extends XSModule {
   private val SEW = 32 // TODO: if modification is needed, change arguments below
-
+  private val latency = 2
   val io = IO(new VecSHACompressIO)
-  val curr = io.curr
-  val messageSchedPlusC = io.messageSchedPlusC
-  val isVSHA2cl = io.isVSHA2cl
 
-  private def ch(x: UInt, y: UInt, z: UInt): UInt = (x & y) ^ ((~x).asUInt & z)
-  private def maj(x: UInt, y: UInt, z: UInt): UInt = (x & y) ^ (x & z) ^ (y & z)
 
-  val words = Wire(Vec(2, UInt(32.W))) // l vs h difference is the words selected
-  words := Mux(
-    isVSHA2cl,
-    VecInit(messageSchedPlusC(0), messageSchedPlusC(1)),
-    VecInit(messageSchedPlusC(2), messageSchedPlusC(3))
-  )
-
-  private val tmp1_s1 = Reg(UInt(SEW.W))
-  private val tmp2_s1 = Reg(UInt(SEW.W))
-  private val words1_s1 = Reg(UInt(32.W))
-  val curr_s1 = Reg(new VecSHAState)
-  when (io.regEnable_s(0)) {
-    tmp1_s1 := curr.h + SHA2.sha256sum1(curr.e) + ch(curr.e, curr.f, curr.g) + words(0)
-    tmp2_s1 := SHA2.sha256sum0(curr.a) + maj(curr.a, curr.b, curr.c)
-    words1_s1 := words(1)
-    curr_s1 := curr
+  val regEnable_s = Wire(Vec(latency + 1, Bool()))
+  val occupied = (1 until regEnable_s.length).map(regEnable_s(_)).reduce(_ || _)
+  regEnable_s(0) := Mux(occupied, false.B, io.in.valid)
+  for (i <- 0 until regEnable_s.length - 1) {
+    regEnable_s(i + 1) := GatedValidRegNext(regEnable_s(i))
   }
 
-  private val words1_s2 = Reg(UInt(32.W))
-  private val mid_s2 = Reg(new VecSHAState)
-  when (io.regEnable_s(1)) {
-    words1_s2 := words1_s1
-    mid_s2 := (tmp1_s1 + tmp2_s1, curr_s1.a, curr_s1.b, curr_s1.c, curr_s1.d + tmp1_s1, curr_s1.e, curr_s1.f, curr_s1.g)
+  io.in.ready := !occupied
+  io.out.valid := regEnable_s.last
+
+  val comp1Step = Module(new VecSHAComp1Step)
+
+  val oldStates = Wire(new VecSHAState)
+  val word      = Wire(UInt(32.W))
+  val newStates = Wire(new VecSHAState)
+
+  val mid = Reg(new VecSHAState)
+  val word0 = Wire(UInt(32.W))
+  val word1 = Reg(UInt(32.W))
+
+  val result = Reg(new VecSHAState)
+
+  word0 := Mux(io.in.bits.isVSHA2cl, io.in.bits.messageSchedPlusC(0), io.in.bits.messageSchedPlusC(2))
+  when (regEnable_s(0)) {
+    mid := newStates
+    word1 := Mux(io.in.bits.isVSHA2cl, io.in.bits.messageSchedPlusC(1), io.in.bits.messageSchedPlusC(3))
   }
 
-  private val tmp1_s3 = Reg(UInt(SEW.W))
-  private val tmp2_s3 = Reg(UInt(SEW.W))
-  private val mid_s3 = Reg(new VecSHAState)
-  when (io.regEnable_s(2)) {
-    tmp1_s3 := mid_s2.h + SHA2.sha256sum1(mid_s2.e) + ch(mid_s2.e, mid_s2.f, mid_s2.g) + words1_s2
-    tmp2_s3 := SHA2.sha256sum0(mid_s2.a) + maj(mid_s2.a, mid_s2.b, mid_s2.c)
-    mid_s3 := mid_s2
+  when (regEnable_s(1)) {
+    result := newStates
   }
 
-  io.next := (tmp1_s3 + tmp2_s3, mid_s3.a, mid_s3.b, mid_s3.c, mid_s3.d + tmp1_s3, mid_s3.e, mid_s3.f, mid_s3.g)
+  oldStates := Mux(regEnable_s(0), io.in.bits.curr, mid)
+  word := Mux(regEnable_s(0), word0, word1)
+
+  comp1Step.io.oldStates := oldStates
+  comp1Step.io.word      := word
+  comp1Step.io.newStates <> newStates
+
+  io.out.bits := result
+}
+
+class VecSHAMess1StepIO(implicit p: Parameters) extends XSBundle {
+  val sig0AndNormalAdders = Input(Vec(3, UInt(32.W)))
+  val normalAdders        = Input(Vec(2, UInt(32.W)))
+  val sig1Adders          = Input(Vec(2, UInt(32.W)))
+
+  val out = Output(Vec(2, UInt(32.W)))
+}
+
+class VecSHAMess1Step(implicit p: Parameters) extends XSModule {
+  val io = IO(new VecSHAMess1StepIO)
+  private val sig0s = io.sig0AndNormalAdders
+  private val norms = io.normalAdders
+  private val sig1s = io.sig1Adders
+
+  io.out(0) := SHA2.sha256sig1(sig1s(0)) + norms(0) + SHA2.sha256sig0(sig0s(1)) + sig0s(0)
+  io.out(1) := SHA2.sha256sig1(sig1s(1)) + norms(1) + SHA2.sha256sig0(sig0s(2)) + sig0s(1)
+}
+
+class VecSHAMessageWordsInput(implicit p: Parameters) extends XSBundle {
+  val wordsLow = Vec(4, UInt(32.W))
+  val wordsMid = Vec(4, UInt(32.W))
+  val wordsHigh = Vec(4, UInt(32.W))
 }
 
 class VecSHAMessageWordsIO(implicit p: Parameters) extends XSBundle {
-  val wordsLow = Input(Vec(4, UInt(32.W)))
-  val wordsMid = Input(Vec(4, UInt(32.W)))
-  val wordsHigh = Input(Vec(4, UInt(32.W)))
-  val regEnable_s = Input(Vec(3, Bool()))
-
-  val out = Output(UInt(128.W))
+  val in  = Flipped(DecoupledIO(new VecSHAMessageWordsInput))
+  val out = ValidIO(UInt(128.W))
 }
 
 class VecSHAMessageWords(implicit p: Parameters) extends XSModule {
+  private val SEW = 32 // TODO: if modification is needed, change arguments below
+  private val latency = 2
   val io = IO(new VecSHAMessageWordsIO)
+
+  val wordsLow = io.in.bits.wordsLow
+  val wordsMid = io.in.bits.wordsMid
+  val wordsHigh = io.in.bits.wordsHigh
+
   /** w[5,6,7,8] are not used, w[16,17,18,19] are generated later */
   private val w = Wire(Vec(16, UInt(32.W)))
   w.foreach(w => w := 0.U) // initialize
-
   /**
    * Assign values to this message words.
-   * @param wordsLow {W[3] @ W[2] @ W[1] @ W[0]} from oldVd
-   * @param wordsMid {W[11] @ W[10] @ W[9] @ W[4]} from vs2
-   * @param wordsHigh {W[15] @ W[14] @ W[13] @ W[12]} from vs1
+   *   [[wordsLow]] {W[3] @ W[2] @ W[1] @ W[0]} from oldVd
+   *   [[wordsMid]] {W[11] @ W[10] @ W[9] @ W[4]} from vs2
+   *   [[wordsHigh]] {W[15] @ W[14] @ W[13] @ W[12]} from vs1
    */
-  Seq( 0,  1,  2,  3).zipWithIndex.foreach(i => w(i._1) := io.wordsLow(i._2))
-  Seq( 4,  9, 10, 11).zipWithIndex.foreach(i => w(i._1) := io.wordsMid(i._2))
-  Seq(12, 13, 14, 15).zipWithIndex.foreach(i => w(i._1) := io.wordsHigh(i._2))
+  Seq( 0,  1,  2,  3).zipWithIndex.foreach(i => w(i._1) := wordsLow(i._2))
+  Seq( 4,  9, 10, 11).zipWithIndex.foreach(i => w(i._1) := wordsMid(i._2))
+  Seq(12, 13, 14, 15).zipWithIndex.foreach(i => w(i._1) := wordsHigh(i._2))
 
-  private val w16_s1 = Reg(UInt(32.W))
-  private val w17_s1 = Reg(UInt(32.W))
-  private val w18Part_s1 = Reg(UInt(32.W))
-  private val w19Part_s1 = Reg(UInt(32.W))
 
-  when (io.regEnable_s(0)) {
-    w16_s1 := SHA2.sha256sig1(w(14)) + w( 9) + SHA2.sha256sig0(w(1)) + w(0)
-    w17_s1 := SHA2.sha256sig1(w(15)) + w(10) + SHA2.sha256sig0(w(2)) + w(1)
-    w18Part_s1 := w(11) + SHA2.sha256sig0(w(3)) + w(2)
-    w19Part_s1 := w(12) + SHA2.sha256sig0(w(4)) + w(3)
+  val regEnable_s = Wire(Vec(latency + 1, Bool()))
+  val occupied = (1 until regEnable_s.length).map(regEnable_s(_)).reduce(_ || _)
+  regEnable_s(0) := Mux(occupied, false.B, io.in.valid)
+  for (i <- 0 until regEnable_s.length - 1) {
+    regEnable_s(i + 1) := GatedValidRegNext(regEnable_s(i))
   }
 
-  private val w16_s2 = Reg(UInt(32.W))
-  private val w17_s2 = Reg(UInt(32.W))
-  private val w18_s2 = Reg(UInt(32.W))
-  private val w19_s2 = Reg(UInt(32.W))
-  when (io.regEnable_s(1)) {
-    w16_s2 := w16_s1
-    w17_s2 := w17_s1
-    w18_s2 := SHA2.sha256sig1(w16_s1) + w18Part_s1
-    w19_s2 := SHA2.sha256sig1(w17_s1) + w19Part_s1
+  io.in.ready := !occupied
+  io.out.valid := regEnable_s.last
+  val mess1Step = Module(new VecSHAMess1Step)
+
+  // IO signals of mess1Step Module
+  val sig0AndNormalAdders = Wire(Vec(3, UInt(32.W)))
+  val sig1Adders          = Wire(Vec(2, UInt(32.W)))
+  val normalAdders        = Wire(Vec(2, UInt(32.W)))
+  val stepResult = Wire(Vec(2, UInt(32.W))) // output of each step
+
+  // First step of calculation
+  val sig0AndNormalAdders_0s = Wire(Vec(3, UInt(32.W)))
+  val normalAdders_0s        = Wire(Vec(2, UInt(32.W)))
+  val sig1Adders_0s          = Wire(Vec(2, UInt(32.W)))
+
+  // Second step of calculation
+  val sig0AndNormalAdders_1s = Reg(Vec(3, UInt(32.W)))
+  val normalAdders_1s        = Reg(Vec(2, UInt(32.W)))
+  val sig1Adders_1s          = Wire(Vec(2, UInt(32.W)))
+
+  // First step calculation result after 1 cycle
+  val stepResult_1s = Reg(Vec(2, UInt(32.W)))
+
+  // Final result
+  val finalResult = Reg(UInt(128.W))
+
+  sig0AndNormalAdders_0s := VecInit(w(0), w(1), w(2))
+  normalAdders_0s        := VecInit(w(9), w(10))
+  sig1Adders_0s          := VecInit(w(14), w(15))
+  when (regEnable_s(0)) {
+    sig0AndNormalAdders_1s := VecInit(w(2), w(3), w(4))
+    normalAdders_1s        := VecInit(w(11), w(12))
+    stepResult_1s          := stepResult
+  }
+  sig1Adders_1s   := VecInit(stepResult_1s(0), stepResult_1s(1))
+
+  when (regEnable_s(1)) {
+    finalResult := Cat(stepResult(1), stepResult(0), stepResult_1s(1), stepResult_1s(0))
   }
 
-  private val w16_s3 = RegEnable(w16_s2, io.regEnable_s(2))
-  private val w17_s3 = RegEnable(w17_s2, io.regEnable_s(2))
-  private val w18_s3 = RegEnable(w18_s2, io.regEnable_s(2))
-  private val w19_s3 = RegEnable(w19_s2, io.regEnable_s(2))
+  sig0AndNormalAdders := Mux(regEnable_s(0), sig0AndNormalAdders_0s, sig0AndNormalAdders_1s)
+  sig1Adders          := Mux(regEnable_s(0), sig1Adders_0s         , sig1Adders_1s         )
+  normalAdders        := Mux(regEnable_s(0), normalAdders_0s       , normalAdders_1s       )
 
-  io.out := Cat(w19_s3, w18_s3, w17_s3, w16_s3)
+  mess1Step.io.sig0AndNormalAdders := sig0AndNormalAdders
+  mess1Step.io.normalAdders        := normalAdders
+  mess1Step.io.sig1Adders          := sig1Adders
+  mess1Step.io.out                 <> stepResult
+
+  io.out.bits := finalResult
 }
 
-class VecSHA2IO extends Bundle {
-  val vs1Val    = Input(UInt(128.W)) // vd
-  val vs2Val    = Input(UInt(128.W)) // vs2
-  val oldVdVal  = Input(UInt(128.W)) // oldVd
-  val op        = Input(UInt(2.W))   // fuOpType(1, 0)
-  val regEnable = Input(Bool())
-  val result    = Output(UInt(128.W))
+class VecSHA2Input(implicit p: Parameters) extends XSBundle {
+  val vs1Val    = UInt(128.W) // vd
+  val vs2Val    = UInt(128.W) // vs2
+  val oldVdVal  = UInt(128.W) // oldVd
+  val op        = UInt(2.W)   // fuOpType(1, 0)
+}
+
+class VecSHA2IO(implicit p: Parameters) extends XSBundle {
+  val in  = Flipped(DecoupledIO(new VecSHA2Input))
+  val out = ValidIO(UInt(128.W))
 }
 
 class VecSHA2(implicit p: Parameters) extends XSModule {
+  // val latency = 2
   val io = IO(new VecSHA2IO)
 
   // def vsha2ch_vv: UInt = "b00100000".U(OpTypeWidth.W) // Vector SM4 Rounds vector-vector
   // def vsha2cl_vv: UInt = "b00100001".U(OpTypeWidth.W) // Vector SM4 Rounds vector-scalar
   // def vsha2ms_vv: UInt = "b00100010".U(OpTypeWidth.W) // Vector SM4 KeyExpansion
 
-  private val vs1AsWords = io.vs1Val.asTypeOf(Vec(4, UInt(32.W)))
-  private val vs2AsWords = io.vs2Val.asTypeOf(Vec(4, UInt(32.W)))
-  private val oldVdAsWords = io.oldVdVal.asTypeOf(Vec(4, UInt(32.W)))
-  private val regEnable_s = Wire(Vec(3, Bool()))
-  regEnable_s(0) := io.regEnable
-  for (lat <- 0 until 2) {
-    regEnable_s(lat + 1) := GatedValidRegNext(regEnable_s(lat))
-  }
-  private val isMessageSchedule_s = Wire(Vec(4, Bool()))
-  isMessageSchedule_s(0) := io.op(1)
-  for (lat <- 0 until 3) {
-      isMessageSchedule_s(lat + 1) := RegEnable(isMessageSchedule_s(lat), regEnable_s(lat))
-  }
+  val vs1AsWords = io.in.bits.vs1Val.asTypeOf(Vec(4, UInt(32.W)))
+  val vs2AsWords = io.in.bits.vs2Val.asTypeOf(Vec(4, UInt(32.W)))
+  val oldVdAsWords = io.in.bits.oldVdVal.asTypeOf(Vec(4, UInt(32.W)))
 
+  val isVSHA2cl = io.in.bits.op(0)
+  val isMessageSchedule = io.in.bits.op(1)
 
   // vsha2c[hl].vv: Vector SHA-2 two rounds of compression
-  private val vshaCompress = Module(new VecSHACompress)
-  vshaCompress.io.curr               := (vs2AsWords, oldVdAsWords)
-  vshaCompress.io.messageSchedPlusC  := vs1AsWords
-  vshaCompress.io.isVSHA2cl          := io.op(0)
-  vshaCompress.io.regEnable_s        := regEnable_s
-  private val vsha2cResult = Cat(vshaCompress.io.next.abef.reverse)
+  val vshaCompress = Module(new VecSHACompress)
+  vshaCompress.io.in.bits.curr               := (vs2AsWords, oldVdAsWords)
+  vshaCompress.io.in.bits.messageSchedPlusC  := vs1AsWords
+  vshaCompress.io.in.bits.isVSHA2cl          := isVSHA2cl
+  vshaCompress.io.in.valid                   := io.in.valid && !isMessageSchedule
+  val vsha2cResult = Cat(vshaCompress.io.out.bits.abef.reverse)
 
   // vsha2ms.vv: Vector SHA-2 message schedule
-  private val vshaMessageWords = Module(new VecSHAMessageWords)
-  vshaMessageWords.io.wordsLow    := oldVdAsWords
-  vshaMessageWords.io.wordsMid    := vs2AsWords
-  vshaMessageWords.io.wordsHigh   := vs1AsWords
-  vshaMessageWords.io.regEnable_s := regEnable_s
-  private val messageWordsHigh = vshaMessageWords.io.out
+  val vshaMessageWords = Module(new VecSHAMessageWords)
+  vshaMessageWords.io.in.bits.wordsLow    := oldVdAsWords
+  vshaMessageWords.io.in.bits.wordsMid    := vs2AsWords
+  vshaMessageWords.io.in.bits.wordsHigh   := vs1AsWords
+  vshaMessageWords.io.in.valid            := io.in.valid && isMessageSchedule
+  val messageWordsHigh = vshaMessageWords.io.out.bits
 
-  io.result := Mux(isMessageSchedule_s.last, messageWordsHigh, vsha2cResult)
+  io.in.ready := vshaCompress.io.in.ready && vshaMessageWords.io.in.ready
+  io.out.bits := Mux(vshaMessageWords.io.out.valid, messageWordsHigh, vsha2cResult)
+  io.out.valid := vshaCompress.io.out.valid || vshaMessageWords.io.out.valid
 }

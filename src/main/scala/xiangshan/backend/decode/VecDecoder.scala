@@ -843,9 +843,9 @@ object VecDecoder extends DecodeConstants {
     VSM4R_VS      -> OPMVV(T, FuType.vcrypp5, VcryppType.vsm4r_vs,  F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no),
 
     // Zvknha
-    VSHA2CH_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2ch_vv,  F, T, F, UopSplitType.VEC_VVV),
-    VSHA2CL_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2cl_vv,  F, T, F, UopSplitType.VEC_VVV),
-    VSHA2MS_VV    -> OPMVV(T, FuType.vcrypp4, VcryppType.vsha2ms_vv,  F, T, F, UopSplitType.VEC_VVV),
+    VSHA2CH_VV    -> OPMVV(T, FuType.vcrypnp, VcryppType.vsha2ch_vv,  F, T, F, UopSplitType.VEC_VVV),
+    VSHA2CL_VV    -> OPMVV(T, FuType.vcrypnp, VcryppType.vsha2cl_vv,  F, T, F, UopSplitType.VEC_VVV),
+    VSHA2MS_VV    -> OPMVV(T, FuType.vcrypnp, VcryppType.vsha2ms_vv,  F, T, F, UopSplitType.VEC_VVV),
   )
 
   val emptyArray: Array[(BitPat, XSDecodeBase)] = Array()
