@@ -146,8 +146,10 @@ if (env.TraceRTLMode) {
     concede2BytesNonBlockValid := true.B
   }
 
-  when (io.fromIFU.redirect || io.fromIFU.f2_flush) {
+  // FIXME: concede2Bytes is too fragile, should be re-designed
+  when (io.fromIFU.redirect || (io.fromIFU.f2_flush && !io.fromIFU.valid)) {
     // when redirect or f2_flush, clear
+    //   when f3 is vaid, concede2Bytes is for f3, should not clear by f2_flush
     concede2Bytes := false.B
   }.elsewhen (io.fromIFU.f3_fire) {
     // when f3_fire, then set
