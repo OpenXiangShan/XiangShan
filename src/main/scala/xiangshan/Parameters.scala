@@ -356,7 +356,8 @@ case class XSCoreParameters
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
   hasMbist: Boolean = false,
-  wfiResume: Boolean = true
+  wfiResume: Boolean = true,
+  hasSramCtl: Boolean = false,
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -910,4 +911,6 @@ trait HasXSParameter {
   def hasMbist               = coreParams.hasMbist
 
   def wfiResume              = coreParams.wfiResume
+  def hasSramCtl             = coreParams.hasSramCtl
+  def hasSramTest            = hasMbist || hasSramCtl
 }

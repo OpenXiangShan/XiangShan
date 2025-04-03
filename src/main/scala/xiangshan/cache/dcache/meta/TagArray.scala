@@ -76,7 +76,7 @@ class TagSRAMBank(index: Int)(implicit p: Parameters) extends AbstractTagArray {
 
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set = nSets, way = DCacheWayDiv,
     shouldReset = false, holdRead = false, singlePort = true, withClockGate = true,
-    hasMbist = hasMbist, suffix = Some("dcsh_tag")))
+    hasMbist = hasMbist,  hasSramCtl = hasSramCtl, suffix = Some("dcsh_tag")))
 
   val wen = rst || io.write.valid
   io.write.ready := !rst
