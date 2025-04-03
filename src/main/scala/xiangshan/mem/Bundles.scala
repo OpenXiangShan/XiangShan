@@ -161,7 +161,8 @@ object Bundles {
       }
       connectSamePort(this, inputReg)
       this.rep_info := DontCare
-      this.data_wen_dup   := DontCare
+      this.nc_with_data := DontCare
+      this.data_wen_dup := DontCare
     }
   }
 
@@ -356,6 +357,11 @@ object Bundles {
   class MemWaitUpdateReqBundle(implicit p: Parameters) extends XSBundle {
     val robIdx = Vec(backendParams.StaExuCnt, ValidIO(new RobPtr))
     val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
+  }
+
+  class MisalignBufferEnqIO(implicit p: Parameters) extends XSBundle {
+    val req = DecoupledIO(new LqWriteBundle)
+    val revoke = Output(Bool())
   }
 
 }
