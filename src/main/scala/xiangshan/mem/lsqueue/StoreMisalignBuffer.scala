@@ -131,12 +131,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // buffer control:
   //  - s_idle:  Idle
+  //  - s_wait:  Wait for rob match
   //  - s_split: Split miss-aligned store into aligned stores
   //  - s_req:   Send split store to sta and get result from sta
   //  - s_resp:  Responds to a split store access request
   //  - s_wb:    writeback yo rob/vecMergeBuffer
   //  - s_block: Wait for this instr to reach the head of Rob.
-  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(6)
+  val s_idle :: s_wait :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(7)
   val bufferState    = RegInit(s_idle)
 
   // enqueue
@@ -158,10 +159,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val s2_reqSelValid = GatedRegNext(reqSelValid)
   val s2_reqSelPort = GatedRegNext(reqSelPort)
-  val s2_misalign_can_split = (0 until enqPortNum).map {
+  val misalign_can_split = Wire(Bool())
+  misalign_can_split := Mux(!cross4KBPageBoundary, (0 until enqPortNum).map {
     case i =>
       !io.enq(i).revoke && s2_reqSelPort === i.U && s2_reqSelValid
-  }.reduce(_|_)
+  }.reduce(_|_), GatedRegNext(misalign_can_split))
 
   when(canEnq) {
     connectSamePort(req, reqSelBits)
@@ -225,13 +227,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary && s2_misalign_can_split) {
+      when(cross4KBPageBoundary && misalign_can_split) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid && s2_misalign_can_split) {
+        when (req_valid && misalign_can_split) {
           bufferState := s_split
           isCrossPage := false.B
         }
