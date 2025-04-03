@@ -131,13 +131,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // buffer control:
   //  - s_idle:  Idle
-  //  - s_wait:  Wait for rob match
   //  - s_split: Split miss-aligned store into aligned stores
   //  - s_req:   Send split store to sta and get result from sta
   //  - s_resp:  Responds to a split store access request
   //  - s_wb:    writeback yo rob/vecMergeBuffer
   //  - s_block: Wait for this instr to reach the head of Rob.
-  val s_idle :: s_wait :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(7)
+  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(6)
   val bufferState    = RegInit(s_idle)
 
   // enqueue
