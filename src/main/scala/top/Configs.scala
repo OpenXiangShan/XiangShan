@@ -501,6 +501,22 @@ class XSNoCTopMinimalConfig(n: Int = 1) extends Config(
   })
 )
 
+class XSNoCTopPowerGateConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSNoCTop = true,
+      WFIClockGate = true,
+      EnablePowerDown = true
+    )
+    case XSTileKey => up(XSTileKey).map {p =>
+      p.copy(
+        L2CacheParamsOpt = Some(p.L2CacheParamsOpt.get.copy(
+          enableL2Flush = true
+        ))
+      )}
+  })
+)
+
 class XSNoCDiffTopConfig(n: Int = 1) extends Config(
   (new XSNoCTopConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCDiffTop = true)
