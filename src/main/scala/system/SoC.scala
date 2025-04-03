@@ -97,10 +97,12 @@ case class SoCParameters
   UseXSNoCDiffTop: Boolean = false,
   UseXSTileDiffTop: Boolean = false,
   IMSICUseTL: Boolean = false,
-  SeperateDMBus: Boolean = false,
+  SeperateTLBus: Boolean = false,
+  SeperateDM: Boolean = false, // for non-XSNoCTop only, should work with SeperateTLBus
+  SeperateTLBusRanges: Seq[AddressSet] = Seq(),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  EnableDMAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){
@@ -153,13 +155,18 @@ trait HasSoCParameter {
 
   val NumIRSrc = soc.NumIRSrc
 
-  val SeperateDMBus = soc.SeperateDMBus
+  val SeperateDM = soc.SeperateDM
+  val SeperateTLBus = soc.SeperateTLBus
+  val SeperateTLBusRanges = soc.SeperateTLBusRanges
 
   val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
     soc.EnableCHIAsyncBridge else None
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
-  val EnableDMAsyncBridge = if (SeperateDMBus && soc.EnableDMAsyncBridge.isDefined)
-    soc.EnableDMAsyncBridge else None
+  val SeperateTLAsyncBridge = if (SeperateTLBus && soc.SeperateTLAsyncBridge.isDefined)
+    soc.SeperateTLAsyncBridge else None
+
+  // seperate TL bus
+  val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
@@ -478,9 +485,9 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   else { pll_node := peripheralXbar.get }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
-  val debugModuleXbarOpt = Option.when(SeperateDMBus)(TLXbar())
+  val debugModuleXbarOpt = Option.when(SeperateDM)(TLXbar())
   if (enableCHI) {
-    if (SeperateDMBus) {
+    if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := device_xbar.get
@@ -489,7 +496,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
       error_xbar.get := sb2tl.node
     }
   } else {
-    if (SeperateDMBus) {
+    if (SeperateDM) {
       debugModule.debug.node := debugModuleXbarOpt.get
     } else {
       debugModule.debug.node := peripheralXbar.get

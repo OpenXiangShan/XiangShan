@@ -22,3 +22,10 @@ L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true }
 L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
 
 DebugModuleBaseAddr: 0x38020000
+
+SeperateDM: false
+
+SeperateTLBus: false
+
+SeperateTLBusRanges:
+  - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address

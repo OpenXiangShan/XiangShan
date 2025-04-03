@@ -24,6 +24,7 @@ import system.SoCParamsKey
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.util.AsyncQueueParams
+import freechips.rocketchip.diplomacy.AddressSet
 
 case class YamlConfig(
   PmemRanges: Option[List[MemoryRange]],
@@ -31,7 +32,10 @@ case class YamlConfig(
   EnableCHIAsyncBridge: Option[Boolean],
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
-  DebugModuleBaseAddr: Option[BigInt]
+  DebugModuleBaseAddr: Option[BigInt],
+  SeperateDM: Option[Boolean],
+  SeperateTLBus: Option[Boolean],
+  SeperateTLBusRanges: Option[List[AddressSet]]
 )
 
 object YamlParser {
@@ -69,6 +73,21 @@ object YamlParser {
     yamlConfig.DebugModuleBaseAddr.foreach { addr =>
       newConfig = newConfig.alter((site, here, up) => {
         case DebugModuleKey => up(DebugModuleKey).map(_.copy(baseAddress = addr))
+      })
+    }
+    yamlConfig.SeperateDM.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = enable)
+      })
+    }
+    yamlConfig.SeperateTLBus.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = enable)
+      })
+    }
+    yamlConfig.SeperateTLBusRanges.foreach { ranges =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBusRanges = ranges)
       })
     }
     newConfig

@@ -35,6 +35,7 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
@@ -162,7 +163,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
-    misc.debugModuleXbarOpt.foreach(_ := core_with_l2(i).sep_dm_opt.get)
+    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+      // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
+      println(s"SeparateDM: ${SeperateDM}")
+      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      require(core_with_l2(i).sep_tl_opt.isDefined)
+      require(SeperateTLBusRanges.size == 1)
+      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
+      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+    }
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
