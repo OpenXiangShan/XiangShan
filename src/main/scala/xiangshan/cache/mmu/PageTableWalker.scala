@@ -694,7 +694,8 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
-  val enableS2xlate = io.in.bits.req_info.s2xlate =/= noS2xlate
+  val req_s2xlate = Reg(UInt(2.W))
+  val enableS2xlate = req_s2xlate =/= noS2xlate
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val s1Pbmte = Mux(enableS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
 
@@ -800,6 +801,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
     // so 2 + FilterSize is enough to avoid dead-lock
+    req_s2xlate := io.in.bits.req_info.s2xlate
     state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
     entries(enq_ptr).ppn := Mux(to_last_hptw_req, last_hptw_req_ppn, io.in.bits.ppn)
