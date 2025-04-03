@@ -101,11 +101,6 @@ ifneq ($(L3_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
 endif
 
-# seperate bus for DebugModule
-ifeq ($(SEPERATE_DM_BUS),1)
-COMMON_EXTRA_ARGS += --seperate-dm-bus
-endif
-
 # configuration from yaml file
 ifneq ($(YAML_CONFIG),)
 COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)

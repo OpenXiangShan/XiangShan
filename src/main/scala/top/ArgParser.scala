@@ -197,9 +197,13 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(hasSramCtl = true))
           }), tail)
-        case "--seperate-dm-bus" :: tail =>
+        case "--seperate-tl-bus" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDMBus = true)
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+          }), tail)
+        case "--seperate-dm" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)

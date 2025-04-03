@@ -90,39 +90,39 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
 
-  // seperate DebugModule bus
-  val EnableDMAsync = EnableDMAsyncBridge.isDefined
   // asynchronous bridge sink node
-  val dmAsyncSinkOpt = Option.when(SeperateDMBus && EnableDMAsync)(
-    LazyModule(new TLAsyncCrossingSink(EnableDMAsyncBridge.get))
+  val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
+    LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
   )
-  dmAsyncSinkOpt.foreach(_.node := core_with_l2.dmAsyncSourceOpt.get.node)
+  tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
   // synchronous sink node
-  val dmSyncSinkOpt = Option.when(SeperateDMBus && !EnableDMAsync)(TLTempNode())
-  dmSyncSinkOpt.foreach(_ := core_with_l2.dmSyncSourceOpt.get)
+  val tlSyncSinkOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
+  tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
 
-  // The Manager Node is only used to make IO. Standalone DM should be used for XSNoCTopConfig
-  val dm = Option.when(SeperateDMBus)(TLManagerNode(Seq(
+  // The Manager Node is only used to make IO
+  val tl = Option.when(SeperateTLBus)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
-      managers = Seq(
+      managers = SeperateTLBusRanges map { address =>
         TLSlaveParameters.v1(
-          address = Seq(p(DebugModuleKey).get.address),
+          address = Seq(address),
           regionType = RegionType.UNCACHED,
+          executable = true,
           supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsPutFull = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           fifoId = Some(0)
         )
-      ),
+
+      },
       beatBytes = 8
     )
   )))
-  val dmXbar = Option.when(SeperateDMBus)(TLXbar())
-  dmAsyncSinkOpt.foreach(sink => dmXbar.get := sink.node)
-  dmSyncSinkOpt.foreach(sink => dmXbar.get := sink)
-  dm.foreach(_ := dmXbar.get)
-  // seperate debug module io
-  val io_dm = dm.map(x => InModuleBody(x.makeIOs()))
+  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
+  tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
+  tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
+  tl.foreach(_ := tlXbar.get)
+  // seperate TL io
+  val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
@@ -332,9 +332,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     }
 
     // Seperate DebugModule TL Async Queue Sink
-    if (SeperateDMBus && EnableDMAsync) {
-      dmAsyncSinkOpt.get.module.clock := soc_clock
-      dmAsyncSinkOpt.get.module.reset := soc_reset_sync
+    if (SeperateTLBus && EnableSeperateTLAsync) {
+      tlAsyncSinkOpt.get.module.clock := soc_clock
+      tlAsyncSinkOpt.get.module.reset := soc_reset_sync
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
