@@ -1499,12 +1499,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // TraceRTL Collect Commit Trace to check the correctness of the pipeline
   if (env.TraceRTLMode) {
     when (io.enq.canAccept) {
+      val hasNonWPEnq = Cat(io.enq.req.map{ case r =>
+        r.valid && !r.bits.traceInfo.isWrongPath
+      }).orR
       io.enq.req.map{ r =>
         dontTouch(r.bits.traceInfo)
         when (r.valid) {
           XSError(r.bits.pc =/= r.bits.traceInfo.pcVA, "ROB Enq: pc should be equal to traceInfo.pcVA")
           when (isEmpty) {
-            XSError(r.bits.traceInfo.isWrongPath, "ROB's first instruction should not be wrongpath. Check tracertl after lastest redirect. The wrongPath mode check is wrong.")
+            XSError(r.bits.traceInfo.isWrongPath && !hasNonWPEnq, "ROB's first instruction should not be wrongpath. Check tracertl after lastest redirect. The wrongPath mode check is wrong.")
           }
         }
       }
