@@ -27,6 +27,7 @@ import xiangshan._
 import xiangshan.mem._
 import xiangshan.mem.Bundles._
 import coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
+import difftest._
 
 trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters {
 
@@ -453,6 +454,18 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
         states(j).setWaitSame(false.B)
       }
     )
+  }
+
+  // uncache store but memBackTypeMM should update the golden memory
+  if (env.EnableDifftest) {
+    val difftest = DifftestModule(new DiffUncacheMMStoreEvent, delay = 1)
+    val id = mem_grant.bits.source
+    difftest.coreid := io.hartId
+    difftest.index  := 0.U
+    difftest.valid  := mem_grant.fire && isStore(entries(id)) && entries(id).memBackTypeMM
+    difftest.addr   := entries(id).addr
+    difftest.data   := entries(id).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
+    difftest.mask   := entries(id).mask
   }
 
 
