@@ -24,3 +24,10 @@ L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
 DebugModuleBaseAddr: 0x38020000
 
 WFIResume: true
+
+SeperateDM: false
+
+SeperateTLBus: false
+
+SeperateTLBusRanges:
+  - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address

@@ -53,16 +53,15 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
 
-  // seperate DebugModule bus
-  val EnableDMAsync = EnableDMAsyncBridge.isDefined
-  println(s"SeperateDMBus = $SeperateDMBus")
-  println(s"EnableDMAsync = $EnableDMAsync")
+  // seperate TL bus
+  println(s"SeperateTLBus = $SeperateTLBus")
+  println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
   // asynchronous bridge source node
-  val dmAsyncSourceOpt = Option.when(SeperateDMBus && EnableDMAsync)(LazyModule(new TLAsyncCrossingSource()))
-  dmAsyncSourceOpt.foreach(_.node := tile.sep_dm_opt.get)
+  val tlAsyncSourceOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
+  tlAsyncSourceOpt.foreach(_.node := tile.sep_tl_opt.get)
   // synchronous source node
-  val dmSyncSourceOpt = Option.when(SeperateDMBus && !EnableDMAsync)(TLTempNode())
-  dmSyncSourceOpt.foreach(_ := tile.sep_dm_opt.get)
+  val tlSyncSourceOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
+  tlSyncSourceOpt.foreach(_ := tile.sep_tl_opt.get)
 
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))
@@ -156,9 +155,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // Seperate DebugModule TL Async Queue Source
-    if (SeperateDMBus && EnableDMAsync) {
-      dmAsyncSourceOpt.get.module.clock := clock
-      dmAsyncSourceOpt.get.module.reset := soc_reset_sync
+    if (SeperateTLBus && EnableSeperateTLAsync) {
+      tlAsyncSourceOpt.get.module.clock := clock
+      tlAsyncSourceOpt.get.module.reset := soc_reset_sync
     }
 
     withClockAndReset(clock, reset_sync) {
