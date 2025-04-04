@@ -85,7 +85,7 @@ jobs:
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
               --with-dramsim3 --threads 16                                  \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata
+              --llvm-profdata llvm-profdata --trace-fst
             mkdir -p $SPEC_DIR
             cp $NOOP_HOME/build/emu $SPEC_DIR/emu
           fi

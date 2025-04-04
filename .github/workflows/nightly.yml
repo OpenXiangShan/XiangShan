@@ -35,7 +35,7 @@ jobs:
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
             --with-dramsim3 --threads 16 --spike                          \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-            --llvm-profdata llvm-profdata
+            --llvm-profdata llvm-profdata --trace-fst
       - name: Random Checkpoint 0
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py           \

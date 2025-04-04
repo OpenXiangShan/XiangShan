@@ -587,6 +587,7 @@ class XiangShan(object):
                 if self.args.default_wave_home != self.args.wave_home:
                     print("copy wave file to " + self.args.wave_home)
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.fst $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
