@@ -205,6 +205,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
           }), tail)
+        case "--wfi-resume" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
+          }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
         case option :: tail =>

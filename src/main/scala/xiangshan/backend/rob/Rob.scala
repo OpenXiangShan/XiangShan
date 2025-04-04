@@ -400,7 +400,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.elsewhen(!hasWFI && RegNext(hasWFI)) {
     wfi_cycles := 0.U
   }
-  val wfi_timeout = wfi_cycles.andR
+  val wfi_timeout = if (wfiResume) wfi_cycles.andR else false.B
   when(RegNext(RegNext(io.csr.wfiEvent)) || io.flushOut.valid || wfi_timeout) {
     hasWFI := false.B
   }
