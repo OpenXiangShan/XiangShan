@@ -117,9 +117,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.hartId := io.hartId
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
-    tile.module.io.sramTest.mbist.zip(io.sramTest.mbist).foreach({case(a, b) => a := b})
-    tile.module.io.sramTest.mbistReset.zip(io.sramTest.mbistReset).foreach({case(a, b) => a := b})
-    tile.module.io.sramTest.sramCtl.zip(io.sramTest.sramCtl).foreach({case(a, b) => a := b})
+    tile.module.io.sramTest := io.sramTest
     io.cpu_halt := tile.module.io.cpu_halt
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.hartIsInReset := tile.module.io.hartIsInReset

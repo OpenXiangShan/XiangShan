@@ -289,17 +289,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     frontend.reset := backend.io.frontendReset
   }
 
+  memBlock.io.sramTestBypass.fromL2Top := io.sramTest
+  frontend.io.sramTest := memBlock.io.sramTestBypass.toFrontend
   if (hasMbist) {
-    memBlock.io.sramTestBypass.fromL2Top.mbist.get := io.sramTest.mbist.get
-    memBlock.io.sramTestBypass.fromL2Top.mbistReset.get := io.sramTest.mbistReset.get
-    frontend.io.sramTest.mbist.get := memBlock.io.sramTestBypass.toFrontend.mbist.get
-    frontend.io.sramTest.mbistReset.get := memBlock.io.sramTestBypass.toFrontend.mbistReset.get
     backend.io.sramTest.mbist.get := memBlock.io.sramTestBypass.toBackend.mbist.get
     backend.io.sramTest.mbistReset.get := memBlock.io.sramTestBypass.toBackend.mbistReset.get
-  }
-
-  if (hasSramCtl) {
-    memBlock.io.sramTestBypass.fromL2Top.sramCtl.get := io.sramTest.sramCtl.get
-    frontend.io.sramTest.sramCtl.get := memBlock.io.sramTestBypass.toFrontend.sramCtl.get
   }
 }
