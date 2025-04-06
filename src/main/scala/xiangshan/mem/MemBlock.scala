@@ -16,44 +16,35 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import coupledL2.PrefetchRecv
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import utils._
+import org.chipsalliance.cde.config.Parameters
+import system.{HasSoCParameter, SoCParamsKey}
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.{HasSoCParameter, SoCParamsKey}
+import utils._
 import xiangshan._
-import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
-import xiangshan.backend.exu.MemExeUnit
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, PFEvent, TriggerUtil}
-import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
-import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
-import xiangshan.backend.rob.{RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.exu.MemExeUnit
+import xiangshan.backend.fu.FuType._
+import xiangshan.backend.fu.NewCSR.PFEvent
+import xiangshan.backend.fu._
+import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-import xiangshan.backend.Bundles._
-import xiangshan.mem._
-import xiangshan.mem.mdp._
-import xiangshan.mem.Bundles._
-import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher, TLBPlace}
+import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
-import coupledL2.PrefetchRecv
-import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.HasSoCParameter
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
+import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -578,7 +569,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
-      val replace_pf = Module(new TlbReplace(2, pftlbParams))
+      val replace_pf = Module(new TlbReplace(TlbSubSizeVec(dtlb_pf_idx), pftlbParams))
       replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
@@ -661,6 +652,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
+  prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
   prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
   prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
@@ -704,6 +696,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     load_unit.io.prefetch_req.valid <> l1_pf_req.valid
     load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
+  // FIXME lyq: l1_pf_req has been already given to load_unit, why there is given to hybrid_unit?
   hybridUnits.foreach(hybrid_unit => {
     hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
     hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
