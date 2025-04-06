@@ -16,38 +16,33 @@
 
 package xiangshan
 
-import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
+import coupledL2._
+import coupledL2.tl2chi._
+import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.tile.MaxHartIdBits
 import huancun._
-import system.SoCParamsKey
-import system.CVMParamskey
+import huancun.debug._
+import org.chipsalliance.cde.config.{Field, Parameters}
+import system.{CVMParamskey, SoCParamsKey}
+import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
+import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
-import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
-import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.frontend.icache.ICacheParameters
-import freechips.rocketchip.diplomacy.AddressSet
-import freechips.rocketchip.tile.MaxHartIdBits
-import system.SoCParamsKey
-import huancun._
-import huancun.debug._
-import xiangshan.cache.wpu.WPUParameters
-import coupledL2._
-import coupledL2.tl2chi._
-import xiangshan.backend.datapath.WakeUpConfig
-import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams}
+import xiangshan.mem.prefetch.{BertiParams, PrefetcherParams, SMSParams, StreamStrideParams}
 
-import scala.math.{max, min, pow}
+import scala.math.{min, pow}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -210,7 +205,7 @@ case class XSCoreParameters
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams(), BertiParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
@@ -595,7 +590,9 @@ trait HasXSParameter {
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
   
   /** prefetch config */
+  def prefetcherSeq = coreParams.prefetcher
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
+  def hasBerti = coreParams.prefetcher.exists(_.isInstanceOf[BertiParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
 
   def HasMExtension = coreParams.HasMExtension

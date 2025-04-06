@@ -157,6 +157,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val latency_flag_write = DecoupledIO(new LatencyMetaWriteReq)
 
     // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
@@ -413,6 +414,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
+  val s2_refill_latency = Mux(io.refill_info.valid && isFromL1Prefetch(s2_req.pf_source), io.refill_info.bits.refill_latency, 0.U)
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
@@ -500,6 +502,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_data_quad_word = RegEnable(s2_data_quad_word, s2_fire_to_s3)
   val s3_data = RegEnable(s2_data, s2_fire_to_s3)
   val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
+  val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   // data_error will be reported by data array 1 cycle after data read resp
   val s3_l2_error = RegEnable(s2_l2_error, s2_fire)
   val s3_data_error = Wire(Bool())
@@ -845,6 +848,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.idx := s3_idx
   io.prefetch_flag_write.bits.way_en := s3_way_en
   io.prefetch_flag_write.bits.source := s3_req.pf_source
+
+  io.latency_flag_write.valid := s3_fire && s3_req.miss
+  io.latency_flag_write.bits.idx := s3_idx
+  io.latency_flag_write.bits.way_en := s3_way_en
+  io.latency_flag_write.bits.latency := s3_refill_latency
 
   // regenerate repl_way & repl_coh
   io.bloom_filter_query.set.valid := s2_fire_to_s3 && s2_req.miss && !isFromL1Prefetch(s2_repl_pf) && s2_repl_coh.isValid() && isFromL1Prefetch(s2_req.pf_source)

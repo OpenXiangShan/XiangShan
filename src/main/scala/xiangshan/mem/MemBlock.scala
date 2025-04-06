@@ -16,42 +16,39 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import coupledL2.PrefetchRecv
 import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import utils._
+import org.chipsalliance.cde.config.Parameters
+import system.{HasSoCParameter, SoCParamsKey}
 import utility._
-import system.SoCParamsKey
-import xiangshan._
-import xiangshan.ExceptionNO._
-import xiangshan.frontend.HasInstrMMIOConst
-import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
-import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
-import xiangshan.backend.exu.MemExeUnit
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil, PFEvent}
-import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
-import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
-import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
-import xiangshan.backend.datapath.NewPipelineConnect
-import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-import xiangshan.backend.Bundles._
-import xiangshan.mem._
-import xiangshan.mem.mdp._
-import xiangshan.mem.Bundles._
-import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher}
-import xiangshan.cache._
-import xiangshan.cache.mmu._
-import coupledL2.PrefetchRecv
 import utility.mbist.{MbistInterface, MbistPipeline}
 import utility.sram.{SramBroadcastBundle, SramHelper}
-import system.HasSoCParameter
+import utils._
+import xiangshan.ExceptionNO._
+import xiangshan._
+import xiangshan.backend.Bundles._
+import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
+import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.exu.MemExeUnit
+import xiangshan.backend.fu.FuType._
+import xiangshan.backend.fu.NewCSR.PFEvent
+import xiangshan.backend.fu._
+import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
+import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
+import xiangshan.cache._
+import xiangshan.cache.mmu._
+import xiangshan.frontend.HasInstrMMIOConst
+import xiangshan.mem.Bundles._
+import xiangshan.mem._
+import xiangshan.mem.mdp._
+import xiangshan.mem.prefetch.PrefetcherWrapper
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
   val LduCnt  = backendParams.LduCnt
@@ -501,22 +498,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   // dtlb
-  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
-  val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
+  val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, prefetcherSeq.size) // (load + hyu + stream pf, store, sms+l2bop+berti)
+  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(TlbSubSizeVec(0), 2, ldtlbParams))
+  val dtlb_st_tlb_st = Module(new TLBNonBlock(TlbSubSizeVec(1), 1, sttlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(TlbSubSizeVec(2), 2, pftlbParams))
   val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
   val dtlb_st = Seq(dtlb_st_tlb_st.io)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
-  val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 2) // (load + hyu + stream pf, store, sms+l2bop)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
   val StrideDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val SmsDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
   val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
+  val BertiTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 2
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -549,7 +547,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
-      val replace_pf = Module(new TlbReplace(2, pftlbParams))
+      val replace_pf = Module(new TlbReplace(TlbSubSizeVec(dtlb_pf_idx), pftlbParams))
       replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
@@ -637,6 +635,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromOOO.l2_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
+  prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
   prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
   prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
   prefetcher.io.trainSource.s1_loadFireHint := loadUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
@@ -646,11 +645,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
-  // fixme lyq: 0, 1 use parameters
+  // fixme lyq: 0, 1 use parameters instead of magic number
   dtlb_reqs(StrideDTLBPortIndex) <> prefetcher.io.tlb_req(0)
   dtlb_reqs(SmsDTLBPortIndex) <> prefetcher.io.tlb_req(1)
+  dtlb_reqs(BertiTLBPortIndex) <> prefetcher.io.tlb_req(2)
   prefetcher.io.pmp_resp(0) := pmp_check(StrideDTLBPortIndex).resp
   prefetcher.io.pmp_resp(1) := pmp_check(SmsDTLBPortIndex).resp
+  prefetcher.io.pmp_resp(2) := pmp_check(BertiTLBPortIndex).resp
   l1_pf_req <> prefetcher.io.l1_pf_to_l1
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
@@ -659,7 +660,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l3.l2_pf_en)
-  
+  XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
+  XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
+
   /** prefetcher site in L2 */
   dtlb_reqs(L2toL1DTLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DTLBPortIndex).resp.ready := true.B
@@ -672,6 +675,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     load_unit.io.prefetch_req.valid <> l1_pf_req.valid
     load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
+  // FIXME lyq: l1_pf_req has been already given to load_unit, why there is given to hybrid_unit?
   hybridUnits.foreach(hybrid_unit => {
     hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
     hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
@@ -1863,6 +1867,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       // TODO lyq: how to set after wrapper?
       // ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
       // ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
+      // ++ (if (bertiOpt.isDefined) Seq(ModuleNode(bertiOpt.get)) else Nil)
     )
     val rightResetTree = ResetGenNode(
       Seq(

@@ -99,6 +99,7 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
   val error      = Bool()
+  val refill_latency = UInt(LATENCY_WIDTH.W)
 }
 
 class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
@@ -377,6 +378,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
+    val refill_train = ValidIO(new TrainReqBundle)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
 
@@ -473,6 +475,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // raw data refilled to l1 by l2
   val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
 
+  val refill_start_time = Reg(UInt(64.W))
+  val refill_latency = Reg(UInt(LATENCY_WIDTH.W))
+
   // allocate current miss queue entry for a miss req
   val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel && !io.wbq_block_miss_req)
   val primary_accept = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
@@ -536,6 +541,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
     access := false.B
     secondary_fired := false.B
+
+    refill_start_time := GTimer()
   }
 
   when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
@@ -626,6 +633,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     refill_data_raw(refill_count ^ isKeyword) := io.mem_grant.bits.data
     isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
+    when(refill_done) {
+      val refill_end_time = GTimer()
+      val time_delta = refill_end_time - refill_start_time
+      val overflow = refill_end_time < refill_start_time || (time_delta >> LATENCY_WIDTH).orR
+      refill_latency := Mux(overflow, 0.U, time_delta)
+    }
   }
 
   when (io.mem_finish.fire) {
@@ -831,6 +844,20 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
   io.refill_info.bits.error      := error
+  io.refill_info.bits.refill_latency := Mux(
+    isFromL1Prefetch(req.pf_source),
+    refill_latency,
+    0.U
+  )
+
+  io.refill_train.valid := req_valid && w_grantlast
+  io.refill_train.bits.pc := req.pc
+  io.refill_train.bits.paddr := req.addr
+  io.refill_train.bits.vaddr := req.vaddr
+  io.refill_train.bits.miss := true.B
+  // FIXME lyq: when mshr entry merges, req.pf_source may be cleaned.
+  io.refill_train.bits.metaSource := req.pf_source
+  io.refill_train.bits.refillLatency := refill_latency
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
@@ -919,6 +946,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     val mainpipe_info = Input(new MainPipeInfoToMQ)
     val refill_info = ValidIO(new MissQueueRefillInfo)
+    val refill_train = ValidIO(new TrainReqBundle)
 
     // block probe
     val probe_addr = Input(UInt(PAddrBits.W))
@@ -1133,6 +1161,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   io.refill_info.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_info.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_info.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info.bits })
+
+  io.refill_train.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_train.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
+  io.refill_train.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_train.bits })
 
   acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)

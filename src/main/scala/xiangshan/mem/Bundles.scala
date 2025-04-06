@@ -18,22 +18,21 @@
 package xiangshan.mem
 
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.fu.vector.Bundles._
-import xiangshan.backend.Bundles._
-import xiangshan.mem.prefetch.PrefetchReqBundle
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
-import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
-import math._
+import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.mem.prefetch.{PrefetchReqBundle, TrainReqBundle}
+
+import scala.math._
 
 object Bundles {
 
@@ -125,6 +124,7 @@ object Bundles {
     val meta_prefetch = UInt(L1PfSourceBits.W)
     val meta_access = Bool()
     val is_from_hw_pf = Bool() // s0 source is from prefetch
+    val refillLatency = UInt(LATENCY_WIDTH.W)
 
     def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
       val inputReg = latch match {
@@ -135,6 +135,7 @@ object Bundles {
       this.meta_prefetch := DontCare
       this.meta_access := DontCare
       this.is_from_hw_pf := DontCare
+      this.refillLatency := 0.U // FIXME lyq: best to use parameter
     }
 
     def toPrefetchReqBundle(): PrefetchReqBundle = {
@@ -144,6 +145,17 @@ object Bundles {
       res.pc := this.uop.pc
       res.miss := this.miss
       res.pfHitStream := isFromStream(this.meta_prefetch)
+      res
+    }
+
+    def toTrainReqBundle(): TrainReqBundle = {
+      val res = Wire(new TrainReqBundle)
+      res.vaddr := this.vaddr
+      res.paddr := this.paddr
+      res.pc := this.uop.pc
+      res.miss := this.miss
+      res.metaSource := this.meta_prefetch
+      res.refillLatency := this.refillLatency
       res
     }
   }
