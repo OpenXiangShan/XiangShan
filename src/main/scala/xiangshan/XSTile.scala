@@ -157,12 +157,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
     io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
 
-    l2top.module.io.sramTestIn.mbist.zip(io.sramTest.mbist).foreach({case(a, b) => a := b})
-    l2top.module.io.sramTestIn.mbistReset.zip(io.sramTest.mbistReset).foreach({case(a, b) => a := b})
-    l2top.module.io.sramTestIn.sramCtl.zip(io.sramTest.sramCtl).foreach({case(a, b) => a := b })
-    core.module.io.sramTest.mbist.zip(l2top.module.io.sramTestOut.mbist).foreach({case(a, b) => a := b})
-    core.module.io.sramTest.mbistReset.zip(l2top.module.io.sramTestOut.mbistReset).foreach({case(a, b) => a := b})
-    core.module.io.sramTest.sramCtl.zip(l2top.module.io.sramTestOut.sramCtl).foreach({case(a, b) => a := b})
+    l2top.module.io.sramTestIn := io.sramTest
+    core.module.io.sramTest := l2top.module.io.sramTestOut
 
     if (enableL2) {
       // TODO: add ECC interface of L2

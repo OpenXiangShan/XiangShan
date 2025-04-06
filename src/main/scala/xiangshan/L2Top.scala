@@ -284,9 +284,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2 = l2cache.get.module
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
-      l2.io.sramTest.mbist.zip(io.sramTestIn.mbist).foreach({ case (a, b) => a := b })
-      l2.io.sramTest.mbistReset.zip(io.sramTestIn.mbistReset).foreach({ case (a, b) => a := b })
-      l2.io.sramTest.sramCtl.zip(io.sramTestIn.sramCtl).foreach({ case (a, b) => a := b })
+      l2.io.sramTest := io.sramTestIn
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
