@@ -4,17 +4,16 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utility.mbist.MbistPipeline
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.{FuType, PMPRespBundle}
-import xiangshan.cache.{DCacheLineReq, HasDCacheParameters, LoadPfDbBundle}
 import xiangshan.cache.mmu._
-import xiangshan.mem._
+import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle}
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle
+import xiangshan.mem._
 import xiangshan.mem.trace._
-import freechips.rocketchip.diplomacy.BufferParams.default
-import utility.mbist.{MbistInterface, MbistPipeline}
 
 object TLBPlace extends Enumeration{
   /* now only support dtlb_ld and dtlb_st */
@@ -63,6 +62,7 @@ class OOOToPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
 
 class DCacheToPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq())
+  val refillTrain = ValidIO(new TrainReqBundle)
 }
 
 class TrainSourceIO(implicit p: Parameters) extends PrefetchBundle {
@@ -149,9 +149,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
 
   /** Prefetchor
-    * L1: Stride
-    * L2: Stride, SMS
-    * L3: Stride
+    * L1: Stride, Berti
+    * L2: Stride, SMS, Berti
+    * L3: Stride, Berti
     */
   val HasSMS = prefetcherSeq.exists(_.isInstanceOf[SMSParams])
   val IdxSMS = prefetcherSeq.indexWhere(_.isInstanceOf[SMSParams])
