@@ -16,16 +16,15 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate, HasPerfEvents}
-import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
+import freechips.rocketchip.tilelink.TLPermissions
+import org.chipsalliance.cde.config.Parameters
+import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.mem.LqPtr
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -57,6 +56,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
+    val latency_flag_write = DecoupledIO(new LatencyMetaWriteReq)
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
@@ -592,6 +592,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
   io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
+
+  // when demand request hit prefetch data, the latency is reset to 0.
+  io.latency_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  io.latency_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.latency_flag_write.bits.way_en := s3_tag_match_way
+  io.latency_flag_write.bits.latency := 0.U
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
   io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)

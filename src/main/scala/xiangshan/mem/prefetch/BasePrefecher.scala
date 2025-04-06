@@ -16,17 +16,26 @@
 
 package xiangshan.mem.prefetch
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import coupledL2.PrefetchCtrlFromCore
+import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
-import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
+import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
-import coupledL2.PrefetchCtrlFromCore
+import xiangshan.mem.Bundles.LsPrefetchTrainBundle
+import xiangshan.mem.L1PrefetchReq
+
+object PrefetchTarget extends Enumeration{
+  val L1 = Value("toL1")
+  val L2 = Value("toL2")
+  val L3 = Value("toL3")
+
+  val PfTgtCnt = Value("PrefetchTargetCount")
+  val PfTgtBits = log2Ceil(PfTgtCnt.id)
+}
 
 class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   val l1I_pf_enable = Bool()
@@ -64,7 +73,24 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
 
 class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq
 
+class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
+  val vaddr = UInt(VAddrBits.W)
+  val paddr = UInt(PAddrBits.W)
+  val pc = UInt(VAddrBits.W)
+  val miss = Bool()
+  val metaSource = UInt(L1PfSourceBits.W)
+  val refillLatency = UInt(LATENCY_WIDTH.W)
+}
+
+class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
+  val triggerPC = UInt(VAddrBits.W)
+  val triggerVA = UInt(VAddrBits.W)
+  val prefetchVA = UInt(VAddrBits.W)
+  val prefetchTarget = UInt(PrefetchTarget.PfTgtBits.W)
+}
+
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
+  val enable = Input(Bool())
   val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
@@ -72,7 +98,10 @@ class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val l1_req = DecoupledIO(new L1PrefetchReq())
   val l2_req = DecoupledIO(new L2PrefetchReq())
   val l3_req = DecoupledIO(new L3PrefetchReq())
-  val enable = Input(Bool())
+}
+
+class BertiPrefetcherIO()(implicit p: Parameters) extends PrefetcherIO {
+  val refillTrain = Flipped(ValidIO(new TrainReqBundle()))
 }
 
 class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
@@ -83,8 +112,11 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val pfHitStream = Bool()
 }
 
-abstract class BasePrefecher()(implicit p: Parameters) extends XSModule {
-  val io = IO(new PrefetcherIO())
+abstract class BasePrefecher()(implicit p: Parameters) extends XSModule
+  with PrefetcherParams
+  with HasDCacheParameters
+{
+  lazy val io: PrefetcherIO = IO(new PrefetcherIO())
 
   // By default, there are no tlb transformations, l2_req and l3_req
   io.tlb_req.req.valid := false.B
