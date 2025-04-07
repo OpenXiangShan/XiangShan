@@ -21,6 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
+import utility.sram.SramMbistBundle
 import system._
 import device._
 import org.chipsalliance.cde.config._
@@ -34,7 +35,6 @@ import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.{ChiselAnnotation, annotate}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
-import utility.sram.SramBroadcastBundle
 
 import difftest.common.DifftestWiring
 import difftest.util.Profile
@@ -90,39 +90,39 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
 
-  // seperate DebugModule bus
-  val EnableDMAsync = EnableDMAsyncBridge.isDefined
   // asynchronous bridge sink node
-  val dmAsyncSinkOpt = Option.when(SeperateDMBus && EnableDMAsync)(
-    LazyModule(new TLAsyncCrossingSink(EnableDMAsyncBridge.get))
+  val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
+    LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
   )
-  dmAsyncSinkOpt.foreach(_.node := core_with_l2.dmAsyncSourceOpt.get.node)
+  tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
   // synchronous sink node
-  val dmSyncSinkOpt = Option.when(SeperateDMBus && !EnableDMAsync)(TLTempNode())
-  dmSyncSinkOpt.foreach(_ := core_with_l2.dmSyncSourceOpt.get)
+  val tlSyncSinkOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
+  tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
 
-  // The Manager Node is only used to make IO. Standalone DM should be used for XSNoCTopConfig
-  val dm = Option.when(SeperateDMBus)(TLManagerNode(Seq(
+  // The Manager Node is only used to make IO
+  val tl = Option.when(SeperateTLBus)(TLManagerNode(Seq(
     TLSlavePortParameters.v1(
-      managers = Seq(
+      managers = SeperateTLBusRanges map { address =>
         TLSlaveParameters.v1(
-          address = Seq(p(DebugModuleKey).get.address),
+          address = Seq(address),
           regionType = RegionType.UNCACHED,
+          executable = true,
           supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           supportsPutFull = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
           fifoId = Some(0)
         )
-      ),
+
+      },
       beatBytes = 8
     )
   )))
-  val dmXbar = Option.when(SeperateDMBus)(TLXbar())
-  dmAsyncSinkOpt.foreach(sink => dmXbar.get := sink.node)
-  dmSyncSinkOpt.foreach(sink => dmXbar.get := sink)
-  dm.foreach(_ := dmXbar.get)
-  // seperate debug module io
-  val io_dm = dm.map(x => InModuleBody(x.makeIOs()))
+  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
+  tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
+  tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
+  tl.foreach(_ := tlXbar.get)
+  // seperate TL io
+  val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
@@ -147,6 +147,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
     private val hasMbist = tiles.head.hasMbist
+    private val hasSramCtl = tiles.head.hasSramCtl
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())
@@ -172,8 +173,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
           val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
         })
       }
-      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val dft = Option.when(hasMbist)(Input(new SramMbistBundle))
+      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val sramCtl = Option.when(hasSramCtl)(Input(UInt(64.W)))
       val lp = Option.when(EnablePowerDown) (new LowPowerIO)
     })
     // imsic axi4lite io
@@ -184,8 +186,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
-    wrapper.core_with_l2.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
-    wrapper.core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
+    wrapper.core_with_l2.module.io.sramTest.mbist.zip(io.dft).foreach { case (a, b) => a := b }
+    wrapper.core_with_l2.module.io.sramTest.mbistReset.zip(io.dft_reset).foreach { case (a, b) => a := b }
+    wrapper.core_with_l2.module.io.sramTest.sramCtl.zip(io.sramCtl).foreach { case (a, b) => a := b }
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
@@ -201,13 +204,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     dontTouch(io)
 
     /*
-     SoC control the sequence of power on/off with isolation/reset/clock 
+     SoC control the sequence of power on/off with isolation/reset/clock
      */
     val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
     val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
 
     /* Core+L2 reset when:
-     1. normal reset from SoC 
+     1. normal reset from SoC
      2. SoC initialize reset during Power on/off flow
      */
     val cpuReset = reset.asBool || !soc_rst_n
@@ -219,14 +222,14 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val seip  = plic.last(0)
     val nmi_31 = nmi.head(0)
     val nmi_43 = nmi.head(1)
-    val msi_info_vld = core_with_l2.module.io.msiInfo.valid 
+    val msi_info_vld = core_with_l2.module.io.msiInfo.valid
     val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
 
     /*
      * CPU Low Power State:
      * 1. core+L2 Low power state transactions is triggered by l2 flush request from core CSR
      * 2. wait L2 flush done
-     * 3. wait Core to wfi -> send out < io.o_cpu_no_op > 
+     * 3. wait Core to wfi -> send out < io.o_cpu_no_op >
      */
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
     val lpState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
@@ -240,7 +243,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     /*WFI clock Gating state
      1. works only when lpState is IDLE means Core+L2 works in normal state
      2. when Core is in wfi state, core+l2 clock is gated
-     3. only reset/interrupt/snoop could recover core+l2 clock 
+     3. only reset/interrupt/snoop could recover core+l2 clock
     */
     val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
     val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
@@ -260,18 +263,18 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val pwrdownGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
     pwrdownGateClock := !soc_rst_n && lpState === sPOFFREQ
     /*
-     physical power off handshake: 
+     physical power off handshake:
      i_cpu_pwrdown_req_n
-     o_cpu_pwrdown_ack_n means all power is safely on 
+     o_cpu_pwrdown_ack_n means all power is safely on
      */
     val soc_pwrdown_n = io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B)
     io.lp.foreach { lp => lp.o_cpu_pwrdown_ack_n := core_with_l2.module.io.pwrdown_ack_n.getOrElse(true.B) }
 
 
     /* Core+L2 hardware initial clock gating as:
-     1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid 
-     2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state 
-     3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel  
+     1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid
+     2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
+     3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
     val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
 
@@ -327,9 +330,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     }
 
     // Seperate DebugModule TL Async Queue Sink
-    if (SeperateDMBus && EnableDMAsync) {
-      dmAsyncSinkOpt.get.module.clock := soc_clock
-      dmAsyncSinkOpt.get.module.reset := soc_reset_sync
+    if (SeperateTLBus && EnableSeperateTLAsync) {
+      tlAsyncSinkOpt.get.module.clock := soc_clock
+      tlAsyncSinkOpt.get.module.reset := soc_reset_sync
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld

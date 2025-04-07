@@ -320,7 +320,9 @@ case class L2CacheConfig
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
-        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform,
+        hasMbist = p.hasMbist,
+        hasSramCtl = p.hasSramCtl,
       )),
       L2NBanks = banks
     ))

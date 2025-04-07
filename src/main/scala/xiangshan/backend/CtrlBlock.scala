@@ -558,10 +558,11 @@ class CtrlBlockImp(
   rat.io.snpt.snptSelect := snptSelect
   rat.io.snpt.flushVec := flushVec
 
-  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
+  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
+  fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
-    fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !(decodeHasException(i) || disableFusion)
+    fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !decodeHasException(i)
     fusionDecoder.io.in(i).bits := decode.io.out(i).bits.instr
     if (i > 0) {
       fusionDecoder.io.inReady(i - 1) := decode.io.out(i).ready

@@ -23,18 +23,19 @@ import chisel3.experimental.dataview._
 import difftest.DifftestModule
 import xiangshan._
 import utils._
+import utility._
+import utility.sram.{SramMbistBundle, SramBroadcastBundle}
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.CHILogger
 import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import openLLC.TargetBinder._
 import cc.xiangshan.openncb._
-import utility._
-import utility.sram.SramBroadcastBundle
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
+import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
@@ -162,7 +163,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
-    misc.debugModuleXbarOpt.foreach(_ := core_with_l2(i).sep_dm_opt.get)
+    misc.debugModuleXbarOpt.foreach { debugModuleXbar =>
+      // SeperateTlBus can only be connected to DebugModule now in non-XSNoCTop environment
+      println(s"SeparateDM: ${SeperateDM}")
+      println(s"misc.debugModuleXbarOpt: ${misc.debugModuleXbarOpt}")
+      require(core_with_l2(i).sep_tl_opt.isDefined)
+      require(SeperateTLBusRanges.size == 1)
+      require(SeperateTLBusRanges.head == p(DebugModuleKey).get.address)
+      debugModuleXbar := core_with_l2(i).sep_tl_opt.get
+    }
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
@@ -332,8 +341,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-      core.module.io.dft.foreach(dontTouch(_) := 0.U.asTypeOf(new SramBroadcastBundle))
-      core.module.io.dft_reset.foreach(dontTouch(_) := 0.U.asTypeOf(new DFTResetSignals))
+      dontTouch(core.module.io.sramTest) := 0.U.asTypeOf(core.module.io.sramTest)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 

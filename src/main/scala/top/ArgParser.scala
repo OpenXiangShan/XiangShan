@@ -90,7 +90,7 @@ object ArgParser {
           }), tail)
         case "--hartidbits" :: hartidbits :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case MaxHartIdBits => hartidbits
+            case MaxHartIdBits => hartidbits.toInt
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -193,9 +193,21 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
           }), tail)
-        case "--seperate-dm-bus" :: tail =>
+        case "--sram-with-ctl" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDMBus = true)
+            case XSTileKey => up(XSTileKey).map(_.copy(hasSramCtl = true))
+          }), tail)
+        case "--seperate-tl-bus" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateTLBus = true)
+          }), tail)
+        case "--seperate-dm" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
+          }), tail)
+        case "--wfi-resume" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)

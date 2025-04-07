@@ -787,8 +787,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.isFrmMisAlignBuf    := s0_sel_src.frm_mabuf
   s0_out.uop_unit_stride_fof := s0_sel_src.uop_unit_stride_fof
   s0_out.paddr         :=
-    Mux(s0_src_valid_vec(nc_idx), io.lsq.nc_ldin.bits.paddr,
-    Mux(s0_src_valid_vec(fast_rep_idx), io.fast_rep_in.bits.paddr,
+    Mux(s0_src_select_vec(nc_idx), io.lsq.nc_ldin.bits.paddr,
+    Mux(s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.paddr,
     Mux(s0_src_select_vec(int_iss_idx) && s0_sel_src.prf_i, 0.U,
     io.prefetch_req.bits.paddr))) // only for nc, fast_rep, prefetch
   s0_out.tlbNoQuery    := s0_tlb_no_query
@@ -1184,13 +1184,23 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // exception that may cause load addr to be invalid / illegal
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
-  val s2_actually_uncache = Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
+
+  // The response signal of `pmp/pma` is credible only after the physical address is actually generated.
+  // Therefore, the response signals of pmp/pma generated after an address translation has produced an `access fault` or a `page fault` are completely unreliable.
+  val s2_un_access_exception =  s2_vecActive && (
+    s2_in.uop.exceptionVec(loadAccessFault) ||
+    s2_in.uop.exceptionVec(loadPageFault)   ||
+    s2_in.uop.exceptionVec(loadGuestPageFault)
+  )
+  // This real physical address is located in uncache space.
+  val s2_actually_uncache = !s2_in.tlbMiss && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio
+  val s2_uncache = !s2_prf && s2_actually_uncache
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_vecActive && (
       s2_in.uop.exceptionVec(loadAccessFault) ||
       s2_pmp.ld ||
-      (s2_isvec || s2_frm_mabuf) && s2_actually_uncache && !s2_prf && !s2_in.tlbMiss ||
+      (s2_isvec || s2_frm_mabuf) && s2_uncache ||
       io.dcache.resp.bits.tag_error && GatedValidRegNext(io.csrCtrl.cache_error_enable)
     )
   }
@@ -1205,7 +1215,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
   val s2_exception = s2_vecActive &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
-  val s2_uncache = !s2_prf && !s2_in.tlbMiss && s2_actually_uncache
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
                      s2_out.isMisalign && !s2_in.misalignWith16Byte && !s2_exception_vec(breakPoint) && !s2_trigger_debug_mode && !s2_uncache
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan, s2_d_corrupt) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
@@ -1516,7 +1525,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_safe_wakeup  = RegEnable(s2_safe_wakeup, s2_fire)
   val s3_safe_writeback = RegEnable(s2_safe_writeback, s2_fire) || s3_hw_err
   val s3_exception = RegEnable(s2_real_exception, s2_fire)
-  val s3_mis_align = RegEnable(s2_mis_align, s2_fire)
+  val s3_mis_align = RegEnable(s2_mis_align, s2_fire) && !s3_exception
   val s3_misalign_can_go = RegEnable(!isAfter(s2_out.uop.lqIdx, io.lsq.lqDeqPtr) || io.misalign_allow_spec, s2_fire)
   val s3_trigger_debug_mode = RegEnable(s2_trigger_debug_mode, false.B, s2_fire)
 

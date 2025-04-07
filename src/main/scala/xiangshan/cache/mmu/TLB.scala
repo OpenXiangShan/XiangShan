@@ -118,13 +118,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   val Sv39Enable = csr.satp.mode === 8.U
   val Sv48Enable = csr.satp.mode === 9.U
-  val Sv39x4Enable = csr.vsatp.mode === 8.U || csr.hgatp.mode === 8.U
-  val Sv48x4Enable = csr.vsatp.mode === 9.U || csr.hgatp.mode === 9.U
+  val Sv39vsEnable = csr.vsatp.mode === 8.U
+  val Sv48vsEnable = csr.vsatp.mode === 9.U
+  val Sv39x4Enable = csr.hgatp.mode === 8.U
+  val Sv48x4Enable = csr.hgatp.mode === 9.U
+
   val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
     if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (mode(i) < ModeM))
   )
-  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (Sv39x4Enable || Sv48x4Enable) && (mode(i) < ModeM))
+  val s2xlateEnable = (0 until Width).map(i =>
+    (isHyperInst(i) || virt_out(i)) &&
+    (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
+    (mode(i) < ModeM)
+  )
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
   // pre fault: check fault before real do translate
@@ -139,7 +146,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (premode(i) < ModeM))
   )
-  val pres2xlateEnable = (0 until Width).map(i => (virt_in || req_in(i).bits.hyperinst) && (Sv39x4Enable || Sv48x4Enable) && (premode(i) < ModeM))
+  val pres2xlateEnable = (0 until Width).map(i =>
+    (virt_in || req_in(i).bits.hyperinst) &&
+    (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
+    (premode(i) < ModeM)
+  )
 
   (0 until Width).foreach{i =>
 
@@ -190,7 +201,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
           } .elsewhen (Sv39x4Enable) {
             pregpf(i) := gpf39
           }
-        } .otherwise {
+        } .elsewhen (req_in_s2xlate(i) === onlyStage1 || req_in_s2xlate(i) === allStage) {
+          when (Sv48vsEnable) {
+            prepf(i) := pf48
+          } .elsewhen (Sv39vsEnable) {
+            prepf(i) := pf39
+          }
+        } .otherwise { // noS2xlate
           when (Sv48Enable) {
             prepf(i) := pf48
           } .elsewhen (Sv39Enable) {
@@ -605,9 +622,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
     val resp_hit = ptw.resp.bits.hit(vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, true, false)
     val p_hit = GatedValidRegNext(resp_hit && io.ptw.resp.fire && s2xlate_hit)
-    val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)
+    val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)(ppnLen - 1, 0)
     val gvpn = Mux(onlyS2, vpn, ppn_s1)
-    val ppn_s2 = ptw.resp.bits.s2.genPPNS2(gvpn)
+    val ppn_s2 = ptw.resp.bits.s2.genPPNS2(gvpn)(ppnLen - 1, 0)
     val p_ppn = RegEnable(Mux(s2xlate === onlyStage2 || s2xlate === allStage, ppn_s2, ppn_s1), io.ptw.resp.fire)
     val p_pbmt = RegEnable(ptw.resp.bits.s1.entry.pbmt,io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits.s1), io.ptw.resp.fire)

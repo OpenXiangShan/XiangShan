@@ -306,7 +306,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s2_valid = Mux(s2page_pageSuper, VecInit(Seq.fill(tlbcontiguous)(true.B)), VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
     this.valididx := Mux(item.s2xlate === onlyStage2, s2_valid, item.s1.valididx)
     // if stage2 page is larger than stage1 page, need to merge s2tag and s2ppn to get a new s2ppn.
-    val s1ppn = item.s1.entry.ppn
+    val s1ppn = item.s1.entry.ppn(sectorppnLen - 1, 0)
     val s1ppn_low = item.s1.ppn_low
     val s2ppn = MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, sectortlbwidth))(Seq(
       3.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 3), item.s2.entry.tag(vpnnLen * 3 - 1, sectortlbwidth)),
@@ -330,14 +330,14 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     // 3. s1 is napot(64KB) and s2 is also napot(64KB)
     val allStage_n = (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.level.getOrElse(0.U) =/= 0.U) ||
       (item.s2.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.level.getOrElse(0.U) =/= 0.U) ||
-      (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s1.entry.n.getOrElse(0.U) =/= 0.U)
+      (item.s1.entry.n.getOrElse(0.U) =/= 0.U && item.s2.entry.n.getOrElse(0.U) =/= 0.U)
     this.n := MuxLookup(item.s2xlate, 2.U)(Seq(
       onlyStage1 -> item.s1.entry.n.getOrElse(0.U),
       onlyStage2 -> item.s2.entry.n.getOrElse(0.U),
       allStage -> allStage_n,
       noS2xlate -> item.s1.entry.n.getOrElse(0.U)
     ))
-    this.vmid := item.s1.entry.vmid.getOrElse(0.U)
+    this.vmid := Mux(item.s2xlate === onlyStage2, item.s2.entry.vmid.getOrElse(0.U), item.s1.entry.vmid.getOrElse(0.U))
     this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
     this.s2xlate := item.s2xlate
@@ -1324,7 +1324,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     )
 
     val vpn_hit = level_match
-    val vmid_hit = Mux(this.s2xlate === allStage, s2.entry.vmid.getOrElse(0.U) === vmid, true.B)
+    val vmid_hit = s1.entry.vmid.getOrElse(0.U) === vmid
     val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid)
     val all_onlyS1_hit = vpn_hit && vmid_hit && vasid_hit
     Mux(this.s2xlate === noS2xlate, noS2_hit,

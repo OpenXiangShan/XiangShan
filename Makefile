@@ -86,6 +86,11 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
+# enable or disable sram ctl maunally
+ifeq ($(SRAM_WITH_CTL),1)
+COMMON_EXTRA_ARGS += --sram-with-ctl
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
@@ -96,14 +101,14 @@ ifneq ($(L3_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
 endif
 
-# seperate bus for DebugModule
-ifeq ($(SEPERATE_DM_BUS),1)
-COMMON_EXTRA_ARGS += --seperate-dm-bus
-endif
-
 # configuration from yaml file
 ifneq ($(YAML_CONFIG),)
 COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
+endif
+
+# hart id bits
+ifneq ($(HART_ID_BITS),)
+COMMON_EXTRA_ARGS += --hartidbits $(HART_ID_BITS)
 endif
 
 # public args sumup

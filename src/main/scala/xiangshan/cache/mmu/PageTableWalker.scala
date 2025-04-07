@@ -153,10 +153,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val idle = RegInit(true.B)
   val finish = WireInit(false.B)
-  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish
-
-  val pageFault = pte.isPf(level, s1Pbmte)
-  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
 
   val hptw_pageFault = RegInit(false.B)
   val hptw_accessFault = RegInit(false.B)
@@ -164,6 +160,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val stage1Hit = RegEnable(io.req.bits.stage1Hit, io.req.fire)
   val stage1 = RegEnable(io.req.bits.stage1, io.req.fire)
   val hptw_resp_stage2 = Reg(Bool())
+  val first_gvpn_check_fail = RegInit(false.B)
 
   // use accessfault repersent bitmap check failed
   val pte_isAf = Mux(bitmap_enable, pte.isAf() || bitmap_checkfailed, pte.isAf())
@@ -172,10 +169,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   } else {
     Mux(enableS2xlate, Mux(onlyS1xlate, pte.isAf(), false.B), pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
   }
+  val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
 
+  val pageFault = pte.isPf(level, s1Pbmte)
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
+
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish && !(find_pte && pte_valid)
+  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
 
   val l3addr = Wire(UInt(ptePaddrLen.W))
   val l2addr = Wire(UInt(ptePaddrLen.W))
@@ -214,7 +216,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     0.U(offLen.W))
   ))
   val gvpn_gpf =
-    !(hptw_pageFault || hptw_accessFault ) &&
+    (!(hptw_pageFault || hptw_accessFault || ((pageFault || ppn_af) && pte_valid)) &&
     Mux(
       s2xlate && io.csr.hgatp.mode === Sv39x4,
       full_gvpn(ptePPNLen - 1, GPAddrBitsSv39x4 - offLen) =/= 0.U,
@@ -223,7 +225,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         full_gvpn(ptePPNLen - 1, GPAddrBitsSv48x4 - offLen) =/= 0.U,
         false.B
       )
-    )
+    )) || first_gvpn_check_fail
 
   val guestFault = hptw_pageFault || hptw_accessFault || gvpn_gpf
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
@@ -232,7 +234,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   fake_h_resp.entry.vmid.map(_ := io.csr.hgatp.vmid)
   fake_h_resp.gpf := true.B
 
-  val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
   val fake_pte = WireInit(0.U.asTypeOf(new PteBundle()))
   fake_pte.perm.v := false.B // tell L1TLB this is fake pte
   fake_pte.ppn := ppn(ppnLen - 1, 0)
@@ -337,7 +338,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       } .otherwise {
         level := Mux(req.l2Hit, 1.U, 2.U)
         af_level := Mux(req.l2Hit, 1.U, 2.U)
-        gpf_level := 0.U
+        gpf_level := Mux(req.l2Hit, 2.U, 0.U)
         ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
         l3Hit := false.B
         gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
@@ -345,7 +346,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     } else {
       level := Mux(req.l2Hit, 1.U, 2.U)
       af_level := Mux(req.l2Hit, 1.U, 2.U)
-      gpf_level := 0.U
+      gpf_level := Mux(req.l2Hit, 2.U, 0.U)
       ppn := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
       l3Hit := false.B
       gvpn_wire := Mux(req.l2Hit, io.req.bits.ppn, satp.ppn)
@@ -365,6 +366,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       need_last_s2xlate := false.B
       when(check_gpa_high_fail){
         mem_addr_update := true.B
+        first_gvpn_check_fail := true.B
       }.otherwise{
         s_last_hptw_req := false.B
       }
@@ -374,6 +376,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       val check_gpa_high_fail = Mux(io.csr.hgatp.mode === Sv39x4, allstage_gpaddr(allstage_gpaddr.getWidth - 1, GPAddrBitsSv39x4) =/= 0.U, Mux(io.csr.hgatp.mode === Sv48x4, allstage_gpaddr(allstage_gpaddr.getWidth - 1, GPAddrBitsSv48x4) =/= 0.U, false.B))
       when(check_gpa_high_fail){
         mem_addr_update := true.B
+        first_gvpn_check_fail := true.B
       }.otherwise{
         need_last_s2xlate := true.B
         s_hptw_req := false.B
@@ -404,7 +407,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       need_last_s2xlate := false.B
     }
   }
-  
+
   when(io.hptw.req.fire && s_last_hptw_req === false.B) {
     w_last_hptw_resp := false.B
     s_last_hptw_req := true.B
@@ -429,7 +432,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_pmp_check := true.B
   }
 
-  when(accessFault && idle === false.B){
+  when(accessFault && !io.hptw.req.valid && idle === false.B){
     s_pmp_check := true.B
     s_mem_req := true.B
     w_mem_resp := true.B
@@ -475,7 +478,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when(mem.resp.fire && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level - 1.U
-    gpf_level := Mux(mode === Sv39 && !pte_valid && !(l3Hit || l2Hit), gpf_level - 2.U, gpf_level - 1.U)
+    gpf_level := Mux(mode === Sv39 && !pte_valid && !l2Hit, gpf_level - 2.U, gpf_level - 1.U)
     pte_valid := true.B
     update_full_gvpn_mem_resp := true.B
     if (HasBitmapCheck) {
@@ -550,6 +553,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         s_llptw_req := true.B
         mem_addr_update := false.B
         accessFault := false.B
+        first_gvpn_check_fail := false.B
       }
       finish := true.B
     }
@@ -564,6 +568,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     w_mem_resp := true.B
     accessFault := false.B
     mem_addr_update := false.B
+    first_gvpn_check_fail := false.B
     s_hptw_req := true.B
     w_hptw_resp := true.B
     s_last_hptw_req := true.B
@@ -877,14 +882,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
         val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
         val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-        val allStageExcp = ptes(index).isPf(0.U, s1Pbmte) || !ptes(index).isLeaf() || ptes(index).isStage1Gpf(io.csr.vsatp.mode)
+        val allStageExcp = ptes(index).isPf(0.U, s1Pbmte) || !ptes(index).isLeaf() || ptes(index).isStage1Gpf(io.csr.hgatp.mode)
         state(i) := Mux((entries(i).req_info.s2xlate === allStage && !allStageExcp),
                         state_last_hptw_req,
                         Mux(bitmap_enable, state_bitmap_check, state_mem_out))
         mem_resp_hit(i) := true.B
-        entries(i).ppn := ptes(index).getPPN() // for last stage 2 translation
+        entries(i).ppn := Mux(ptes(index).n === 0.U, ptes(index).getPPN(), Cat(ptes(index).getPPN()(ptePPNLen - 1, pteNapotBits), entries(i).req_info.vpn(pteNapotBits - 1, 0))) // for last stage 2 translation
         // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
-        entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, ptes(index).isStage1Gpf(io.csr.vsatp.mode), false.B)
+        entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, ptes(index).isStage1Gpf(io.csr.hgatp.mode), false.B)
       }
     }
   }

@@ -28,9 +28,9 @@ import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
 import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, IntBuffer, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.sram.SramMbistBundle
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
-import utility.sram.SramBroadcastBundle
 import xiangshan.backend.trace.TraceCoreInterface
 
 class XSTile()(implicit p: Parameters) extends LazyModule
@@ -47,7 +47,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_l3_pf_port = memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
   val tl_uncache = l2top.inner.mmio_port
-  val sep_dm_opt = l2top.inner.sep_dm_port_opt
+  val sep_tl_opt = l2top.inner.sep_tl_port_opt
   val beu_int_source = l2top.inner.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.inner.clint_int_node
@@ -116,8 +116,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
-      val dft = if(hasMbist) Some(Input(new SramBroadcastBundle)) else None
-      val dft_reset = if(hasMbist) Some(Input(new DFTResetSignals())) else None
+      val sramTest = new Bundle() {
+        val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
+        val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+        val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
+      }
       val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
     })
@@ -154,10 +157,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
     io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
 
-    l2top.module.io.dft.zip(io.dft).foreach({case(a, b) => a := b})
-    l2top.module.io.dft_reset.zip(io.dft_reset).foreach({case(a, b) => a := b})
-    core.module.io.dft.zip(l2top.module.io.dft_out).foreach({case(a, b) => a := b})
-    core.module.io.dft_reset.zip(l2top.module.io.dft_reset_out).foreach({case(a, b) => a := b})
+    l2top.module.io.sramTestIn := io.sramTest
+    core.module.io.sramTest := l2top.module.io.sramTestOut
 
     if (enableL2) {
       // TODO: add ECC interface of L2

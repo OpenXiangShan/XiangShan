@@ -105,9 +105,9 @@
  <check enabled="true" class="org.scalastyle.file.RegexChecker" level="warning">
   <parameters>
    <!-- :=, :<=, :>=, :<>=, :#=, <>, ===, =/=, <<, >>, <=, >= -->
-   <parameter name="regex"><![CDATA[(:<?#?>?=|<>|=[=/]=|<<|>>|[<>]=)[^ ]]]></parameter>
+   <parameter name="regex"><![CDATA[(:<?#?>?=|<>|=[=/]=|<<|>>|[<>]=)[^ \n]]]></parameter>
   </parameters>
-  <customMessage>No space after operators</customMessage>
+  <customMessage>No space or newline after operators</customMessage>
  </check>
 
  <!-- ===== imports ===== -->
