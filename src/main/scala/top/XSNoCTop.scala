@@ -150,7 +150,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     private val hasSramCtl = tiles.head.hasSramCtl
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
-      val riscv_halt = Output(Bool())
+      val riscv_wfi = Output(Bool())
       val riscv_critical_error = Output(Bool())
       val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
@@ -235,7 +235,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val lpState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
     val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
     val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
-    val isWFI = core_with_l2.module.io.cpu_halt
+    val isWFI = core_with_l2.module.io.cpu_wfi
     val exitco = !io.chi.syscoreq & !io.chi.syscoack
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
     io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
@@ -288,7 +288,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.soc_reset := soc_reset
     core_with_l2.module.io.hartId := io.hartId
     core_with_l2.module.io.nodeID.get := io.nodeID
-    io.riscv_halt := core_with_l2.module.io.cpu_halt
+    io.riscv_wfi := core_with_l2.module.io.cpu_wfi
     io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
     core_with_l2.module.io.hartResetReq := io.hartResetReq
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset

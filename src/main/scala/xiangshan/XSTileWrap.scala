@@ -72,7 +72,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(hartIdLen.W))
       val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
-      val cpu_halt = Output(Bool())
+      val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
@@ -118,7 +118,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.msiInfo := imsicAsync.o.msiInfo
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.sramTest := io.sramTest
-    io.cpu_halt := tile.module.io.cpu_halt
+    io.cpu_wfi := tile.module.io.cpu_wfi
     io.cpu_crtical_error := tile.module.io.cpu_crtical_error
     io.hartIsInReset := tile.module.io.hartIsInReset
     io.traceCoreInterface <> tile.module.io.traceCoreInterface
