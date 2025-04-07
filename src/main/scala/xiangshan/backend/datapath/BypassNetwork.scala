@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
-import xiangshan.{JumpOpType, SelImm, XSBundle, XSModule}
+import utils.SeqUtils._
+import xiangshan.{ALUOpType, JumpOpType, SelImm, XSBundle, XSModule}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, ExuVec, ImmInfo}
 import xiangshan.backend.issue._
@@ -143,17 +144,21 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   }
 
   toExus.zipWithIndex.foreach { case (exuInput, exuIdx) =>
+    val imm = ImmExtractor(
+      immInfo(exuIdx).imm,
+      immInfo(exuIdx).immType,
+      exuInput.bits.params.destDataBitsMax,
+      exuInput.bits.params.immType.map(_.litValue)
+    )
+    val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(immInfo(exuIdx).imm(immInfo(exuIdx).imm.getWidth - 1, ImmUnion.I.len)), XLEN)
+    val exuParm = exuInput.bits.params
+    val isIntScheduler = exuParm.isIntExeUnit
+    val isReadVfRf = exuParm.readVfRf
+    val fuOpType = exuInput.bits.fuOpType
+    val fuType = exuInput.bits.fuType
+    val isAlu = FuType.isAlu(fuType)
+
     exuInput.bits.src.zipWithIndex.foreach { case (src, srcIdx) =>
-      val imm = ImmExtractor(
-        immInfo(exuIdx).imm,
-        immInfo(exuIdx).immType,
-        exuInput.bits.params.destDataBitsMax,
-        exuInput.bits.params.immType.map(_.litValue)
-      )
-      val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(immInfo(exuIdx).imm(immInfo(exuIdx).imm.getWidth - 1, ImmUnion.I.len)), XLEN)
-      val exuParm = exuInput.bits.params
-      val isIntScheduler = exuParm.isIntExeUnit
-      val isReadVfRf= exuParm.readVfRf
       val dataSource = exuInput.bits.dataSources(srcIdx)
       val isWakeUpSink = params.allIssueParams.filter(_.exuBlockParams.contains(exuParm)).head.exuBlockParams.map(_.isIQWakeUpSink).reduce(_ || _)
       val readForward = if (isWakeUpSink) dataSource.readForward else false.B
@@ -169,7 +174,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       println(s"[BypassNetWork] ${exuParm.name}")
       println(s"[BypassNetWork] exuIdx = ${exuIdx}")
       println(s"[BypassNetWork] srcIdx = ${srcIdx}")
-      src := Mux1H(
+      val originSrc = Mux1H(
         Seq(
           readForward    -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec),
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
@@ -181,20 +186,75 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )
       )
+      src := originSrc
+
+      if (exuParm.hasAluFu && srcIdx == 0) {
+        when(isAlu) {
+          val isAdduw = ALUOpType.isAdduw(fuOpType)
+          val isOddadd = ALUOpType.isOddadd(fuOpType)
+          val isSradd = ALUOpType.isSradd(fuOpType)
+          val isSr29add = isSradd && ALUOpType.isSr29add(fuOpType)
+          val isSr30add = isSradd && ALUOpType.isSr30add(fuOpType)
+          val isSr31add = isSradd && ALUOpType.isSr31add(fuOpType)
+          val isSr32add = isSradd && ALUOpType.isSr32add(fuOpType)
+          val isShadd = ALUOpType.isShadd(fuOpType)
+          val isSh1add = isShadd && ALUOpType.isSh1add(fuOpType)
+          val isSh2add = isShadd && ALUOpType.isSh2add(fuOpType)
+          val isSh3add = isShadd && ALUOpType.isSh3add(fuOpType)
+          val isSh4add = isShadd && ALUOpType.isSh4add(fuOpType)
+
+          val adduwSrc = ZeroExt(originSrc(31, 0), XLEN)
+          val oddAddSrc = ZeroExt(originSrc(0), XLEN)
+          val sr29addSrc = ZeroExt(originSrc(63, 29), XLEN)
+          val sr30addSrc = ZeroExt(originSrc(63, 30), XLEN)
+          val sr31addSrc = ZeroExt(originSrc(63, 31), XLEN)
+          val sr32addSrc = ZeroExt(originSrc(63, 32), XLEN)
+          val shaddSrc = Cat(Fill(32, fuOpType(0)), Fill(32, 1.U)) & originSrc
+          val sh1addSrc = Cat(shaddSrc(62, 0), 0.U(1.W))
+          val sh2addSrc = Cat(shaddSrc(61, 0), 0.U(2.W))
+          val sh3addSrc = Cat(shaddSrc(60, 0), 0.U(3.W))
+          val sh4addSrc = Cat(originSrc(59, 0), 0.U(4.W))
+
+          val aluSrc = Wire(UInt(XLEN.W))
+          dontTouch(aluSrc)
+          aluSrc := MuxCase(originSrc, Seq(
+            isAdduw -> adduwSrc,
+            isOddadd -> oddAddSrc,
+            isSr29add -> sr29addSrc,
+            isSr30add -> sr30addSrc,
+            isSr31add -> sr31addSrc,
+            isSr32add -> sr32addSrc,
+            isSh1add -> sh1addSrc,
+            isSh2add -> sh2addSrc,
+            isSh3add -> sh3addSrc,
+            isSh4add -> sh4addSrc,
+          ))
+          src := aluSrc
+        }
+      }
     }
-    if (exuInput.bits.params.hasBrhFu) {
+
+    if (exuParm.hasAluFu) {
+      when(isAlu) {
+        val isLui32add = ALUOpType.isLui32add(fuOpType)
+        val lui32addSrc = Wire(Vec(2, UInt(XLEN.W)))
+        lui32addSrc(0) := SignExt(imm(11, 0), XLEN)
+        lui32addSrc(1) := Cat(imm(63, 12), 0.U(12.W))
+        exuInput.bits.src.zip(lui32addSrc).foreach { case (src, lui32Src) =>
+          when(isLui32add) {
+            src := lui32Src
+          }
+        }
+      }
+    }
+
+    if (exuParm.hasBrhFu) {
       val thisPcOffset = exuInput.bits.getPcOffset()
       val nextPcOffset = exuInput.bits.getNextPcOffset()
-      val imm = ImmExtractor(
-        immInfo(exuIdx).imm,
-        immInfo(exuIdx).immType,
-        exuInput.bits.params.destDataBitsMax,
-        exuInput.bits.params.immType.map(_.litValue)
-      )
-      val isJALR = FuType.isJump(exuInput.bits.fuType) && JumpOpType.jumpOpisJalr(exuInput.bits.fuOpType)
+      val isJALR = FuType.isJump(fuType) && JumpOpType.jumpOpisJalr(fuOpType)
       val immBJU = imm + Mux(isJALR, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = immInfo(exuIdx).imm
-      exuInput.bits.imm := Mux((FuType.isCsr(exuInput.bits.fuType) || FuType.isFence(exuInput.bits.fuType))&& exuInput.bits.params.hasCSR.B, immCsrFence, immBJU)
+      exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType))&& exuParm.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.get := nextPcOffset
       dontTouch(isJALR)
       dontTouch(immBJU)

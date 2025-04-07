@@ -284,7 +284,7 @@ package object xiangshan {
 
     def bclr       = "b000_0010".U // bclr:    src1 & ~(1 << src2[5:0])
     def bset       = "b000_0011".U // bset:    src1 | (1 << src2[5:0])
-    def binv       = "b000_0100".U // binv:    src1 ^ ~(1 << src2[5:0])
+    def binv       = "b000_0100".U // binv:    src1 ^ (1 << src2[5:0])
 
     def srl        = "b000_0101".U // srl:     src1 >> src2
     def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
@@ -312,8 +312,8 @@ package object xiangshan {
 
     // ADD-op
     def adduw      = "b010_0000".U // adduw:  src1[31:0]  + src2
-    def add        = "b010_0001".U // add:     src1        + src2
-    def oddadd     = "b010_0010".U // oddadd:  src1[0]     + src2
+    def oddadd     = "b010_0001".U // oddadd:  src1[0]     + src2
+    def add        = "b010_0010".U // add:     src1        + src2
     def lui32add   = "b010_0011".U // lui32add: SEXT(src2[11:0]) + {src2[63:12], 12'b0}
 
     def sr29add    = "b010_0100".U // sr29add: src1[63:29] + src2
@@ -381,6 +381,20 @@ package object xiangshan {
     def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
     def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
     def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
+
+    def isLui32add(func: UInt): Bool = func(6, 4) === "b001".U && !func(2) && func(1) && func(0) || func === lui32add
+    def isOddadd(func: UInt): Bool = (func(6, 4) === "b001".U || func(6, 4) === "b010".U) && func(3, 0) === "b0001".U
+    def isAdduw(func: UInt): Bool = func(6, 4) === "b010".U && !func(3, 0).orR
+    def isSradd(func: UInt): Bool = func(6, 4) === "b010".U && !func(3) && func(2)
+    def isSr29add(func: UInt): Bool = !func(1) && !func(0)
+    def isSr30add(func: UInt): Bool = !func(1) &&  func(0)
+    def isSr31add(func: UInt): Bool =  func(1) && !func(0)
+    def isSr32add(func: UInt): Bool =  func(1) &&  func(0)
+    def isShadd(func: UInt): Bool = func(6, 4) === "b010".U && func(3)
+    def isSh1add(func: UInt): Bool = !func(2) && !func(1)
+    def isSh2add(func: UInt): Bool = !func(2) &&  func(1)
+    def isSh3add(func: UInt): Bool =  func(2) && !func(1)
+    def isSh4add(func: UInt): Bool =  func(2) &&  func(1)
 
     def apply() = UInt(FuOpTypeWidth.W)
   }
