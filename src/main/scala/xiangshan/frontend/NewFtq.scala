@@ -35,6 +35,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.icache._
+import xiangshan.frontend.ifu._
 
 class FtqDebugBundle(implicit p: Parameters) extends XSBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -212,13 +213,6 @@ class BpuFlushInfo(implicit p: Parameters) extends XSBundle with HasCircularQueu
     src.valid && !isAfter(src.bits, idx_to_flush)
   def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
   def shouldFlushByStage3(idx: FtqPtr) = shouldFlushBy(s3, idx)
-}
-
-class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
-  val req              = Decoupled(new FetchRequestBundle)
-  val redirect         = Valid(new BranchPredictionRedirect)
-  val topdown_redirect = Valid(new BranchPredictionRedirect)
-  val flushFromBpu     = new BpuFlushInfo
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle {
