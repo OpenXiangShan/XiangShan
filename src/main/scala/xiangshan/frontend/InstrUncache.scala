@@ -31,9 +31,16 @@ import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utils._
+import xiangshan.HasXSParameter
 import xiangshan.XSBundle
 import xiangshan.XSModule
 import xiangshan.frontend.icache.HasICacheParameters
+
+trait HasInstrMMIOConst extends HasXSParameter {
+  def mmioBusWidth = 64
+  def mmioBusBytes = mmioBusWidth / 8
+  def maxInstrLen  = 32
+}
 
 class InsUncacheReq(implicit p: Parameters) extends XSBundle {
   val addr: PrunedAddr = PrunedAddr(PAddrBits)

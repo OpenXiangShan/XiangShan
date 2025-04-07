@@ -47,6 +47,7 @@ import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import xiangshan.frontend.ifu._
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -109,7 +110,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
   val bpu          = Module(new Predictor)
-  val ifu          = Module(new NewIFU)
+  val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
 
@@ -130,7 +131,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
 
   // RVCDecoder fsIsOff
-  ifu.io.csr_fsIsOff := csrCtrl.fsIsOff
+  ifu.io.csrFsIsOff := csrCtrl.fsIsOff
 
   // bpu ctrl
   bpu.io.ctrl         := csrCtrl.bp_ctrl
@@ -158,7 +159,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   val itlb =
     Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq.fill(PortNumber)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(PortNumber) zip icache.io.itlb foreach { case (a, b) => a <> b }
-  itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
+  itlb.io.requestor.last <> ifu.io.itlb // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
@@ -174,10 +175,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   icache.io.softPrefetchReq <> io.softPrefetch
 
   // IFU-Ftq
-  ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
-  ftq.io.toIfu.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
+  ifu.io.fromFtq <> ftq.io.toIfu
+  ftq.io.toIfu.req.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
 
-  ftq.io.fromIfu <> ifu.io.ftqInter.toFtq
+  ftq.io.fromIfu <> ifu.io.toFtq
   bpu.io.ftq_to_bpu <> ftq.io.toBpu
   ftq.io.fromBpu <> bpu.io.bpu_to_ftq
 
@@ -186,7 +187,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // ICache-Ftq
   icache.io.fromFtq <> ftq.io.toICache
   // override fetchReq.ready to sync with Ifu
-  ftq.io.toICache.fetchReq.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
+  ftq.io.toICache.fetchReq.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
   icache.io.flush                := ftq.io.icacheFlush
 
   // Ifu-ICache
@@ -198,7 +199,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   icache.io.fencei      := RegNext(io.fencei)
 
   // IFU-Ibuffer
-  ifu.io.toIbuffer <> ibuffer.io.in
+  ifu.io.toIBuffer <> ibuffer.io.in
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend
@@ -392,7 +393,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   checkTakenPC
   checkNotTakenPC
 
-  ifu.io.rob_commits <> io.backend.toFtq.rob_commits
+  ifu.io.robCommits <> io.backend.toFtq.rob_commits
 
   ibuffer.io.flush                := needFlush
   ibuffer.io.ControlRedirect      := FlushControlRedirect
@@ -413,8 +414,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
 
-  instrUncache.io.req <> ifu.io.uncacheInter.toUncache
-  ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
+  instrUncache.io.req <> ifu.io.toUncache
+  ifu.io.fromUncache <> instrUncache.io.resp
   instrUncache.io.flush := false.B
   io.error <> RegNext(RegNext(icache.io.error))
 
