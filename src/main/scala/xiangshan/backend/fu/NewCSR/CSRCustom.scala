@@ -78,6 +78,7 @@ class SbpctlBundle extends CSRBundle {
 }
 
 class SpfctlBundle extends CSRBundle {
+  val BERTI_ENABLE            = RW(    22).withReset(true.B)
   val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B)  // (Train L2, Prefetch L2) TP
   val L2_PF_VBOP_ENABLE       = RW(    20).withReset(true.B)  // (Train L2, Prefetch L2) VBOP
   val L2_PF_PBOP_ENABLE       = RW(    19).withReset(true.B)  // (Train L2, Prefetch L2) PBOP
