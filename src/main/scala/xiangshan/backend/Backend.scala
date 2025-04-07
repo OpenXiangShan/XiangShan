@@ -26,7 +26,6 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import device.MsiInfoBundle
 import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
@@ -951,6 +950,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   backendCriticalError := criticalErrors.map(_._2).reduce(_ || _)
 
   io.toTop.cpuCriticalError := csrio.criticalErrorState
+  io.toTop.msiAck := csrio.msiAck
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -1046,10 +1046,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   })
 }
 
-class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
+class TopToBackendBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val hartId            = Output(UInt(hartIdLen.W))
   val externalInterrupt = Output(new ExternalInterruptIO)
-  val msiInfo           = Output(ValidIO(new MsiInfoBundle))
+  val msiInfo           = Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
   val clintTime         = Output(ValidIO(UInt(64.W)))
   val l2FlushDone       = Output(Bool())
 }
@@ -1057,6 +1057,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle {
 class BackendToTopBundle extends Bundle {
   val cpuHalted = Output(Bool())
   val cpuCriticalError = Output(Bool())
+  val msiAck = Output(Bool())
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {

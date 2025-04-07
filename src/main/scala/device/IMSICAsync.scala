@@ -19,27 +19,20 @@ package device
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
+import system.HasSoCParameter
+import xiangshan.XSModule
+import org.chipsalliance.cde.config.Parameters
 
-class IMSICAsync(
-  NumVSIRFiles: Int = 5,
-  NumHart: Int = 1,
-  NumIRSrc: Int = 256,
-) extends Module {
-  private val NumIRFiles: Int = /*M*/ 1 + /*S*/ 1 + NumVSIRFiles
-  private val NR_SRC_WIDTH = log2Up(NumIRSrc)
-  private val NR_HARTS_WIDTH = log2Up(NumHart)
-  private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
-  private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
-
+class IMSICAsync(implicit p: Parameters) extends XSModule with HasSoCParameter {
   // has default clock and reset
   // input ports, ValidIO is an inner function
   val i = IO(Input(new Bundle {
-    val msiInfo = ValidIO(new MsiInfoBundle(NumIRFiles = NumIRFiles, NumHart = NumHart, NumIRSrc = NumIRSrc))
+    val msiInfo = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
   }))
 
   // output ports 
   val o = IO(Output(new Bundle {
-    val msiInfo = ValidIO(new MsiInfoBundle(NumIRFiles = NumIRFiles, NumHart = NumHart, NumIRSrc = NumIRSrc))
+    val msiInfo = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
   }))
 
   // code about msi_vld_sync, delay 3 cycles after i.msiInfo.valid.

@@ -72,9 +72,9 @@ ifneq ($(XSTOP_PREFIX),)
 COMMON_EXTRA_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 endif
 
-# IMSIC use TileLink rather than AXI4Lite
-ifeq ($(IMSIC_USE_TL),1)
-COMMON_EXTRA_ARGS += --imsic-use-tl
+# IMSIC bus type (AXI, TL or NONE)
+ifneq ($(IMSIC_BUS_TYPE),)
+COMMON_EXTRA_ARGS += --imsic-bus-type $(IMSIC_BUS_TYPE)
 endif
 
 # enable or disable dfx manually
