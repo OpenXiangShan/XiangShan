@@ -225,15 +225,15 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   // write SRAM
   io.metaWrite.req.bits.generate(
-    tag = getPTagFromBlk(mshrResp.blkPAddr),
-    idx = mshrResp.vSetIdx,
+    phyTag = getPTagFromBlk(mshrResp.blkPAddr),
+    vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     bankIdx = mshrResp.vSetIdx(0),
     poison = false.B
   )
   io.dataWrite.req.bits.generate(
     data = respDataReg.asUInt,
-    idx = mshrResp.vSetIdx,
+    vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     bankIdx = mshrResp.vSetIdx(0),
     poison = false.B

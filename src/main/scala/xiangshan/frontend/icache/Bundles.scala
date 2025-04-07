@@ -56,15 +56,15 @@ object ICacheMetadata {
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
   class MetaWriteReqBundle(implicit p: Parameters) extends ICacheBundle {
-    val vSetIdx: UInt = UInt(idxBits.W)
     val phyTag:  UInt = UInt(tagBits.W)
+    val vSetIdx: UInt = UInt(idxBits.W)
     val waymask: UInt = UInt(nWays.W)
     val bankIdx: Bool = Bool()
     val poison:  Bool = Bool()
 
-    def generate(tag: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.vSetIdx := idx
-      this.phyTag  := tag
+    def generate(phyTag: UInt, vSetIdx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
+      this.phyTag  := phyTag
+      this.vSetIdx := vSetIdx
       this.waymask := waymask
       this.bankIdx := bankIdx
       this.poison  := poison
@@ -82,9 +82,9 @@ class DataWriteBundle(implicit p: Parameters) extends ICacheBundle {
     val bankIdx: Bool = Bool()
     val poison:  Bool = Bool()
 
-    def generate(data: UInt, idx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
-      this.vSetIdx := idx
+    def generate(data: UInt, vSetIdx: UInt, waymask: UInt, bankIdx: Bool, poison: Bool): Unit = {
       this.data    := data
+      this.vSetIdx := vSetIdx
       this.waymask := waymask
       this.bankIdx := bankIdx
       this.poison  := poison
@@ -186,7 +186,8 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val ftqIdx:           FtqPtr     = new FtqPtr
   val isSoftPrefetch:   Bool       = Bool()
   val backendException: UInt       = ExceptionType()
-  def crossCacheline:   Bool       = startAddr(blockOffBits - 1) === 1.U
+
+  def crossCacheline: Bool = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): PrefetchReqBundle = {
     this.startAddr      := info.startAddr
