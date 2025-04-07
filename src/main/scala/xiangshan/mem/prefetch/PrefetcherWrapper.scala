@@ -74,7 +74,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new Bundle() {
     // prefetch control
     val pfCtrlFromTile = Input(new PrefetchCtrlFromTile)
-    val pfCtrlFromOOO = Flipped(new PrefetchCtrl)
+    val pfCtrlFromCSR = Flipped(new PrefetchCtrl)
     val pfCtrlFromDCache = Flipped(new PrefetchControlBundle)
     // replenish information
     val fromDCache = Flipped(new DCacheToPrefetchIO)
@@ -94,8 +94,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   def isStoreAccess(uop: DynInst): Bool = FuType.isStore(uop.fuType)
 
   val hartId = p(XSCoreParamsKey).HartId
-  val l1D_pf_enable = RegNextN(io.pfCtrlFromOOO.l1D_pf_enable, 2, Some(false.B))
-  val pf_train_on_hit = RegNextN(io.pfCtrlFromOOO.l1D_pf_train_on_hit, 2, Some(true.B))
+  val l1D_pf_enable = RegNextN(io.pfCtrlFromCSR.l1D_pf_enable, 2, Some(true.B))
+  val pf_train_on_hit = RegNextN(io.pfCtrlFromCSR.l1D_pf_train_on_hit, 2, Some(true.B))
   val s2_loadPcVec = (0 until LD_TRAIN_WIDTH).map{ i=>
     RegEnable(io.fromOOO.s1_loadPc(i), io.trainSource.s1_loadFireHint(i))
   }
@@ -116,15 +116,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     */
   val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
-    // sms.io.enable := Constantin.createRecord(s"enableSMS$hartId", initValue = true)
     val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableSMS && l1D_pf_enable &&
-        GatedRegNextN(io.pfCtrlFromOOO.l2_pf_recv_enable, 2, Some(false.B))
-    pf.io_agt_en := GatedRegNextN(io.pfCtrlFromOOO.l1D_pf_enable_agt, 2, Some(false.B))
-    pf.io_pht_en := GatedRegNextN(io.pfCtrlFromOOO.l1D_pf_enable_pht, 2, Some(false.B))
-    pf.io_act_threshold := GatedRegNextN(io.pfCtrlFromOOO.l1D_pf_active_threshold, 2, Some(12.U))
-    pf.io_act_stride := GatedRegNextN(io.pfCtrlFromOOO.l1D_pf_active_stride, 2, Some(30.U))
+      GatedRegNextN(io.pfCtrlFromCSR.l2_pf_recv_enable, 2, Some(false.B))
+    pf.io_agt_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_agt, 2, Some(false.B))
+    pf.io_pht_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_pht, 2, Some(false.B))
+    pf.io_act_threshold := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_threshold, 2, Some(12.U))
+    pf.io_act_stride := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_stride, 2, Some(30.U))
     pf.io_stride_en := false.B
     pf.io_dcache_evict <> io.fromDCache.sms_agt_evict_req
     pf.io.l1_req.ready := false.B
@@ -165,9 +164,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val strideOpt: Option[L1Prefetcher] = if(hasStreamStride) Some(Module(new L1Prefetcher())) else None
   strideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
-      // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+    // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
-      GatedRegNextN(io.pfCtrlFromOOO.l1D_pf_enable_stride, 2, Some(false.B))
+      GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_stride, 2, Some(false.B))
+
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
 
@@ -258,10 +258,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
-  io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromOOO.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
   io.l1_pf_to_l3.addr_valid := l3_pf_req.valid
   io.l1_pf_to_l3.addr := l3_pf_req.bits.addr
-  io.l1_pf_to_l3.l2_pf_en := RegNextN(io.pfCtrlFromOOO.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l3.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)
   l2_trace.paddr := l2_pf_req.bits.addr
