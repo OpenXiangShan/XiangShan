@@ -322,12 +322,12 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)
   arb_seq.zipWithIndex.foreach { case (arb, i) =>
-    XSPerfAccumulate(s"Stride_fire_l${i}", arb.io.in(StrideIdx).fire)
-    XSPerfAccumulate(s"Stride_block_l${i}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
-    XSPerfAccumulate(s"SMS_fire_l${i}", arb.io.in(SMSIdx).fire)
-    XSPerfAccumulate(s"SMS_block_l${i}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
-    XSPerfAccumulate(s"Berti_fire_l${i}", arb.io.in(BertiIdx).fire)
-    XSPerfAccumulate(s"Berti_block_l${i}", arb.io.in(BertiIdx).valid && !arb.io.in(BertiIdx).ready)
+    XSPerfAccumulate(s"Stride_fire_l${i+1}", arb.io.in(StrideIdx).fire)
+    XSPerfAccumulate(s"Stride_block_l${i+1}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
+    XSPerfAccumulate(s"SMS_fire_l${i+1}", arb.io.in(SMSIdx).fire)
+    XSPerfAccumulate(s"SMS_block_l${i+1}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
+    XSPerfAccumulate(s"Berti_fire_l${i+1}", arb.io.in(BertiIdx).fire)
+    XSPerfAccumulate(s"Berti_block_l${i+1}", arb.io.in(BertiIdx).valid && !arb.io.in(BertiIdx).ready)
   }
 
 }
