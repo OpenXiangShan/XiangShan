@@ -157,7 +157,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxSMS = prefetcherSeq.indexWhere(_.isInstanceOf[SMSParams])
   val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
-    val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
+    val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableSMS && l1D_pf_enable &&
       GatedRegNextN(io.pfCtrlFromCSR.l2_pf_recv_enable, 2, Some(false.B))
@@ -209,7 +209,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
   val strideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   strideOpt.foreach(pf => {
-    val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
+    val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_stride, 2, Some(false.B))
@@ -244,6 +244,48 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
     l2_pf_arb.io.in(IdxStreamStride) <> pf.io.l2_req
     l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
+  })
+
+  val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
+  val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
+  val bertiOpt: Option[BertiPrefetcher] = if(HasBerti) Some(Module(new BertiPrefetcher())) else None
+  bertiOpt.foreach(pf => {
+    val enableBerti = Constantin.createRecord(s"pf_enableBerti$hartId", initValue = true)
+    // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+    pf.io.enable := enableBerti && l1D_pf_enable &&
+      GatedRegNextN(io.pfCtrlFromCSR.berti_enable, 2, Some(false.B))
+
+    for(i <- 0 until LD_TRAIN_WIDTH){
+      val source = io.trainSource.s3_load(i)
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
+        source.bits.miss || isFromBerti(source.bits.meta_prefetch)
+      ) // && isLoadAccess(source.bits.uop)
+      pf.io.ld_in(i).bits := source.bits
+      pf.io.ld_in(i).bits.uop.pc := Mux(
+        io.trainSource.s3_ptrChasing(i),
+        s2_loadPcVec(i),
+        s3_loadPcVec(i)
+      )
+    }
+
+    for (i <- 0 until ST_TRAIN_WIDTH) {
+      val source = io.trainSource.s3_store(i)
+      pf.io.st_in(i).valid := source.valid && source.bits.isFirstIssue && (
+        source.bits.miss || isFromBerti(source.bits.meta_prefetch)
+      )
+      pf.io.st_in(i).bits := source.bits
+      pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
+    }
+
+    pf.io.refillTrain := io.fromDCache.refillTrain
+
+    io.tlb_req(IdxBerti) <> pf.io.tlb_req
+    pf.io.pmp_resp := io.pmp_resp(IdxBerti)
+
+    l1_pf_arb.io.in(IdxBerti) <> pf.io.l1_req
+    l2_pf_arb.io.in(IdxBerti) <> pf.io.l2_req
+    l3_pf_arb.io.in(IdxBerti) <> pf.io.l3_req
+
   })
 
   /**

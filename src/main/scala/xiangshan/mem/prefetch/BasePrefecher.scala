@@ -53,6 +53,7 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   val l2_pf_vbop_enable = Bool()
   val l2_pf_tp_enable = Bool()
   val l2_pf_delay_latency = UInt(10.W)
+  val berti_enable = Bool()
 
   def toL2PrefetchCtrl(): PrefetchCtrlFromCore = {
     val res = Wire(new PrefetchCtrlFromCore)
