@@ -247,12 +247,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.fromDCache.sms_agt_evict_req.ready := false.B
   if (!hasSMS) {
     io.tlb_req(SMSIdx).req.valid := false.B
-    io.tlb_req(SMSIdx).req.bits := false.B
+    io.tlb_req(SMSIdx).req_kill := false.B
+    io.tlb_req(SMSIdx).req.bits := DontCare
     io.tlb_req(SMSIdx).resp.ready := true.B
   }
   if (!hasStreamStride) {
     io.tlb_req(StrideIdx).req.valid := false.B
-    io.tlb_req(StrideIdx).req.bits := false.B
+    io.tlb_req(StrideIdx).req_kill := false.B
+    io.tlb_req(StrideIdx).req.bits := DontCare
     io.tlb_req(StrideIdx).resp.ready := true.B
   }
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
