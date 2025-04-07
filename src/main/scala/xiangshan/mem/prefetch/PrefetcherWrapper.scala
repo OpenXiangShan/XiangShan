@@ -283,11 +283,4 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l3_trace_table.log(l3_trace, l3_pf_req.valid, "L3Unknown", clock, reset)
   }
 
-  // FIXME move to Memblock
-  // XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
-  // XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
-  // XSPerfAccumulate("l1pf_fire_l2", l1_pf_to_l2.valid)
-  // XSPerfAccumulate("sms_fire_l2", !l1_pf_to_l2.valid && sms_pf_to_l2.valid)
-  // XSPerfAccumulate("sms_block_by_l1pf", l1_pf_to_l2.valid && sms_pf_to_l2.valid)
-
 }
