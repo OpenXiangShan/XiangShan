@@ -953,6 +953,23 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid.asUInt
   }
 
+  when(io.toIbuffer.valid && io.toIbuffer.ready) {
+    val enqVec = io.toIbuffer.bits.enqEnable
+    val allocateSeqNum = VecInit((0 until PredictWidth).map { i =>
+      val idx  = PopCount(enqVec.take(i + 1))
+      val pc   = f3_pc(i)
+      val code = io.toIbuffer.bits.instrs(i)
+      PerfCCT.createInstMetaAtFetch(idx, pc, code, enqVec(i), clock, reset)
+    })
+    io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
+      a := allocateSeqNum(i)
+    }
+  }.otherwise {
+    io.toIbuffer.bits.debug_seqNum.zipWithIndex.foreach { case (a, i) =>
+      a := 0.U
+    }
+  }
+
   /** to backend */
   // f3_gpaddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := f3_toIbuffer_valid && Mux(
