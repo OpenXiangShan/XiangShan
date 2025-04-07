@@ -91,6 +91,12 @@ ifeq ($(SRAM_WITH_CTL),1)
 COMMON_EXTRA_ARGS += --sram-with-ctl
 endif
 
+# enable non-secure access or not
+# CHI requests are secure as default by now
+ifeq ($(ENABLE_NS),1)
+COMMON_EXTRA_ARGS += --enable-ns
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
