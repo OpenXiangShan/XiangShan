@@ -637,14 +637,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
-  // TODO: add pfetecher control bundles in csrCtrl
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable_agt := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_enable_pht := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_active_threshold := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_active_stride := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_stride
-  prefetcher.io.pfCtrlFromOOO.l1D_pf_train_on_hit := io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_train_on_hit
-  prefetcher.io.pfCtrlFromOOO.l2_pf_enable := io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable
+  prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
   prefetcher.io.fromOOO.s1_loadPc := io.ooo_to_mem.issueLda.map(x => RegNext(x.bits.uop.pc)) ++ io.ooo_to_mem.hybridPc
