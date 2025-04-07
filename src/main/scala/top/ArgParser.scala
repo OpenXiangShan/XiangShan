@@ -148,6 +148,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
           }), tail)
+        case "--enable-ns" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.NonSecureKey => true
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
