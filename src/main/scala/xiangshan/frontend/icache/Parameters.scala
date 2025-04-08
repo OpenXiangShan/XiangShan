@@ -45,7 +45,6 @@ case class ICacheParameters(
     ICacheDataSRAMWidth: Int = 66,
     // TODO: hard code, need delete
     partWayNum:          Int = 4,
-    nMMIOs:              Int = 1,
     blockBytes:          Int = 64,
     cacheCtrlAddressOpt: Option[AddressSet] = None
 ) extends L1CacheParameters {
