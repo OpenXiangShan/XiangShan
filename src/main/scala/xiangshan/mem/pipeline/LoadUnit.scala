@@ -119,6 +119,8 @@ class LoadToPvt(implicit p: Parameters) extends XSBundle {
   val loadvalue = Output(UInt(XLEN.W))
   val pdest     = Output(UInt(PhyRegIdxWidth.W))
   val misPredict = Output(new Redirect)
+  val rfWen = Output(Bool())
+  val fpWen = Output(Bool())
 }
 
 class LoadReadPc(implicit p: Parameters) extends XSBundle {
@@ -1783,13 +1785,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.valid       := ldoutValid
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
 
+  
   //to lvp
-  io.toifu.valid := ldoutValid && s3_out.bits.uop.rfWen
+  io.toifu.valid := ldoutValid
   io.toifu.bits.loadpc := DontCare
   io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-  io.toPvt.valid := ldoutValid && s3_out.bits.uop.rfWen
+  io.toPvt.valid := ldoutValid
   io.toPvt.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
   io.toPvt.bits.pdest := io.ldout.bits.uop.pdest
+  io.toPvt.bits.rfWen := io.ldout.bits.uop.rfWen
+  io.toPvt.bits.fpWen := io.ldout.bits.uop.fpWen
   // mispredict flush pipe
   io.toPvt.bits.misPredict := DontCare
   io.toPvt.bits.misPredict.isRVC       := io.ldout.bits.uop.preDecodeInfo.isRVC

@@ -22,7 +22,7 @@ import utility._
 import utils._
 import xiangshan._
 import org.codehaus.plexus.classworlds.strategy.ParentFirstStrategy
-import xiangshan.backend.datapath.DataConfig.IntData
+import xiangshan.backend.datapath.DataConfig.{FpData, IntData}
 import xiangshan.backend.rename.RatPredPort
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.LoadToPvt
@@ -36,6 +36,8 @@ class PvtReadPort(implicit p: Parameters) extends PvtBundle {
 
 class PvtWritePort(implicit p: Parameters) extends PvtBundle {
     val wen = Input(Bool())
+    val rfWen = Input(Bool())
+    val fpWen = Input(Bool())
     val addr = Input(UInt(PvtTagLen.W))
     val data = Input(UInt(XLEN.W))
     val robIdx = Input(new RobPtr)
@@ -47,8 +49,10 @@ abstract class PvtModule(implicit p: Parameters) extends XSModule with HasPvtCon
 
 trait HasPvtConst extends HasXSParameter {
     val PvtTagLen = PhyRegIdxWidth
-    val EntryNum = MaxPhyRegs
-    val ReadPortNum = 8
+    val IntEntryNum = IntPhyRegs
+    val FpEntryNum = FpPhyRegs
+    val IntReadPortNum = 8
+    val FpReadPortNum = 10
     val WritePortNum = RenameWidth
 }
 
@@ -60,107 +64,191 @@ class PvtEntry(implicit p: Parameters) extends PvtBundle{
     val used = Bool()
 }
 
+class UpdateFrmRename(implicit p: Parameters) extends PvtBundle{
+    val rfWen = Input(Bool())
+    val fpWen = Input(Bool())
+    val addr = Input(UInt(PhyRegIdxWidth.W))
+}
+
 class PvtIO(implicit p: Parameters) extends PvtBundle{
-    val readPorts = Vec(ReadPortNum, new PvtReadPort)
+    val intReadPorts = Vec(IntReadPortNum, new PvtReadPort)
+    val fpReadPorts = Vec(FpReadPortNum, new PvtReadPort)
     val writePorts = Vec(WritePortNum, new PvtWritePort)
     val flush = Flipped(ValidIO(new Redirect))
     val full = Output(Bool())
-    val writeFail = Vec(WritePortNum, Output(Bool()))
-    val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
-    val pvtUpdateFrmRename = Vec(RenameWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val intPvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
+    val fpPvtUpdate = Vec(backendParams.numPregWb(FpData()), Input(UInt(PhyRegIdxWidth.W)))
+    val pvtUpdateFrmRename = Vec(RenameWidth, new UpdateFrmRename)
     val fromLoad = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
     val misPred = Vec(backendParams.LduCnt, ValidIO(new Redirect))
-    val intSrcPred = Vec(ReadPortNum*3, new RatPredPort)
-    val fpSrcPred = Vec(ReadPortNum*3, new RatPredPort)
+    val intSrcPred = Vec(IntReadPortNum*3, new RatPredPort)
+    val fpSrcPred = Vec(FpReadPortNum*3, new RatPredPort)
 }
 
 class Pvt(implicit p: Parameters) extends PvtModule{
     val io = IO(new PvtIO)
 
-    val PvtTable = RegInit(VecInit.fill(EntryNum)(0.U.asTypeOf(new PvtEntry)))
-    val PvtTableNext = WireInit(PvtTable)
-    io.writeFail := VecInit.fill(WritePortNum)(false.B)
+    val IntPvtTable = RegInit(VecInit.fill(IntEntryNum)(0.U.asTypeOf(new PvtEntry)))
+    val IntPvtTableNext = WireInit(IntPvtTable)
+    val FpPvtTable = RegInit(VecInit.fill(FpEntryNum)(0.U.asTypeOf(new PvtEntry)))
+    val FpPvtTableNext = WireInit(FpPvtTable)
 
     //write
     io.writePorts.zipWithIndex.foreach{ case (w, i) =>
-        val windex = w.addr(log2Ceil(EntryNum)-1, 0)
         //todo: same tag different ld
-        when (w.wen){
+        when (w.wen && w.rfWen){
             // can not find match entry, create a new entry
-            PvtTableNext(windex).value := w.data
-            PvtTableNext(windex).tag := w.addr
-            PvtTableNext(windex).valid := true.B
-            PvtTableNext(windex).robIdx := w.robIdx
-            PvtTableNext(windex).used := false.B
+            val windex = w.addr(log2Ceil(IntEntryNum)-1, 0)
+            IntPvtTableNext(windex).value := w.data
+            IntPvtTableNext(windex).tag := w.addr
+            IntPvtTableNext(windex).valid := true.B
+            IntPvtTableNext(windex).robIdx := w.robIdx
+            IntPvtTableNext(windex).used := false.B
+        }.elsewhen (w.wen && w.fpWen){
+            val windex = w.addr(log2Ceil(FpEntryNum)-1, 0)
+            FpPvtTableNext(windex).value := w.data
+            FpPvtTableNext(windex).tag := w.addr
+            FpPvtTableNext(windex).valid := true.B
+            FpPvtTableNext(windex).robIdx := w.robIdx
+            FpPvtTableNext(windex).used := false.B
         }
     }
 
     // pvt wb update
-    io.pvtUpdate.zipWithIndex.foreach{ case (pvtUpdate, i) =>
-        when (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid &&
-          (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).tag === pvtUpdate)) {
-            PvtTableNext(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid := false.B
+    io.intPvtUpdate.zipWithIndex.foreach{ case (pvtUpdate, i) =>
+        when (IntPvtTable(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).valid &&
+          (IntPvtTable(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).tag === pvtUpdate)) {
+            IntPvtTableNext(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).valid := false.B
         }
     }
-    io.pvtUpdateFrmRename.zipWithIndex.foreach{ case (pvtUpdate, i) =>
-        when (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid &&
-          (PvtTable(pvtUpdate(log2Ceil(EntryNum)-1, 0)).tag === pvtUpdate)) {
-            PvtTableNext(pvtUpdate(log2Ceil(EntryNum)-1, 0)).valid := false.B
+    io.fpPvtUpdate.zipWithIndex.foreach{ case (pvtUpdate, i) =>
+        when (FpPvtTable(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).valid &&
+          (FpPvtTable(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).tag === pvtUpdate)) {
+            FpPvtTableNext(pvtUpdate(log2Ceil(IntEntryNum)-1, 0)).valid := false.B
+        }
+    }
+
+    io.pvtUpdateFrmRename.foreach{ update =>
+        when (update.rfWen) {
+            when (IntPvtTable(update.addr(log2Ceil(IntEntryNum)-1, 0)).valid &&
+              (IntPvtTable(update.addr(log2Ceil(IntEntryNum)-1, 0)).tag === update.addr)) {
+                IntPvtTableNext(update.addr(log2Ceil(IntEntryNum)-1, 0)).valid := false.B
+            }
+        }.elsewhen (update.fpWen) {
+            when (FpPvtTable(update.addr(log2Ceil(FpEntryNum)-1, 0)).valid &&
+              (FpPvtTable(update.addr(log2Ceil(FpEntryNum)-1, 0)).tag === update.addr)) {
+                FpPvtTableNext(update.addr(log2Ceil(FpEntryNum)-1, 0)).valid := false.B
+            }
         }
     }
 
     // pvt read
-    for ((r, i) <- io.readPorts.zipWithIndex) {
-        val rindex = r.addr(log2Ceil(EntryNum)-1, 0)
-        r.data := PvtTable(rindex).value
+    for ((r, i) <- io.intReadPorts.zipWithIndex) {
+        val rindex = r.addr(log2Ceil(IntEntryNum)-1, 0)
+        r.data := IntPvtTable(rindex).value
         val readFail = io.fromLoad.map{ veri =>
-            val veriIdx = veri.bits.pdest(log2Ceil(EntryNum)-1, 0)
+            val veriIdx = veri.bits.pdest(log2Ceil(IntEntryNum)-1, 0)
             val readConflict = veri.bits.pdest === r.addr && r.valid && veri.valid
-            val misPred = PvtTable(veriIdx).robIdx === veri.bits.misPredict.robIdx && veri.valid &&
-              PvtTable(veriIdx).tag === veri.bits.pdest && PvtTable(veriIdx).value =/= veri.bits.loadvalue
+            val misPred = IntPvtTable(veriIdx).robIdx === veri.bits.misPredict.robIdx && veri.valid &&
+              IntPvtTable(veriIdx).tag === veri.bits.pdest && IntPvtTable(veriIdx).value =/= veri.bits.loadvalue
             readConflict && misPred
         }.reduce(_ || _)
         r.fail := readFail
         when (r.valid) {
-            PvtTableNext(rindex).used := true.B
-            assert(PvtTable(rindex).valid && PvtTable(rindex).tag === r.addr, "Pvt readports $i read a invalid entry")
+            IntPvtTableNext(rindex).used := true.B
+            assert(IntPvtTable(rindex).valid && IntPvtTable(rindex).tag === r.addr, "Pvt intReadPorts $i read a invalid entry")
+        }
+    }
+    for ((r, i) <- io.fpReadPorts.zipWithIndex) {
+        val rindex = r.addr(log2Ceil(FpEntryNum)-1, 0)
+        r.data := FpPvtTable(rindex).value
+        val readFail = io.fromLoad.map{ veri =>
+            val veriIdx = veri.bits.pdest(log2Ceil(FpEntryNum)-1, 0)
+            val readConflict = veri.bits.pdest === r.addr && r.valid && veri.valid
+            val misPred = FpPvtTable(veriIdx).robIdx === veri.bits.misPredict.robIdx && veri.valid &&
+              FpPvtTable(veriIdx).tag === veri.bits.pdest && FpPvtTable(veriIdx).value =/= veri.bits.loadvalue
+            readConflict && misPred
+        }.reduce(_ || _)
+        r.fail := readFail
+        when (r.valid) {
+            FpPvtTableNext(rindex).used := true.B
+            assert(FpPvtTable(rindex).valid && FpPvtTable(rindex).tag === r.addr, "Pvt fpReadPorts $i read a invalid entry")
         }
     }
 
     for ((pred, i) <- io.intSrcPred.zipWithIndex) {
-        val rindex = pred.addr(log2Ceil(EntryNum)-1, 0)
-        pred.pred := PvtTable(rindex).valid
+        val rindex = pred.addr(log2Ceil(IntEntryNum)-1, 0)
+        pred.pred := IntPvtTable(rindex).valid
     }
-    io.fpSrcPred.foreach{_.pred := DontCare}
+    io.fpSrcPred.foreach{ pred =>
+        val rindex = pred.addr(log2Ceil(FpEntryNum)-1, 0)
+        pred.pred := FpPvtTable(rindex).valid
+    }
 
     //load verify
     for ((veri, i) <- io.fromLoad.zipWithIndex) {
-        val index = veri.bits.pdest(log2Ceil(EntryNum)-1, 0)
-        val entryMatch = PvtTable(index).robIdx === veri.bits.misPredict.robIdx && PvtTable(index).tag === veri.bits.pdest
-        val misMatch = PvtTable(index).value =/= veri.bits.loadvalue && entryMatch
-        when (veri.valid) {
-            val needCancel = WireInit(VecInit((0 until EntryNum).map(i => {
-                PvtTable(i).robIdx.needFlush(veri.bits.misPredict)
-            })))
-            // flush pvt selectively, used means that has influence to after instr
-            when (misMatch && PvtTable(index).used) {
-                PvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
-                    when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
+        io.misPred(i).valid := false.B
+        io.misPred(i).bits := DontCare
+        when (veri.bits.rfWen) {
+            val index = veri.bits.pdest(log2Ceil(IntEntryNum)-1, 0)
+            val entryMatch = IntPvtTable(index).robIdx === veri.bits.misPredict.robIdx && IntPvtTable(index).tag === veri.bits.pdest
+            val misMatch = IntPvtTable(index).value =/= veri.bits.loadvalue && entryMatch
+            when (veri.valid) {
+                val needCancel = WireInit(VecInit((0 until IntEntryNum).map(i => {
+                    IntPvtTable(i).robIdx.needFlush(veri.bits.misPredict)
+                })))
+                // flush pvt selectively, used means that has influence to after instr
+                when (misMatch && IntPvtTable(index).used) {
+                    io.misPred(i).valid := true.B
+                    io.misPred(i).bits := veri.bits.misPredict
+                    IntPvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
+                        when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
+                    }
+                }.elsewhen (entryMatch) {
+                    IntPvtTableNext(index) := 0.U.asTypeOf(new PvtEntry)
+                    io.misPred(i).valid := false.B
+                    io.misPred(i).bits := 0.U.asTypeOf(new Redirect)
                 }
-            }.elsewhen (entryMatch) { PvtTableNext(index) := 0.U.asTypeOf(new PvtEntry) }
+            }
+        }.elsewhen (veri.bits.fpWen) {
+            val index = veri.bits.pdest(log2Ceil(FpEntryNum)-1, 0)
+            val entryMatch = FpPvtTable(index).robIdx === veri.bits.misPredict.robIdx && FpPvtTable(index).tag === veri.bits.pdest
+            val misMatch = FpPvtTable(index).value =/= veri.bits.loadvalue && entryMatch
+            when (veri.valid) {
+                val needCancel = WireInit(VecInit((0 until FpEntryNum).map(i => {
+                    FpPvtTable(i).robIdx.needFlush(veri.bits.misPredict)
+                })))
+                // flush pvt selectively, used means that has influence to after instr
+                when (misMatch && FpPvtTable(index).used) {
+                    io.misPred(i).valid := true.B
+                    io.misPred(i).bits := veri.bits.misPredict
+                    FpPvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
+                        when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
+                    }
+                }.elsewhen (entryMatch) {
+                    FpPvtTableNext(index) := 0.U.asTypeOf(new PvtEntry)
+                    io.misPred(i).valid := false.B
+                    io.misPred(i).bits := 0.U.asTypeOf(new Redirect)
+                }
+            }
         }
-        io.misPred(i).valid := misMatch && PvtTable(index).used && veri.valid
-        io.misPred(i).bits := veri.bits.misPredict
     }
     // other redirect, flush after
     when (io.flush.valid) {
-        val needCancel = WireInit(VecInit((0 until EntryNum).map(i => {
-            PvtTable(i).robIdx.needFlush(io.flush)
+        val intNeedCancel = WireInit(VecInit((0 until IntEntryNum).map(i => {
+            IntPvtTable(i).robIdx.needFlush(io.flush)
         })))
-        PvtTableNext.zip(needCancel).foreach { case (entry, flush) =>
+        val fpNeedCancel = WireInit(VecInit((0 until FpEntryNum).map(i => {
+            FpPvtTable(i).robIdx.needFlush(io.flush)
+        })))
+        IntPvtTableNext.zip(intNeedCancel).foreach { case (entry, flush) =>
+            when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
+        }
+        FpPvtTableNext.zip(fpNeedCancel).foreach { case (entry, flush) =>
             when (flush) {entry := 0.U.asTypeOf(new PvtEntry)}
         }
     }
-    PvtTable := PvtTableNext
-    io.full := PvtTable.map(_.valid).reduce(_ && _)
+    IntPvtTable := IntPvtTableNext
+    FpPvtTable := FpPvtTableNext
+    io.full := IntPvtTable.map(_.valid).reduce(_ && _) || FpPvtTable.map(_.valid).reduce(_ && _)
 }

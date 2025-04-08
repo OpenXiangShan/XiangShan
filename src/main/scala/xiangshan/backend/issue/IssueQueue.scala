@@ -301,14 +301,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
 
-  //dontTouch(io.srcPred)
-  //dontTouch(io.pvtRead)
-
   // find src pred
   for (i <- 0 until params.numEnq) {
     for (j <- 0 until io.srcPred(i).length) {
 //      io.srcPred(i)(j).addr := io.enq(i).bits.psrc(j)
-      io.srcPred(i)(j).addr := Mux(io.enq(i).bits.rfWen, io.enq(i).bits.psrc(j), 0.U)
+      io.srcPred(i)(j).addr := io.enq(i).bits.psrc(j)
     }
   }
   // we assume that no more than 1 src is pred
@@ -318,7 +315,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val needPvt = predVec.reduce(_ || _)
     val pvtIdx = PriorityEncoder(predVec)
     val isBranch = FuType.isBrh(io.enq(readIdx).bits.fuType)
-    read.valid := needPvt && io.enq(readIdx).valid && !isBranch && SrcType.isXp(io.enq(readIdx).bits.srcType(pvtIdx))
+    read.valid := needPvt && io.enq(readIdx).valid && !isBranch
     read.addr := io.enq(readIdx).bits.psrc(pvtIdx)
   }
 

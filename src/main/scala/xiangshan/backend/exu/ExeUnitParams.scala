@@ -10,7 +10,8 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, MemScheduler, SchedulerType, VfScheduler}
+
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -84,6 +85,7 @@ case class ExeUnitParams(
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
+  val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 

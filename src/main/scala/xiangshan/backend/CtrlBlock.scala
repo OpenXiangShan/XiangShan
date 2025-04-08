@@ -145,19 +145,19 @@ class CtrlBlockImp(
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
-  rename.io.pvtUpdate := DontCare
+  rename.io.intPvtUpdate := DontCare
+  rename.io.fpPvtUpdate := DontCare
   rename.io.intSrcPred <> io.intSrcPred
   rename.io.fpSrcPred <> io.fpSrcPred
   val intWbPred = intScheWbData.map(_.bits.pred)
   val existPred = intWbPred.reduce(_ || _)
-  assert(PopCount(intWbPred) <= 4.U, "update more than 4 pvt at one time")
   val intWbPredSrc = intScheWbData.map(_.bits.predSrc)
   when (existPred) {
     intWbPred.zipWithIndex.foreach { case (pred, i) =>
       when (pred) {
-        rename.io.pvtUpdate(i) := intWbPredSrc(i)
+        rename.io.intPvtUpdate(i) := intWbPredSrc(i)
       }.otherwise {
-        rename.io.pvtUpdate(i) := 0.U
+        rename.io.intPvtUpdate(i) := 0.U
       }
     }
   }
@@ -168,6 +168,18 @@ class CtrlBlockImp(
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
+  val fpWbPred = fpScheWbData.map(_.bits.pred)
+  val fpExistPred = fpWbPred.reduce(_ || _)
+  val fpWbPredSrc = fpScheWbData.map(_.bits.predSrc)
+  when (fpExistPred) {
+    fpWbPred.zipWithIndex.foreach { case (pred, i) =>
+      when (pred) {
+        rename.io.fpPvtUpdate(i) := fpWbPredSrc(i)
+      }.otherwise {
+        rename.io.fpPvtUpdate(i) := 0.U
+      }
+    }
+  }
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
@@ -612,6 +624,7 @@ class CtrlBlockImp(
     rename.io.in(i).bits := decodePipeRename(i).bits
     rename.io.pvtWen(i) := io.decode2Lvp(i).valid && io.decode2Lvp(i).pred
     rename.io.pvtWdata(i) := io.decode2Lvp(i).predValue
+    rename.io.pvtPc(i) := io.decode2Lvp(i).pc
     dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
   }

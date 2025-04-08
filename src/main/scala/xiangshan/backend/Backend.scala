@@ -548,7 +548,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       case (immInfo, og2ImmInfo) => immInfo := og2ImmInfo
     }
   bypassNetwork.io.fromDataPath.rcData := dataPath.io.toBypassNetworkRCData
-  bypassNetwork.io.fromDataPath.pvtData := dataPath.io.toBypassNetworkPvtData
+  bypassNetwork.io.fromDataPath.intPvtData := dataPath.io.toBypassNetworkIntPvtData
+  bypassNetwork.io.fromDataPath.fpPvtData := dataPath.io.toBypassNetworkFpPvtData
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.fp)(fpExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)

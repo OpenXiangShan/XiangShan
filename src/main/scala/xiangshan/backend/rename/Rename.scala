@@ -39,7 +39,7 @@ import xiangshan.backend.PvtReadPort
 
 import scala.annotation.meta.param
 import freechips.rocketchip.formal.MonitorDirection.Cover.flip
-import xiangshan.backend.datapath.DataConfig.IntData
+import xiangshan.backend.datapath.DataConfig.{FpData, IntData}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler}
 import yunsuan.{VfaluType, VipuType}
 
@@ -100,7 +100,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val out = new StallReasonIO(RenameWidth)
     }
     val pvtfull = Output(Bool())
-    val pvtWriteFail = Vec(RenameWidth, Output(Bool()))
     val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
     val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
     val intSrcPred = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, Vec(3, new RatPredPort())))
@@ -108,13 +107,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 //    val pvtUpdate = Input(UInt(PhyRegIdxWidth.W))
     val pvtWen = Vec(RenameWidth, Input(Bool()))
     val pvtWdata = Vec(RenameWidth, Input(UInt(XLEN.W)))
-    val pvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
+    val pvtPc = Vec(RenameWidth, Input(UInt(VAddrBits.W)))
+    val intPvtUpdate = Vec(backendParams.numPregWb(IntData()), Input(UInt(PhyRegIdxWidth.W)))
+    val fpPvtUpdate = Vec(backendParams.numPregWb(FpData()), Input(UInt(PhyRegIdxWidth.W)))
     val fromLoad = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
     val misPred = Vec(backendParams.LduCnt, ValidIO(new Redirect))
   })
 
   dontTouch(io.pvtfull)
-  dontTouch(io.pvtWriteFail)
 
   io.in.zipWithIndex.map { case (o, i) =>
     PerfCCT.updateInstPos(o.bits.debug_seqNum, PerfCCT.InstPos.AtRename.id.U, o.valid, clock, reset)
@@ -144,7 +144,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vlFreeList.io.debug_rat.foreach(_ <> io.debug_vl_rat.get)
 
   io.pvtfull := pvt.io.full
-  io.pvtWriteFail := pvt.io.writeFail
   pvt.io.flush := io.redirect
   pvt.io.fromLoad <> io.fromLoad
   io.misPred <> pvt.io.misPred
@@ -152,14 +151,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //todo : when 2 consistent pvtwen are true, the second pvtwdata will be ignore
   val pvtBufferValid = RegInit(VecInit.fill(RenameWidth)(false.B))
   val pvtBufferData  = RegInit(VecInit.fill(RenameWidth)(0.U(XLEN.W)))
+  val pvtBufferPc    = RegInit(VecInit.fill(RenameWidth)(0.U(VAddrBits.W)))
   for (i <- 0 until RenameWidth) {
     when(io.pvtWen(i) && !pvtBufferValid(i)) {
       pvtBufferValid(i) := true.B
       pvtBufferData(i)  := io.pvtWdata(i)
+      pvtBufferPc(i)    := io.pvtPc(i)
     }
   }
   pvt.io.writePorts.zipWithIndex.foreach{ case (w, i) =>
-    w.wen := pvtBufferValid(i) && !pvt.io.full && io.out(i).valid && !io.redirect.valid
+    w.wen := pvtBufferValid(i) && !pvt.io.full && io.out(i).valid &&
+            !io.redirect.valid && io.out(i).bits.pc === pvtBufferPc(i)
+    w.rfWen := io.out(i).bits.rfWen
+    w.fpWen := io.out(i).bits.fpWen
 //    w.addr := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
     w.addr := io.out(i).bits.pdest
     w.data := pvtBufferData(i)
@@ -170,15 +174,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
   // pvt read
-  pvt.io.readPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
+  pvt.io.intReadPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
   pvt.io.intSrcPred.zip(io.intSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
+  pvt.io.fpReadPorts.zip(io.fpPvtRead.flatten).foreach{ case(r, p) => r <> p}
   pvt.io.fpSrcPred.zip(io.fpSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
-  io.fpPvtRead.flatten.foreach(_.data := DontCare)
-  io.fpPvtRead.flatten.foreach(_.fail := DontCare)
-  io.fpSrcPred.flatten.flatten.foreach(_.pred := DontCare)
 
-  XSPerfAccumulate("read_pvt_total", PopCount(io.intPvtRead.flatten.map( port => port.valid && !port.fail)))
-  XSPerfAccumulate("read_more_than1pvt", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
+  XSPerfAccumulate("read_int_pvt_total", PopCount(io.intPvtRead.flatten.map( port => port.valid && !port.fail)))
+  XSPerfAccumulate("read_more_than1pvt_int", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
   XSPerfAccumulate("write_pvt_total", PopCount(io.pvtWen))
   XSPerfAccumulate("write_more_than1pvt", PopCount(io.pvtWen) > 1.U)
   XSPerfAccumulate("write_more_than2pvt", PopCount(io.pvtWen) > 2.U)
@@ -402,9 +404,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
-    pvt.io.pvtUpdate := io.pvtUpdate
-    pvt.io.pvtUpdateFrmRename.zip(uops.map(_.pdest)).zip(io.out.map(_.valid)).foreach{ case ((sink, source), valid) =>
-      sink := Mux(valid, source, 0.U)
+    pvt.io.intPvtUpdate := io.intPvtUpdate
+    pvt.io.fpPvtUpdate := io.fpPvtUpdate
+    pvt.io.pvtUpdateFrmRename.zip(io.out).foreach{ case (update, out) =>
+      update.rfWen := out.bits.rfWen
+      update.fpWen := out.bits.fpWen
+      update.addr := Mux(out.valid, out.bits.pdest, 0.U)
     }
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
