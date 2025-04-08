@@ -24,7 +24,7 @@ import ftq.FtqRedirectSramEntry
 import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
@@ -151,14 +151,14 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioLastCommit = Input(Bool())
 }
 
-object ExceptionType extends NamedUInt(2) {
-  def none: UInt = "b00".U(width.W)
-  def pf:   UInt = "b01".U(width.W) // instruction page fault
-  def gpf:  UInt = "b10".U(width.W) // instruction guest page fault
-  def af:   UInt = "b11".U(width.W) // instruction access fault
+object ExceptionType extends EnumUInt(4) {
+  def None: UInt = 0.U(width.W)
+  def Pf:   UInt = 1.U(width.W) // instruction page fault
+  def Gpf:  UInt = 2.U(width.W) // instruction guest page fault
+  def Af:   UInt = 3.U(width.W) // instruction access fault
 
-  def hasException(e: UInt):             Bool = e =/= none
-  def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
+  def hasException(e: UInt):             Bool = e =/= None
+  def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= None).reduce(_ || _)
   def hasException(e: IndexedSeq[UInt]): Bool = hasException(VecInit(e))
 
   def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
@@ -171,11 +171,11 @@ object ExceptionType extends NamedUInt(2) {
     )
     // input is at-most-one-hot encoded, so we don't worry about priority here.
     MuxCase(
-      none,
+      None,
       Seq(
-        has_pf  -> pf,
-        has_gpf -> gpf,
-        has_af  -> af
+        has_pf  -> Pf,
+        has_gpf -> Gpf,
+        has_af  -> Af
       )
     )
   }
@@ -193,7 +193,7 @@ object ExceptionType extends NamedUInt(2) {
 
   // raise af if pmp check failed
   def fromPMPResp(resp: PMPRespBundle): UInt =
-    Mux(resp.instr, af, none)
+    Mux(resp.instr, Af, None)
 
   // raise af if meta/data array ecc check failed or l2 cache respond with tilelink corrupt
   /* FIXME: RISC-V Machine ISA v1.13 (draft) introduced a "hardware error" exception, described as:
@@ -210,10 +210,10 @@ object ExceptionType extends NamedUInt(2) {
    * But it's draft and XiangShan backend does not implement this exception code yet, so we still raise af here.
    */
   def fromECC(enable: Bool, corrupt: Bool): UInt =
-    Mux(enable && corrupt, af, none)
+    Mux(enable && corrupt, Af, None)
 
   def fromTilelink(corrupt: Bool): UInt =
-    Mux(corrupt, af, none)
+    Mux(corrupt, Af, None)
 
   /**Generates exception mux tree
    *
@@ -240,7 +240,7 @@ object ExceptionType extends NamedUInt(2) {
 //    }
     // use MuxCase with default
     exceptions.foreach(e => require(e.getWidth == width))
-    val mapping = exceptions.init.map(e => (e =/= none) -> e)
+    val mapping = exceptions.init.map(e => (e =/= None) -> e)
     val default = exceptions.last
     MuxCase(default, mapping)
   }
@@ -278,11 +278,11 @@ object ExceptionType extends NamedUInt(2) {
   }
 }
 
-object BrType extends NamedUInt(2) {
-  def notCFI: UInt = "b00".U(width.W)
-  def branch: UInt = "b01".U(width.W)
-  def jal:    UInt = "b10".U(width.W)
-  def jalr:   UInt = "b11".U(width.W)
+object BrType extends EnumUInt(4) {
+  def NotCfi: UInt = 0.U(width.W)
+  def Branch: UInt = 1.U(width.W)
+  def Jal:    UInt = 2.U(width.W)
+  def Jalr:   UInt = 3.U(width.W)
 }
 
 class PreDecodeInfo extends Bundle { // 8 bit
@@ -292,10 +292,10 @@ class PreDecodeInfo extends Bundle { // 8 bit
   val isCall = Bool()
   val isRet  = Bool()
   // val excType = UInt(3.W)
-  def isBr   = brType === BrType.branch
-  def isJal  = brType === BrType.jal
-  def isJalr = brType === BrType.jalr
-  def notCFI = brType === BrType.notCFI
+  def isBr   = brType === BrType.Branch
+  def isJal  = brType === BrType.Jal
+  def isJalr = brType === BrType.Jalr
+  def notCFI = brType === BrType.NotCfi
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {

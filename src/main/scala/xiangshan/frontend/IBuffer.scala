@@ -110,16 +110,15 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf
   }
 
-  object IBufferExceptionType extends NamedUInt(3) {
-    def None        = "b000".U
-    def NonCrossPF  = "b001".U
-    def NonCrossGPF = "b010".U
-    def NonCrossAF  = "b011".U
-    // illegal instruction
-    def rvcII    = "b100".U
-    def CrossPF  = "b101".U
-    def CrossGPF = "b110".U
-    def CrossAF  = "b111".U
+  object IBufferExceptionType extends EnumUInt(8) {
+    def None:        UInt = "b000".U(width.W)
+    def NonCrossPF:  UInt = "b001".U(width.W)
+    def NonCrossGPF: UInt = "b010".U(width.W)
+    def NonCrossAF:  UInt = "b011".U(width.W)
+    def RvcII:       UInt = "b100".U(width.W) // illegal instruction
+    def CrossPF:     UInt = "b101".U(width.W)
+    def CrossGPF:    UInt = "b110".U(width.W)
+    def CrossAF:     UInt = "b111".U(width.W)
 
     def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: UInt, crossPage: Bool, rvcIll: Bool): UInt = {
       require(
@@ -132,7 +131,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
         Seq(
           crossPage     -> Cat(1.U(1.W), fetchExcp),
           fetchExcp.orR -> fetchExcp,
-          rvcIll        -> this.rvcII
+          rvcIll        -> this.RvcII
         )
       )
     }

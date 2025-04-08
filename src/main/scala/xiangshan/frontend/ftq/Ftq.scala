@@ -157,7 +157,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
   // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
   // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
-  val backendException  = RegInit(ExceptionType.none)
+  val backendException  = RegInit(ExceptionType.None)
   val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
   when(fromBackendRedirect.valid) {
     backendException := ExceptionType.fromOH(
@@ -172,7 +172,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       backendPcFaultPtr := ifuWbPtr_write
     }
   }.elsewhen(ifuWbPtr =/= backendPcFaultPtr) {
-    backendException := ExceptionType.none
+    backendException := ExceptionType.None
   }
 
   // **********************************************************************
@@ -479,7 +479,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.prefetchReq.bits.backendException := Mux(
     backendPcFaultPtr === pfPtr,
     backendException,
-    ExceptionType.none
+    ExceptionType.None
   )
   // io.toICache.fetchReq.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.fetchReq.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>

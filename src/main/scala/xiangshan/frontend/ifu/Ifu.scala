@@ -32,7 +32,7 @@ import utility.XSDebug
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.RedirectLevel
 import xiangshan.RobCommitInfo
@@ -331,7 +331,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // FIXME: raise af if one fetch block crosses the cacheable/un-cacheable boundary, might not correct
   private val s2_mmioMismatchException = VecInit(Seq(
-    ExceptionType.none, // mark the exception only on the second line
+    ExceptionType.None, // mark the exception only on the second line
     Mux(
       // not double-line, skip check
       !fromICache.bits.doubleline || (
@@ -339,8 +339,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
         fromICache.bits.pmpMmio(0) === fromICache.bits.pmpMmio(1) &&
           fromICache.bits.itlbPbmt(0) === fromICache.bits.itlbPbmt(1)
       ),
-      ExceptionType.none,
-      ExceptionType.af
+      ExceptionType.None,
+      ExceptionType.Af
     )
   ))
 
@@ -379,7 +379,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_instrRange = s2_jumpRange & s2_ftrRange
   private val s2_exceptionVec = VecInit((0 until PredictWidth).map(i =>
     MuxCase(
-      ExceptionType.none,
+      ExceptionType.None,
       Seq(
         !isNextLine(s2_pc(i), s2_ftqReq.startAddr)                   -> s2_exception(0),
         (isNextLine(s2_pc(i), s2_ftqReq.startAddr) && s2_doubleline) -> s2_exception(1)
@@ -456,7 +456,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Mux(
       isLastInLine(s2_pc(i)) && !s2_pd(i).isRVC && s2_doubleline && !ExceptionType.hasException(s2_exception(0)),
       s2_exception(1),
-      ExceptionType.none
+      ExceptionType.None
     )
   })
   XSPerfAccumulate("fetch_bubble_icache_not_resp", s2_valid && !icacheRespAllValid)
@@ -563,7 +563,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /* *** mmio *** */
   private def nMmioFsmState = 11
-  private object MmioFsmState extends NamedUInt(log2Up(nMmioFsmState)) {
+  private object MmioFsmState extends EnumUInt(nMmioFsmState) {
     def Idle:           UInt = 0.U(width.W)
     def WaitLastCommit: UInt = 1.U(width.W)
     def SendReq:        UInt = 2.U(width.W)
@@ -591,7 +591,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private def mmioReset(): Unit = {
     mmioState := MmioFsmState.Idle
     mmioData.foreach(_ := 0.U)
-    mmioException               := ExceptionType.none
+    mmioException               := ExceptionType.None
     mmioIsRvc                   := false.B
     mmioHasResend               := false.B
     mmioResendAddr              := PrunedAddrInit(0.U(PAddrBits.W))
@@ -706,8 +706,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
         // if itlb re-check respond pbmt mismatch with previous check, must be access fault
         val pbmtMismatchException = Mux(
           io.itlb.resp.bits.pbmt(0) =/= s3_itlbPbmt,
-          ExceptionType.af,
-          ExceptionType.none
+          ExceptionType.Af,
+          ExceptionType.None
         )
         val exception = ExceptionType.merge(tlbException, pbmtMismatchException)
         // if tlb has exception, abort checking pmp, just send instr & exception to iBuffer and wait for commit
@@ -725,8 +725,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
       // if pmp re-check respond mismatch with previous check, must be access fault
       val mmioMismatchException = Mux(
         io.pmp.resp.mmio =/= s3_pmpMmio,
-        ExceptionType.af,
-        ExceptionType.none
+        ExceptionType.Af,
+        ExceptionType.None
       )
       val exception = ExceptionType.merge(pmpException, mmioMismatchException)
       // if pmp has exception, abort sending request, just send instr & exception to iBuffer and wait for commit
@@ -899,8 +899,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // s3_gpAddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := s3_toIBufferValid && Mux(
     s3_reqIsMmio,
-    mmioException === ExceptionType.gpf,
-    s3_exception.map(_ === ExceptionType.gpf).reduce(_ || _)
+    mmioException === ExceptionType.Gpf,
+    s3_exception.map(_ === ExceptionType.Gpf).reduce(_ || _)
   )
   io.toBackend.gpaddrMem_waddr        := s3_ftqReq.ftqIdx.value
   io.toBackend.gpaddrMem_wdata.gpaddr := Mux(s3_reqIsMmio, mmioResendGpAddr.toUInt, s3_gpAddr.toUInt)
@@ -1053,12 +1053,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /* write back flush type */
   private val checkFaultType    = wbCheckResultStage2.faultType
-  private val checkJalFault     = wbValid && checkFaultType.map(_ === PreDecodeFaultType.jalFault).reduce(_ || _)
-  private val checkJalrFault    = wbValid && checkFaultType.map(_ === PreDecodeFaultType.jalrFault).reduce(_ || _)
-  private val checkRetFault     = wbValid && checkFaultType.map(_ === PreDecodeFaultType.retFault).reduce(_ || _)
-  private val checkTargetFault  = wbValid && checkFaultType.map(_ === PreDecodeFaultType.targetFault).reduce(_ || _)
-  private val checkNotCFIFault  = wbValid && checkFaultType.map(_ === PreDecodeFaultType.notCfiFault).reduce(_ || _)
-  private val checkInvalidTaken = wbValid && checkFaultType.map(_ === PreDecodeFaultType.invalidTaken).reduce(_ || _)
+  private val checkJalFault     = wbValid && checkFaultType.map(_ === PreDecodeFaultType.JalFault).reduce(_ || _)
+  private val checkJalrFault    = wbValid && checkFaultType.map(_ === PreDecodeFaultType.JalrFault).reduce(_ || _)
+  private val checkRetFault     = wbValid && checkFaultType.map(_ === PreDecodeFaultType.RetFault).reduce(_ || _)
+  private val checkTargetFault  = wbValid && checkFaultType.map(_ === PreDecodeFaultType.TargetFault).reduce(_ || _)
+  private val checkNotCFIFault  = wbValid && checkFaultType.map(_ === PreDecodeFaultType.NotCfiFault).reduce(_ || _)
+  private val checkInvalidTaken = wbValid && checkFaultType.map(_ === PreDecodeFaultType.InvalidTaken).reduce(_ || _)
 
   XSPerfAccumulate("predecode_flush_jalFault", checkJalFault)
   XSPerfAccumulate("predecode_flush_jalrFault", checkJalrFault)
