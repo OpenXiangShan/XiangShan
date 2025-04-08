@@ -12,6 +12,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryHSEventSinkBundle}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
+import system.HasSoCParameter
 
 import scala.collection.immutable.SeqMap
 
@@ -251,13 +252,13 @@ class HvienBundle extends InterruptEnableBundle {
 
 }
 
-class HgeieBundle extends CSRBundle {
-  val ie = RW(GEILEN, 1).withReset(0.U)
+class HgeieBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
+  val ie = RW(soc.IMSICParams.geilen, 1).withReset(0.U)
   // bit 0 is read only 0
 }
 
-class HgeipBundle extends CSRBundle {
-  val ip = RO(GEILEN, 1)
+class HgeipBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
+  val ip = RO(soc.IMSICParams.geilen, 1)
   // bit 0 is read only 0
 }
 

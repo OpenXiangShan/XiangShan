@@ -24,8 +24,6 @@ import xiangshan.backend.trace._
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
-  final val GEILEN = 5 // m,s,5vs
-
   final val ASIDLEN = 16 // the length of ASID of XS implementation
 
   final val ASIDMAX = 16 // the max value of ASIDLEN defined by spec
