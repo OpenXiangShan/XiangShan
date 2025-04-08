@@ -1,6 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-* Copyright (c) 2024 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2024-2025 Institute of Computing Technology, Chinese Academy of Sciences
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -24,7 +24,6 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import device.IMSICAsync
 import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
 import utility.sram.{SramBroadcastBundle, SramMbistBundle}
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
@@ -112,11 +111,8 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     childClock := clock
     childReset := reset_sync
 
-    val imsicAsync = withClockAndReset(clock, reset_sync)(Module(new IMSICAsync()))
-    imsicAsync.i.msiInfo := io.msiInfo
-
     tile.module.io.hartId := io.hartId
-    tile.module.io.msiInfo := imsicAsync.o.msiInfo
+    tile.module.io.msiInfo := io.msiInfo
     tile.module.io.reset_vector := io.reset_vector
     tile.module.io.sramTest := io.sramTest
     io.cpu_halt := tile.module.io.cpu_halt
