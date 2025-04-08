@@ -246,11 +246,12 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      2. when Core is in wfi state, core+l2 clock is gated
      3. only reset/interrupt/snoop could recover core+l2 clock
     */
-    val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+    val sNORMAL :: sGCLOCK :: sAWAKE :: sFLITWAKE :: Nil = Enum(4)
     val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
     val isNormal = lpState === sIDLE
     val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
-    wfiState := WfiStateNext(wfiState, isWFI, isNormal, io.chi.rx.snp.flitpend, intSrc)
+    val flitpend = io.chi.rx.snp.flitpend | io.chi.rx.rsp.flitpend | io.chi.rx.dat.flitpend
+    wfiState := WfiStateNext(wfiState, isWFI, isNormal, flitpend, intSrc)
 
     if (WFIClockGate) {
       wfiGateClock := (wfiState === sGCLOCK)
