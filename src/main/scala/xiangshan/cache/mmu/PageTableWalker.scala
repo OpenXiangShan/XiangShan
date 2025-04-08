@@ -153,6 +153,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val idle = RegInit(true.B)
   val finish = WireInit(false.B)
+  val vs_finish = WireInit(false.B) // need to wait for G-stage translate, should not do pmp check
 
   val hptw_pageFault = RegInit(false.B)
   val hptw_accessFault = RegInit(false.B)
@@ -176,7 +177,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
 
-  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish && !(find_pte && pte_valid)
+  val sent_to_pmp = idle === false.B && (s_pmp_check === false.B || mem_addr_update) && !finish && !vs_finish && !first_gvpn_check_fail && !(find_pte && pte_valid)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, false.B, sent_to_pmp)
 
   val l3addr = Wire(UInt(ptePaddrLen.W))
@@ -432,7 +433,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_pmp_check := true.B
   }
 
-  when(accessFault && !io.hptw.req.valid && idle === false.B){
+  when(accessFault && idle === false.B){
     s_pmp_check := true.B
     s_mem_req := true.B
     w_mem_resp := true.B
@@ -528,6 +529,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       level := levelNext
       when(s2xlate){
         s_hptw_req := false.B
+        vs_finish := true.B
       }.otherwise{
         s_mem_req := false.B
       }
