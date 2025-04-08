@@ -16,6 +16,7 @@
 
 import chisel3._
 import chisel3.util._
+import utils.NamedUInt
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
@@ -938,6 +939,8 @@ package object xiangshan {
     def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
       partialSelect(vec, fuConfig.exceptionOut, unSelect)
   }
+
+  object InstSeqNum extends NamedUInt(64)
 
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base

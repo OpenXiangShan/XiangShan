@@ -267,6 +267,7 @@ class ExeUnitImp(
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
+      sink.bits.debug_seqNum     := source.bits.debug_seqNum
   }
   funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
     val latency = fu.cfg.latency.latencyVal.getOrElse(0)
@@ -405,6 +406,7 @@ class ExeUnitImp(
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
   io.out.bits.debug.isPerfCnt := funcUnits.map(_.io.csrio.map(_.isPerfCnt)).map(_.getOrElse(false.B)).reduce(_ || _)
   io.out.bits.debugInfo := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfDebugInfo))
+  io.out.bits.debug_seqNum := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.debug_seqNum))
 }
 
 class DispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
@@ -451,6 +453,7 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   fu.io.in.bits.data.imm       := io.in.bits.uop.imm
   fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
   fu.io.in.bits.perfDebugInfo := io.in.bits.uop.debugInfo
+  fu.io.in.bits.debug_seqNum := io.in.bits.uop.debug_seqNum
 
   io.out.valid            := fu.io.out.valid
   fu.io.out.ready         := io.out.ready
@@ -463,6 +466,7 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
   io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx
   io.out.bits.uop.debugInfo := fu.io.out.bits.perfDebugInfo
+  io.out.bits.uop.debug_seqNum := fu.io.out.bits.debug_seqNum
 
   io.out.bits.debug       := 0.U.asTypeOf(io.out.bits.debug)
 }
