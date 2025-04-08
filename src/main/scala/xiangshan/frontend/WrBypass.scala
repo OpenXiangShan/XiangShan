@@ -41,8 +41,8 @@ class WrBypass[T <: Data](
     val write_data     = Input(Vec(numWays, gen))
     val write_way_mask = if (multipleWays) Some(Input(Vec(numWays, Bool()))) else None
 
-    val hit             = Output(Bool())
-    val hit_data        = Vec(numWays, Valid(gen))
+    val hit      = Output(Bool())
+    val hit_data = Vec(numWays, Valid(gen))
   })
 
   class Idx_Tag extends Bundle {
@@ -55,7 +55,7 @@ class WrBypass[T <: Data](
   }
 
   val idx_tag_cam = Module(new IndexableCAMTemplate(new Idx_Tag, numEntries, 1))
-  val data_mem = Mem(numEntries, Vec(numWays, gen))
+  val data_mem    = Mem(numEntries, Vec(numWays, gen))
 
   val valids       = RegInit(0.U.asTypeOf(Vec(numEntries, Vec(numWays, Bool()))))
   val ever_written = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))

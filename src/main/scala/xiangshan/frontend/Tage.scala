@@ -35,7 +35,8 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
-import utility.sram.{FoldedSRAMTemplate, SRAMConflictBehavior}
+import utility.sram.FoldedSRAMTemplate
+import utility.sram.SRAMConflictBehavior
 import xiangshan._
 
 trait TageParams extends HasBPUConst with HasXSParameter {

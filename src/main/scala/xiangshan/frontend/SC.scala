@@ -34,7 +34,8 @@ import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
-import utility.sram.{SRAMTemplate, SRAMConflictBehavior}
+import utility.sram.SRAMConflictBehavior
+import utility.sram.SRAMTemplate
 import xiangshan._
 
 trait HasSCParameter extends TageParams {}
@@ -114,11 +115,13 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   table.io.r.req.valid       := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
 
-  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2,2).toSeq.map(VecInit(_))
-  val per_br_ctrs = VecInit((0 until numBr).map(i => Mux1H(
-    UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
-    per_br_ctrs_unshuffled
-  )))
+  val per_br_ctrs_unshuffled = table.io.r.resp.data.sliding(2, 2).toSeq.map(VecInit(_))
+  val per_br_ctrs = VecInit((0 until numBr).map(i =>
+    Mux1H(
+      UIntToOH(get_phy_br_idx(s1_unhashed_idx, i), numBr),
+      per_br_ctrs_unshuffled
+    )
+  ))
 
   io.resp.ctrs := per_br_ctrs
 
@@ -143,10 +146,11 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val update_idx = getIdx(io.update.pc, update_folded_hist)
 
   table.io.w.apply(
-    valid = io.update.mask.reduce(_||_),
+    valid = io.update.mask.reduce(_ || _),
     data = update_wdata_packed,
     setIdx = update_idx,
-    waymask = updateWayMask.asUInt)
+    waymask = updateWayMask.asUInt
+  )
 
   val wrBypassEntries = 16
 
