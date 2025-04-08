@@ -1878,9 +1878,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(pmp)
       )
       ++ pmp_checkers.map(ModuleNode(_))
-      // TODO lyq: how to set after wrapper?
-      // ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
-      // ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
+      ++ Seq(ModuleNode(prefetcher))
     )
     val rightResetTree = ResetGenNode(
       Seq(
