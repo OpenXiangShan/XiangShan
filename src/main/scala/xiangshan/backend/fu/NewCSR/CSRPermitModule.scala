@@ -6,8 +6,10 @@ import chisel3.util.experimental.decode.TruthTable
 import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
+import org.chipsalliance.cde.config.Parameters
+import system.HasSoCParameter
 
-class CSRPermitModule extends Module {
+class CSRPermitModule(implicit p: Parameters) extends Module {
   val io = IO(new CSRPermitIO)
 
   val xRetPermitMod = Module(new XRetPermitModule)
@@ -369,7 +371,7 @@ class PrivilegePermitModule extends Module {
   io.out.privilege_EX_VI := !privilegeLegal && privState.isVirtual && !csrIsM
 }
 
-class VirtualLevelPermitModule extends Module {
+class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with HasSoCParameter {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO
@@ -420,8 +422,8 @@ class VirtualLevelPermitModule extends Module {
 
   private val rwSatp_EX_VI = privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
-  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
-  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > CSRConfig.GEILEN.U)
+  private val rwVStopei_EX_II = (privState.isModeM || privState.isModeHS) && (addr === CSRs.vstopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
+  private val rwStopei_EX_VI = privState.isModeVS && (addr === CSRs.stopei.U) && (vgein === 0.U || vgein > soc.IMSICParams.geilen.U)
 
   private val rwSip_Sie_EX_VI = privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
 
