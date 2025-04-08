@@ -33,7 +33,7 @@ import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
-import utility.sram.SramMbistBundle
+import utility.sram.SramBroadcastBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
@@ -214,21 +214,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
-      val sramTestIn = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-        val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
-      }
-      val sramTestOut = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Output(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Output(new DFTResetSignals()))
-        val sramCtl    = Option.when(hasSramCtl)(Output(UInt(64.W)))
-      }
+      val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+      val dft_out = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+      val dft_reset_out = Option.when(hasMbist)(Output(new DFTResetSignals()))
       // val reset_core = IO(Output(Reset()))
     })
-    io.sramTestOut.mbist.zip(io.sramTestIn.mbist).foreach({case(a, b) => a := b})
-    io.sramTestOut.mbistReset.zip(io.sramTestIn.mbistReset).foreach({case(a, b) => a := b})
-    io.sramTestOut.sramCtl.zip(io.sramTestIn.sramCtl).foreach({case(a, b) => a := b})
+    io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
+    io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -284,7 +277,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2 = l2cache.get.module
 
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
-      l2.io.sramTest := io.sramTestIn
+      l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
+      l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
@@ -373,7 +367,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       ResetGen(ResetGenNode(Seq(
         CellNode(reset_core),
         ModuleNode(inner.module)
-      )), reset, sim = false, io.sramTestIn.mbistReset)
+      )), reset, sim = false, io.dft_reset)
     } else {
       reset_core := DontCare
     }

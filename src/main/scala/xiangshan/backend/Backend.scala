@@ -31,7 +31,7 @@ import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility._
-import utility.sram.SramMbistBundle
+import utility.sram.SramBroadcastBundle
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
@@ -65,7 +65,7 @@ class BackendImp(wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp
   val io = IO(new BackendIO()(p, wrapper.params))
   io <> wrapper.inner.module.io
   if (p(DebugOptionsKey).ResetGen) {
-    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.sramTest.mbistReset)
+    ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
 }
 
@@ -868,7 +868,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
   if(hasMbist) {
-    cg.cgen := io.sramTest.mbist.get.cgen
+    cg.cgen := io.dft.get.cgen
   } else {
     cg.cgen := false.B
   }
@@ -903,8 +903,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         // ))
       ))
     ))
-    ResetGen(leftResetTree, reset, sim = false, io.sramTest.mbistReset)
-    ResetGen(rightResetTree, reset, sim = false, io.sramTest.mbistReset)
+    ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
+    ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
   } else {
     io.frontendReset := DontCare
   }
@@ -1087,8 +1087,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   }
   val debugRolling = new RobDebugRollingIO
   val topDownInfo = new TopDownInfo
-  val sramTest = new Bundle() {
-    val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
-    val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-  }
+  val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+  val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
 }

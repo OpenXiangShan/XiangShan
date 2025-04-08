@@ -24,7 +24,7 @@ import difftest.DifftestModule
 import xiangshan._
 import utils._
 import utility._
-import utility.sram.{SramMbistBundle, SramBroadcastBundle}
+import utility.sram.SramBroadcastBundle
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.CHILogger
@@ -341,7 +341,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
       io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-      dontTouch(core.module.io.sramTest) := 0.U.asTypeOf(core.module.io.sramTest)
+      core.module.io.dft.foreach(dontTouch(_) := DontCare)
+      core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
 

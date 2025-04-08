@@ -908,9 +908,9 @@ trait HasXSParameter {
   def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
-  def hasMbist               = coreParams.hasMbist
-
   def wfiResume              = coreParams.wfiResume
+
+  def hasMbist               = coreParams.hasMbist
   def hasSramCtl             = coreParams.hasSramCtl
-  def hasSramTest            = hasMbist || hasSramCtl
+  def hasDFT                 = hasMbist || hasSramCtl
 }

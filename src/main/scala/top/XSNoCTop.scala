@@ -21,7 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import utility.sram.SramMbistBundle
+import utility.sram.SramBroadcastBundle
 import system._
 import device._
 import org.chipsalliance.cde.config._
@@ -173,9 +173,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
           val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
         })
       }
-      val dft = Option.when(hasMbist)(Input(new SramMbistBundle))
+      val dft = Option.when(hasMbist)(Input(new SramBroadcastBundle))
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-      val sramCtl = Option.when(hasSramCtl)(Input(UInt(64.W)))
       val lp = Option.when(EnablePowerDown) (new LowPowerIO)
     })
     // imsic axi4lite io
@@ -186,9 +185,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
-    wrapper.core_with_l2.module.io.sramTest.mbist.zip(io.dft).foreach { case (a, b) => a := b }
-    wrapper.core_with_l2.module.io.sramTest.mbistReset.zip(io.dft_reset).foreach { case (a, b) => a := b }
-    wrapper.core_with_l2.module.io.sramTest.sramCtl.zip(io.sramCtl).foreach { case (a, b) => a := b }
+    wrapper.core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
+    wrapper.core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync

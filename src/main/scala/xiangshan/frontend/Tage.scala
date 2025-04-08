@@ -169,8 +169,9 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       holdRead = true,
       bypassWrite = true,
       withClockGate = true,
-      avoidSameAddr = true,
-      hasMbist = hasMbist
+      // avoidSameAddr = true,
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl,
     )
   )
 
