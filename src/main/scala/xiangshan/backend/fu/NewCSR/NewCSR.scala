@@ -1489,6 +1489,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
     diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && hasTrap)
+    diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
+    diffArchEvent.irToVS := RegEnable(irToVS, hasTrap)
     if (env.EnableDifftest) {
       diffArchEvent.exceptionInst := RegEnable(io.fromRob.trap.bits.instr, hasTrap)
     }
@@ -1606,9 +1608,14 @@ class NewCSR(implicit val p: Parameters) extends Module
     }).orR
     diffMhpmeventOverflowEvent.mhpmeventOverflow := VecInit(mhpmevents.map(_.regOut.asInstanceOf[MhpmeventBundle].OF.asBool)).asUInt
 
+    val mtopeiChange = RegNext(fromAIA.mtopei.asUInt) =/= fromAIA.mtopei.asUInt
+    val stopeiChange = RegNext(fromAIA.stopei.asUInt) =/= fromAIA.stopei.asUInt
+    val vstopeiChange = RegNext(hstatus.regOut.VGEIN.asUInt) =/= hstatus.regOut.VGEIN.asUInt
+    val hgeipChange = RegNext(fromAIA.vseip) =/= fromAIA.vseip
+
     val diffSyncAIAEvent = DifftestModule(new DiffSyncAIAEvent)
     diffSyncAIAEvent.coreid := hartId
-    diffSyncAIAEvent.valid := fromAIA.rdata.valid
+    diffSyncAIAEvent.valid := mtopeiChange || stopeiChange || vstopeiChange || hgeipChange
     diffSyncAIAEvent.mtopei := mtopei.rdata
     diffSyncAIAEvent.stopei := stopei.rdata
     diffSyncAIAEvent.vstopei := vstopei.rdata
