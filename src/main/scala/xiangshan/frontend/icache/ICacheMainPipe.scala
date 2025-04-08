@@ -468,7 +468,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toIfu.bits.pAddr              := s2_pAddr
   (0 until PortNumber).foreach { i =>
     val needThisLine = if (i == 0) true.B else s2_doubleline
-    toIfu.bits.exception(i) := Mux(needThisLine, s2_exceptionOut(i), ExceptionType.none)
+    toIfu.bits.exception(i) := Mux(needThisLine, s2_exceptionOut(i), ExceptionType.None)
     toIfu.bits.pmpMmio(i)   := Mux(needThisLine, s2_pmpMmio(i), false.B)
     toIfu.bits.itlbPbmt(i)  := Mux(needThisLine, s2_itlbPbmt(i), Pbmt.pma)
   }
