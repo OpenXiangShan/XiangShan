@@ -22,7 +22,7 @@
 *
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
@@ -34,6 +34,7 @@ import utility.sram.SplittedSRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
 

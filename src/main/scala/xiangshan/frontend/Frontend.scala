@@ -32,6 +32,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
+import ftq.Ftq
+import ftq.Ftq_RF_Components
+import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistInterface

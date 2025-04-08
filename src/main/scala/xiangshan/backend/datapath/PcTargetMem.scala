@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig.VAddrData
-import xiangshan.frontend.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
+import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
 
 class PcTargetMem(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
