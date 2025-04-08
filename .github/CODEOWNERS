@@ -1,6 +1,6 @@
 src/main/scala/xiangshan/frontend/ @Gao-Zeyu
 src/main/scala/xiangshan/frontend/icache @ngc7331
-src/main/scala/xiangshan/frontend/InstrUncache.scala @ngc7331
+src/main/scala/xiangshan/frontend/instruncache @ngc7331
 src/main/scala/xiangshan/frontend/ifu @ngc7331 @my-mayfly
 src/main/scala/xiangshan/frontend/BPU.scala @eastonman
 src/main/scala/xiangshan/frontend/Composer.scala @eastonman
