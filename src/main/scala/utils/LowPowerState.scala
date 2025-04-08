@@ -21,13 +21,14 @@ import chisel3.util._
 
 /* WFI state Update */
 object WfiStateNext {
-  val sNORMAL :: sGCLOCK :: sAWAKE :: Nil = Enum(3)
+  val sNORMAL :: sGCLOCK :: sAWAKE :: sFLITWAKE :: Nil = Enum(4)
 
   def apply(wfiState: UInt, isWFI: Bool, isNormal: Bool, flitpend: Bool, intSrc: UInt): UInt = {
     val nextState = MuxCase(wfiState, Array(
       (wfiState === sNORMAL && isWFI && isNormal && !intSrc.orR) -> sGCLOCK,
       (wfiState === sGCLOCK && intSrc.orR) -> sAWAKE,
-      (wfiState === sGCLOCK && flitpend)   -> sNORMAL,
+      (wfiState === sGCLOCK && flitpend)   -> sFLITWAKE,
+      (wfiState === sFLITWAKE && ~isWFI)   -> sNORMAL,
       (wfiState === sAWAKE && !intSrc.orR) -> sNORMAL
     ).toIndexedSeq)
 
