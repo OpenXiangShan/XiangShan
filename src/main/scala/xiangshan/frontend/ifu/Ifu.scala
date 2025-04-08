@@ -51,8 +51,8 @@ import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.IfuToICacheIO
-import xiangshan.frontend.InsUncacheReq
-import xiangshan.frontend.InsUncacheResp
+import xiangshan.frontend.IfuToInstrUncacheIO
+import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
@@ -81,8 +81,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val toICache:   IfuToICacheIO = new IfuToICacheIO
 
     // Uncache: mmio request / response
-    val fromUncache: DecoupledIO[InsUncacheResp] = Flipped(DecoupledIO(new InsUncacheResp))
-    val toUncache:   DecoupledIO[InsUncacheReq]  = DecoupledIO(new InsUncacheReq)
+    val toUncache:   IfuToInstrUncacheIO = new IfuToInstrUncacheIO
+    val fromUncache: InstrUncacheToIfuIO = Flipped(new InstrUncacheToIfuIO)
 
     // IBuffer: enqueue
     val toIBuffer: DecoupledIO[FetchToIBuffer] = DecoupledIO(new FetchToIBuffer)
@@ -117,7 +117,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
   private val fromICache                    = io.fromICache.fetchResp
-  private val (toUncache, fromUncache)      = (io.toUncache, io.fromUncache)
+  private val (toUncache, fromUncache)      = (io.toUncache.req, io.fromUncache.resp)
   private val (preDecoderIn, preDecoderOut) = (preDecoder.io.req, preDecoder.io.resp)
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
     (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
