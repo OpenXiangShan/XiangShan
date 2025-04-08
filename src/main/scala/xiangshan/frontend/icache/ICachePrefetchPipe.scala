@@ -22,14 +22,13 @@ import utility.DataHoldBypass
 import utility.PriorityMuxDefault
 import utility.ValidHold
 import utility.XSPerfAccumulate
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
 import xiangshan.frontend.BpuFlushInfo
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
@@ -117,7 +116,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
 
   private def nS1FsmState: Int = 5
-  private object S1FsmState extends NamedUInt(log2Up(nS1FsmState)) {
+  private object S1FsmState extends EnumUInt(nS1FsmState) {
     def Idle:       UInt = 0.U(width.W)
     def ItlbResend: UInt = 1.U(width.W)
     def MetaResend: UInt = 2.U(width.W)
@@ -221,7 +220,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
    *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
    */
-  private val s1_itlbExceptionIsGpf = VecInit(s1_itlbException.map(_ === ExceptionType.gpf))
+  private val s1_itlbExceptionIsGpf = VecInit(s1_itlbException.map(_ === ExceptionType.Gpf))
   private val s1_gpAddr = PriorityMuxDefault(
     s1_itlbExceptionIsGpf zip (0 until PortNumber).map(i => s1_gpAddrRaw(i) - (i << blockOffBits).U),
     0.U.asTypeOf(s1_gpAddrRaw(0))
@@ -326,7 +325,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     toWayLookup.bits.itlbException(i) := Mux(
       excpValid,
       s1_itlbException(i), // includes backend exception
-      ExceptionType.none
+      ExceptionType.None
     )
     toWayLookup.bits.itlbPbmt(i) := Mux(excpValid, s1_itlbPbmt(i), Pbmt.pma)
   }
