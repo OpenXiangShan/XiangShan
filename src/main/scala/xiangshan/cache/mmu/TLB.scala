@@ -495,8 +495,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val req_s2xlate = Wire(UInt(2.W))
     req_s2xlate := MuxCase(noS2xlate, Seq(
       (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U && !req_need_gpa) -> allStage,
+      (csr.vsatp.mode === 0.U && !req_need_gpa) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
 
@@ -545,8 +545,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_s2xlate = Wire(UInt(2.W))
     miss_req_s2xlate := MuxCase(noS2xlate, Seq(
       (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
-      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U && !req_need_gpa) -> allStage,
+      (csr.vsatp.mode === 0.U && !req_need_gpa) -> onlyStage2,
       (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
