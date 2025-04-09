@@ -179,7 +179,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
-  val doingSvinval = RegInit(false.B)
   val enqPtr = enqPtrVec(0)
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
@@ -434,16 +433,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
       val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
-      // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!enqTriggerActionIsDebugMode && !enqHasException && enqUop.isSvinvalBegin(enqUop.flushPipe)) {
-        doingSvinval := true.B
-      }
-      // the end instruction of Svinval enqs so clear doingSvinval
-      when(!enqTriggerActionIsDebugMode && !enqHasException && enqUop.isSvinvalEnd(enqUop.flushPipe)) {
-        doingSvinval := false.B
-      }
-      // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
-      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe) || enqUop.isNotSvinval))
       when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
         hasWFI := true.B
       }
