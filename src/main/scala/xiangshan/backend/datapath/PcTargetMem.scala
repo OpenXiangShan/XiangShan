@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig.VAddrData
-import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
+import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO, FtqRfComponents}
 
 class PcTargetMem(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -24,7 +24,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val readValid = io.toDataPath.fromDataPathValid
 
   private def hasRen: Boolean = true
-  private val targetMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
+  private val targetMem = Module(new SyncDataModuleTemplate(new FtqRfComponents, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
   private val targetPCVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   private val pcVec       : Vec[UInt] = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
 

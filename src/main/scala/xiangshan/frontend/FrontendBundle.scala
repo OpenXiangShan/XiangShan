@@ -19,9 +19,9 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
-import ftq.Ftq_Redirect_SRAMEntry
-import ftq.Ftq_RF_Components
 import ftq.FtqPtr
+import ftq.FtqRedirectSramEntry
+import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils.NamedUInt
@@ -52,7 +52,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
 
-  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+  def fromFtqPcBundle(b: FtqRfComponents) = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
     // when (b.fallThruError) {
@@ -78,7 +78,7 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
   val nextlineStart  = PrunedAddr(VAddrBits)
   val ftqIdx         = new FtqPtr
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
-  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+  def fromFtqPcBundle(b: FtqRfComponents) = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
     this
@@ -789,7 +789,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s1_uftbHasIndirect = Bool()
   val s1_ftbCloseReq     = Bool()
 
-  val last_stage_spec_info = new Ftq_Redirect_SRAMEntry
+  val last_stage_spec_info = new FtqRedirectSramEntry
   val last_stage_ftb_entry = new FTBEntry
 
   val topdown_info = new FrontendTopDownBundle

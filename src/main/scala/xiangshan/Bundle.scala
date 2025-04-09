@@ -33,7 +33,7 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
 import xiangshan.frontend.{HasBPUParameter, IfuToBackendIO, PreDecodeInfo}
-import xiangshan.frontend.ftq.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.ftq.FtqRedirectSramEntry
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
@@ -43,7 +43,7 @@ import chisel3.util.experimental.decode.EspressoMinimizer
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.fu.NewCSR.{Mcontrol6, Tdata1Bundle, Tdata2Bundle}
 import xiangshan.backend.fu.PMPEntry
-import xiangshan.frontend.ftq.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.ftq.FtqRedirectSramEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
@@ -128,7 +128,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val backendIPF = Bool() // instruction page fault
   val backendIAF = Bool() // instruction access fault
 
-  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+  def fromFtqRedirectSram(entry: FtqRedirectSramEntry) = {
     // this.hist := entry.ghist
     this.histPtr := entry.histPtr
     this.ssp := entry.ssp

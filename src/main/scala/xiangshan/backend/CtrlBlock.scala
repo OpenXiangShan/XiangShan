@@ -34,7 +34,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.ftq.{FtqPtr, FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.ftq.{FtqPtr, FtqRead, FtqRfComponents}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
@@ -94,7 +94,7 @@ class CtrlBlockImp(
   val rename = Module(new Rename)
   val redirectGen = Module(new RedirectGenerator)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  private val pcMem = Module(new SyncDataModuleTemplate(new FtqRfComponents, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
