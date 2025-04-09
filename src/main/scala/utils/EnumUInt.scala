@@ -12,37 +12,33 @@ import chisel3.util._
  *     def Work: UInt = 1.U(width.W)
  *     def Done: UInt = 2.U(width.W)
  *   }
- *   FsmState.validate()
  * }}}
  *
- * validate() will check:
+ * Validate() will check:
+ *
  * 1. all values are unique (unless allowDuplicate is true)
  *    @example {{{
  *      object FsmState extends EnumUInt(3) {
  *        def Idle: UInt = 0.U(width.W)
  *        def Work: UInt = 1.U(width.W)
- *        def Done: UInt = 1.U(width.W)
+ *        def Done: UInt = 1.U(width.W) // will fail, as Work/Done are duplicate
  *      }
- *      FsmState.validate() // will fail, as Idle/Work are duplicate
  *    }}}
  *    @example {{{
  *      object FsmState extends EnumUInt(3, allowDuplicate = true) {
  *        def Idle: UInt = 0.U(width.W)
  *        def Work: UInt = 1.U(width.W)
- *        def AliasOfWork: UInt = 1.U(width.W)
+ *        def AliasOfWork: UInt = 1.U(width.W) // will pass, we allow duplicate values for alias
  *        def Done: UInt = 2.U(width.W)
- *      }
- *      FsmState.validate() // will pass, we allow duplicate values for alias
- *      // but please note that we must have n unique values (to satisfy rule 4)
+ *      } // but please note that we must have n=3 unique values (to satisfy rule 4)
  *    }}}
  * 2. all value's width is defined width
  *    @example {{{
  *      object FsmState extends EnumUInt(3) {
- *        def Idle: UInt = 0.U
+ *        def Idle: UInt = 0.U // will fail, as Idle/Work are not defined with width, it's default to 1, but 2 expected
  *        def Work: UInt = 1.U
  *        def Done: UInt = 2.U
  *      }
- *      FsmState.validate() // will fail, as Idle/Work are not defined with width, it's default to 1, but 2 expected
  *    }}}
  * 3. if useOneHot is true, all values are power of 2
  *    @example {{{
@@ -50,25 +46,58 @@ import chisel3.util._
  *        def Idle: UInt = 0.U(width.W)
  *        def Work: UInt = 1.U(width.W)
  *        def Done: UInt = 2.U(width.W)
- *        def Error: UInt = 3.U(width.W)
+ *        def Error: UInt = 3.U(width.W) // will fail, as Error = 3.U is not a power of 2, Error = 4.U is expected
  *      }
- *      FsmState.validate() // will fail, as Error = 3.U is not a power of 2, Error = 4.U is expected
  *    }}}
  * 4. all possible values are defined
  *    @example {{{
  *      object FsmState extends EnumUInt(3) {
  *        def Idle: UInt = 0.U(width.W)
  *        def Work: UInt = 1.U(width.W)
+ *        // will fail, as only 2 values are defined, but 3 are expected
  *      }
- *      FsmState.validate() // will fail, as only 2 values are defined, but 3 are expected
  *    }}}
+ *
  * NOTE: all methods used to define constants must be in UpperCamelCase, and return UInt, and take no parameters
+ *
+ * You can use fixedWidth or define reserved values to define the width of the enum
+ * @example {{{
+ *   // we have only defined 2 values, but we want width=2, so we use fixedWidth=2
+ *   object FsmState extends EnumUInt(2, fixedWidth = Some(2)) {
+ *     def Idle: UInt = 0.U(width.W)
+ *     def Work: UInt = 1.U(width.W)
+ *   }
+ *   // or, we can define all 4 values, with 2 of them reserved
+ *   import annotation.unused
+ *   object FsmState extends EnumUInt(4) {
+ *     def Idle: UInt = 0.U(width.W)
+ *     def Work: UInt = 1.U(width.W)
+ *     @unused
+ *     def Rsvd2: UInt = 2.U(width.W) // reserved value
+ *     @unused
+ *     def Rsvd3: UInt = 3.U(width.W) // reserved value
+ *   }
+ * }}}
  */
 abstract class EnumUInt(
     n:              Int,
     useOneHot:      Boolean = false,
-    allowDuplicate: Boolean = false
-) extends NamedUInt(if (useOneHot) n else log2Up(n)) {
+    allowDuplicate: Boolean = false,
+    fixedWidth:     Option[Int] = None
+) extends NamedUInt(
+      if (fixedWidth.isDefined) {
+        require(
+          fixedWidth.get >= log2Up(n),
+          s"EnumUInt fixedWidth=${fixedWidth.get} must be greater or equal than log2Up($n)=${log2Up(n)}."
+        )
+        fixedWidth.get
+      } else if (useOneHot) {
+        n
+      } else {
+        log2Up(n)
+      }
+    ) {
+
   def validate(): Unit = {
     val methodsAll = this.getClass.getDeclaredMethods
       .filter { method =>
