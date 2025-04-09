@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink._
 import utils._
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramMbistBundle, SramBroadcastBundle, SramHelper}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import system.{HasSoCParameter, SoCParamsKey}
 import xiangshan._
 import xiangshan.ExceptionNO._

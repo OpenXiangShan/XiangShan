@@ -146,6 +146,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val soc_reset = IO(Input(AsyncReset()))
     private val hasMbist = tiles.head.hasMbist
     private val hasSramCtl = tiles.head.hasSramCtl
+    private val hasDFT = hasMbist || hasSramCtl
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))
       val riscv_halt = Output(Bool())

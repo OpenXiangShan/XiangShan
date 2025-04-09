@@ -37,7 +37,6 @@ import utility._
 import utility.mbist.MbistInterface
 import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
-import utility.sram.SramCtlBundle
 import utility.sram.SramHelper
 import xiangshan._
 import xiangshan.backend.fu.NewCSR.PFEvent

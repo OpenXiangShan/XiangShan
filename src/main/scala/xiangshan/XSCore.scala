@@ -27,7 +27,7 @@ import system.HasSoCParameter
 import utils._
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramMbistBundle, SramHelper}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
