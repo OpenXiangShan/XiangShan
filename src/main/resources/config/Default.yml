@@ -1,3 +1,5 @@
+Config: DefaultConfig
+
 PmemRanges:
   - { lower: 0x80000000, upper: 0x80000000000 }
 
@@ -21,7 +23,18 @@ L2CacheConfig: { size: 1 MB, ways: 8, inclusive: true, banks: 4, tp: true }
 
 L3CacheConfig: { size: 16 MB, ways: 16, inclusive: false, banks: 4 }
 
-DebugModuleBaseAddr: 0x38020000
+HartIDBits: 6
+
+DebugAttachProtocals: [JTAG]
+
+DebugModuleParams:
+  nAbstractDataWords: 2
+  maxSupportedSBAccess: 64
+  hasBusMaster: true
+  baseAddress: 0x38020000
+  nScratch: 2
+  crossingHasSafeReset: false
+  hasHartResets: true
 
 WFIResume: true
 
@@ -31,6 +44,8 @@ SeperateTLBus: false
 
 SeperateTLBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
+
+EnableSeperateTLBusAsyncBridge: true
 
 IMSICBusType: AXI
 
@@ -43,3 +58,17 @@ IMSICParams:
   iselectWidth: 12
   EnableImsicAsyncBridge: true
   HasTEEIMSIC: false
+
+CHIIssue: E.b
+
+WFIClockGate: false
+
+EnablePowerDown: false
+
+XSTopPrefix: ""
+
+EnableDFX: true
+
+EnableSramCtl: false
+
+EnableCHINS: false
