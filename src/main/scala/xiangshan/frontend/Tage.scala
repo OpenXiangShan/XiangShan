@@ -170,7 +170,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       holdRead = true,
       conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     )
   )
 
