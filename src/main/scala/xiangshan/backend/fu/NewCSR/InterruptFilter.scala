@@ -56,9 +56,10 @@ class InterruptFilter extends Module {
   val mIpriosIsZero : Bool = miprios  === 0.U
   val hsIpriosIsZero: Bool = hsiprios === 0.U
 
+  val NoSEIMask = (~(BigInt(1) << InterruptNO.SEI).U(64.W)).asUInt
   val mtopigather = mip & mie & (~mideleg).asUInt
   val hstopigather = hsip & hsie & (~hideleg).asUInt
-  val vstopigather = vsip & vsie
+  val vstopigather = vsip & vsie & NoSEIMask
 
   val flag = RegInit(false.B)
   when (platformValid) {
@@ -294,7 +295,7 @@ class InterruptFilter extends Module {
   val Candidate1: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
   val Candidate2: Bool = vsip.SEIP && vsie.SEIE && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
   val Candidate3: Bool = vsip.SEIP && vsie.SEIE && !Candidate1 && !Candidate2
-  val Candidate4: Bool = (hvictl.VTI.asUInt === 0.U) && (vsie & vsip & "hfffffffffffffdff".U).orR
+  val Candidate4: Bool = (hvictl.VTI.asUInt === 0.U) && vstopigather.orR
   val Candidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
   val CandidateNoValid: Bool = !Candidate1 && !Candidate2 && !Candidate3 && !Candidate4 && !Candidate5
 
