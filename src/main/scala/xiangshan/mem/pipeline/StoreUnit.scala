@@ -67,7 +67,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
     // writeback to misalign buffer
-    val misalign_buf = Decoupled(new LsPipelineBundle)
+    val misalign_enq = new MisalignBufferEnqIO
     // trigger
     val fromCsrTrigger = Input(new CsrTriggerBundle)
 
@@ -415,6 +415,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_mis_align = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isCbo && !s1_out.nc && !s1_out.mmio &&
                       GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable) && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
                       !s1_trigger_breakpoint && !s1_trigger_debug_mode
+  val s1_toMisalignBufferValid = s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch &&
+    !s1_frm_mabuf && !s1_isCbo && s1_in.isMisalign && !s1_in.misalignWith16Byte &&
+    GatedValidRegNext(io.csrCtrl.hd_misalign_st_enable)
+  io.misalign_enq.req.valid := s1_toMisalignBufferValid
+  io.misalign_enq.req.bits.fromLsPipelineBundle(s1_in)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -481,11 +486,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
-  val toMisalignBufferValid = s2_valid && GatedValidRegNext(s1_mis_align && !s1_frm_mabuf)
-  io.misalign_buf.valid := toMisalignBufferValid
-  io.misalign_buf.bits  := s2_in
-  io.misalign_buf.bits.hasException := s2_exception
-  val misalignBufferNack = toMisalignBufferValid && !io.misalign_buf.ready
+  io.misalign_enq.revoke := s2_exception
+  val s2_misalignBufferNack = !io.misalign_enq.revoke &&
+    RegEnable(s1_toMisalignBufferValid && !io.misalign_enq.req.ready, false.B, s1_fire)
 
   // feedback tlb miss to RS in store_s2
   val feedback_slow_valid = WireInit(false.B)
@@ -493,10 +496,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec && !s1_frm_mabuf
   io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
   io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
-  io.feedback_slow.bits.hit  := RegEnable(s1_feedback.bits.hit, feedback_slow_valid) && !misalignBufferNack
+  io.feedback_slow.bits.hit  := RegEnable(s1_feedback.bits.hit, feedback_slow_valid) && !s2_misalignBufferNack
 
   val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit && s1_feedback.valid) &&
-                       !misalignBufferNack && s2_in.isvec && !s2_frm_mabuf
+                       !s2_misalignBufferNack && s2_in.isvec && !s2_frm_mabuf
 
   val s2_misalign_stout = WireInit(0.U.asTypeOf(io.misalign_stout))
   s2_misalign_stout.valid := s2_valid && s2_can_go && s2_frm_mabuf

@@ -199,7 +199,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_rep_out = Decoupled(new LqWriteBundle)
 
     // to misalign buffer
-    val misalign_buf = Decoupled(new LqWriteBundle)
+    val misalign_enq = new MisalignBufferEnqIO
     val misalign_allow_spec = Input(Bool())
 
     // Load RAR rollback
@@ -1552,8 +1552,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // connect to misalignBuffer
   val toMisalignBufferValid = s3_can_enter_lsq_valid && s3_mis_align && !s3_frm_mabuf
-  io.misalign_buf.valid := toMisalignBufferValid && s3_misalign_can_go
-  io.misalign_buf.bits  := s3_in
+  io.misalign_enq.req.valid := toMisalignBufferValid && s3_misalign_can_go
+  io.misalign_enq.req.bits  := s3_in
+  io.misalign_enq.revoke := false.B
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.lsq.ldin.bits.nc_with_data := s3_nc_with_data
@@ -1575,7 +1576,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_flushPipe = s3_ldld_rep_inst
 
   val s3_lrq_rep_info = WireInit(s3_in.rep_info)
-  s3_lrq_rep_info.misalign_nack := toMisalignBufferValid && !(io.misalign_buf.ready && s3_misalign_can_go)
+  s3_lrq_rep_info.misalign_nack := toMisalignBufferValid && !(io.misalign_enq.req.ready && s3_misalign_can_go)
   val s3_lrq_sel_rep_cause = PriorityEncoderOH(s3_lrq_rep_info.cause.asUInt)
   val s3_replayqueue_rep_cause = WireInit(0.U.asTypeOf(s3_in.rep_info.cause))
 

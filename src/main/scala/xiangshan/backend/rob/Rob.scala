@@ -1266,7 +1266,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
   }
-  
+
   /**
    * debug info
    */
