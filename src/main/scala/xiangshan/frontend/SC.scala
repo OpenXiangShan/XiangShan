@@ -84,7 +84,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     singlePort = false,
     conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSc", hasMbist)
   // def getIdx(hist: UInt, pc: UInt) = {

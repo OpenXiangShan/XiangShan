@@ -27,7 +27,7 @@ import freechips.rocketchip.amba.axi4._
 import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
 import utility.{ChiselDB, Constantin, DFTResetSignals, DelayN, FileRegisters, IntBuffer, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import utility.sram.SramMbistBundle
+import utility.sram.SramBroadcastBundle
 import coupledL2.EnableCHI
 import coupledL2.tl2chi.PortIO
 import xiangshan.backend.trace.TraceCoreInterface
@@ -116,11 +116,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = Input(ValidIO(UInt(64.W)))
-      val sramTest = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-        val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
-      }
+      val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
       val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
     })
@@ -159,8 +156,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
     io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
 
-    l2top.module.io.sramTestIn := io.sramTest
-    core.module.io.sramTest := l2top.module.io.sramTestOut
+    l2top.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+    l2top.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+    core.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+    core.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
 
     if (enableL2) {
       // TODO: add ECC interface of L2

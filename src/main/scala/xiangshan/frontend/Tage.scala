@@ -170,7 +170,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams {
       holdRead = true,
       conflictBehavior = SRAMConflictBehavior.BufferWriteLossy,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     )
   )
 
@@ -330,7 +331,8 @@ class TageTable(
     holdRead = true,
     singlePort = true,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -344,7 +346,8 @@ class TageTable(
       holdRead = true,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
   )
 

@@ -596,7 +596,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     way =smsParams.pht_ways,
     singlePort = true,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   def PHT_SETS = smsParams.pht_size / smsParams.pht_ways
   // clockgated on pht_valids

@@ -502,7 +502,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       holdRead = false,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
     private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtb", hasMbist)
     val ftb_r_entries   = ftb.io.r.resp.data.map(_.entry)
