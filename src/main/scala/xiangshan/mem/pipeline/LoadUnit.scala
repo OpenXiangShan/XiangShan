@@ -234,11 +234,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val readPc           = new LoadReadPc
     val toPvt            = Valid(new LoadToPvt)
   })
-
-  dontTouch(io.toifu)
-  dontTouch(io.toPvt)
-
-
   PerfCCT.updateInstPos(io.ldin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)

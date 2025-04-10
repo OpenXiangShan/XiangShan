@@ -183,10 +183,9 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
-    // passed from DecodedInstP
+    // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
-    val lsrc            = Vec(numSrc, UInt(LogicRegsWidth.W))
     val fuType          = FuType()
     val fuOpType        = FuOpType()
     val rfWen           = Bool()
@@ -627,7 +626,6 @@ object Bundles {
     val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
-    val ldest         = UInt(LogicRegsWidth.W)
     val predSrc       = UInt(params.rdPregIdxWidth.W)
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
@@ -674,7 +672,6 @@ object Bundles {
       this.imm           := source.common.imm
       this.robIdx        := source.common.robIdx
       this.pdest         := source.common.pdest
-      this.ldest         := source.common.ldest
       this.predSrc       := source.common.predSrc
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback

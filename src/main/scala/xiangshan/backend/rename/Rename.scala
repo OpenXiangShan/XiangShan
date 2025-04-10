@@ -180,10 +180,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   pvt.io.fpSrcPred.zip(io.fpSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
 
   XSPerfAccumulate("read_int_pvt_total", PopCount(io.intPvtRead.flatten.map( port => port.valid && !port.fail)))
-  XSPerfAccumulate("read_more_than1pvt_int", PopCount(io.intPvtRead.flatten.map(_.valid)) > 1.U)
+  XSPerfAccumulate("read_more_than3pvt_int", PopCount(io.intPvtRead.flatten.map(_.valid)) > 3.U)
   XSPerfAccumulate("write_pvt_total", PopCount(io.pvtWen))
-  XSPerfAccumulate("write_more_than1pvt", PopCount(io.pvtWen) > 1.U)
-  XSPerfAccumulate("write_more_than2pvt", PopCount(io.pvtWen) > 2.U)
+  XSPerfAccumulate("write_more_than4pvt", PopCount(io.pvtWen) > 4.U)
   XSPerfAccumulate("misPred_total", PopCount(pvt.io.misPred.map(_.valid)))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
