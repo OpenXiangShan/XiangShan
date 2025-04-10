@@ -1203,7 +1203,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s2_exception_vec(loadAccessFault) := s2_vecActive && (
       s2_in.uop.exceptionVec(loadAccessFault) ||
       s2_pmp.ld ||
-      (s2_isvec || s2_frm_mabuf) && s2_uncache ||
+      s2_isvec && s2_uncache ||
       io.dcache.resp.bits.tag_error && GatedValidRegNext(io.csrCtrl.cache_error_enable)
     )
   }
