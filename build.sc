@@ -58,7 +58,7 @@ trait HasChisel extends SbtModule {
   override def scalacOptions = super.scalacOptions() ++
     Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get) ++ Agg(ivy"org.chipsalliance:llvm-firtool:1.62.1")
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
