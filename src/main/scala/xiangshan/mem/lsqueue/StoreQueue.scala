@@ -302,7 +302,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val ncSlaveAck = Wire(Bool())
   val ncSlaveAckMid = Wire(UInt(uncacheIdxBits.W))
   val ncDoResp = Wire(Bool())
-  val ncReadNextTrigger = Mux(io.uncacheOutstanding, ncDoReq, ncDoResp)
+  val ncReadNextTrigger = Mux(io.uncacheOutstanding, ncSlaveAck, ncDoResp)
   val ncDeqTrigger = Mux(io.uncacheOutstanding, ncSlaveAck, ncDoResp)
   val ncPtr = Mux(io.uncacheOutstanding, ncSlaveAckMid, ncWaitRespPtrReg)
 
