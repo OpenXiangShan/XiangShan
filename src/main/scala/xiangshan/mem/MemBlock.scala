@@ -435,9 +435,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
+  val l1D_pf_enable = GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
+      val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
+      // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+      sms.io.enable := enableSMS && l1D_pf_enable &&
+        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_recv_enable, 2, Some(false.B))
       sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_agt, 2, Some(false.B))
       sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_pht, 2, Some(false.B))
       sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_active_threshold, 2, Some(12.U))
@@ -453,8 +458,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
       val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
-      l1Prefetcher.io.enable := enableL1StreamPrefetcher &&
-        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
+      // constantinCtrl && master switch csrCtrl && single switch csrCtrl
+      l1Prefetcher.io.enable := enableL1StreamPrefetcher && l1D_pf_enable &&
+        GatedRegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable_stride, 2, Some(false.B))
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -627,8 +633,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
       outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
       outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_enable, 2, Some(true.B))
-
-      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.pf_ctrl.l1D_pf_enable, 2, Some(false.B))
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
