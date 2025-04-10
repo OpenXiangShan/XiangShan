@@ -307,3 +307,51 @@ include Makefile.test
 include src/main/scala/device/standalone/standalone_device.mk
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+
+#
+# Docker Support
+#
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
+GIT_BRANCH_CLEAN := $(shell echo $(GIT_BRANCH) | sed -e "s/[^[:alnum:]]/-/g")
+XSDEV_IMAGE := OpenXiangShan/xsdev$(if $(GIT_BRANCH_CLEAN),:$(GIT_BRANCH_CLEAN))
+HAVE_XSDEV_IMAGE := $(shell docker image inspect --format '{{.ID}}' $(XSDEV_IMAGE) 2> /dev/null)
+DOCKER_RUN = docker run -it --rm -e IN_XSDEV_DOCKER=y -e NOOP_HOME=/work \
+			-v .:/work:ro \
+			-v ./out:/work/out:rw \
+			-v ./build:/work/build:rw \
+		    $(XSDEV_IMAGE) $(1) || exit 1
+
+# run all targets in docker
+check_docker_env:
+	@mkdir -p out build;
+	@if [ -z "$(IN_XSDEV_DOCKER)" ]; then \
+		echo "Switching to Docker environment..."; \
+		$(call DOCKER_RUN, -c "make $(MAKECMDGOALS)"); \
+		exit 0; \
+	else \
+		echo; \
+	fi
+$(filter-out image sh,$(MAKECMDGOALS)): $(if $(HAVE_XSDEV_IMAGE),check_docker_env)
+	@$(MAKE) $(MAKECMDGOALS)
+
+# build docker image
+HTTP_PROXY ?= http://172.28.9.101:1091
+PROXY_HOST := $(shell echo $(HTTP_PROXY) | sed -e 's|http://\(.*\):\(.*\)|\1|')
+PROXY_PORT := $(shell echo $(HTTP_PROXY) | sed -e 's|http://\(.*\):\(.*\)|\2|')
+.mill-jvm-opts:
+	@{ echo -Dhttp.proxyHost=$(PROXY_HOST);		\
+	   echo -Dhttp.proxyPort=$(PROXY_PORT);		\
+	   echo -Dhttps.proxyHost=$(PROXY_HOST);	\
+	   echo -Dhttps.proxyPort=$(PROXY_PORT); } > $@
+__prep_proxy: .mill-jvm-opts
+image: $(if $(HTTP_PROXY),__prep_proxy) init
+	@mkdir -p out
+	docker build -t $(XSDEV_IMAGE) \
+	       $(if $(HTTP_PROXY),--build-arg  HTTP_PROXY=$(HTTP_PROXY) \
+				  --build-arg HTTPS_PROXY=$(HTTP_PROXY)) .
+# run interactive shell
+sh:
+	$(if $(HAVE_XSDEV_IMAGE),,\
+	     $(error Docker unavailable or "$(XSDEV_IMAGE)" image not exist))
+	@$(call DOCKER_RUN)
+.PHONY: image __prep_proxy sh
