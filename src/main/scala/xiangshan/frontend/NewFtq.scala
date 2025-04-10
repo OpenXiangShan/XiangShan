@@ -84,7 +84,8 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
       dataSplit = 2,
       singlePort = false,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
     sram.io.r.req.valid       := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)

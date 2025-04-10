@@ -331,7 +331,8 @@ class TageTable(
     holdRead = true,
     singlePort = true,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   us.extra_reset.get := io.update.reset_u.reduce(_ || _) && io.update.mask.reduce(_ || _)
 
@@ -345,7 +346,8 @@ class TageTable(
       holdRead = true,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
   )
 

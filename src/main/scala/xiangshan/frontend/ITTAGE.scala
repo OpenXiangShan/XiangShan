@@ -278,7 +278,8 @@ class ITTageTable(
     singlePort = true,
     useBitmask = true,
     withClockGate = true,
-    hasMbist = hasMbist
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl
   ))
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   table.io.r.req.valid       := io.req.fire

@@ -279,7 +279,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray with HasICache
       holdRead = true,
       singlePort = true,
       withClockGate = true,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
 
     // meta connection
@@ -441,7 +442,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray with HasICache
         holdRead = true,
         singlePort = true,
         withClockGate = false, // enable signal timing is bad, no gating here
-        hasMbist = hasMbist
+        hasMbist = hasMbist,
+        hasSramCtl = hasSramCtl
       ))
 
       // read
@@ -837,7 +839,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
     singlePort:    Boolean = false,
     bypassWrite:   Boolean = false,
     withClockGate: Boolean = false,
-    hasMbist:      Boolean = false
+    hasMbist:      Boolean = false,
+    hasSramCtl:    Boolean = false
 ) extends Module {
 
   private val dataBits  = gen.getWidth
@@ -863,7 +866,8 @@ class SRAMTemplateWithFixedWidth[T <: Data](
       singlePort = singlePort,
       bypassWrite = bypassWrite,
       withClockGate = withClockGate,
-      hasMbist = hasMbist
+      hasMbist = hasMbist,
+      hasSramCtl = hasSramCtl
     ))
     // read req
     sramBank.io.r.req.valid       := io.r.req.valid
