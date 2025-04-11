@@ -238,7 +238,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
     val isWFI = core_with_l2.module.io.cpu_halt
     val exitco = !io.chi.syscoreq & !io.chi.syscoack
-    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco)
+    val QACTIVE = WireInit(false.B)
+    val QACCEPTn = WireInit(false.B)
+    lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
     io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
 
     /*WFI clock Gating state
@@ -295,8 +297,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.hartResetReq := io.hartResetReq
     io.hartIsInReset := core_with_l2.module.io.hartIsInReset
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
-    core_with_l2.module.io.iso_en.foreach { _ := false.B }
-    core_with_l2.module.io.pwrdown_req_n.foreach { _ := true.B }
+    core_with_l2.module.io.iso_en.foreach { _ := io.lp.map(_.i_cpu_iso_en).getOrElse(false.B) }
+    core_with_l2.module.io.pwrdown_req_n.foreach { _ := io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B) }
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
     traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
