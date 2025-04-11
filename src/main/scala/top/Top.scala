@@ -175,14 +175,26 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.dse_epoch := dseCtrl.module.io.epoch
     io.dse_max_instr := dseCtrl.module.io.max_instr_cnt
 
-    lazy val io_perf = HardenXSPerfAccumulate.reclaim()
+    lazy val (io_perf, nr_perf, deg_valids_vec, deg_data, nrStructCnt) = HardenXSPerfAccumulate.reclaim(tiles.head.CommitWidth)
+    lazy val param = HardenPerfConfig(tiles.head.CommitWidth)
+    val deg_out = IO(Output(new BatchOutput(param)))
+    val perf_out = IO(Output(new IOPerfOutput(nr_perf * (new PerfEventBundle).getWidth)))
+    val deg_valids = IO(Output(UInt(tiles.head.CommitWidth.W)))
+    withClockAndReset(io.clock.asClock, io.reset.asBool.asAsyncReset) {
+      lazy val out = Batch(deg_data, deg_valids_vec, io_perf, nr_perf, param, nrStructCnt)
+      deg_out := out._1
+      perf_out := out._2
+      deg_valids := RegNext(Cat(deg_valids_vec.reverse))
+    }
 
     // input
     dontTouch(dma)
     dontTouch(io)
-    dontTouch(io_perf)
     dontTouch(peripheral)
     dontTouch(memory)
+    dontTouch(perf_out)
+    dontTouch(deg_valids)
+    dontTouch(deg_out)
     misc.module.ext_intrs := io.extIntrs
     misc.module.pll0_lock := io.pll0_lock
     misc.module.cacheable_check <> io.cacheable_check
