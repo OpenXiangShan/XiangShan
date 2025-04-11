@@ -812,7 +812,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen)
     deq.bits.common.flushPipe.foreach(_ := deqEntryVec(i).bits.payload.flushPipe)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
-    deq.bits.common.ldest := deqEntryVec(i).bits.payload.ldest
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
