@@ -38,14 +38,16 @@ object WfiStateNext {
 
 /* Core low power state Update  */
 object lpStateNext {
-  val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
+  val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sWAITQ :: sQREQ :: sPOFFREQ :: Nil = Enum(7)
 
-  def apply(lpState: UInt, l2flush: Bool, l2FlushDone: Bool, isWFI: Bool, exitco: Bool): UInt = {
+  def apply(lpState: UInt, l2flush: Bool, l2FlushDone: Bool, isWFI: Bool, exitco: Bool, QACTIVE: Bool, QACCEPTn: Bool): UInt = {
     val nextState = MuxCase(lpState, Array(
       (lpState === sIDLE && l2flush) -> sL2FLUSH,
       (lpState === sL2FLUSH && l2FlushDone) -> sWAITWFI,
       (lpState === sWAITWFI && isWFI ) -> sEXITCO,
-      (lpState === sEXITCO && exitco ) -> sPOFFREQ
+      (lpState === sEXITCO && exitco ) -> sWAITQ,
+      (lpState === sWAITQ && !QACTIVE ) -> sQREQ,
+      (lpState === sQREQ && !QACCEPTn ) -> sPOFFREQ
     ).toIndexedSeq)
 
     nextState
