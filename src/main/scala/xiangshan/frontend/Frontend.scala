@@ -33,8 +33,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import ftq.Ftq
+import ftq.FtqEntry
 import ftq.FtqPtr
-import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistInterface
@@ -190,13 +190,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   bpu.io.fromFtq <> ftq.io.toBpu
   ftq.io.fromBpu <> bpu.io.toFtq
 
-  ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
-
   // ICache-Ftq
   icache.io.fromFtq <> ftq.io.toICache
   // override fetchReq.ready to sync with Ifu
   ftq.io.toICache.fetchReq.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
-  icache.io.flush                := ftq.io.icacheFlush
+  icache.io.flush                := DontCare
 
   // Ifu-ICache
   ifu.io.fromICache <> icache.io.toIfu
@@ -214,7 +212,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqRfComponents))
+  val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
