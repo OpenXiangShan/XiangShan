@@ -495,9 +495,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val req_s2xlate = Wire(UInt(2.W))
     req_s2xlate := MuxCase(noS2xlate, Seq(
       (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U && !req_need_gpa) -> allStage,
-      (csr.vsatp.mode === 0.U && !req_need_gpa) -> onlyStage2,
-      (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.hgatp.mode === 0.U) -> onlyStage1
     ))
 
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, true, false)
@@ -545,9 +545,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_s2xlate = Wire(UInt(2.W))
     miss_req_s2xlate := MuxCase(noS2xlate, Seq(
       (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
-      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U && !req_need_gpa) -> allStage,
-      (csr.vsatp.mode === 0.U && !req_need_gpa) -> onlyStage2,
-      (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.hgatp.mode === 0.U) -> onlyStage1
     ))
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
     val hasS2xlate = miss_req_s2xlate_reg =/= noS2xlate
@@ -700,7 +700,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         (!RegNext(virt_in || req_in(i).bits.hyperinst)) -> noS2xlate,
         (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
         (csr.vsatp.mode === 0.U) -> onlyStage2,
-        (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
+        (csr.hgatp.mode === 0.U) -> onlyStage1
       ))
       difftest.s2xlate := req_s2xlate
     }
