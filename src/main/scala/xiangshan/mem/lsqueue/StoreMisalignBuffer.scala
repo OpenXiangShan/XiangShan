@@ -210,11 +210,15 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   // if there is exception or mmio in split store
   val globalException = RegInit(false.B)
+  val globalUncache = RegInit(false.B)
+
+  // debug info
   val globalMMIO = RegInit(false.B)
+  val globalNC   = RegInit(false.B)
 
   val hasException = io.splitStoreResp.bits.vecActive && !io.splitStoreResp.bits.need_rep &&
     ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR || TriggerAction.isDmode(io.splitStoreResp.bits.uop.trigger)
-  val isMMIO = io.splitStoreResp.bits.mmio && !io.splitStoreResp.bits.need_rep
+  val isUncache = (io.splitStoreResp.bits.mmio || io.splitStoreResp.bits.nc) && !io.splitStoreResp.bits.need_rep
 
   io.sqControl.toStoreQueue.crossPageWithHit := io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx && isCrossPage
   io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block
@@ -251,12 +255,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     is (s_resp) {
       when (io.splitStoreResp.valid) {
         val clearOh = UIntToOH(curPtr)
-        when (hasException || isMMIO) {
+        when (hasException || isUncache) {
           // commit directly when exception ocurs
           // if any split store reaches mmio space, delegate to software storeAddrMisaligned exception
           bufferState := s_wb
           globalException := hasException
-          globalMMIO := isMMIO
+          globalUncache := isUncache
+          globalMMIO := io.splitStoreResp.bits.mmio
+          globalNC   := io.splitStoreResp.bits.nc
         } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & (~clearOh).asUInt).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
@@ -276,22 +282,28 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           unSentStores := 0.U
           unWriteStores := 0.U
           globalException := false.B
-          globalMMIO := false.B
+          globalUncache := false.B
           isCrossPage := false.B
           needFlushPipe := false.B
+
+          globalMMIO := false.B
+          globalNC   := false.B
         }
 
       }.otherwise {
-        when (io.writeBack.fire && (!isCrossPage || globalMMIO || globalException)) {
+        when (io.writeBack.fire && (!isCrossPage || globalUncache || globalException)) {
           bufferState := s_idle
           req_valid := false.B
           curPtr := 0.U
           unSentStores := 0.U
           unWriteStores := 0.U
           globalException := false.B
-          globalMMIO := false.B
+          globalUncache := false.B
           isCrossPage := false.B
           needFlushPipe := false.B
+
+          globalMMIO := false.B
+          globalNC   := false.B
         } .elsewhen(io.writeBack.fire && isCrossPage) {
           bufferState := s_block
         } .otherwise {
@@ -309,8 +321,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         unSentStores := 0.U
         unWriteStores := 0.U
         globalException := false.B
-        globalMMIO := false.B
+        globalUncache := false.B
         isCrossPage := false.B
+        needFlushPipe := false.B
+
+        globalMMIO := false.B
+        globalNC   := false.B
       }
     }
   }
@@ -531,7 +547,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   when (io.splitStoreResp.valid) {
     val resp = io.splitStoreResp.bits
     splitStoreResp(curPtr) := io.splitStoreResp.bits
-    when (isMMIO) {
+    when (isUncache) {
       unWriteStores := 0.U
       unSentStores := 0.U
       exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), StaCfg)
@@ -573,14 +589,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.valid := req_valid && (bufferState === s_wb) && !io.storeOutValid && !req.isvec
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
-  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalMMIO || globalException) && exceptionVec(no))
+  StaCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
   io.writeBack.bits.uop.flushPipe := needFlushPipe
   io.writeBack.bits.uop.replayInst := false.B
   io.writeBack.bits.data := DontCare
   io.writeBack.bits.isFromLoadUnit := DontCare
   io.writeBack.bits.debug.isMMIO := globalMMIO
-  // FIXME lyq: temporarily set to false
-  io.writeBack.bits.debug.isNC := false.B
+  io.writeBack.bits.debug.isNC := globalNC
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
@@ -609,7 +624,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       wb.bits.isForVSnonLeafPTE := req.isForVSnonLeafPTE
       wb.bits.vstart            := req.uop.vpu.vstart
       wb.bits.vecTriggerMask    := 0.U
-      wb.bits.nc                := false.B
+      wb.bits.nc                := globalNC
     }
   }
 
@@ -622,9 +637,12 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     unSentStores := 0.U
     unWriteStores := 0.U
     globalException := false.B
-    globalMMIO := false.B
+    globalUncache := false.B
     isCrossPage := false.B
     needFlushPipe := false.B
+
+    globalMMIO := false.B
+    globalNC   := false.B
   }
 
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
