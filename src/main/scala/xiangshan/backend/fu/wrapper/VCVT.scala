@@ -220,21 +220,18 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   vectorCvt0.fire := fire
   vectorCvt0.src := in0
   vectorCvt0.opType := opType
-  vectorCvt0.sew := sew
   vectorCvt0.rm := rm
-  vectorCvt0.isFpToVecInst := isFpToVecInst
-  vectorCvt0.isFround := 0.U
-  vectorCvt0.isFcvtmod := false.B
+  // Todo: remove these
+  vectorCvt0.inSew1H := 0.U
+  vectorCvt0.outSew1H := 0.U
 
   val vectorCvt1 = Module(new VectorCvt(xlen))
   vectorCvt1.fire := fire
   vectorCvt1.src := in1
   vectorCvt1.opType := opType
-  vectorCvt1.sew := sew
   vectorCvt1.rm := rm
-  vectorCvt1.isFpToVecInst := isFpToVecInst
-  vectorCvt1.isFround := 0.U
-  vectorCvt1.isFcvtmod := false.B
+  vectorCvt1.inSew1H := 0.U
+  vectorCvt1.outSew1H := 0.U
 
   val isNarrowCycle2 = RegEnable(RegEnable(isNarrow, fire), fireReg)
   val outputWidth1HCycle2 = RegEnable(RegEnable(outputWidth1H, fire), fireReg)
@@ -244,12 +241,7 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
     vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
     vectorCvt1.io.result ## vectorCvt0.io.result)
 
-  io.fflags := Mux1H(outputWidth1HCycle2, Seq(
-    vectorCvt1.io.fflags ## vectorCvt0.io.fflags,
-    Mux(isNarrowCycle2, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
-    Mux(isNarrowCycle2, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
-    vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0)
-  ))
+  io.fflags := 0.U
 }
 
 

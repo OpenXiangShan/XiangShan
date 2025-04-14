@@ -719,28 +719,25 @@ object GenFlowMask extends VLSUConstants {
 }
 
 object genVWmask128 {
-  def apply(addr: UInt, sizeEncode: UInt): UInt = {
-    (LookupTree(sizeEncode, List(
-      "b000".U -> 0x1.U, //0001 << addr(2:0)
-      "b001".U -> 0x3.U, //0011
-      "b010".U -> 0xf.U, //1111
-      "b011".U -> 0xff.U, //11111111
-    )) << addr(3, 0)).asUInt
-  }
+  def apply(addr: UInt, sizeEncode: UInt): UInt = (Mux1H(Seq(
+    (BitPat("b000") === sizeEncode) -> 0x1.U,  //0001 << addr(2:0)
+    (BitPat("b001") === sizeEncode) -> 0x3.U,  //0011
+    (BitPat("b010") === sizeEncode) -> 0xf.U,  //1111
+    (BitPat("b011") === sizeEncode) -> 0xff.U, //11111111
+    (BitPat("b1??") === sizeEncode) -> 0xffff.U,
+  )) << addr(3, 0)).asUInt
 }
 /*
 * only use in max length is 128
 */
 object genVWdata {
-  def apply(data: UInt, sizeEncode: UInt): UInt = {
-    LookupTree(sizeEncode, List(
-      "b000".U -> Fill(16, data(7, 0)),
-      "b001".U -> Fill(8, data(15, 0)),
-      "b010".U -> Fill(4, data(31, 0)),
-      "b011".U -> Fill(2, data(63,0)),
-      "b100".U -> data(127,0)
-    ))
-  }
+  def apply(data: UInt, sizeEncode: UInt): UInt = Mux1H(Seq(
+    (BitPat("b000") === sizeEncode) -> Fill(16, data(7, 0)),
+    (BitPat("b001") === sizeEncode) -> Fill(8, data(15, 0)),
+    (BitPat("b010") === sizeEncode) -> Fill(4, data(31, 0)),
+    (BitPat("b011") === sizeEncode) -> Fill(2, data(63,0)),
+    (BitPat("b1??") === sizeEncode) -> Fill(1, data(127,0)),
+  ))
 }
 
 object genUSSplitAddr{

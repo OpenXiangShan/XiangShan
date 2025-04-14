@@ -9,7 +9,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.FuOpType
-import yunsuan.{VfcvtType, VfpuType}
+import yunsuan.{VfpuType}
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
 
@@ -17,7 +17,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // io alias
-  private val opcode = fuOpType(8, 0)
+  private val opcode = fuOpType
   private val src0 = inData.src(0)
   private val sew = fp_fmt
   private val vfcvtRm = rm
@@ -62,11 +62,10 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   fcvt.io.fire := fire
   fcvt.io.src := src0
   fcvt.io.opType := opcode(7, 0)
-  fcvt.io.sew := sew
   fcvt.io.rm := vfcvtRm
-  fcvt.io.isFpToVecInst := true.B
-  fcvt.io.isFround := 0.U
-  fcvt.io.isFcvtmod := 0.U
+  // Todo: remove these
+  fcvt.io.inSew1H := 0.U
+  fcvt.io.outSew1H := 0.U
 
   io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fcvt.io.fflags)
 

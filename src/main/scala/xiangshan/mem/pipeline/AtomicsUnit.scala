@@ -43,7 +43,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   val io = IO(new Bundle() {
     val hartId        = Input(UInt(hartIdLen.W))
-    val in            = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
+    val in            = Flipped(Decoupled(new ExuInput(param)))
     val storeDataIn   = Flipped(Vec(StdCnt, Valid(new ExuInput(moudParam))))
     // AtomicsUnit re-uses lda port to write back
     val out           = new MemWriteBack(ldaParams.head)
@@ -61,17 +61,17 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
   val List(
-    s_invalid, 
-    s_tlb_and_flush_sbuffer_req, 
-    s_pm, 
-    s_wait_flush_sbuffer_resp, 
-    s_cache_req, 
+    s_invalid,
+    s_tlb_and_flush_sbuffer_req,
+    s_pm,
+    s_wait_flush_sbuffer_resp,
+    s_cache_req,
     s_cache_resp,
-    s_cache_resp_latch, 
-    s_finish, 
-    s_finish2, 
-    s_extra_wb2, 
-    s_extra_wb, 
+    s_cache_resp_latch,
+    s_finish,
+    s_finish2,
+    s_extra_wb2,
+    s_extra_wb,
   ) = Enum(11)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
@@ -206,7 +206,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   assert(state === s_invalid ||
     LSUOpType.sizeIs(_.W)(uop.fuOpType) ||
     LSUOpType.sizeIs(_.D)(uop.fuOpType) ||
-    LSUOpType.isAMOCASQ(uop.fuOpType),
+    LSUOpType.sizeIs(_.Q)(uop.fuOpType),
     "Only word or doubleword or quadword is supported"
   )
 
@@ -544,35 +544,30 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   ) && state === s_cache_req
   val pipe_req = io.dcache.req.bits
   pipe_req := DontCare
-  pipe_req.cmd := LookupTree(uop.fuOpType, List(
+
+  val amoOpcode = LSUOpType.getAmoOp(uop.fuOpType)
+  val size = LSUOpType.size(uop.fuOpType)
+  pipe_req.cmd := LookupTree(amoOpcode, List(
     // TODO: optimize this
-    LSUOpType.lr_w      -> M_XLR,
-    LSUOpType.sc_w      -> M_XSC,
-    LSUOpType.amoswap_w -> M_XA_SWAP,
-    LSUOpType.amoadd_w  -> M_XA_ADD,
-    LSUOpType.amoxor_w  -> M_XA_XOR,
-    LSUOpType.amoand_w  -> M_XA_AND,
-    LSUOpType.amoor_w   -> M_XA_OR,
-    LSUOpType.amomin_w  -> M_XA_MIN,
-    LSUOpType.amomax_w  -> M_XA_MAX,
-    LSUOpType.amominu_w -> M_XA_MINU,
-    LSUOpType.amomaxu_w -> M_XA_MAXU,
-    LSUOpType.amocas_w  -> M_XA_CASW,
-
-    LSUOpType.lr_d      -> M_XLR,
-    LSUOpType.sc_d      -> M_XSC,
-    LSUOpType.amoswap_d -> M_XA_SWAP,
-    LSUOpType.amoadd_d  -> M_XA_ADD,
-    LSUOpType.amoxor_d  -> M_XA_XOR,
-    LSUOpType.amoand_d  -> M_XA_AND,
-    LSUOpType.amoor_d   -> M_XA_OR,
-    LSUOpType.amomin_d  -> M_XA_MIN,
-    LSUOpType.amomax_d  -> M_XA_MAX,
-    LSUOpType.amominu_d -> M_XA_MINU,
-    LSUOpType.amomaxu_d -> M_XA_MAXU,
-    LSUOpType.amocas_d  -> M_XA_CASD,
-
-    LSUOpType.amocas_q  -> M_XA_CASQ
+    LSUOpType.AmoOp.lr   -> M_XLR,
+    LSUOpType.AmoOp.sc   -> M_XSC,
+    LSUOpType.AmoOp.swap -> M_XA_SWAP,
+    LSUOpType.AmoOp.add  -> M_XA_ADD,
+    LSUOpType.AmoOp.xor  -> M_XA_XOR,
+    LSUOpType.AmoOp.and  -> M_XA_AND,
+    LSUOpType.AmoOp.or   -> M_XA_OR,
+    LSUOpType.AmoOp.min  -> M_XA_MIN,
+    LSUOpType.AmoOp.max  -> M_XA_MAX,
+    LSUOpType.AmoOp.minu -> M_XA_MINU,
+    LSUOpType.AmoOp.maxu -> M_XA_MAXU,
+    LSUOpType.AmoOp.cas  -> LookupTree(
+      size,
+      List(
+        LSUOpType.W.U -> M_XA_CASW,
+        LSUOpType.D.U -> M_XA_CASD,
+        LSUOpType.Q.U -> M_XA_CASQ,
+      )
+    )
   ))
   pipe_req.miss := false.B
   pipe_req.probe := false.B
@@ -586,6 +581,11 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   pipe_req.amo_cmp  := genWdataAMO(rd, LSUOpType.size(uop.fuOpType))
   pipe_req.miss_fail_cause_evict_btot := false.B
 
+  val difftestFuOp = LookupTree(
+    LSUOpType.getAmoOpAndSize(uop.fuOpType),
+    LSUOpType.difftestAmoOpMap,
+  )
+
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
     val en = io.dcache.req.fire
@@ -595,7 +595,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     difftest.data   := RegEnable(io.dcache.req.bits.amo_data.asTypeOf(difftest.data), en)
     difftest.mask   := RegEnable(io.dcache.req.bits.amo_mask, en)
     difftest.cmp    := RegEnable(io.dcache.req.bits.amo_cmp.asTypeOf(difftest.cmp), en)
-    difftest.fuop   := RegEnable(uop.fuOpType, en)
+    difftest.fuop   := RegEnable(difftestFuOp, en)
     difftest.out    := resp_data_wire.asTypeOf(difftest.out)
   }
 

@@ -3,12 +3,14 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.ZeroExt
-import xiangshan.{VSETOpType, CSROpType}
+import xiangshan.{CSROpType, HasXSParameter, VSETOpType}
 import xiangshan.backend.decode.{Imm_VSETIVLI, Imm_VSETVLI}
 import xiangshan.backend.decode.isa.bitfield.InstVType
+import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes
 import xiangshan.backend.fu.vector.Bundles.VsetVType
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
 import xiangshan.backend.fu.vector.Bundles.VConfig
+import xiangshan.backend.vector.Decoder.VSetFuncUnit
 
 class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   val debugIO = IO(new Bundle() {
@@ -101,7 +103,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.vtype := vtype
 
   // assume cfg of VSetRvfWvf is VSetRvfWvfCfg
-  protected val oldVt = in.ctrl.vpu.get.specVType
+  protected val oldVt = in.ctrl.oldVType.get
   vsetModule.io.in.oldVt.get := oldVt
 
   val vl = vsetModule.io.out.vconfig.vl
@@ -119,4 +121,48 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isCSRReadVl && vl === vlmax
 
   debugIO.vconfig := vsetModule.io.out.vconfig
+}
+
+class VSetUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) with HasXSParameter {
+  private val in = io.in.bits
+  private val out = io.out.bits
+
+  private val op = in.ctrl.fuOpType
+  private val imm = in.data.imm
+
+  private val vsetFu = Module(new VSetFuncUnit(vlen = VLEN, elen = ELEN, xlen = XLEN))
+
+  vsetFu.in.vsetvlVType.valid := VSetOpcodes.isVSetvl(op)
+  vsetFu.in.vsetvlVType.bits  := in.data.src(1) // rs2
+  vsetFu.in.vsetvliVType.valid := VSetOpcodes.isVSetvli(op)
+  vsetFu.in.vsetvliVType.bits  := Imm_VSETVLI().getVTypei(imm)
+  vsetFu.in.vsetivliVType.valid := VSetOpcodes.isVSetivli(op)
+  vsetFu.in.vsetivliVType.bits  := Imm_VSETIVLI().getVTypei(imm)
+  vsetFu.in.readVl.valid := VSetOpcodes.isReadVl(op)
+  vsetFu.in.readVl.bits := in.data.vl.get
+  vsetFu.in.rdIsZero := VSetOpcodes.rdIsZero(op)
+  vsetFu.in.rs1IsZero := VSetOpcodes.rs1IsZero(op)
+  vsetFu.in.oldVType.valid := true.B
+  vsetFu.in.oldVType.bits := in.ctrl.oldVType.get
+  vsetFu.in.vlFromGp.valid := VSetOpcodes.vlIsReg(op)
+  vsetFu.in.vlFromGp.bits := in.data.src(0) // rs1
+  vsetFu.in.vlFromVl.valid := VSetOpcodes.vlIsKeep(op)
+  vsetFu.in.vlFromVl.bits := in.data.vl.get // vl
+  vsetFu.in.vlFromImm.valid := VSetOpcodes.vlIsImm(op)
+  vsetFu.in.vlFromImm.bits := Imm_VSETIVLI().getAvl(imm)
+
+  private val vl = vsetFu.out.vl
+  private val vlmax = vsetFu.out.vlmax
+
+  io.in.ready := io.out.ready
+  io.out.valid := io.in.valid
+
+  this.connect0LatencyCtrlSingal
+
+  out.res.data := vl
+
+  io.vtype.get.valid := vsetFu.in.vsetvlVType.valid && io.out.valid
+  io.vtype.get.bits := vsetFu.out.vtype
+  io.vlIsZero.get := io.out.valid && vl === 0.U
+  io.vlIsVlmax.get := io.out.valid && vl === vlmax
 }
