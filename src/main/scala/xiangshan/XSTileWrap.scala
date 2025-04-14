@@ -123,7 +123,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
     io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
     io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
-    io.pwrdown_ack_n.foreach { _ := true.B }
+    io.pwrdown_ack_n.foreach { _ := DontCare }
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
@@ -162,6 +162,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    io.pwrdown_req_n.foreach(dontTouch(_))
+    io.pwrdown_ack_n.foreach(dontTouch(_))
+    io.iso_en.foreach(dontTouch(_))
   }
   lazy val module = new XSTileWrapImp(this)
 }
