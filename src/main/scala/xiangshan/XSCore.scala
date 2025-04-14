@@ -27,7 +27,7 @@ import system.HasSoCParameter
 import utils._
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramBroadcastBundle, SramMbistBundle, SramHelper}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import xiangshan.frontend._
 import xiangshan.backend._
 import xiangshan.backend.fu.PMPRespBundle
@@ -112,11 +112,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2Miss = Bool()
       val l3Miss = Bool()
     })
-    val sramTest = new Bundle() {
-      val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
-      val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-      val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
-    }
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
   })
 
   dontTouch(io.l2_flush_done)
@@ -290,10 +287,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     frontend.reset := backend.io.frontendReset
   }
 
-  memBlock.io.sramTestBypass.fromL2Top := io.sramTest
-  frontend.io.sramTest := memBlock.io.sramTestBypass.toFrontend
-  if (hasMbist) {
-    backend.io.sramTest.mbist.get := memBlock.io.sramTestBypass.toBackend.mbist.get
-    backend.io.sramTest.mbistReset.get := memBlock.io.sramTestBypass.toBackend.mbistReset.get
-  }
+  memBlock.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+  memBlock.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  frontend.io.dft.zip(memBlock.io.dft_frnt).foreach({ case (a, b) => a := b })
+  frontend.io.dft_reset.zip(memBlock.io.dft_reset_frnt).foreach({ case (a, b) => a := b })
+  backend.io.dft.zip(memBlock.io.dft_bcknd).foreach({ case (a, b) => a := b })
+  backend.io.dft_reset.zip(memBlock.io.dft_reset_bcknd).foreach({ case (a, b) => a := b })
 }

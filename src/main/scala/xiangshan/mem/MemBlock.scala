@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink._
 import utils._
 import utility._
 import utility.mbist.{MbistInterface, MbistPipeline}
-import utility.sram.{SramMbistBundle, SramBroadcastBundle, SramHelper}
+import utility.sram.{SramBroadcastBundle, SramHelper}
 import system.{HasSoCParameter, SoCParamsKey}
 import xiangshan._
 import xiangshan.ExceptionNO._
@@ -365,22 +365,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val fromL2Top = Input(new TopDownFromL2Top)
       val toBackend = Flipped(new TopDownInfo)
     }
-    val sramTestBypass = new Bundle() {
-      val fromL2Top = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-        val sramCtl    = Option.when(hasSramCtl)(Input(UInt(64.W)))
-      }
-      val toFrontend = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Output(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Output(new DFTResetSignals()))
-        val sramCtl    = Option.when(hasSramCtl)(Output(UInt(64.W)))
-      }
-      val toBackend = new Bundle() {
-        val mbist      = Option.when(hasMbist)(Output(new SramMbistBundle))
-        val mbistReset = Option.when(hasMbist)(Output(new DFTResetSignals()))
-      }
-    }
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+    val dft_frnt = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+    val dft_reset_frnt = Option.when(hasMbist)(Output(new DFTResetSignals()))
+    val dft_bcknd = Option.when(hasDFT)(Output(new SramBroadcastBundle))
+    val dft_reset_bcknd = Option.when(hasMbist)(Output(new DFTResetSignals()))
   })
 
   io.mem_to_ooo.writeBack.zipWithIndex.foreach{ case (wb, i) =>
@@ -2033,8 +2023,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         CellNode(io.reset_backend)
       )
     )
-    ResetGen(leftResetTree, reset, sim = false, io.sramTestBypass.fromL2Top.mbistReset)
-    ResetGen(rightResetTree, reset, sim = false, io.sramTestBypass.fromL2Top.mbistReset)
+    ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
+    ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
   } else {
     io.reset_backend := DontCare
   }
@@ -2147,35 +2137,36 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   } else {
     None
   }
-   private val sigFromSrams = if (hasSramTest) Some(SramHelper.genBroadCastBundleTop()) else None
+  private val sigFromSrams = if (hasDFT) Some(SramHelper.genBroadCastBundleTop()) else None
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
 
-  sigFromSrams.foreach({ case sig => sig.mbist := DontCare })
   if (hasMbist) {
-    sigFromSrams.get.mbist := io.sramTestBypass.fromL2Top.mbist.get
-    io.sramTestBypass.toFrontend.mbist.get := io.sramTestBypass.fromL2Top.mbist.get
-    io.sramTestBypass.toFrontend.mbistReset.get := io.sramTestBypass.fromL2Top.mbistReset.get
-    io.sramTestBypass.toBackend.mbist.get := io.sramTestBypass.fromL2Top.mbist.get
-    io.sramTestBypass.toBackend.mbistReset.get := io.sramTestBypass.fromL2Top.mbistReset.get
-    cg.cgen := io.sramTestBypass.fromL2Top.mbist.get.cgen
+    cg.cgen := io.dft.get.cgen
   } else {
     cg.cgen := false.B
   }
 
   // sram debug
-  val sramCtl = Option.when(hasSramCtl)(RegNext(io.sramTestBypass.fromL2Top.sramCtl.get))
-  sigFromSrams.foreach({ case sig => sig.sramCtl := DontCare })
-  sigFromSrams.zip(sramCtl).foreach {
-    case (sig, ctl) =>
-      sig.sramCtl.RTSEL := ctl(1, 0) // CFG[1 : 0]
-      sig.sramCtl.WTSEL := ctl(3, 2) // CFG[3 : 2]
-      sig.sramCtl.MCR   := ctl(5, 4) // CFG[5 : 4]
-      sig.sramCtl.MCW   := ctl(7, 6) // CFG[7 : 6]
+  sigFromSrams.foreach({ case sig => sig := DontCare })
+  sigFromSrams.zip(io.dft).foreach {
+    case (sig, dft) =>
+      if (hasMbist) {
+        sig.ram_hold := dft.ram_hold
+        sig.ram_bypass := dft.ram_bypass
+        sig.ram_bp_clken := dft.ram_bp_clken
+        sig.ram_aux_clk := dft.ram_aux_clk
+        sig.ram_aux_ckbp := dft.ram_aux_ckbp
+        sig.ram_mcp_hold := dft.ram_mcp_hold
+      }
+      if (hasSramCtl) {
+        sig.ram_ctl := RegNext(dft.ram_ctl)
+      }
   }
-  if (hasSramCtl) {
-    io.sramTestBypass.toFrontend.sramCtl.get := sramCtl.get
-  }
+  io.dft_frnt.zip(sigFromSrams).foreach({ case (a, b) => a := b })
+  io.dft_reset_frnt.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  io.dft_bcknd.zip(sigFromSrams).foreach({ case (a, b) => a := b })
+  io.dft_reset_bcknd.zip(io.dft_reset).foreach({ case (a, b) => a := b })
 }
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
@@ -2196,7 +2187,7 @@ class MemBlockImp(wrapper: MemBlock) extends LazyModuleImp(wrapper) {
   if (p(DebugOptionsKey).ResetGen) {
     ResetGen(
       ResetGenNode(Seq(ModuleNode(wrapper.inner.module))),
-      reset, sim = false, io.sramTestBypass.fromL2Top.mbistReset
+      reset, sim = false, io.dft_reset
     )
   }
 }

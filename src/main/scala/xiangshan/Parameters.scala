@@ -912,5 +912,5 @@ trait HasXSParameter {
 
   def wfiResume              = coreParams.wfiResume
   def hasSramCtl             = coreParams.hasSramCtl
-  def hasSramTest            = hasMbist || hasSramCtl
+  def hasDFT            = hasMbist || hasSramCtl
 }
