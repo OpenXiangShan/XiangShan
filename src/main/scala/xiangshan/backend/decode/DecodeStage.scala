@@ -30,6 +30,8 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.backend.vector.Decoder.DecodeChannels
+import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
 
 class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   // params alias
@@ -40,36 +42,45 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
 
+  // Input
   val redirect = Input(Bool())
-  val canAccept = Output(Bool())
   // from Ibuffer
   val in = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
+  // from FusionDecoder
+  val fusion = Vec(DecodeWidth - 1, Input(Bool()))
+
+  // from CSR
+  val csrCtrl = Input(new CustomCSRCtrlIO)
+  val fromCSR = Input(new CSRToDecode)
+  val vstart = Input(Vl())
+
+  // vtype update
+  val fromRob = new Bundle {
+    val isResumeVType = Input(Bool())
+  }
+
   // to Rename
   val out = Vec(DecodeWidth, DecoupledIO(new DecodeOutUop))
-  // RAT read
+
+  // to RAT
   val intRat = Vec(RenameWidth, Vec(numIntRatPorts, Flipped(new RatReadPort(log2Ceil(IntLogicRegs)))))
   val fpRat = Vec(RenameWidth, Vec(numFpRatPorts, Flipped(new RatReadPort(log2Ceil(FpLogicRegs)))))
   val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(log2Ceil(VecLogicRegs)))))
   // no v0Rat and vlRat Bundle because they are only one logic register
   val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(V0LogicRegs))))
   val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(log2Ceil(VlLogicRegs))))
-  // csr control
-  val csrCtrl = Input(new CustomCSRCtrlIO)
-  val fromCSR = Input(new CSRToDecode)
-  val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
-  // vtype update
-  val fromRob = new Bundle {
-    val isResumeVType = Input(Bool())
+  val toFrontend = new Bundle {
+    val canAccept = Output(Bool())
   }
-  val stallReason = new Bundle {
-    val in = Flipped(new StallReasonIO(DecodeWidth))
-    val out = new StallReasonIO(DecodeWidth)
-  }
-  val vstart = Input(Vl())
 
   val toCSR = new Bundle {
     val trapInstInfo = ValidIO(new TrapInstInfo)
+  }
+
+  val stallReason = new Bundle {
+    val in = Flipped(new StallReasonIO(DecodeWidth))
+    val out = new StallReasonIO(DecodeWidth)
   }
 }
 
@@ -101,6 +112,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   /** complex decoder */
   val decoderComp = Module(new DecodeUnitComp)
+
+  val decodeChannels = Module(new DecodeChannels(
+    mopWidth = DecodeWidth,
+    uopWidth = DecodeWidth,
+    instSeq = InstPattern.all,
+    numM2M4M8Channel = (6, 6, 6),
+  ))
+
   /** simple decoders in Seq of DecodeWidth */
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
@@ -154,7 +173,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoderComp.io.csrCtrl := io.csrCtrl
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
-  decoderComp.io.in.valid := complexValid && !io.fromRob.isResumeVType
+  decoderComp.io.in.valid := complexValid // && !io.fromRob.isResumeVType
   decoderComp.io.in.bits.simpleDecodedInst := complexInst
   decoderComp.io.in.bits.uopInfo := complexUopInfo
   decoderComp.io.out.complexDecodedInsts.zipWithIndex.foreach { case (out, i) => out.ready := io.out(i).ready }
@@ -177,9 +196,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
 
   /** condition of acceptation: no redirection, ready from rename/complex decoder, no resumeVType */
-  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.fromRob.isResumeVType
+  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) // && !io.fromRob.isResumeVType
 
-  io.canAccept := canAccept
+  io.toFrontend.canAccept := canAccept
 
   /**
    * Assign ready signal for DecodeStage's input. Ready signal in i-th channel:
@@ -194,7 +213,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     in.ready := !io.redirect && (
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
-    ) && !io.fromRob.isResumeVType
+    ) // && !io.fromRob.isResumeVType
   }
 
   /** final instruction decoding result */
@@ -216,7 +235,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
    * Note that finalDecodedInst is generated in order.
    */
   io.out.zipWithIndex.foreach { case (inst, i) =>
-    inst.valid := finalDecodedInstValid(i) && !io.fromRob.isResumeVType
+    inst.valid := finalDecodedInstValid(i) // && !io.fromRob.isResumeVType
     inst.bits := finalDecodedInst(i)
     inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
     inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))

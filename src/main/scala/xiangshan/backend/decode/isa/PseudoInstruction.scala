@@ -11,6 +11,9 @@ object PseudoInstructions {
 
   // no read csr
   def CSRRW_WO           = BitPat("b????????????_xxxxx____?01___?????_1110011")
+
+  // imm of addi is all 0s
+  def MOV = BitPat("b000000000000_?????_000_?????_0010011")
 }
 
 object CSRReadOnlyBlockInstructions {
