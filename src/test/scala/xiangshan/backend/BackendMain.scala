@@ -19,7 +19,7 @@ object BackendMain extends App {
 
   Generator.execute(
     firrtlOpts :+ "--full-stacktrace" :+ "--target-dir" :+ "backend",
-    backend.module,
+    backend.inner.ctrlBlock.decode.module,
     firtoolOpts
   )
   println("done")

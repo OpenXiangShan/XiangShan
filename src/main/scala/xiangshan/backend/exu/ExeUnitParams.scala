@@ -336,9 +336,11 @@ case class ExeUnitParams(
 
   def hasMoudFu = fuConfigs.map(_.name == "moud").reduce(_ || _)
 
-  def hasStoreFu = hasStoreAddrFu || hasStdFu
+  def hasStoreFu = hasStoreAddrFu || hasStdFu || hasVStdFu
 
   def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasHyldaFu || hasHystaFu || hasVLoadFu || hasVStoreFu
+
+  def hasMemFu = hasMemAddrFu || hasStdFu || hasVStdFu
 
   def hasHyldaFu = fuConfigs.map(_.name == "hylda").reduce(_ || _)
 
@@ -349,6 +351,8 @@ case class ExeUnitParams(
   def hasStoreAddrExu = hasStoreAddrFu || hasHystaFu
 
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
+
+  def hasVStdFu = fuConfigs.map(_.name == "vstd").reduce(_ || _)
 
   def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialuF).reduce(_ || _)
 
@@ -494,16 +498,16 @@ case class ExeUnitParams(
     new ExuInput(this)
   }
 
-  def genExuInputCopySrcBundle(implicit p: Parameters): ExuInput = {
-    new ExuInput(this, hasCopySrc = true)
-  }
-
-  def genNewExuInputCopySrcBundle(implicit p: Parameters): NewExuInput = {
-    new NewExuInput(this, hasCopySrc = true)
+  def genNewExuInputBundle(implicit p: Parameters): NewExuInput = {
+    new NewExuInput(this)
   }
 
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {
     new ExuOutput(this)
+  }
+
+  def genExuOutputBundle(dataConfigs: Seq[DataConfig])(implicit p: Parameters): ExuOutput = {
+    new ExuOutput(this, dataConfigs)
   }
 
   def genNewExuOutputBundle(implicit p: Parameters): NewExuOutput = {

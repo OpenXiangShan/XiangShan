@@ -16,25 +16,24 @@
 
 package xiangshan.backend.decode
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.Instructions._
-import freechips.rocketchip.rocket.CustomInstructions._
 import freechips.rocketchip.util.uintToBitPat
+import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan.ExceptionNO.{breakPoint, illegalInstr, virtualInstr}
 import xiangshan._
-import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop}
-import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
-import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl, VSew}
-import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.Zimop._
-import yunsuan.{FcmpOpCode, MULOpType, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
+import xiangshan.backend.decode.isa.CSRReadOnlyBlockInstructions._
+import xiangshan.backend.decode.isa.CSRs
+import xiangshan.backend.decode.isa.Instructions._
+import xiangshan.backend.decode.isa.PseudoInstructions._
+import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
+import xiangshan.backend.fu.wrapper.CSRToDecode
+import yunsuan.{MULOpType, VfaluType, VfmaOpCode}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -58,7 +57,7 @@ trait DecodeConstants {
     //   |          |          |          |         |           |  |  |  |  |  |  |  uopSplitType
     //   |          |          |          |         |           |  |  |  |  |  |  |  |               selImm
     //   |          |          |          |         |           |  |  |  |  |  |  |  |               |
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, UopSplitType.X, SelImm.X) // Use SelImm to indicate invalid instr
 
   val decodeArray: Array[(BitPat, XSDecodeBase)]
   final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
@@ -547,19 +546,6 @@ object ZfaDecode extends DecodeConstants {
     FMAXM_H     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
     FMAXM_S     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
     FMAXM_D     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
-    FROUND_H    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
-    FROUND_S    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
-    FROUND_D    -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fround,   fWen = T, canRobCompress = T),
-    FROUNDNX_H  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
-    FROUNDNX_S  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
-    FROUNDNX_D  -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.froundnx, fWen = T, canRobCompress = T),
-    FCVTMOD_W_D -> FDecode(SrcType.fp, SrcType.X,  SrcType.X, FuType.fcvt, VfcvtType.fcvtmod_w_d, xWen = T, canRobCompress = T),
-    FLEQ_H      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fleq, xWen = T, canRobCompress = T),
-    FLEQ_S      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fleq, xWen = T, canRobCompress = T),
-    FLEQ_D      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fleq, xWen = T, canRobCompress = T),
-    FLTQ_H      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fltq, xWen = T, canRobCompress = T),
-    FLTQ_S      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fltq, xWen = T, canRobCompress = T),
-    FLTQ_D      -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fltq, xWen = T, canRobCompress = T),
   )
 }
 
@@ -807,7 +793,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     CBODecode.table ++
     SvinvalDecode.table ++
     HypervisorDecode.table ++
-    VecDecoder.table ++
     ZicondDecode.table ++
     ZimopDecode.table ++
     ZfaDecode.table ++
@@ -878,7 +863,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isAmocasQIllegal = isAmocasQ && (inst.RD(0) === 1.U || inst.RS2(0) === 1.U)
 
   private val exceptionII =
-    decodedInst.selImm === SelImm.INVALID_INSTR ||
     (if (HasMptCheck) (io.fromCSR.illegalInst.mfence.get && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.mfence) else false.B) ||
     io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
     io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
@@ -1110,11 +1094,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
   decodedInst.vpu.vstart := io.enq.vstart
   decodedInst.vpu.isVleff := isFof && inst.NF === 0.U
-  decodedInst.vpu.specVill  := io.enq.decodeInUop.specvtype.illegal
-  decodedInst.vpu.specVma   := io.enq.decodeInUop.specvtype.vma
-  decodedInst.vpu.specVta   := io.enq.decodeInUop.specvtype.vta
-  decodedInst.vpu.specVsew  := io.enq.decodeInUop.specvtype.vsew
-  decodedInst.vpu.specVlmul := io.enq.decodeInUop.specvtype.vlmul
 
   decodedInst.vlsInstr := isVls
 
@@ -1186,7 +1165,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInst.fuType := Mux1H(Seq(
     // keep condition
     (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl && !isCsrrVlenb) -> decodedInst.fuType,
-    (isCsrrVl) -> FuType.vsetfwf.U,
+    (isCsrrVl) -> FuType.vset.U,
     (isCsrrVlenb) -> FuType.alu.U,
 
     // change vlsu to vseglsu when NF =/= 0.U

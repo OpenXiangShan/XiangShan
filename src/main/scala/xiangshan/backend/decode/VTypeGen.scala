@@ -3,11 +3,14 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import top.ArgParser
 import utility.PriorityMuxDefault
 import xiangshan._
-import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
-import xiangshan.backend.fu.VsetModule
-import xiangshan.backend.fu.vector.Bundles.{VType, VsetVType}
+import xiangshan.backend.decode.isa.Instructions
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.vector.Decoder.VSetFuncUnit
+import xiangshan.backend.vector.util.Verilog
 
 
 class VTypeGen(implicit p: Parameters) extends XSModule {
@@ -16,49 +19,45 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   val in = IO(Input(new In))
   val out = IO(Output(new Out))
 
-  private val vtypeSpec = RegInit(VType.initVtype())
+  private val vtypeSpec = RegInit(VType.init())
 
-  private val vtypeArch = RegInit(VType.initVtype())
+  private val vtypeArch = RegInit(VType.init())
 
   private val vtypeSpecNext = WireInit(vtypeSpec)
 
   private val vtypeArchNext = WireInit(vtypeArch)
-  /** valid signals of instructions */
-  private val instValidVec = in.insts.map(_.valid)
   /** instructions code */
   private val instFieldVec = in.insts.map(_.bits.asTypeOf(new XSInstBitFields))
 
-  private val isVsetiVec = VecInit(instFieldVec.map(fields =>
-    (fields.OPCODE === "b1010111".U) && (fields.WIDTH === "b111".U) && (
-      fields.ALL(31) === "b0".U ||
-        fields.ALL(31, 30) === "b11".U
-      )
-  ).zip(instValidVec).map { case (isVset, valid) => valid && isVset})
+  private val isVsetivli = VecInit(in.insts.map { inst => inst.valid && Instructions.VSETIVLI === inst.bits })
+  private val isVsetvli = VecInit(in.insts.map { inst => inst.valid && Instructions.VSETVLI === inst.bits })
 
-  private val isVsetvliVec = VecInit(instFieldVec.map(fields =>
-    (fields.OPCODE === "b1010111".U) &&
-      (fields.WIDTH === "b111".U) &&
-      (fields.ALL(31) === "b0".U)
-    )
-  ).zip(instValidVec).map { case (isVsetvli, valid) => valid && isVsetvli}
+  private val isVsetiVec: Vec[Bool] = VecInit(isVsetivli zip isVsetvli map { case(l, r) => l || r })
 
-  private val instVTypeVec = isVsetvliVec.zip(instFieldVec).map { case (isVsetvli, field) =>
-    Mux(
-      isVsetvli,
-      field.ZIMM_VSETVLI.asTypeOf(new InstVType),
-      field.ZIMM_VSETIVLI.asTypeOf(new InstVType),
-    )
-  }.map(instVType => VsetVType.fromInstVType(instVType))
-
-  // generate vtype depending on instructions
-  private val vsetModuleVec = Seq.fill(DecodeWidth)(Module(new VsetModule()))
-  for(i <- 0 until DecodeWidth) {
-    vsetModuleVec(i).io.in.avl := 0.U
-    vsetModuleVec(i).io.in.vtype := instVTypeVec(i)
-    vsetModuleVec(i).io.in.func := VSETOpType.uvsetvcfg_xi
+  private val vsetModuleVec = Seq.fill(DecodeWidth)(Module(new VSetFuncUnit(vlen = VLEN, elen = ELEN, xlen = XLEN)))
+  private val oldVTypeVec = Wire(Vec(DecodeWidth, chiselTypeOf(vsetModuleVec.head.in.oldVType.bits)))
+  for ((vsetModule, i) <- vsetModuleVec.zipWithIndex) {
+    vsetModule.in.vsetvlVType.valid := false.B // don't handle vsetvl in VTypeGen
+    vsetModule.in.vsetvliVType.valid := isVsetvli(i)
+    vsetModule.in.vsetivliVType.valid := isVsetivli(i)
+    vsetModule.in.vsetvlVType.bits := DontCare
+    vsetModule.in.vsetvliVType.bits := instFieldVec(i).ZIMM_VSETVLI
+    vsetModule.in.vsetivliVType.bits := instFieldVec(i).ZIMM_VSETIVLI
+    vsetModule.in.readVl.valid := false.B
+    vsetModule.in.readVl.bits := DontCare
+    vsetModule.in.rdIsZero := instFieldVec(i).RD === 0.U
+    vsetModule.in.rs1IsZero := instFieldVec(i).RS1 === 0.U
+    vsetModule.in.oldVType.valid := true.B
+    vsetModule.in.oldVType.bits := oldVTypeVec(i)
+    vsetModule.in.vlFromGp.valid := false.B
+    vsetModule.in.vlFromGp.bits := DontCare
+    vsetModule.in.vlFromImm.valid := isVsetivli(i)
+    vsetModule.in.vlFromImm.bits := instFieldVec(i).UIMM_VSETIVLI
+    vsetModule.in.vlFromVl.valid := false.B
+    vsetModule.in.vlFromVl.bits := DontCare
   }
 
-  private val vtypeNewVec = vsetModuleVec.map(_.io.out.vconfig.vtype)
+  private val vtypeNewVec = vsetModuleVec.map(_.out.vtype)
 
   private val specvtype = vtypeSpec +: out.vtype
   out.specvtype := specvtype.take(out.specvtype.length)
@@ -66,6 +65,8 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   for(i <- 0 until DecodeWidth) {
     out.vtype(i) := PriorityMuxDefault((isVsetiVec zip vtypeNewVec).take(i + 1).reverse, vtypeSpec)
   }
+
+  oldVTypeVec := specvtype.take(oldVTypeVec.length)
 
   // assign the last vtype to vtypeSpec
   private val vtypeNew = out.vtype(DecodeWidth - 1)
@@ -99,6 +100,23 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
 }
 
 object VTypeGen {
+  def main(args: Array[String]): Unit = {
+    val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(
+      args :+ "--disable-always-basic-diff" :+ "--dump-fir" :+ "--fpga-platform" :+ "--target" :+ "verilog")
+
+    val defaultConfig = config.alterPartial({
+      case XSCoreParamsKey => config(XSTileKey).head
+    })
+
+    Verilog.emitVerilog(
+      new VTypeGen()(defaultConfig),
+      Array(
+        "--full-stacktrace",
+        "--target-dir", "build/VTypeGen",
+      )
+    )
+  }
+
   class In()(implicit p: Parameters) extends XSBundle {
     val insts = Flipped(Vec(DecodeWidth, ValidIO(UInt(32.W))))
     val walkToArchVType = Input(Bool())

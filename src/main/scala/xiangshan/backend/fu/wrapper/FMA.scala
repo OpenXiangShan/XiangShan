@@ -33,8 +33,7 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   fma.io.fp_a         := src0
   fma.io.fp_b         := src1
   fma.io.fp_c         := src2
-  fma.io.round_mode   := rm
-  fma.io.fp_format    := fp_fmt
+  fma.io.rm           := rm
   fma.io.op_code      := opcode
   fma.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   fma.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN

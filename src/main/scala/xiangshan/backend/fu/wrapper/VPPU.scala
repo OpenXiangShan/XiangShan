@@ -9,7 +9,6 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModule}
 import xiangshan.SrcType
-import yunsuan.encoding.Opcode.VimacOpcode
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
 import yunsuan.{OpType, VpermType}
 import yunsuan.vector.perm.Permutation
@@ -35,7 +34,8 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
-  private val vppuNeedClearMask = (VpermType.vcompress === io.in.bits.ctrl.fuOpType) && (vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)
+  // Todo: check if vuopIdx comparison is right
+  private val vppuNeedClearMask = (VpermType.vcompress === io.in.bits.ctrl.fuOpType) && (vuopIdx === 0.U)
   private val mask = Mux(vppuNeedClearMask, 0.U, srcMask)
   private val isVmvnr = VpermType.isVmvnr(io.in.bits.ctrl.fuOpType)
   private val emul = VpermType.getEmulVmvnr(io.in.bits.ctrl.fuOpType)

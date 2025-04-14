@@ -20,6 +20,7 @@ package xiangshan.mem
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utility._
 import utils._
@@ -29,12 +30,13 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.mem.prefetch.PrefetchReqBundle
+
 import math._
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
-    require(sizeEncode.getWidth == LSUOpType.Size.width)
-    (LookupTree(sizeEncode, List(
+    (LookupTree(sizeEncode.take(2), List(
       LSUOpType.B.U -> 0x1.U, //0001 << addr(2:0)
       LSUOpType.H.U -> 0x3.U, //0011
       LSUOpType.W.U -> 0xf.U, //1111
@@ -45,8 +47,7 @@ object genWmask {
 
 object genVWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
-    require(sizeEncode.getWidth == LSUOpType.Size.width)
-    (LookupTree(sizeEncode, List(
+    (LookupTree(sizeEncode.take(2), List(
       LSUOpType.B.U -> 0x1.U, //0001 << addr(2:0)
       LSUOpType.H.U -> 0x3.U, //0011
       LSUOpType.W.U -> 0xf.U, //1111
@@ -67,8 +68,7 @@ object genBasemask {
    *         Return: 0xff
    */
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
-    require(sizeEncode.getWidth == LSUOpType.Size.width)
-    LookupTree(sizeEncode, List(
+    LookupTree(sizeEncode.take(2), List(
       LSUOpType.B.U -> 0x1.U,
       LSUOpType.H.U -> 0x3.U,
       LSUOpType.W.U -> 0xf.U,
@@ -131,8 +131,8 @@ object AddPipelineReg {
 
 object MemorySize {
 
-  sealed abstract class Size (uint: UInt) {
-    def U: UInt = this.uint
+  sealed abstract class Size (val bitpat: BitPat) {
+    def U: UInt = bitPatToUInt(bitpat)
     def ByteOffset: UInt
   }
 
@@ -145,20 +145,31 @@ object MemorySize {
   /*
   * ByteOffset is for generate ByteEnd, the range of request is [BytesStart, ByteEnd]
   */
-  case object B extends Size("b000".U(Size.width.W)){
+  case object B extends Size(BitPat("b000")){
     def ByteOffset = 0.U(Size.ByteOffsetWidth.W)
   }
-  case object H extends Size("b001".U(Size.width.W)){
+  case object H extends Size(BitPat("b001")){
     def ByteOffset = 1.U(Size.ByteOffsetWidth.W)
   }
-  case object W extends Size("b010".U(Size.width.W)){
+  case object W extends Size(BitPat("b010")){
     def ByteOffset = 3.U(Size.ByteOffsetWidth.W)
   }
-  case object D extends Size("b011".U(Size.width.W)){
+  case object D extends Size(BitPat("b011")){
     def ByteOffset = 7.U(Size.ByteOffsetWidth.W)
   }
-  case object Q extends Size("b100".U(Size.width.W)){
+  case object Q extends Size(BitPat("b1??")){
     def ByteOffset = 15.U(Size.ByteOffsetWidth.W)
+
+    override def U: UInt = {
+      throw new NoSuchMethodException(
+        "To avoid wrong comparison **Q.U === size**, calling this method will raise exception.\n" +
+          "If you want to check whether it is 128b load/store, please use sizeIs(_.Q)(size) instead.\n" +
+          "If you want to generate a UInt signal, please use QB.U\n"
+      )
+    }
+  }
+  case object QB extends Size(BitPat("b100")) {
+    def ByteOffset = Q.ByteOffset
   }
 
   /*
@@ -166,7 +177,7 @@ object MemorySize {
   */
   def ByteOffset (size: UInt): UInt = {
     require(size.getWidth == Size.width)
-    LookupTree(size, Size.all.map(s => s.U -> s.ByteOffset))
+    Mux1H(Size.all.map(x => (x.bitpat === size) -> x.ByteOffset))
   }
 
   // The range of request is [BytesStart, ByteEnd]
@@ -175,7 +186,11 @@ object MemorySize {
   }
 
   def sizeIs(op: UInt, sz: Size): Bool = {
-    op === sz.U
+    op === sz.bitpat
+  }
+
+  def sizeIs(sz: this.type => Size)(size: UInt): Bool = {
+    sz(this).bitpat === size
   }
 }
 

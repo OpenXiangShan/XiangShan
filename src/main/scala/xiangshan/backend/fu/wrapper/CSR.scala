@@ -77,7 +77,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     CSROpType.wrti -> csri,
     CSROpType.seti -> (regOut | csri),
     CSROpType.clri -> (regOut & (~csri).asUInt),
-  ))
+  ).map { case (k, v) => k.encode -> v })
 
   private val csrAccess = valid && CSROpType.isCsrAccess(func)
   private val csrWen = valid && (

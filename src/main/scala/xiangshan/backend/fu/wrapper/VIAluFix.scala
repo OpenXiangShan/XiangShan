@@ -5,18 +5,19 @@ import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{DstMgu, Mgtu, Mgu, NewMgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
-import yunsuan.vector.SewOH
+import yunsuan.vector.Common.SewOH
 import yunsuan.vector.VectorALU.VIAluFixPoint
 
 import math.pow
 
 class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
+//  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
 
   // params
   private val dataWidth = cfg.destDataBits
@@ -32,9 +33,9 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val mgu = Module(new NewMgu(dataWidth))
   private val mgtu = Module(new Mgtu(dataWidth))
 
-  private val opcode = VialuFixType.getOpcode(fuOpType).asTypeOf(vIAluFixPoints.head.io.in.opcode)
-  private val isSigned = VialuFixType.isSigned(fuOpType)
-  private val isMisc = VialuFixType.isMisc(fuOpType)
+  private val opcode = fuOpType
+  private val isSigned = VIAluOpcodes.isSigned(fuOpType)
+  private val isMisc = false.B // Todo
   private val widenVs2 = inCtrl.vialuCtrl.get.widenVs2
   private val widen = inCtrl.vialuCtrl.get.widen
   private val isVf2 = inCtrl.vialuCtrl.get.isVf2
@@ -95,7 +96,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   }
 
   private val maskToMgu = Mux(isAddCarry, allMaskTrue, srcMask)
-  private val vdWiden = (VialuFixType.fmtIsVVW(fuOpType) || VialuFixType.fmtIsWVW(fuOpType)) & !isExt & !isDstMask
+  private val vdWiden = VIAluOpcodes.isWiden(fuOpType)
   private val eew = Mux(vdWiden, vsew + 1.U, vsew)
   private val vdIdx = Mux(isNarrow, vuopIdx(2, 1), vuopIdx)
 
