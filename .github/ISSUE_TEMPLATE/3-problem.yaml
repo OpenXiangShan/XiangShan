@@ -11,6 +11,9 @@ body:
         This template is only used for problem encountered when compiling XiangShan, running EMU, etc. If this doesn't look right, please back and choose another template.
         这个 issue 模板仅用于处理您在编译香山、运行 EMU 等时遇到的问题。如果您遇到的不是此类问题，请回退并选择其他模板。
 
+        Please make sure that the problem can still be reproduced on the latest commit of the master branch.
+        请确保问题在 master 分支最新的 commit 仍能复现。
+
         Please fill in the following information so we can better understand and address your issue. Thank you!
         请填写以下内容，以便我们更好地理解和处理您的问题。谢谢！
   - type: checkboxes
@@ -26,6 +29,8 @@ body:
         - label: I have searched the previous issues and did not find anything relevant. 我已经搜索过之前的 issue，并没有找到相关的。
           required: true
         - label: I have searched the previous discussions and did not find anything relevant. 我已经搜索过之前的 discussions，并没有找到相关的。
+          required: true
+        - label: I have reproduced the problem using the latest commit on the master branch. 我已经使用 master 分支最新的 commit 复现了问题。
           required: true
   - type: textarea
     id: describe
