@@ -9,22 +9,23 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.FuOpType
-import yunsuan.{VfcvtType, VfpuType}
+import yunsuan.{VfpuType}
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
+import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 
 
 class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // io alias
-  private val opcode = fuOpType(8, 0)
+  private val opcode = fuOpType
   private val src0 = inData.src(0)
   private val sew = fp_fmt
 
-  private val isFround  = opcode === VfcvtType.fround
-  private val isFoundnx = opcode === VfcvtType.froundnx
-  private val isFcvtmod = opcode === VfcvtType.fcvtmod_w_d
+  private val isFround  = FCvtOpcode.isFround(opcode)
+  private val isFoundnx = FCvtOpcode.isFroundNx(opcode)
+  private val isFcvtmod = FCvtOpcode.isFcvtMod(opcode)
 
   private val isRtz = opcode(2) & opcode(1) | isFcvtmod
   private val isRod = opcode(2) & !opcode(1) & opcode(0)
@@ -78,13 +79,11 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   val fcvt = Module(new FPCVT(XLEN, isI2F = false))
   fcvt.io.fire := fire
   fcvt.io.src := src0
-  fcvt.io.opType := opcode(7, 0)
-  fcvt.io.sew := sew
+  fcvt.io.opType := opcode
   fcvt.io.rm := vfcvtRm
-  fcvt.io.isFpToVecInst := true.B
-  fcvt.io.isFround := Cat(isFoundnx, isFround)
-  fcvt.io.isFcvtmod := isFcvtmod
-
+  // Todo: remove these
+  fcvt.io.inSew1H := 0.U
+  fcvt.io.outSew1H := 0.U
 
   //cycle2
   val isNarrowCycle2 = RegEnable(RegEnable(isNarrowCvt, fire), fireReg)

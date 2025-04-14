@@ -37,7 +37,7 @@ import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.NewCSR.CSROoORead
-import yunsuan.{VfaluType, VipuType, VmoveType}
+import yunsuan.{VfaluType, VipuType, VMoveOpcode}
 import xiangshan.backend.RatToVecExcpMod
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
@@ -345,14 +345,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new RenameOutUop))
-  uops.zip(io.in.map(_.bits)).map{ case(uop, in) => {
-    uop := 0.U.asTypeOf(uop)
+  (uops zip io.in.map(_.bits)).zipWithIndex.foreach { case((uop, in), i) =>
     connectSamePort(uop, in)
-    uop.debug.foreach({ debug =>
-      connectSamePort(uop.debug.get, in.debug.get)
-      debug.instr := in.instr
-    })
-  }}
+    uop.debug zip in.debug foreach { case (uopDbg, inDbg) =>
+      uopDbg.pc := inDbg.pc
+      uopDbg.debug_seqNum := inDbg.debug_seqNum
+      uopDbg.instr := in.instr
+      uopDbg.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse))
+      // Only assign performance counters in debugInfo
+      uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
+      uopDbg.perfDebugInfo.renameTime := GTimer()
+      uopDbg.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR
+    }
+  }
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -435,6 +440,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid
     uops(i).ssid := io.ssit(i).ssid
 
+    uops(i).singleStep := false.B
+
+
     // update cf according to waittable result
     uops(i).loadWaitBit := io.waittable(i)
     uops(i).crossFtq := false.B
@@ -472,7 +480,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
-    uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
     val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numWB := 0.U
@@ -510,7 +517,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
-    uops(i).dirtyVs := (
+    uops(i).dirtyVs := false.B // Todo: handle this in some DecodeField
+      /* (
       compressMasksVec(i) & Cat(io.in.map(in =>
         // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
         in.bits.uopSplitType =/= UopSplitType.SCA_SIM &&
@@ -523,8 +531,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
           (FuType.vmove, VmoveType.vmv_x_s)     // vmv.x.s
         ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
       ).reverse)
-    ).orR
-    uops(i).debug.foreach(_.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR)
+    ).orR*/
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(intReadPortsData(i)(1), fpReadPortsData(i)(1), vecReadPortsData(i)(1)))
@@ -642,8 +649,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       if (i + 1 < RenameWidth) {
         uops(i).traceBlockInPipe.ilastsize := uops(i + 1).traceBlockInPipe.ilastsize
         uops(i).traceBlockInPipe.itype := uops(i + 1).traceBlockInPipe.itype
+      } else {
+        // Todo: check it
+        uops(i).traceBlockInPipe.ilastsize := 0.U
+        uops(i).traceBlockInPipe.itype := 0.U
       }
-    }.elsewhen(needRobFlags(i)) {
+    }.otherwise {
       uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
 
       // CSR systemop instruction excluding ebreak & ecall
@@ -758,9 +769,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
   val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
-  io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && FuType.isJump(in.bits.fuType) && in.fire }
-  io.out.map{ x =>
-    x.bits.hasException := x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger)
+  uops.zip(io.in).foreach{ case (uop, in) => uop.snapshot := allowSnpt && FuType.isJump(in.bits.fuType) && in.fire }
+  uops.map{ x =>
+    x.hasException := x.exceptionVec.orR || TriggerAction.isDmode(x.trigger)
   }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)

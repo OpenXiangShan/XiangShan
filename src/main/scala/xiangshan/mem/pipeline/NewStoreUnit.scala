@@ -44,8 +44,7 @@ class StoreUnitS0(param: ExeUnitParams)(
       * Request sources
       */
     val unalignTail = Flipped(DecoupledIO(new StoreStageIO))
-    val stin = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
-    val vecstin = Flipped(Decoupled(new VectorStoreIn))
+    val stin = Flipped(Decoupled(new ExuInput(param)))
     val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
 
     // Tlb request
@@ -60,18 +59,15 @@ class StoreUnitS0(param: ExeUnitParams)(
     * Arbitrate all S0 request sources with the following priority::
     *
     * 0. unaligned tail injected from S1
-    * 1. vector store elements produced by VSplit
-    * 2. scalar store requests issued from the issue queue
-    * 3. hardware prefetch requests
+    * 1. scalar store requests issued from the issue queue
+    * 2. hardware prefetch requests
     */
   val unalignTail,
-    vectorIssue,
     scalarIssue,
     prefetchReq = Wire(DecoupledIO(new StoreStageIO))
 
   val sources = Seq(
     unalignTail,
-    vectorIssue,
     scalarIssue,
     prefetchReq
   )
@@ -80,13 +76,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   // 0. unaligned tail injected from S1
   unalignTail <> io.unalignTail
 
-  // 1. vector store elements produced by VSplit
-  vectorIssue.valid := io.vecstin.valid
-  connectSamePort(vectorIssue.bits, io.vecstin.bits)
-  vectorIssue.bits.DontCareUnalign()
-  vectorIssue.bits.DontCareStoreSet()
-
-  // 2. scalar store requests issued from the issue queue
+  // 1. scalar store requests issued from the issue queue
   val stin = io.stin.bits
   val stinUop = stin.toDynInst()
   val stinVAddr = stin.src(0) + SignExt(stin.imm(11,0), VAddrBits)
@@ -110,9 +100,8 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.ssid.get := stinUop.ssid
   scalarIssue.bits.storeSetHit.get := stinUop.storeSetHit
   scalarIssue.bits.DontCareUnalign()
-  scalarIssue.bits.DontCareVectorFields()
 
-  // 3. hardware prefetch requests
+  // 2. hardware prefetch requests
   prefetchReq.valid := io.prefetchReq.valid && io.dcacheReq.ready
   prefetchReq.bits.entrance := StoreEntrance.prefetch.U
   prefetchReq.bits.accessType.instrType := InstrType.prefetch.U
@@ -121,10 +110,9 @@ class StoreUnitS0(param: ExeUnitParams)(
   prefetchReq.bits.vaddr := io.prefetchReq.bits.vaddr
   prefetchReq.bits.fullva := io.prefetchReq.bits.vaddr
   prefetchReq.bits.DontCareUnalign()
-  prefetchReq.bits.DontCareVectorFields()
   prefetchReq.bits.DontCareStoreSet()
   prefetchReq.bits.uop := 0.U.asTypeOf(new DynInst())
-  prefetchReq.bits.size := MemorySize.Q.U
+  prefetchReq.bits.size := MemorySize.QB.U
   prefetchReq.bits.mask := Fill(VLEN/8, 1.U(1.W))
   prefetchReq.bits.isFirstIssue := true.B
 
@@ -191,24 +179,18 @@ class StoreUnitS0(param: ExeUnitParams)(
     require(size.getWidth == MemorySize.Size.width)
     // 1.1 Align check
     val align = LookupTree(size, List(
-      MemorySize.B.U -> true.B,
-      MemorySize.H.U -> (vaddr.take(1) === 0.U),
-      MemorySize.W.U -> (vaddr.take(2) === 0.U),
-      MemorySize.D.U -> (vaddr.take(3) === 0.U),
-      MemorySize.Q.U -> (vaddr.take(4) === 0.U)
+      MemorySize.B.bitpat -> true.B,
+      MemorySize.H.bitpat -> (vaddr.take(1) === 0.U),
+      MemorySize.W.bitpat -> (vaddr.take(2) === 0.U),
+      MemorySize.D.bitpat -> (vaddr.take(3) === 0.U),
+      MemorySize.Q.bitpat -> (vaddr.take(4) === 0.U),
     ))
     // 1.2 cross16Bytes check
     // 1.3 cross4KPage check
-    val lowAddr = vaddr.take(pgIdxBits)
-    val upAddr = LookupTree(size, List(
-      MemorySize.B.U -> 0.U,
-      MemorySize.H.U -> 1.U,
-      MemorySize.W.U -> 3.U,
-      MemorySize.D.U -> 7.U,
-      MemorySize.Q.U -> 15.U
-    )) +& lowAddr
-    val cross16Byte = upAddr(DCacheVWordOffset) =/= lowAddr(DCacheVWordOffset)
-    val cross4KPage = upAddr.head(1).asBool
+    val inPageAddrFrom = vaddr.take(pgIdxBits)
+    val inPageAddrUntil = (MemorySize.ByteOffset(size) +& inPageAddrFrom).ensuring(_.getWidth == pgIdxBits + 1)
+    val cross16Byte = inPageAddrUntil(DCacheVWordOffset) =/= inPageAddrFrom(DCacheVWordOffset)
+    val cross4KPage = inPageAddrUntil(pgIdxBits)
     (align, cross16Byte, cross4KPage)
   }
 
@@ -217,7 +199,6 @@ class StoreUnitS0(param: ExeUnitParams)(
   pipeOut.bits := pipeOutBits
 
   io.stin.ready := scalarIssue.ready
-  io.vecstin.ready := vectorIssue.ready
   io.prefetchReq.ready := prefetchReq.ready
 
   io.tlbReq.valid := sink.valid
@@ -329,7 +310,6 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val cross4KPage = in.cross4KPage.get
   val cross16Byte = isUnalignTail || isUnalignHead
-  val vecBaseVaddr = in.vecBaseVaddr.get
 
   val kill = robIdx.needFlush(io.redirect)
   val fire = pipeIn.fire && !kill
@@ -373,20 +353,9 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isDebugMode = TriggerAction.isDmode(triggerAction)
   val isBreakPoint = TriggerAction.isExp(triggerAction)
 
-  val vecVaddrOffset = Mux(
-    isDebugMode || isBreakPoint,
-    storeTrigger.io.toLoadStore.triggerVaddr - vecBaseVaddr,
-    vaddr + genVFirstUnmask(mask).asUInt - vecBaseVaddr
-  )
-  val vecTriggerMask = Mux(
-    isDebugMode || isBreakPoint,
-    storeTrigger.io.toLoadStore.triggerMask,
-    0.U
-  )
-
   // Unalign tail inject to s0
   val unalignTailInjectValid = fire && isUnalignHead
-  val unalignTail = Wire(io.unalignTail.bits.cloneType)
+  val unalignTail = Wire(chiselTypeOf(io.unalignTail.bits))
   connectSamePort(unalignTail, in)
   unalignTail.entrance := StoreEntrance.unalignTail.U
   unalignTail.vaddr := ((vaddr >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
@@ -434,7 +403,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     * [NOTE]: the normal request is also the last request,
     */
   val toSqAddrValid = fire && !isHwPrefetch
-  val toSqAddr = Wire(io.toSqAddr.bits.cloneType)
+  val toSqAddr = Wire(chiselTypeOf(io.toSqAddr.bits))
   def alignVWordAddr(addr: UInt) = {
     Cat(addr(addr.getWidth - 1, DCacheVWordOffset), 0.U(DCacheVWordOffset.W))
   }
@@ -442,7 +411,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.vaddr := Mux(isCbo, alignVWordAddr(vaddr), vaddr)
   toSqAddr.tlbMiss := !feedBackHit
   toSqAddr.mask := mask
-  toSqAddr.size := Mux(isCbo, MemorySize.Q.U, size)
+  toSqAddr.size := Mux(isCbo, MemorySize.QB.U, size)
   toSqAddr.wlineflag := isCbo
   connectSamePort(toSqAddr.uop, uop)
   toSqAddr.uop.pc.foreach(_ := uop.pc)
@@ -468,7 +437,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   .elsewhen (pipeIn.fire) { pipeOutValid := true.B }
   .elsewhen (pipeOut.fire) { pipeOutValid := false.B }
 
-  val stageInfo = Wire(pipeOut.bits.cloneType)
+  val stageInfo = Wire(chiselTypeOf(pipeOut.bits))
   connectSamePort(stageInfo, in)
   stageInfo.tlbHit.get := tlbHit
   stageInfo.tlbException.get := tlbException
@@ -476,8 +445,6 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.isForVSnonLeafPTE.get := isForVSnonLeafPTE
   stageInfo.paddr.get := paddr
   stageInfo.gpaddr.get := gpaddr
-  stageInfo.vecTriggerMask.get := vecTriggerMask
-  stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.needRSReplay.get := needRSReplay
   stageInfo.hasException.get := hasException || isDebugMode || isBreakPoint
   stageInfo.uop.trigger := triggerAction
@@ -644,11 +611,10 @@ class StoreUnitS2(param: ExeUnitParams)(
   .elsewhen (pipeIn.fire) { pipeOutValid := true.B }
   .elsewhen (pipeOut.fire) { pipeOutValid := false.B }
 
-  val stageInfo = Wire(pipeOut.bits.cloneType)
+  val stageInfo = Wire(chiselTypeOf(pipeOut.bits))
   connectSamePort(stageInfo, in)
   stageInfo.uop.exceptionVec(storeAddrMisaligned) := am
   stageInfo.uop.exceptionVec(storeAccessFault) := af
-  stageInfo.uop.vpu.vstart := in.vecVaddrOffset.get >> uop.vpu.veew
   stageInfo.hasException.get := hasException
   stageInfo.nc.get := isNC
   stageInfo.mmio.get := isMMIO
@@ -716,7 +682,6 @@ class StoreUnitS3(param: ExeUnitParams)(
 
     // Writeback
     val stout = new MemWriteBack(param)
-    val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     val exceptionInfo = ValidIO(new MemExceptionInfo)
   })
 
@@ -763,7 +728,6 @@ class StoreUnitS3(param: ExeUnitParams)(
   wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
   wbData.tlbException.get := Mux(headHasException, head.tlbException.get, in.tlbException.get)
   wbData.uop.vpu.vstart := Mux(headHasException, head.uop.vpu.vstart, in.uop.vpu.vstart)
-  wbData.vecTriggerMask.get := Mux(headHasException, head.vecTriggerMask.get, in.vecTriggerMask.get)
   wbData.isForVSnonLeafPTE.get := Mux(
     headHasException,
     head.isForVSnonLeafPTE.get,
@@ -831,27 +795,6 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.exceptionInfo.bits.uopIdx := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
   io.exceptionInfo.bits.vl := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
   io.exceptionInfo.bits.vstart := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
-
-  io.vecstout.valid := sxValid && sxVector
-  io.vecstout.bits.mBIndex := sxData.mbIndex.get
-  io.vecstout.bits.hit := sxData.tlbHit.get
-  io.vecstout.bits.isvec := sxVector
-  io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
-  io.vecstout.bits.flushState := DontCare
-  io.vecstout.bits.trigger := sxData.uop.trigger
-  io.vecstout.bits.nc := sxData.nc.get
-  io.vecstout.bits.mmio := sxData.mmio.get
-  io.vecstout.bits.exceptionVec := sxData.uop.exceptionVec.selectByFu(VstuCfg)
-  io.vecstout.bits.hasException := sxData.hasException.get
-  io.vecstout.bits.elemIdx := sxData.elemIdx.get
-  io.vecstout.bits.alignedType := sxData.size
-  io.vecstout.bits.mask := sxData.mask
-  io.vecstout.bits.vaddr := sxData.fullva
-  io.vecstout.bits.vaNeedExt := sxData.tlbException.get.vaNeedExt
-  io.vecstout.bits.gpaddr := sxData.gpaddr.get
-  io.vecstout.bits.isForVSnonLeafPTE := sxData.isForVSnonLeafPTE.get
-  io.vecstout.bits.vstart := sxData.uop.vpu.vstart
-  io.vecstout.bits.vecTriggerMask := sxData.vecTriggerMask.get
 }
 
 class StoreUnitS4(param: ExeUnitParams)(
@@ -874,8 +817,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val redirect = Flipped(ValidIO(new Redirect))
   val csrTrigger = Input(new CsrTriggerBundle)
   // Request sources
-  val stin = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
-  val vecstin = Flipped(Decoupled(new VectorStoreIn))
+  val stin = Flipped(Decoupled(new ExuInput(param)))
   val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
   // TLB / PMA / PMP
   val tlb = new TlbRequestIO
@@ -900,7 +842,6 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val feedBackSlow = ValidIO(new RSFeedback)
   // Writeback
   val stout = new MemWriteBack(param)
-  val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
   val exceptionInfo = ValidIO(new MemExceptionInfo)
 
   val debugInfo = Output(new DebugLsInfoBundle)
@@ -928,7 +869,6 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // S0
   s0.io.redirect := io.redirect
   s0.io.stin <> io.stin
-  s0.io.vecstin <> io.vecstin
   s0.io.prefetchReq <> io.prefetchReq
   io.tlb.req <> s0.io.tlbReq
   io.tlb.req_kill := s0.io.tlbReqKill
@@ -960,7 +900,6 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // s3
   s3.io.redirect := io.redirect
   io.stout := s3.io.stout
-  io.vecstout <> s3.io.vecstout
   io.exceptionInfo := s3.io.exceptionInfo
 }
 

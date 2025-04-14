@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.FuConfig.VialuCfg
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
@@ -48,7 +49,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
 
   // vadc.vv, vsbc.vv need this
-  protected val needClearMask: Bool = if(cfg == VialuCfg) VialuFixType.needClearMask(inCtrl.fuOpType) else false.B
+  protected val needClearMask: Bool = if(cfg == VialuCfg) VIAluOpcodes.isPredicateAlwaysTrue(inCtrl.fuOpType) else false.B
 
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
@@ -77,7 +78,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val outVm       = outVecCtrl.vm
 
   // vadc.vv, vsbc.vv need this
-  protected val outNeedClearMask: Bool = if(cfg == VialuCfg) VialuFixType.needClearMask(outCtrl.fuOpType) else false.B
+  protected val outNeedClearMask: Bool = if(cfg == VialuCfg) VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType) else false.B
   protected val outVl       = outData.vl.get
   protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)

@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vstart
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.backend.regfile.RfWritePortBundle
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, NoScheduler, SchdBlockParams, VecScheduler}
 
 class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
   val in = Flipped(DecoupledIO(gen))
@@ -88,11 +89,25 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
     val hartId = Input(UInt(8.W))
   }
 
+  val dataConfigs = schdParams.schdType match {
+    case IntScheduler() => Seq(IntData(), VlData())
+    case FpScheduler() => Seq(FpData())
+    case VecScheduler() => Seq(VecData(), V0Data(), VlData())
+    case NoScheduler() => ???
+  }
+
+  // Todo: fix rebase
   val fromIntExu: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.intSchdParams.get.genNewExuOutputDecoupledBundle)
 
   val fromFpExu: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.fpSchdParams.get.genNewExuOutputDecoupledBundle)
 
   val fromVfExu: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.vecSchdParams.get.genNewExuOutputDecoupledBundle)
+
+//  val fromIntExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.intSchdParams.get.genExuOutputBundle(DecoupledIO(_), dataConfigs))
+//
+//  val fromFpExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.fpSchdParams.get.genExuOutputBundle(DecoupledIO(_), dataConfigs))
+//
+//  val fromVfExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.vecSchdParams.get.genExuOutputBundle(DecoupledIO(_), dataConfigs))
 
   val fromCSR = Input(new Bundle {
     val vstart = Vstart()
@@ -105,6 +120,7 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
   val toVlPreg = Output(backendParams.genVlWriteBackBundle)
 
   val toCtrlBlock = new Bundle {
+    // Todo: fix rebase
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle.flatten)
   }
 }

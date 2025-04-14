@@ -13,9 +13,11 @@ import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.regcache._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.vector.Utils.{SplitMask, VecDataToMaskDataVec}
 import yunsuan.VialuFixType
+import xiangshan.backend.vector.datapath.VecImmExtractor
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   // params
@@ -65,7 +67,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
                         else if (source.bits.params.isVfExeUnit && source.bits.params.writeVecRf) { source.bits.toVecRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }
                         else if (source.bits.params.isVfExeUnit && source.bits.params.writeV0Rf)  { source.bits.toV0Rf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
                         else if (source.bits.params.isVfExeUnit && source.bits.params.writeVlRf)  { source.bits.toVlRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W))  }
-                        else { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }} 
+                        else { source.bits.toIntRf.map(_.bits).getOrElse(0.U(source.bits.params.destDataBitsMax.W)) }}
         }
       }
     }
@@ -168,6 +170,20 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       exuInput.bits.params.destDataBitsMax,
       exuInput.bits.params.immType,
     )
+
+    val vecImm = Option.when(
+      exuInput.bits.params.hasVecFu
+    )(
+      VecImmExtractor(
+        VLEN,
+        exuInput.bits.params.immType,
+      )(
+        fromDPs(exuIdx).bits.imm.getOrElse(0.U),
+        fromDPs(exuIdx).bits.selImm.getOrElse(0.U),
+        exuInput.bits.vtype.get.vsew
+      )
+    )
+
     val exuParm = exuInput.bits.params
     val immLoadSrc0 = Option.when(exuParm.hasLoadFu)(SignExt(ImmUnion.U.toImm32(fromDPs(exuIdx).bits.imm.get(31, ImmUnion.I.len)), XLEN))
     val isIntScheduler = exuParm.isIntExeUnit
@@ -186,7 +202,15 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readV0 = if (srcIdx < 3 && isReadVfRf) dataSource.readV0 else false.B
       val readRegOH = exuInput.bits.dataSources(srcIdx).readRegOH
       val readRegCache = if (exuParm.needReadRegCache) exuInput.bits.dataSources(srcIdx).readRegCache else false.B
-      val readImm = if (exuParm.immType.nonEmpty && srcIdx == 1 || exuParm.hasLoadExu && srcIdx == 0) exuInput.bits.dataSources(srcIdx).readImm else false.B
+      val readImm = {
+        if (exuParm.issueBlockParam.inVfSchd)
+          exuInput.bits.dataSources(srcIdx).readImm
+        else if (exuParm.immType.nonEmpty && srcIdx == 1 || exuParm.hasLoadExu && srcIdx == 0)
+          exuInput.bits.dataSources(srcIdx).readImm
+        else {
+          false.B
+        }
+      }
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
       println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
       val readBypass2 = if (bypass2ExuIdx >= 0) dataSource.readBypass2 else false.B
@@ -211,10 +235,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
           readBypass2    -> (if (bypass2ExuIdx >= 0) Mux1H(bypass2ValidVec3(bypass2ExuIdx)(srcIdx), bypass2DataVec) else 0.U),
           readZero       -> 0.U,
-          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.v0.get else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
-          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0.get else if (exuParm.aluNeedPc) immALU else imm)
+          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0.get else if (exuParm.aluNeedPc) immALU else if (vecImm.nonEmpty) vecImm.get else imm)
         )
       )
       src := originSrc
@@ -234,9 +257,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       dontTouch(immBJU)
       dontTouch(immCsrFence)
     }
-    exuInput.bits.copySrc.get.map( copysrc =>
+    exuInput.bits.copySrc.foreach(_.map(copysrc =>
       copysrc.zip(exuInput.bits.src).foreach{ case(copy, src) => copy := src}
-    )
+    ))
 
     if (exuParm.needVPUCtrl) {
       val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
@@ -252,9 +275,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         when (maskWakeUpFu) {
           val maskIn = exuInput.bits.v0.get
           val vm = vpu.vm
-          val needClearMask = isViAlu & VialuFixType.needClearMask(fuOpType)
           srcMask := MuxCase(maskIn, Seq(
-            needClearMask -> allMaskFalse,
             vm -> allMaskTrue,
           ))
         }
@@ -279,12 +300,12 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       when (isViAlu) {
         val isExt = exuInput.bits.vpu.get.isExt
         val vialuCtrl = exuInput.bits.vialuCtrl.get
-        val widenVs2 = VialuFixType.fmtIsVVW(fuOpType) & VialuFixType.isAddSub(fuOpType)
-        val widen = (VialuFixType.fmtIsWVW(fuOpType) | VialuFixType.fmtIsVVW(fuOpType)) & VialuFixType.isAddSub(fuOpType)
-        val isVf2 = VialuFixType.fmtIsVF2(fuOpType) & isExt
-        val isVf4 = VialuFixType.fmtIsVF4(fuOpType) & isExt
-        val isVf8 = VialuFixType.fmtIsVF8(fuOpType) & isExt
-        val isAddCarry = VialuFixType.isAddCarry(fuOpType)
+        val widenVs2 = VIAluOpcodes.isWidenVs2(fuOpType)
+        val widen = VIAluOpcodes.isWiden(fuOpType)
+        val isVf2 = VIAluOpcodes.isExt2(fuOpType)
+        val isVf4 = VIAluOpcodes.isExt4(fuOpType)
+        val isVf8 = VIAluOpcodes.isExt8(fuOpType)
+        val isAddCarry = VIAluOpcodes.isAddCarry(fuOpType)
 
         vialuCtrl.widenVs2 := widenVs2
         vialuCtrl.widen := widen

@@ -153,55 +153,6 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
   val elemIdxInsideVd     = UInt(elemIdxBits.W) // only use in unit-stride
-
-  // TODO: remove this after unifying interface with vssplit
-  def toVectorLoadIn(): VectorLoadIn = {
-    require(!isVStore)
-    val out = Wire(new VectorLoadIn())
-    out.entrance := LoadEntrance.vectorIssue.U
-    out.accessType.instrType := InstrType.vector.U
-    out.accessType.pftType := DontCare
-    out.accessType.pftCoh := DontCare
-    out.uop := uop
-    out.vaddr := vaddr
-    out.fullva := vaddr
-    out.size := alignedType
-    out.mask := mask
-    out.elemIdx.get := elemIdx
-    out.mbIndex.get := mBIndex
-    out.regOffset.get := reg_offset
-    out.elemIdxInsideVd.get := elemIdxInsideVd
-    out.vecBaseVaddr.get := DontCare
-    out.vecVaddrOffset.get := DontCare
-    out.vecTriggerMask.get := DontCare
-    out.hasROBEntry := true.B
-    out.missDbUpdated := false.B
-    out.occupySource := DontCare
-    out
-  }
-
-  def toVectorStoreIn(): VectorStoreIn = {
-    require(isVStore)
-    val out = Wire(new VectorStoreIn())
-    out.entrance := StoreEntrance.vectorIssue.U
-    out.accessType.instrType := InstrType.vector.U
-    out.accessType.isCbo := false.B
-    out.accessType.isCboNoZero := false.B
-    out.uop := uop
-    out.vaddr := vaddr
-    out.fullva := vaddr
-    out.size := alignedType
-    out.mask := mask
-    out.isFirstIssue := true.B // TODO: In new vector implement, modifications are required
-
-    out.vecBaseVaddr.get := basevaddr
-    out.usSecondInv.get := usSecondInv
-    out.elemIdx.get := elemIdx
-    out.mbIndex.get := mBIndex
-    out.vecTriggerMask.get := 0.U
-    out.vecVaddrOffset.get := 0.U
-    out
-  }
 }
 
 object VecFeedbacks {
@@ -266,7 +217,7 @@ class storeMisaignIO(implicit p: Parameters) extends Bundle{
 
 class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
+  val in                  = Flipped(Decoupled(new ExuInput(param))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new StoreQueueDataWrite))
@@ -275,7 +226,7 @@ class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parame
 
 class VSplitPipelineIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
+  val in                  = Flipped(Decoupled(new ExuInput(param)))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
 }
@@ -305,7 +256,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 }
 
 class VSegmentUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
-  val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
+  val in                  = Flipped(Decoupled(new ExuInput(param))) // from iq
   val uopwriteback        = DecoupledIO(new ExuOutput(param)) // writeback data
   val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
@@ -325,7 +276,7 @@ class VSegmentUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends V
 
 class VfofDataBuffIO(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))))
+  val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(param))))
   val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExceptionInfo)))
 
   val uopWriteback        = DecoupledIO(new ExuOutput(param))

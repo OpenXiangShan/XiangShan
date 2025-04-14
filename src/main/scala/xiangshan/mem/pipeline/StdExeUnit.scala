@@ -27,7 +27,7 @@ import xiangshan.backend.fu.FuType
 
 class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
-  val in = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
+  val in = Flipped(DecoupledIO(new ExuInput(param)))
   val vstdIn = Flipped(ValidIO(new StoreQueueDataWrite))
   val out = new MemWriteBack(param) // std -> wb
   val atomicData = Valid(new ExuInput(param)) // std -> atomicsUnit

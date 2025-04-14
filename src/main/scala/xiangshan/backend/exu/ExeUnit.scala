@@ -34,7 +34,7 @@ import xiangshan._
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
-  val in = Flipped(DecoupledIO(new NewExuInput(params, hasCopySrc = true)))
+  val in = Flipped(DecoupledIO(new NewExuInput(params)))
   val out = DecoupledIO(new NewExuOutput(params))
   val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(DecoupledIO(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
@@ -190,7 +190,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.ctrl.vlWen.get)
       sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.ctrl.flushPipe.get)
       sink.bits.ctrl.isRVC       .foreach(x => x := source.bits.ctrl.isRVC.get)
-      sink.bits.ctrl.rasAction   .foreach(x=> x  := source.bits.ctrl.rasAction.get)
+      sink.bits.ctrl.rasAction   .foreach(x => x := source.bits.ctrl.rasAction.get)
       sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ctrl.ftqIdx.get)
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ctrl.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.ctrl.predictInfo.get)
@@ -200,6 +200,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+      sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
       sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
   }
@@ -236,6 +237,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
       sink.vpu.foreach(x => x.maskVecGen := 0.U)
       sink.vialuCtrl.foreach(x => x := 0.U.asTypeOf(new VIAluCtrlSignals))
+      sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
@@ -249,9 +251,6 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   funcUnits.zip(exuParams.idxCopySrc).map{ case(fu, idx) =>
     (fu.io.in.bits.data.src).zip(io.in.bits.data.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
-    if(fu.cfg.srcNeedCopy) {
-      (fu.io.in.bits.data.src).zip(io.in.bits.copy.copySrc.get(idx)).foreach { case(fuSrc, copySrc) => fuSrc := copySrc }
-    }
     fu.io.in.bits.data.v0.foreach(_ := io.in.bits.data.v0.get)
     fu.io.in.bits.data.vl.foreach(_ := io.in.bits.data.vl.get)
   }
