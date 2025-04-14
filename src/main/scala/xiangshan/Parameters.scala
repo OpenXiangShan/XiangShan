@@ -31,7 +31,7 @@ import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, Ras, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
@@ -127,7 +127,7 @@ case class XSCoreParameters
     val ftb = Module(new FTB()(p))
     val uftb = Module(new FauFTB()(p))
     val tage = Module(new Tage_SC()(p))
-    val ras = Module(new RAS()(p))
+    val ras = Module(new Ras()(p))
     val ittage = Module(new ITTage()(p))
     val preds = Seq(uftb, tage, ftb, ittage, ras)
     preds.map(_.io := DontCare)
