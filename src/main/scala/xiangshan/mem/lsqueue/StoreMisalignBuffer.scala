@@ -253,6 +253,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
 
     is (s_resp) {
+      val needDelay = WireInit(false.B)
+
       when (io.splitStoreResp.valid) {
         val clearOh = UIntToOH(curPtr)
         when (hasException || isUncache) {
@@ -267,9 +269,15 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
-          // got result, goto calculate data and control sq
-          bufferState := s_wb
+          // got result, goto calculate data and control sq.
+          // Wait a beat to get  misalign writeback aligned raw rollback.
+          needDelay := true.B
+          bufferState := s_resp
         }
+      }
+
+      when (RegNextN(needDelay, RAWTotalDelayCycles)) {
+        bufferState := s_wb
       }
     }
 

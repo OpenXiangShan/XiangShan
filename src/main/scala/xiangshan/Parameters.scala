@@ -773,6 +773,8 @@ trait HasXSParameter {
   def LoadQueueRARSize = coreParams.LoadQueueRARSize
   def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
   def RollbackGroupSize = coreParams.RollbackGroupSize
+  val RAWlgSelectGroupSize = log2Ceil(RollbackGroupSize)
+  val RAWTotalDelayCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / RAWlgSelectGroupSize).toInt + 1 - 2
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
