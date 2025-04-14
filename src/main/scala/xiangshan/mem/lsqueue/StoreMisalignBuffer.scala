@@ -267,8 +267,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
-          // got result, goto calculate data and control sq
-          bufferState := s_wb
+          // got result, goto calculate data and control sq.
+          // Wait a beat to get  misalign writeback aligned raw rollback.
+          when (RegNextN(io.splitStoreResp.valid, RAWTotalDelayCycles)) {
+            bufferState := s_wb
+          } .otherwise {
+            bufferState := s_resp
+          }
+
         }
       }
     }

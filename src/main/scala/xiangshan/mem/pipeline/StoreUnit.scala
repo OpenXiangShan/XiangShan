@@ -568,9 +568,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   .elsewhen (s3_kill) { s3_valid := false.B }
 
   // wb: writeback
-  val SelectGroupSize   = RollbackGroupSize
-  val lgSelectGroupSize = log2Ceil(SelectGroupSize)
-  val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
 
   s3_out                 := DontCare
   s3_out.uop             := s3_in.uop
@@ -586,16 +583,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // --------------------------------------------------------------------------------
   // stage x
   // --------------------------------------------------------------------------------
-  // delay TotalSelectCycles - 2 cycle(s)
-  val TotalDelayCycles = TotalSelectCycles - 2
-  val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new VecMemExuOutput(isVector = true)))
-  val sx_in_vec = Wire(Vec(TotalDelayCycles +1, Bool()))
+  val sx_valid = Wire(Vec(RAWTotalDelayCycles + 1, Bool()))
+  val sx_ready = Wire(Vec(RAWTotalDelayCycles + 1, Bool()))
+  val sx_in    = Wire(Vec(RAWTotalDelayCycles + 1, new VecMemExuOutput(isVector = true)))
+  val sx_in_vec = Wire(Vec(RAWTotalDelayCycles +1, Bool()))
 
   // backward ready signal
   s3_ready := sx_ready.head
-  for (i <- 0 until TotalDelayCycles + 1) {
+  for (i <- 0 until RAWTotalDelayCycles + 1) {
     if (i == 0) {
       sx_valid(i)          := s3_valid
       sx_in(i).output      := s3_out
@@ -614,14 +609,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
       sx_in(i).hasException := s3_exception
       sx_in_vec(i)         := s3_in.isvec
-      sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
-      val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
+      val cur_can_go = (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
       val prev_fire  = sx_valid(i-1) && !sx_in(i-1).output.uop.robIdx.needFlush(io.redirect) && sx_ready(i)
 
-      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == RAWTotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
