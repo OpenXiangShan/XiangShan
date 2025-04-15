@@ -32,6 +32,7 @@ import xiangshan.backend.Bundles.DecodedInst
 import xiangshan.XSModule
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode.EspressoMinimizer
 import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan._
 import xiangshan.backend.fu.FuType
@@ -103,7 +104,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   }
 
   val default = Seq.fill(3 * RenameWidth)(BitPat.N())
-  val decoder = DecodeLogic(VecInit(extendedCanCompress).asUInt, default, compressTable)
+  val decoder = DecodeLogic(VecInit(extendedCanCompress).asUInt, default, compressTable, minimizer = EspressoMinimizer)
   (io.out.needRobFlags ++ io.out.instrSizes ++ io.out.masks).zip(decoder).foreach {
     case (sink, source) => sink := source
   }
