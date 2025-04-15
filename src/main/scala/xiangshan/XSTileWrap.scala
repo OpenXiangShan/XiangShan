@@ -28,6 +28,7 @@ import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
+import utils.PowerSwitchBuffer
 
 // This module is used for XSNoCTop for async time domain and divide different
 // voltage domain. Everything in this module should be in the core clock domain
@@ -123,7 +124,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     tile.module.io.nodeID.foreach(_ := io.nodeID.get)
     io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
     io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
-    io.pwrdown_ack_n.foreach { _ := true.B }
+    io.pwrdown_ack_n.foreach { _ := DontCare }
+    io.pwrdown_ack_n zip io.pwrdown_req_n foreach { case (ack, req) =>
+      val powerSwitchBuffer = Module(new PowerSwitchBuffer)
+      ack := powerSwitchBuffer.ack
+      powerSwitchBuffer.sleep := req
+    }
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
@@ -162,6 +168,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     dontTouch(io.hartId)
     dontTouch(io.msiInfo)
+    io.pwrdown_req_n.foreach(dontTouch(_))
+    io.pwrdown_ack_n.foreach(dontTouch(_))
+    io.iso_en.foreach(dontTouch(_))
   }
   lazy val module = new XSTileWrapImp(this)
 }
