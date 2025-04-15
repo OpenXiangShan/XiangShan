@@ -71,8 +71,8 @@ case class SoCParameters
     PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0)
   ),
-  TIMERRange: AddressSet = AddressSet(0x5B0100000L, TIMERConsts.size - 1),
-  SYSCNTRange: AddressSet = AddressSet(0x38000000L, SYSCNTConsts.size - 1),
+  TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
+  SYSCNTRange: AddressSet = AddressSet(0x38008000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
@@ -200,6 +200,7 @@ trait HasPeripheralRanges {
   private def mmpma = pmParams.mmpma
 
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
+    "TIMER" -> soc.TIMERRange,
     "SYSCNT" -> soc.SYSCNTRange,
     "BEU"   -> soc.BEURange,
     "PLIC"  -> soc.PLICRange,

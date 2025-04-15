@@ -16,16 +16,11 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 
 object SYSCNTConsts {
-  def msipOffset(hart:    Int) = hart * msipBytes
-  def timecmpOffset(hart: Int) = 0x4000 + hart * timecmpBytes
-  def timeOffset   = 0xbff8
-  def incOffset    = 0xf000
-  def msipBytes    = 4
-  def timecmpBytes = 8
-  def size         = 0x10000
+
+  def timeOffset   = 0x3ff8//0xbff8 base addr is 0x8000
+  def incOffset    = 0x7000
+  def size         = 0x8000
   def timeWidth    = 64
-  def ipiWidth     = 32
-  def ints         = 2
 }
 
 case class SYSCNTParams(baseAddress: BigInt = 0x02000000, intStages: Int = 0) {

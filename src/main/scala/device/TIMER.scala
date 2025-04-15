@@ -16,10 +16,10 @@ object TIMERConsts
 {
   def msipOffset(hart: Int) = hart * msipBytes
   def timecmpOffset(hart: Int) = 0x4000 + hart * timecmpBytes
-  def timeOffset = 0xbff8
+  def timeOffset = 0x7ff8//not use by simtop
   def msipBytes = 4
   def timecmpBytes = 8
-  def size = 0x10000
+  def size = 0x8000
   def timeWidth = 64
   def ipiWidth = 32
   def ints = 2
