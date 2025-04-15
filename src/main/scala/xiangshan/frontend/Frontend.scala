@@ -482,6 +482,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
         sig.ram_aux_clk  := dft.ram_aux_clk
         sig.ram_aux_ckbp := dft.ram_aux_ckbp
         sig.ram_mcp_hold := dft.ram_mcp_hold
+        sig.cgen         := dft.cgen
       }
       if (hasSramCtl) {
         sig.ram_ctl := RegNext(dft.ram_ctl)
