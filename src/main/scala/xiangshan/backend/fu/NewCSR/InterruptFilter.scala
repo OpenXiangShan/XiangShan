@@ -53,9 +53,6 @@ class InterruptFilter extends Module {
   val mtopiIsNotZero: Bool = (mip & mie & (~mideleg).asUInt) =/= 0.U
   val stopiIsNotZero: Bool = (hsip & hsie & (~hideleg).asUInt) =/= 0.U
 
-  val mIpriosIsZero : Bool = miprios  === 0.U
-  val hsIpriosIsZero: Bool = hsiprios === 0.U
-
   val NoSEIMask = (~(BigInt(1) << InterruptNO.SEI).U(64.W)).asUInt
   val mtopigather = mip & mie & (~mideleg).asUInt
   val hstopigather = hsip & hsie & (~hideleg).asUInt
@@ -261,33 +258,23 @@ class InterruptFilter extends Module {
 
   // update mtopi
   io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
-  io.out.mtopi.IPRIO := Mux(
-    mtopiIsNotZero,
-    Mux(
-      mIpriosIsZero,
-      1.U,
-      Mux1H(Seq(
-        (!mipriosRegTmp.isZero && !mipriosRegTmp.greaterThan255) -> mipriosRegTmp.prioNum,
-        (mipriosRegTmp.greaterThan255 || mipriosRegTmp.isZero && mIidDefaultPrioLowMEI) -> 255.U,
-        (mipriosRegTmp.isZero && mIidDefaultPrioHighMEI) -> 0.U,
-      ))
-    ),
+  io.out.mtopi.IPRIO := Mux(mtopiIsNotZero,
+    Mux1H(Seq(
+      (!mipriosRegTmp.isZero && !mipriosRegTmp.greaterThan255) -> mipriosRegTmp.prioNum,
+      (mipriosRegTmp.greaterThan255 || mipriosRegTmp.isZero && mIidDefaultPrioLowMEI) -> 255.U,
+      (mipriosRegTmp.isZero && mIidDefaultPrioHighMEI) -> 0.U,
+    )),
     0.U
   )
 
   // upadte stopi
   io.out.stopi.IID := Mux(stopiIsNotZero, hsIidNum, 0.U)
-  io.out.stopi.IPRIO := Mux(
-    stopiIsNotZero,
-    Mux(
-      hsIpriosIsZero,
-      1.U,
-      Mux1H(Seq(
-        (!hsipriosRegTmp.isZero && !hsipriosRegTmp.greaterThan255) -> hsipriosRegTmp.prioNum,
-        (hsipriosRegTmp.greaterThan255 || hsipriosRegTmp.isZero && hsIidDefaultPrioLowSEI) -> 255.U,
-        (hsipriosRegTmp.isZero && hsIidDefaultPrioHighSEI) -> 0.U,
-      ))
-    ),
+  io.out.stopi.IPRIO := Mux(stopiIsNotZero,
+    Mux1H(Seq(
+      (!hsipriosRegTmp.isZero && !hsipriosRegTmp.greaterThan255) -> hsipriosRegTmp.prioNum,
+      (hsipriosRegTmp.greaterThan255 || hsipriosRegTmp.isZero && hsIidDefaultPrioLowSEI) -> 255.U,
+      (hsipriosRegTmp.isZero && hsIidDefaultPrioHighSEI) -> 0.U,
+    )),
     0.U
   )
 
