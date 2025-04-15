@@ -98,6 +98,7 @@ jobs:
             --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --resume \
             -L "$NODE_SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
+          find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
 
       - name: Report SPEC CPU2006 score
         if: steps.determine_run.outputs.run_biweekly == 'true'
@@ -135,6 +136,7 @@ jobs:
             echo "### :sos: Failed Tests" >> $GITHUB_STEP_SUMMARY  
             echo '```' >> $GITHUB_STEP_SUMMARY
             cat $SPEC_DIR/err_ckps.json >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
