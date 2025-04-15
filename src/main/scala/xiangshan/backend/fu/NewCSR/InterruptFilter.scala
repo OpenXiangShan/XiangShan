@@ -379,7 +379,7 @@ class InterruptFilter extends Module {
   val irToHS = !mIRNotZero && hsIRNotZero
   val irToVS = !mIRNotZero && !hsIRNotZero && vsIRNotZero
 
-  val mIRVec  = Mux(mIRNotZero, mIRVecTmp, 0.U)
+  val mIRVec  = mIRVecTmp
   val hsIRVec = Mux(irToHS, hsIRVecTmp, 0.U)
   val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecTmp, 64), 0.U)
 
