@@ -281,7 +281,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         BitPat.N((log2Ceil(RenameWidth + 1))))
     )
   }
-
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
     commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U + rawInfo(i).crossFtqCommit

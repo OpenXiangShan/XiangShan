@@ -322,13 +322,13 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
       when (hasRabWrite) {
         sWaitRab_rabWriteOffset := sWaitRab_rabWriteOffset +
           PriorityMux((0 until RabCommitWidth).map(
-            idx => i.fromRab.logicPhyRegMap.reverse(idx).valid -> (6 - idx).U
+            idx => i.fromRab.logicPhyRegMap.reverse(idx).valid -> (RabCommitWidth - idx).U
           ))
       }
       when (hasRatWrite) {
         sWaitRab_ratWriteOffset := sWaitRab_ratWriteOffset +
           PriorityMux((0 until RabCommitWidth).map(
-            idx => regWriteFromRatVec.reverse(idx).valid -> (6 - idx).U
+            idx => regWriteFromRatVec.reverse(idx).valid -> (RabCommitWidth - idx).U
           ))
       }
 

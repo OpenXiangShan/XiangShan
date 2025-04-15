@@ -210,7 +210,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
-  private val numOut = Wire(UInt(log2Ceil(DecodeWidth).W))
+  private val numOut = Wire(UInt(DecodeWidth.U.getWidth.W))
   private val numDeq = numOut
 
   // counter current number of valid
@@ -234,7 +234,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   }.otherwise {
     numOut := 0.U
   }
-  val numBypass = Wire(UInt(log2Ceil(DecodeWidth).W))
+  val numBypass = Wire(UInt(DecodeWidth.U.getWidth.W))
   // when using bypass, bypassed entries do not enqueue
   when(useBypass) {
     when(numFromFetch >= DecodeWidth.U) {
@@ -329,9 +329,9 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Dequeue
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  val outputEntriesValidNumNext = Wire(UInt(log2Ceil(DecodeWidth).W))
+  val outputEntriesValidNumNext = Wire(UInt(DecodeWidth.U.getWidth.W))
   XSError(outputEntriesValidNumNext > DecodeWidth.U, "Ibuffer: outputEntriesValidNumNext > DecodeWidth.U")
-  val validVec = UIntToMask(outputEntriesValidNumNext(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
+  val validVec = UIntToMask(outputEntriesValidNumNext(DecodeWidth.U.getWidth - 1, 0), DecodeWidth)
   when(decodeCanAccept) {
     outputEntriesValidNumNext := Mux(useBypass, numBypass, numDeq)
   }.elsewhen(outputEntriesIsNotFull) {
@@ -359,8 +359,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       val validIdx = Mux(
         idx.asUInt >= deqBankPtr.value,
         idx.asUInt - deqBankPtr.value,
-        ((idx + IBufNBank).asUInt - deqBankPtr.value)(log2Ceil(IBufNBank) - 1, 0)
-      )(log2Ceil(DecodeWidth) - 1, 0)
+        ((idx + IBufNBank).asUInt - deqBankPtr.value)(DecodeWidth.U.getWidth - 1, 0)
+      )(DecodeWidth.U.getWidth - 1, 0)
       val bankAdvance = numOut > validIdx
       ptrNext := Mux(bankAdvance, ptr + 1.U, ptr)
     }

@@ -146,12 +146,12 @@ case class XSCoreParameters
   ICacheForceMetaECCError: Boolean = false,
   ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
-  IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
-  DecodeWidth: Int = 6,
-  RenameWidth: Int = 6,
+  IBufNBank: Int = 8, // IBuffer bank amount, should divide IBufSize
+  DecodeWidth: Int = 8,
+  RenameWidth: Int = 8,
   CommitWidth: Int = 8,
   RobCommitWidth: Int = 8,
-  RabCommitWidth: Int = 6,
+  RabCommitWidth: Int = 8,
   MaxUopSize: Int = 65,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
@@ -904,9 +904,9 @@ trait HasXSParameter {
   def PrivWidth              = coreParams.traceParams.PrivWidth
   def IaddrWidth             = coreParams.traceParams.IaddrWidth
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
-  def IretireWidthEncoded    = log2Up((2 + RenameWidth + 1) * RenameWidth / 2) // 2 + 3 + ... + (RenameWidth + 1)
-  def IretireWidthCommited   = log2Up(RenameWidth * 2)
-  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IretireWidthEncoded    = ((2 + RenameWidth + 1) * RenameWidth / 2).U.getWidth // 2 + 3 + ... + (RenameWidth + 1)
+  def IretireWidthCommited   = (RenameWidth * 2).U.getWidth
+  def IretireWidthCompressed = (RenameWidth * CommitWidth * 2).U.getWidth
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
   def hasMbist               = coreParams.hasMbist
