@@ -49,6 +49,41 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val stallReason          = new StallReasonIO(DecodeWidth)
 }
 
+object IBufferExceptionType extends EnumUInt(8) {
+  def None:        UInt = "b000".U(width.W)
+  def NonCrossPF:  UInt = "b001".U(width.W)
+  def NonCrossGPF: UInt = "b010".U(width.W)
+  def NonCrossAF:  UInt = "b011".U(width.W)
+  def RvcII:       UInt = "b100".U(width.W) // illegal instruction
+  def CrossPF:     UInt = "b101".U(width.W)
+  def CrossGPF:    UInt = "b110".U(width.W)
+  def CrossAF:     UInt = "b111".U(width.W)
+
+  def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: ExceptionType, crossPage: Bool, rvcIll: Bool): UInt =
+    MuxCase(
+      0.U,
+      Seq(
+        crossPage              -> Cat(1.U(1.W), fetchExcp.value),
+        fetchExcp.hasException -> fetchExcp.value,
+        rvcIll                 -> this.RvcII
+      )
+    )
+
+  def isRVCII(uint: UInt): Bool = {
+    this.checkInputWidth(uint)
+    uint(2) && uint(1, 0) === 0.U
+  }
+
+  def isCrossPage(uint: UInt): Bool = {
+    this.checkInputWidth(uint)
+    uint(2) && uint(1, 0) =/= 0.U
+  }
+
+  def isPF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossPF(1, 0)
+  def isGPF(uint: UInt): Bool = uint(1, 0) === this.NonCrossGPF(1, 0)
+  def isAF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossAF(1, 0)
+}
+
 class IBufEntry(implicit p: Parameters) extends XSBundle {
   val inst             = UInt(32.W)
   val pc               = PrunedAddr(VAddrBits)
@@ -108,47 +143,6 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.isLastInFtqEntry                  := isLastInFtqEntry
     cf.debug_seqNum                      := debug_seqNum
     cf
-  }
-
-  object IBufferExceptionType extends EnumUInt(8) {
-    def None:        UInt = "b000".U(width.W)
-    def NonCrossPF:  UInt = "b001".U(width.W)
-    def NonCrossGPF: UInt = "b010".U(width.W)
-    def NonCrossAF:  UInt = "b011".U(width.W)
-    def RvcII:       UInt = "b100".U(width.W) // illegal instruction
-    def CrossPF:     UInt = "b101".U(width.W)
-    def CrossGPF:    UInt = "b110".U(width.W)
-    def CrossAF:     UInt = "b111".U(width.W)
-
-    def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: UInt, crossPage: Bool, rvcIll: Bool): UInt = {
-      require(
-        fetchExcp.getWidth == ExceptionType.width,
-        s"The width(${fetchExcp.getWidth}) of fetchExcp should be equal to " +
-          s"the width(${ExceptionType.width}) of frontend.ExceptionType."
-      )
-      MuxCase(
-        0.U,
-        Seq(
-          crossPage     -> Cat(1.U(1.W), fetchExcp),
-          fetchExcp.orR -> fetchExcp,
-          rvcIll        -> this.RvcII
-        )
-      )
-    }
-
-    def isRVCII(uint: UInt): Bool = {
-      this.checkInputWidth(uint)
-      uint(2) && uint(1, 0) === 0.U
-    }
-
-    def isCrossPage(uint: UInt): Bool = {
-      this.checkInputWidth(uint)
-      uint(2) && uint(1, 0) =/= 0.U
-    }
-
-    def isPF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossPF(1, 0)
-    def isGPF(uint: UInt): Bool = uint(1, 0) === this.NonCrossGPF(1, 0)
-    def isAF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossAF(1, 0)
   }
 }
 

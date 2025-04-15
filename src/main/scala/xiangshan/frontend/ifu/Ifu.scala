@@ -332,20 +332,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // FIXME: raise af if one fetch block crosses the cacheable/un-cacheable boundary, might not correct
   private val s2_mmioMismatchException = VecInit(Seq(
     ExceptionType.None, // mark the exception only on the second line
-    Mux(
-      // not double-line, skip check
-      !fromICache.bits.doubleline || (
+    ExceptionType(hasAf =
+      // if not double-line, skip check
+      fromICache.bits.doubleline && (
         // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-        fromICache.bits.pmpMmio(0) === fromICache.bits.pmpMmio(1) &&
-          fromICache.bits.itlbPbmt(0) === fromICache.bits.itlbPbmt(1)
-      ),
-      ExceptionType.None,
-      ExceptionType.Af
+        fromICache.bits.pmpMmio(0) =/= fromICache.bits.pmpMmio(1) ||
+          fromICache.bits.itlbPbmt(0) =/= fromICache.bits.itlbPbmt(1)
+      )
     )
   ))
 
   // merge exceptions
-  private val s2_exception = ExceptionType.merge(s2_exceptionIn, s2_mmioMismatchException)
+  private val s2_exception = VecInit((s2_exceptionIn zip s2_mmioMismatchException).map { case (in, m) => in || m })
 
   // we need only the first port, as the second is asked to be the same
   private val s2_pmpMmio  = fromICache.bits.pmpMmio(0)
@@ -454,7 +452,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
    */
   private val s2_crossPageExceptionVec = VecInit((0 until PredictWidth).map { i =>
     Mux(
-      isLastInLine(s2_pc(i)) && !s2_pd(i).isRVC && s2_doubleline && !ExceptionType.hasException(s2_exception(0)),
+      isLastInLine(s2_pc(i)) && !s2_pd(i).isRVC && s2_doubleline && s2_exception(0).isNone,
       s2_exception(1),
       ExceptionType.None
     )
@@ -580,7 +578,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val mmioState = RegInit(MmioFsmState.Idle)
 
   private val mmioData       = RegInit(VecInit(Seq.fill(2)(0.U(16.W))))
-  private val mmioException  = RegInit(0.U(ExceptionType.width.W))
+  private val mmioException  = RegInit(ExceptionType.None)
   private val mmioIsRvc      = RegInit(false.B)
   private val mmioHasResend  = RegInit(false.B)
   private val mmioResendAddr = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
@@ -607,7 +605,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // do mmio fetch only when pmp/pbmt shows it is a un-cacheable address and no exception occurs
   private val s3_reqIsMmio =
-    s3_valid && (s3_pmpMmio || Pbmt.isUncache(s3_itlbPbmt)) && !ExceptionType.hasException(s3_exception)
+    s3_valid && (s3_pmpMmio || Pbmt.isUncache(s3_itlbPbmt)) && s3_exception.map(_.isNone).reduce(_ && _)
   private val mmioCommit = VecInit(io.robCommits.map { commit =>
     commit.valid && commit.bits.ftqIdx === s3_ftqReq.ftqIdx && commit.bits.ftqOffset === 0.U
   }).asUInt.orR
@@ -682,9 +680,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResp) {
       when(fromUncache.fire) {
         val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
-        val exception = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
         // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
-        val needResend = !respIsRVC && s3_pAddr(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
+        val needResend = !respIsRVC && s3_pAddr(0)(2, 1) === 3.U && exception.isNone
         mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
         mmioException := exception
         mmioIsRvc     := respIsRVC
@@ -702,16 +700,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
       when(io.itlb.resp.fire) {
         // we are using a blocked tlb, so resp.fire must have !resp.bits.miss
         assert(!io.itlb.resp.bits.miss, "blocked mode iTLB miss when resp.fire")
-        val tlbException = ExceptionType.fromTlbResp(io.itlb.resp.bits)
+        val itlbException = ExceptionType.fromTlbResp(io.itlb.resp.bits)
         // if itlb re-check respond pbmt mismatch with previous check, must be access fault
-        val pbmtMismatchException = Mux(
-          io.itlb.resp.bits.pbmt(0) =/= s3_itlbPbmt,
-          ExceptionType.Af,
-          ExceptionType.None
-        )
-        val exception = ExceptionType.merge(tlbException, pbmtMismatchException)
+        val pbmtMismatchException = ExceptionType(hasAf = io.itlb.resp.bits.pbmt(0) =/= s3_itlbPbmt)
+        // merge, itlbException has higher priority
+        val exception = itlbException || pbmtMismatchException
         // if tlb has exception, abort checking pmp, just send instr & exception to iBuffer and wait for commit
-        mmioState := Mux(ExceptionType.hasException(exception), MmioFsmState.WaitCommit, MmioFsmState.SendPmp)
+        mmioState := Mux(exception.hasException, MmioFsmState.WaitCommit, MmioFsmState.SendPmp)
         // also save itlb response
         mmioException               := exception
         mmioResendAddr              := io.itlb.resp.bits.paddr(0)
@@ -721,16 +716,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
     }
 
     is(MmioFsmState.SendPmp) {
-      val pmpException = ExceptionType.fromPMPResp(io.pmp.resp)
+      val pmpException = ExceptionType.fromPmpResp(io.pmp.resp)
       // if pmp re-check respond mismatch with previous check, must be access fault
-      val mmioMismatchException = Mux(
-        io.pmp.resp.mmio =/= s3_pmpMmio,
-        ExceptionType.Af,
-        ExceptionType.None
-      )
-      val exception = ExceptionType.merge(pmpException, mmioMismatchException)
+      val mmioMismatchException = ExceptionType(hasAf = io.pmp.resp.mmio =/= s3_pmpMmio)
+      // merge, pmpException has higher priority
+      val exception = pmpException || mmioMismatchException
       // if pmp has exception, abort sending request, just send instr & exception to iBuffer and wait for commit
-      mmioState := Mux(ExceptionType.hasException(exception), MmioFsmState.WaitCommit, MmioFsmState.ResendReq)
+      mmioState := Mux(exception.hasException, MmioFsmState.WaitCommit, MmioFsmState.ResendReq)
       // also save pmp response
       mmioException := exception
     }
@@ -742,7 +734,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResendResp) {
       when(fromUncache.fire) {
         mmioState     := MmioFsmState.WaitCommit
-        mmioException := ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        mmioException := ExceptionType(hasAf = fromUncache.bits.corrupt)
         mmioData(1)   := fromUncache.bits.data(15, 0)
       }
     }
@@ -860,8 +852,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
     a.bits  := i.U
     a.valid := checkerOutStage1.fixedTaken(i) && !s3_reqIsMmio
   }
-  io.toIBuffer.bits.foldpc        := s3_foldPc
-  io.toIBuffer.bits.exceptionType := ExceptionType.merge(s3_exceptionVec, s3_crossPageExceptionVec)
+  io.toIBuffer.bits.foldpc := s3_foldPc
+  io.toIBuffer.bits.exceptionType := VecInit((s3_exceptionVec zip s3_crossPageExceptionVec).map { case (e, ce) =>
+    e || ce // merge, cross page fix has lower priority
+  })
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
@@ -869,7 +863,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     case 0 => s3_isBackendException
     case _ => false.B
   }
-  io.toIBuffer.bits.crossPageIPFFix := s3_crossPageExceptionVec.map(ExceptionType.hasException)
+  io.toIBuffer.bits.crossPageIPFFix := s3_crossPageExceptionVec.map(_.hasException)
   io.toIBuffer.bits.illegalInstr    := s3_ill
   io.toIBuffer.bits.triggered       := s3_triggered
 
@@ -899,8 +893,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // s3_gpAddr is valid iff gpf is detected
   io.toBackend.gpaddrMem_wen := s3_toIBufferValid && Mux(
     s3_reqIsMmio,
-    mmioException === ExceptionType.Gpf,
-    s3_exception.map(_ === ExceptionType.Gpf).reduce(_ || _)
+    mmioException.isGpf,
+    s3_exception.map(_.isGpf).reduce(_ || _)
   )
   io.toBackend.gpaddrMem_waddr        := s3_ftqReq.ftqIdx.value
   io.toBackend.gpaddrMem_wdata.gpaddr := Mux(s3_reqIsMmio, mmioResendGpAddr.toUInt, s3_gpAddr.toUInt)
@@ -951,7 +945,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     io.toIBuffer.bits.exceptionType(0) := mmioException
     // exception can happen in next page only when resend
-    io.toIBuffer.bits.crossPageIPFFix(0) := mmioHasResend && ExceptionType.hasException(mmioException)
+    io.toIBuffer.bits.crossPageIPFFix(0) := mmioHasResend && mmioException.hasException
     io.toIBuffer.bits.illegalInstr(0)    := mmioRvcExpander.io.ill
 
     io.toIBuffer.bits.enqEnable := s3_mmioRange.asUInt

@@ -160,10 +160,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val backendException  = RegInit(ExceptionType.None)
   val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
   when(fromBackendRedirect.valid) {
-    backendException := ExceptionType.fromOH(
-      has_pf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
-      has_gpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
-      has_af = fromBackendRedirect.bits.cfiUpdate.backendIAF
+    backendException := ExceptionType(
+      hasPf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
+      hasGpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
+      hasAf = fromBackendRedirect.bits.cfiUpdate.backendIAF
     )
     when(
       fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF ||
@@ -471,7 +471,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     copy.ftqIdx := ifuPtr
   }
   io.toICache.fetchReq.bits.isBackendException :=
-    ExceptionType.hasException(backendException) && backendPcFaultPtr === ifuPtr
+    backendException.hasException && backendPcFaultPtr === ifuPtr
 
   io.toICache.prefetchReq.valid := toPrefetchEntryToSend && pfPtr =/= bpuPtr
   io.toICache.prefetchReq.bits.req.fromFtqPcBundle(toPrefetchPcBundle)
