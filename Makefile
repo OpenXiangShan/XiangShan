@@ -18,6 +18,15 @@
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
 
+# if XSTopPrefix is specified in yaml, use it.
+ifneq ($(YAML_CONFIG),)
+HAS_PREFIX_FROM_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG))
+ifneq ($(HAS_PREFIX_FROM_YAML),)
+XSTOP_PREFIX_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG) | sed 's/XSTopPrefix *: *//' | tr -d \"\')
+override XSTOP_PREFIX = $(XSTOP_PREFIX_YAML)
+endif
+endif
+
 TOP = $(XSTOP_PREFIX)XSTop
 SIM_TOP = SimTop
 
@@ -107,14 +116,14 @@ ifneq ($(L3_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l3-cache-size $(L3_CACHE_SIZE)
 endif
 
-# configuration from yaml file
-ifneq ($(YAML_CONFIG),)
-COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
-endif
-
 # hart id bits
 ifneq ($(HART_ID_BITS),)
 COMMON_EXTRA_ARGS += --hartidbits $(HART_ID_BITS)
+endif
+
+# configuration from yaml file
+ifneq ($(YAML_CONFIG),)
+COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
 endif
 
 # public args sumup
