@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.HasPMParameters
 
@@ -35,7 +36,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   // write pmpCfg
   val cfgVec = WireInit(VecInit(Seq.fill(8)(0.U.asTypeOf(new PMPCfgBundle))))
   for (i <- 0 until (p(PMParameKey).NumPMP/8+1) by 2) {
-    when (wen && (addr === (0x3A0 + i).U)) {
+    when (wen && (addr === (CSRs.pmpcfg0 + i).U)) {
       for (j <- cfgVec.indices) {
         val cfgOldTmp = pmpEntry(8*i/2+j).cfg
         val cfgNewTmp = Wire(new PMPCfgBundle)
@@ -64,7 +65,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
     pmpAddrW(i) := pmpEntry(i).addr.ADDRESS.asUInt
     pmpAddrR(i) := pmpEntry(i).addr.ADDRESS.asUInt
     // write pmpAddr
-    when (wen && (addr === (0x3B0 + i).U)) {
+    when (wen && (addr === (CSRs.pmpaddr0 + i).U)) {
       if (i != (p(PMParameKey).NumPMP - 1)) {
         val addrNextLocked: Bool = PMPCfgLField.addrLocked(pmpEntry(i).cfg, pmpEntry(i + 1).cfg)
         pmpMask(i) := Mux(!addrNextLocked, pmpEntry(i).matchMask(wdata), pmpEntry(i).mask)
@@ -76,7 +77,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
       }
     }
     // read pmpAddr
-    when(ren && (addr === (0x3B0 + i).U)) {
+    when(ren && (addr === (CSRs.pmpaddr0 + i).U)) {
       pmpAddrR(i) := pmpEntry(i).readAddr(pmpEntry(i).cfg, pmpEntry(i).addr.ADDRESS.asUInt)
     }
   }
