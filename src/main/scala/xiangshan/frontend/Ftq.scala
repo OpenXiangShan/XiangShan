@@ -568,13 +568,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
   // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
   // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
-  val backendException  = RegInit(ExceptionType.none)
+  val backendException  = RegInit(ExceptionType.None)
   val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
   when(fromBackendRedirect.valid) {
-    backendException := ExceptionType.fromOH(
-      has_pf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
-      has_gpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
-      has_af = fromBackendRedirect.bits.cfiUpdate.backendIAF
+    backendException := ExceptionType(
+      hasPf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
+      hasGpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
+      hasAf = fromBackendRedirect.bits.cfiUpdate.backendIAF
     )
     when(
       fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF ||
@@ -583,7 +583,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       backendPcFaultPtr := ifuWbPtr_write
     }
   }.elsewhen(ifuWbPtr =/= backendPcFaultPtr) {
-    backendException := ExceptionType.none
+    backendException := ExceptionType.None
   }
 
   // **********************************************************************
@@ -879,7 +879,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     copy.ftqIdx := ifuPtr
   }
   io.toICache.fetchReq.bits.isBackendException :=
-    ExceptionType.hasException(backendException) && backendPcFaultPtr === ifuPtr
+    backendException.hasException && backendPcFaultPtr === ifuPtr
 
   io.toICache.prefetchReq.valid := toPrefetchEntryToSend && pfPtr =/= bpuPtr
   io.toICache.prefetchReq.bits.req.fromFtqPcBundle(toPrefetchPcBundle)
@@ -887,7 +887,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toICache.prefetchReq.bits.backendException := Mux(
     backendPcFaultPtr === pfPtr,
     backendException,
-    ExceptionType.none
+    ExceptionType.None
   )
   // io.toICache.fetchReq.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.fetchReq.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>

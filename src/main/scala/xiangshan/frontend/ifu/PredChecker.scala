@@ -139,14 +139,14 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   io.resp.stage2Out.faultType.zipWithIndex.foreach { case (faultType, i) =>
     faultType := MuxCase(
-      PreDecodeFaultType.noFault,
+      PreDecodeFaultType.NoFault,
       Seq(
-        jalFaultVecNext(i)  -> PreDecodeFaultType.jalFault,
-        jalrFaultVecNext(i) -> PreDecodeFaultType.jalrFault,
-        retFaultVecNext(i)  -> PreDecodeFaultType.retFault,
-        targetFault(i)      -> PreDecodeFaultType.targetFault,
-        notCFITakenNext(i)  -> PreDecodeFaultType.notCfiFault,
-        invalidTakenNext(i) -> PreDecodeFaultType.invalidTaken
+        jalFaultVecNext(i)  -> PreDecodeFaultType.JalFault,
+        jalrFaultVecNext(i) -> PreDecodeFaultType.JalrFault,
+        retFaultVecNext(i)  -> PreDecodeFaultType.RetFault,
+        targetFault(i)      -> PreDecodeFaultType.TargetFault,
+        notCFITakenNext(i)  -> PreDecodeFaultType.NotCfiFault,
+        invalidTakenNext(i) -> PreDecodeFaultType.InvalidTaken
       )
     )
   }
