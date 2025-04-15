@@ -906,8 +906,8 @@ trait HasXSParameter {
   def PrivWidth              = coreParams.traceParams.PrivWidth
   def IaddrWidth             = coreParams.traceParams.IaddrWidth
   def ItypeWidth             = coreParams.traceParams.ItypeWidth
-  def IretireWidthInPipe     = log2Up(RenameWidth * 2)
-  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2)
+  def IretireWidthInPipe     = log2Up(RenameWidth * 2 + 1)
+  def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2 + 1)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
   def hasMbist               = coreParams.hasMbist

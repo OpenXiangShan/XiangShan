@@ -149,7 +149,7 @@ trait HasSoCParameter {
   val TracePrivWidth              = tiles.head.traceParams.PrivWidth
   val TraceIaddrWidth             = tiles.head.traceParams.IaddrWidth
   val TraceItypeWidth             = tiles.head.traceParams.ItypeWidth
-  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2)
+  val TraceIretireWidthCompressed = log2Up(tiles.head.RenameWidth * tiles.head.CommitWidth * 2 + 1)
   val TraceIlastsizeWidth         = tiles.head.traceParams.IlastsizeWidth
 
   // L3 configurations
