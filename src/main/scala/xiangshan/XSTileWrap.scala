@@ -18,6 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import device.{TIMER, TIMERParams, TimeAsync}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -41,12 +42,15 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val tile = LazyModule(new XSTile())
 
   // interrupts sync
-  val clintIntNode = IntIdentityNode()
+  val SeperateTLsync = SeperateTLBus && (!EnableSeperateTLAsync)
+  val clintIntNode = Option.when(!SeperateTLsync)(IntIdentityNode())
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
-  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
+  //instance clint timer
+  val clint = Option.when(SeperateTLsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
+  tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode.getOrElse(clint.get.intnode)
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
@@ -55,12 +59,15 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   // seperate TL bus
   println(s"SeperateTLBus = $SeperateTLBus")
   println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
+  val tlXbar = Option.when(SeperateTLsync)(TLXbar())
+  tlXbar.map(_ := tile.sep_tl_opt.get) // TLXbar node in connect with tile master
+  clint.map(_.node := tlXbar.get) //TLXbar node out connnect with timer mmio
   // asynchronous bridge source node
   val tlAsyncSourceOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TLAsyncCrossingSource()))
   tlAsyncSourceOpt.foreach(_.node := tile.sep_tl_opt.get)
   // synchronous source node
-  val tlSyncSourceOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
-  tlSyncSourceOpt.foreach(_ := tile.sep_tl_opt.get)
+  val tlSyncSourceOpt = Option.when(SeperateTLsync)(TLTempNode())
+  tlSyncSourceOpt.foreach(_ := tlXbar.get)
 
   class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     val clock = IO(Input(Clock()))
@@ -87,10 +94,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         case None => new PortIO
       }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
-      val clintTime = EnableClintAsyncBridge match {
-        case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
-        case None => Input(ValidIO(UInt(64.W)))
-      }
+      val clintTime = Input(ValidIO(UInt(64.W)))
       val sramTest = new Bundle() {
         val mbist      = Option.when(hasMbist)(Input(new SramMbistBundle))
         val mbistReset = Option.when(hasMbist)(Input(new DFTResetSignals()))
@@ -129,16 +133,16 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
 
     // CLINT Async Queue Sink
     EnableClintAsyncBridge match {
-      case Some(param) =>
-        val sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
-        sink.io.async <> io.clintTime
-        sink.io.deq.ready := true.B
-        tile.module.io.clintTime.valid := sink.io.deq.valid
-        tile.module.io.clintTime.bits := sink.io.deq.bits
+      case Some(params) =>
+        val sink = withClockAndReset(clock, reset)(Module(new TimeAsync()))
+        sink.io.i_time <> io.clintTime
+        tile.module.io.clintTime := sink.io.o_time
       case None =>
         tile.module.io.clintTime := io.clintTime
     }
-
+    // instance clint timer Module to generate interrupt
+    val clintInst = clint.map(_.module)
+    clintInst.foreach(_.io.time := io.clintTime)
     // CHI Async Queue Source
     EnableCHIAsyncBridge match {
       case Some(param) =>

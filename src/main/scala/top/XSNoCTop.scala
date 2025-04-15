@@ -70,19 +70,25 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
   // imsic bus top
   val u_imsic_bus_top = LazyModule(new imsic_bus_top)
-
+  //clint timer
+  val l_clint = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
   // interrupts
-  val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
+  val SeperateTLsync = SeperateTLBus && (!EnableSeperateTLAsync)
+  val clintIntNode = Option.when(!SeperateTLBus)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  core_with_l2.clintIntNode := clintIntNode
+  if (SeperateTLBus)
+    core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
+  else
+    core_with_l2.clintIntNode.map(_ := l_clint.get.intnode) //from clint integrated in xstop
+
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
   core_with_l2.nmiIntNode := nmiIntNode
   beuIntNode := core_with_l2.beuIntNode
-  val clint = InModuleBody(clintIntNode.makeIOs())
+  val clint = InModuleBody(clintIntNode.map(_.makeIOs()))
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
@@ -118,6 +124,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val tlXbar = Option.when(SeperateTLBus)(TLXbar())
   tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
   tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
+
+  // seperate TL bus
+  println(s"SeperateTLBus = $SeperateTLBus")
+  println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
+  l_clint.foreach(_.node := tlXbar.get)//TLXbar node out connnect with timer mmio
   tl.foreach(_ := tlXbar.get)
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
@@ -144,6 +155,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
+    val ref_clock = Option.when(SeperateTLBus)(IO(Input(Clock())))
+    val ref_reset = Option.when(SeperateTLBus)(IO(Input(AsyncReset())))
     private val hasMbist = tiles.head.hasMbist
     private val hasSramCtl = tiles.head.hasSramCtl
     val io = IO(new Bundle {
@@ -184,6 +197,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // imsic bare io
     val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
+    val ref_reset_sync = ref_reset.map(_ => withClockAndReset(ref_clock, ref_reset) { ResetGen(2, io.dft_reset) })
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
     wrapper.core_with_l2.module.io.sramTest.mbist.zip(io.dft).foreach { case (a, b) => a := b }
@@ -217,8 +231,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val cpuReset = reset.asBool || !soc_rst_n
 
     //Interrupt sources collect
-    val msip  = clint.head(0)
-    val mtip  = clint.head(1)
+    val mip_mux = Wire(Vec(2,Bool()))
+
+    core_with_l2.clintIntNode.foreach( clint => mip_mux := clint.out.head._1) //seperate==0,or seperate & tlasyc
+    core_with_l2.clint.foreach(clint =>mip_mux := clint.intnode.out.head._1)//seperae & !tlasync
+
+    val msip  = mip_mux(0)
+    val mtip  = mip_mux(1)
     val meip  = plic.head(0)
     val seip  = plic.last(0)
     val nmi_31 = nmi.head(0)
@@ -308,15 +327,14 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
     io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
-    EnableClintAsyncBridge match {
-      case Some(param) =>
-        withClockAndReset(soc_clock, soc_reset_sync) {
-          val source = Module(new AsyncQueueSource(UInt(64.W), param))
-          source.io.enq.valid := io.clintTime.valid
-          source.io.enq.bits := io.clintTime.bits
-          core_with_l2.module.io.clintTime <> source.io.async
+    SeperateTLBus match {
+      case true =>
+        withClockAndReset(ref_clock, ref_reset_sync) {
+          val ClintVldGen = Module(new TimeVldGen())
+          ClintVldGen.io.i_time := io.clintTime.bits
+          core_with_l2.module.io.clintTime <> ClintVldGen.io.o_time
         }
-      case None =>
+      case false =>
         core_with_l2.module.io.clintTime <> io.clintTime
     }
 
@@ -366,7 +384,7 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
       dummy <> data.get
     }
   }
-  exposeIO(l_soc.clint, "clint")
+  exposeIO(l_soc.clint.get, "clint")
   exposeIO(l_soc.debug, "debug")
   exposeIO(l_soc.plic, "plic")
   exposeIO(l_soc.beu, "beu")
@@ -382,6 +400,8 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   exposeOptionIO(soc.imsic_m_tl, "imsic_m_tl")
   exposeOptionIO(soc.imsic_s_tl, "imsic_s_tl")
   exposeOptionIO(soc.imsic, "imsic")
+  exposeOptionIO(soc.ref_clock, "ref_clock")//syscnt clk
+  exposeOptionIO(soc.ref_reset, "ref_reset")//syscnt reset
 
   // TODO:
   // XSDiffTop is only part of DUT, we can not instantiate difftest here.
