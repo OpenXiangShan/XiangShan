@@ -117,6 +117,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   with HasVLSUParameters
   with SdtrigExt
 {
+  // TODO：src 写得更参数化一些
+  // TODO：select 和 valid 要分清
+  // TODO：为什么每个 src 的 Bundle 类型都不一样？
+  // TODO：需要更清晰的变量命名，比如 1. misalign 异常 + misalignBuffer 可以处理的非对齐 2. 所有地址非对齐情况，这些变量写得清楚，读者很难从变量名看出它准确的含义
+  // TODO：最好不要靠人脑和经验去排序，每一种逻辑都是可以参数化的
+  // TODO: 一个变量的赋值不要写得到处都是
+  // TODO: nc/mmio/uncache 需要更清楚的命名
   val io = IO(new Bundle() {
     // control
     val redirect      = Flipped(ValidIO(new Redirect))
@@ -335,6 +342,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_no_query = s0_hw_prf_select || s0_sel_src.prf_i ||
     s0_src_select_vec(fast_rep_idx) || s0_src_select_vec(mmio_idx) ||
     s0_src_select_vec(nc_idx)
+  // TODO: 全换成 select，或者 valid / select 统一一下，或者直接 orR 一下
+  // TODO：所有 src 都需要 dcache ready 吗？应该只有个别情况需要 ready
+  // TODO：
   s0_valid := !s0_kill && (s0_src_select_vec(nc_idx) || ((
     s0_src_valid_vec(mab_idx) ||
     s0_src_valid_vec(super_rep_idx) ||
@@ -357,6 +367,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_misalign_select := s0_src_select_vec(mab_idx) && !s0_kill
 
    // if is hardware prefetch or fast replay, don't send valid to tlb
+   // TODO：&& io.dcache.req 应该用 s0_valid
+   // TODO: 这里应该用 select 而不是 valid，有可能是时序原因，待确定
   s0_tlb_valid := (
     s0_src_valid_vec(mab_idx) ||
     s0_src_valid_vec(super_rep_idx) ||
@@ -366,6 +378,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_src_valid_vec(l2l_fwd_idx)
   ) && io.dcache.req.ready
 
+  // TODO：下面都可以删掉
   // which is S0's out is ready and dcache is ready
   val s0_try_ptr_chasing      = s0_src_select_vec(l2l_fwd_idx)
   val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.dcache.req.ready
@@ -380,7 +393,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // query DTLB
   io.tlb.req.valid                   := s0_tlb_valid
   io.tlb.req.bits.cmd                := Mux(s0_sel_src.prf,
-                                         Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
+                                         Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read), // TODO：prf wr 也应该是读？
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.isPrefetch         := s0_sel_src.prf
@@ -391,7 +404,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
   io.tlb.req.bits.kill               := s0_kill || s0_tlb_no_query // if does not need to be translated, kill it
-  io.tlb.req.bits.memidx.is_ld       := true.B
+  io.tlb.req.bits.memidx.is_ld       := true.B // TODO：没用
   io.tlb.req.bits.memidx.is_st       := false.B
   io.tlb.req.bits.memidx.idx         := s0_sel_src.uop.lqIdx.value
   io.tlb.req.bits.debug.robIdx       := s0_sel_src.uop.robIdx
@@ -409,7 +422,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.vaddr_dup    := s0_dcache_vaddr
   io.dcache.req.bits.mask         := s0_sel_src.mask
   io.dcache.req.bits.data         := DontCare
-  io.dcache.req.bits.isFirstIssue := s0_sel_src.isFirstIssue
+  io.dcache.req.bits.isFirstIssue := s0_sel_src.isFirstIssue // TODO：删掉
   io.dcache.req.bits.instrtype    := Mux(s0_sel_src.prf, DCACHE_PREFETCH_SOURCE.U, LOAD_SOURCE.U)
   io.dcache.req.bits.debug_robIdx := s0_sel_src.uop.robIdx.value
   io.dcache.req.bits.replayCarry  := s0_sel_src.rep_carry
@@ -417,6 +430,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.lqIdx        := s0_sel_src.uop.lqIdx
   io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
   io.dcache.is128Req              := s0_is128bit
+  // TODO：不要一会叫 128bit 一会叫 16Byte，怎么还有 is128Bit 呢
 
   // load flow priority mux
   def fromNullSource(): FlowSource = {
@@ -778,7 +792,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
-  s0_out.hasROBEntry   := s0_sel_src.has_rob_entry
+  s0_out.hasROBEntry   := s0_sel_src.has_rob_entry // 这是干啥的？没用的话就删了
   s0_out.isPrefetch    := s0_sel_src.prf
   s0_out.isHWPrefetch  := s0_hw_prf_select
   s0_out.isFastReplay  := s0_sel_src.fast_rep
@@ -809,6 +823,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.mbIndex        := s0_sel_src.mbIndex
   s0_out.vecBaseVaddr   := s0_sel_src.vecBaseVaddr
   // s0_out.flowPtr         := s0_sel_src.flowPtr
+  // TODO：vecActive 可以删掉
+  // TODO：|| 后面的东西什么时候会被用到呢
   s0_out.uop.exceptionVec(loadAddrMisaligned) := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive && !s0_misalignWith16Byte
   s0_out.isMisalign := (!s0_addr_aligned || s0_sel_src.uop.exceptionVec(loadAddrMisaligned)) && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_src_select_vec(super_rep_idx)
@@ -917,6 +933,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_fast_rep_dly_err =  RegEnable(io.fast_rep_in.bits.delayedLoadError, io.fast_rep_in.valid) && s1_in.isFastReplay
   val s1_l2l_fwd_dly_err  = RegEnable(io.l2l_fwd_in.dly_ld_err, io.l2l_fwd_in.valid) && s1_in.isFastPath
   val s1_dly_err          = s1_fast_rep_dly_err || s1_l2l_fwd_dly_err
+  // TODO：指定位宽
   val s1_vaddr_hi         = Wire(UInt())
   val s1_vaddr_lo         = Wire(UInt())
   val s1_vaddr            = Wire(UInt())
@@ -953,7 +970,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
   io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
   io.dcache.s1_kill             := s1_kill || s1_dly_err || s1_tlb_miss || s1_exception
-  io.dcache.s1_kill_data_read   := s1_kill || s1_dly_err || s1_tlb_fast_miss
+  io.dcache.s1_kill_data_read   := s1_kill || s1_dly_err || s1_tlb_fast_miss // TODO：删掉？
 
   // store to load forwarding
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
@@ -1014,10 +1031,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     // if is tlbNoQuery request, don't trigger exception from tlb resp
+    // TODO：vecActive 可以删掉
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
-    when (RegNext(io.tlb.req.bits.checkfullva) &&
+    when (RegNext(io.tlb.req.bits.checkfullva) && // checkfullva 可以删掉
       (s1_out.uop.exceptionVec(loadPageFault) ||
         s1_out.uop.exceptionVec(loadGuestPageFault) ||
         s1_out.uop.exceptionVec(loadAccessFault))) {
@@ -1051,7 +1069,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_cancel_ptr_chasing ||
     s1_in.uop.robIdx.needFlush(io.redirect) ||
     (s1_in.uop.robIdx.needFlush(s1_redirect_reg) && !GatedValidRegNext(s0_try_ptr_chasing)) ||
-    RegEnable(s0_kill, false.B, io.ldin.valid ||
+    RegEnable(s0_kill, false.B, io.ldin.valid || // TODO:删掉
       io.vecldin.valid || io.replay.valid ||
       io.l2l_fwd_in.valid || io.fast_rep_in.valid ||
       io.misalign_ldin.valid || io.lsq.nc_ldin.valid
@@ -1324,7 +1342,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_fwd_vp_match_invalid = io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid || io.ubuffer.matchInvalid
   val s2_vp_match_fail = s2_fwd_vp_match_invalid && s2_troublem
   val s2_safe_wakeup = !s2_out.rep_info.need_rep && !s2_mmio && (!s2_in.nc || s2_nc_with_data) && !s2_mis_align && !s2_real_exception // don't need to replay and is not a mmio\misalign no data
-  val s2_safe_writeback = s2_real_exception || s2_safe_wakeup || s2_vp_match_fail
+  val s2_safe_writeback = s2_real_exception || s2_safe_wakeup || s2_vp_match_fail // TODO: vp_match_fail 应该可以删掉
 
   // ld-ld violation require
   /**
