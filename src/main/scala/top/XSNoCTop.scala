@@ -79,7 +79,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  if (SeperateTLBus)
+  if (!SeperateTLBus)
     core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
   else
     core_with_l2.clintIntNode.map(_ := l_clint.get.intnode) //from clint integrated in xstop
