@@ -126,6 +126,8 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     when (s1_out_valid && !s1_flush) {
       when (isAfter(current.robIdx, s1_out_bits.robIdx)) {
         current := s1_out_bits
+        // s1 is older than current and caused by wb, set current.isEnqExcp to false
+        current.isEnqExcp := false.B
       }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
         current.exceptionVec := Mux(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
         current.hasException := Mux(isVecUpdate, s1_out_bits.hasException, current.hasException)
@@ -144,8 +146,9 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         current.vsew      := Mux(isVecUpdate, s1_out_bits.vsew,       current.vsew)
         current.veew      := Mux(isVecUpdate, s1_out_bits.veew,       current.veew)
         current.vlmul     := Mux(isVecUpdate, s1_out_bits.vlmul,      current.vlmul)
+        // current has a new exception caused by wb, set current.isEnqExcp to false
+        current.isEnqExcp := false.B
       }
-      current.isEnqExcp := false.B
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
     currentValid := true.B
