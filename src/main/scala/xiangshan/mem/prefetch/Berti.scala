@@ -33,6 +33,9 @@ case class BertiParams
 (
   name: String = "berti",
   ht_set_cnt: Int = 8,
+  ht_way_cnt: Int = 16,
+  dt_way_cnt: Int = 16,
+  dt_delta_size: Int = 16,
 ) extends PrefetcherParams{
   override def TRAIN_FILTER_SIZE = 6
   override def PREFETCH_FILTER_SIZE = 16
@@ -60,9 +63,9 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def DtCntWidth: Int = 4
 
   def HtSetSize: Int = bertiParams.ht_set_cnt
-  def DtWaySize: Int = 16
-  def HtWaySize: Int = 16
-  def DtDeltaSize: Int = 16
+  def DtWaySize: Int = bertiParams.dt_way_cnt
+  def HtWaySize: Int = bertiParams.ht_way_cnt
+  def DtDeltaSize: Int = bertiParams.dt_delta_size
   def DtDeltaIndexWidth: Int = log2Up(DtDeltaSize)
 
   def HtSetWidth: Int = log2Up(HtSetSize)
@@ -228,7 +231,10 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
 
 class DeltaTable()(implicit p: Parameters) extends BertiModule{
   /*** built-in function */
-  def thresholdOfReset: Int = (1 << DtCntWidth) - 1
+  def thresholdOfMax: Int = (1 << DtCntWidth) - 1
+  def thresholdOfHalf: Int = (1 << (DtCntWidth - 1)) - 1
+  def thresholdOfReset: Int = thresholdOfMax
+  def thresholdOfUpdate: Int = thresholdOfHalf
   def thresholdOfL1PF: Int = ((1 << DtCntWidth) * 0.65).toInt
   def thresholdOfL2PF: Int = ((1 << DtCntWidth) * 0.5).toInt
   def thresholdOfL2PFR: Int = ((1 << DtCntWidth) * 0.35).toInt
@@ -269,13 +275,21 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule{
       coverageCnt := 1.U
     }
 
-    def update(): Unit = {
-      coverageCnt := coverageCnt + 1.U
+    def update(inc: UInt = 1.U): Unit = {
+      coverageCnt := coverageCnt + inc
     }
 
-    def reset(): Unit = {
+    // enter the new cycle
+    // use next to use this record
+    def newCycle(next: UInt = 0.U): Unit = {
       coverageCnt := 0.U
-      status := getStatus(coverageCnt)
+      status := getStatus(Mux(next === 0.U, coverageCnt, next))
+    }
+
+    // enter the new status
+    // use next to use this record
+    def newStatus(next: UInt = 0.U): Unit = {
+      status := getStatus(Mux(next === 0.U, coverageCnt, next))
     }
   }
 
@@ -290,6 +304,26 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule{
       counter := 0.U
       bestDeltaIdx := 0.U
       deltaList.map(x => x.init())
+    }
+
+    def setStatus(): Unit = {
+      when(counter >= thresholdOfReset.U){
+        counter := 0.U
+        deltaList.map(x => x.newCycle())
+      }.elsewhen(counter >= thresholdOfUpdate.U){
+        deltaList.map(x => x.newStatus())
+      }
+    }
+
+    // TODO: use next to use this record
+    // it's a little hard to record the nextDeltaCnt
+    def setStatus(nextCnt: UInt, nextDeltaCnt: Seq[UInt]): Unit = {
+      when(nextCnt >= thresholdOfReset.U){
+        counter := 0.U
+        deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newCycle(cnt)}
+      }.elsewhen(counter >= thresholdOfUpdate.U){
+        deltaList.zip(nextDeltaCnt).map{case (x, cnt) => x.newStatus(cnt)}
+      }
     }
 
     def setLite(_pcTag: UInt, _delta: UInt): Unit = {
@@ -418,15 +452,13 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule{
   /*** processing logic */
   this.updateLite(io.learn)
   io.prefetch := this.prefetch(io.train)
-  // reset
-  for(i <- 0 until DtWaySize){
-    when(entries(i).counter === thresholdOfReset.U){
-      entries(i).deltaList.map(x => x.reset())
-    }
-  }
+
+  entries.foreach(x => x.setStatus())
 
   /** performance counter */
   XSPerfAccumulate("learn_req", io.learn.valid)
+  XSPerfAccumulate("learn_req_0", io.learn.valid && io.learn.delta === 0.U)
+  XSPerfAccumulate("learn_req_non_0", io.learn.valid && io.learn.delta =/= 0.U)
   XSPerfAccumulate("train_req", io.train.valid)
   XSPerfAccumulate("prefetch_req", io.prefetch.valid)
 
@@ -731,4 +763,7 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   prefetchBuffer.io.l2_req.ready := true.B
   prefetchBuffer.io.l3_req.ready := true.B
 
+  XSPerfAccumulate("demandMiss", demandMiss)
+  XSPerfAccumulate("demandPfHit", demandPfHit)
+  XSPerfAccumulate("demandRefill", demandRefill)
 }
