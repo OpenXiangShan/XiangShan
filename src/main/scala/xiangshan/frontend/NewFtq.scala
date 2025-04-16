@@ -81,7 +81,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
       gen,
       set = FtqSize,
       way = 1,
-      dataSplit = 2,
+      dataSplit = 4,
       singlePort = false,
       withClockGate = true,
       hasMbist = hasMbist,
