@@ -1650,7 +1650,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 //  io.lsq.ldin.bits.uop.exceptionVec(loadAddrMisaligned) := Mux(s3_in.onlyMisalignException, false.B, s3_in.uop.exceptionVec(loadAddrMisaligned))
 
-  val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep || s3_mis_align
+  val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep || s3_mis_align || (s3_frm_mabuf && io.misalign_ldout.bits.rep_info.need_rep)
   io.lsq.ldld_nuke_query.revoke := s3_revoke
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
