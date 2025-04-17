@@ -430,7 +430,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_lr = s2_req.cmd === M_XLR
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
-  val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAmo && !s2_lr || s2_req.isStore)
+  val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
 
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR && s2_need_tag
