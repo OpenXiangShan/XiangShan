@@ -575,7 +575,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val s1_paddr = Cat(stage1.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
       val s2_paddr = Cat(stage2.genPPNS2(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
       for (d <- 0 until nRespDups) {
-        resp(idx).bits.paddr(d) := Mux(s2xlate =/= noS2xlate, s2_paddr, s1_paddr)
+        resp(idx).bits.paddr(d) := Mux(s2xlate === onlyStage2 || s2xlate === allStage, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := s1_paddr
         pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
         perm_check(stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
