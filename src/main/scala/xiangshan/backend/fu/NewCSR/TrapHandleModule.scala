@@ -150,6 +150,6 @@ class TrapHandleIO extends Bundle {
     val causeNO = new CauseBundle
     val dbltrpToMN = Bool()
     val hasDTExcp = Bool()
-    val pcFromXtvec = UInt()
+    val pcFromXtvec = UInt(64.W)
   }
 }
