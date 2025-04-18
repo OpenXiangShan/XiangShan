@@ -1142,35 +1142,22 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // Vector instructions that prevent triggered exceptions from being written to the 'databuffer'.
     val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
 
+    val misalignToDataBufferValid = allocated(rdataPtrExt(0).value) && committed(rdataPtrExt(0).value) &&
+                                    (!isVec(rdataPtrExt(0).value) && allvalid(rdataPtrExt(0).value) || vecMbCommit(rdataPtrExt(0).value)) &&
+                                    canDeqMisaligned && (!isCross4KPage || isCross4KPageCanDeq || hasException(rdataPtrExt(0).value))
     // Only the first interface can write unaligned directives.
     // Simplified design, even if the two ports have exceptions, but still only one unaligned dequeue.
     val assert_flag = WireInit(false.B)
     when(firstWithMisalign && firstWithCross16Byte) {
-      dataBuffer.io.enq(0).valid := canDeqMisaligned && allocated(rdataPtrExt(0).value) && committed(rdataPtrExt(0).value) &&
-        ((!isVec(rdataPtrExt(0).value) && allvalid(rdataPtrExt(0).value) || vecMbCommit(rdataPtrExt(0).value)) &&
-        (!isCross4KPage || isCross4KPageCanDeq) || hasException(rdataPtrExt(0).value)) && !ncStall
-
-      dataBuffer.io.enq(1).valid := canDeqMisaligned && allocated(rdataPtrExt(0).value) && committed(rdataPtrExt(0).value) &&
-        (!isVec(rdataPtrExt(0).value) && allvalid(rdataPtrExt(0).value) || vecMbCommit(rdataPtrExt(0).value)) &&
-        (!isCross4KPage || isCross4KPageCanDeq) && !hasException(rdataPtrExt(0).value) && !ncStall
+      dataBuffer.io.enq(i).valid := misalignToDataBufferValid
       assert_flag := dataBuffer.io.enq(1).valid
     }.otherwise {
-      if (i == 0) {
-        dataBuffer.io.enq(i).valid := (
-          allocated(ptr) && committed(ptr)
-            && ((!isVec(ptr) && (allvalid(ptr) || hasException(ptr))) || vecMbCommit(ptr))
-            && !mmioStall && !ncStall
-            && (!unaligned(ptr) || !cross16Byte(ptr) && (allvalid(ptr) || hasException(ptr)))
-          )
-      }
-      else {
-        dataBuffer.io.enq(i).valid := (
-          allocated(ptr) && committed(ptr)
-            && ((!isVec(ptr) && (allvalid(ptr) || hasException(ptr))) || vecMbCommit(ptr))
-            && !mmioStall && !ncStall
-            && (!unaligned(ptr) || !cross16Byte(ptr) && (allvalid(ptr) || hasException(ptr)))
-          )
-      }
+      dataBuffer.io.enq(i).valid := (
+        allocated(ptr) && committed(ptr)
+          && ((!isVec(ptr) && (allvalid(ptr) || hasException(ptr))) || vecMbCommit(ptr))
+          && !mmioStall && !ncStall
+          && (!unaligned(ptr) || !cross16Byte(ptr) && (allvalid(ptr) || hasException(ptr)))
+        )
     }
 
     val misalignAddrLow = vaddrModule.io.rdata(0)(2, 0)
