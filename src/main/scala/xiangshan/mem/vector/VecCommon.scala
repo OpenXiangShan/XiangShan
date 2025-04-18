@@ -610,7 +610,7 @@ object GenElemIdx extends VLSUConstants {
       eewUopFlowsLog2
     )
     LookupTree(uopFlowsLog2, List(
-      0.U -> uopIdx,
+      0.U -> uopIdx ## flowIdx(0), // for hardware misalign
       1.U -> uopIdx ## flowIdx(0),
       2.U -> uopIdx ## flowIdx(1, 0),
       3.U -> uopIdx ## flowIdx(2, 0),
