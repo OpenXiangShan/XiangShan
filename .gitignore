@@ -321,6 +321,9 @@ src_managed/
 project/boot/
 project/plugins/project/
 
+# mill specific
+.mill-jvm-opts
+
 # Scala-IDE specific
 .scala_dependencies
 .worksheet
