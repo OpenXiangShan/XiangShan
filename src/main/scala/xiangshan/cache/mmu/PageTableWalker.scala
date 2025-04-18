@@ -244,7 +244,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(Mux(pte_valid, pageFault && !accessFault, false.B), (accessFault || ppn_af) && !(pte_valid && (pageFault || guestFault)), Mux(accessFault, af_level, Mux(guestFault, gpf_level, level)), Mux(pte_valid, pte, fake_pte), vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false, not_merge = false, bitmap_checkfailed.asBool)
+  // pageFault is always valid when pte_valid
+  val resp_pf = pte_valid && pageFault
+  // when (pte_valid && (pageFault || guestFault), should not report accessFault or ppn_af
+  val resp_af = (accessFault || ppn_af) && !((pte_valid && pageFault) || guestFault)
+  // should use af_level when accessFault && !((pte_valid && pageFault) || guestFault)
+  val resp_level = Mux(accessFault && resp_af, af_level, Mux(guestFault, gpf_level, level))
+  // when ptw do not really send a memory request, should use fake_pte
+  val resp_pte = Mux(pte_valid, pte, fake_pte)
+  ptw_resp.apply(resp_pf, resp_af, resp_level, resp_pte, vpn, satp.asid, hgatp.vmid, vpn(sectortlbwidth - 1, 0), not_super = false, not_merge = false, bitmap_checkfailed.asBool)
 
   val normal_resp = idle === false.B && mem_addr_update && !need_last_s2xlate && (guestFault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2
