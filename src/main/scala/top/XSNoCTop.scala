@@ -222,8 +222,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val seip  = plic.last(0)
     val nmi_31 = nmi.head(0)
     val nmi_43 = nmi.head(1)
+    val debugIntr = debug.head(0)
     val msi_info_vld = core_with_l2.module.io.msiInfo.valid
-    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, debugIntr, msi_info_vld)
 
     /*
      * CPU Low Power State:
