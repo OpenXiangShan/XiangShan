@@ -962,7 +962,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
           entries(i).hptw_resp.gpf := io.hptw.resp.bits.h_resp.gpf || check_g_perm_fail
           entries(i).first_s2xlate_fault := io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf
         }.otherwise{ // change the entry that is waiting hptw resp
-          val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
+          val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting &&
+            dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn) &&
+            entries(i).req_info.s2xlate === entries(io.hptw.resp.bits.id).req_info.s2xlate)
           val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
           state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
