@@ -220,6 +220,7 @@ class Sbuffer(implicit p: Parameters)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
+  val grow_perm_fail = RegInit(VecInit(Seq.fill(StoreBufferSize)(false.B)))
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -437,6 +438,7 @@ class Sbuffer(implicit p: Parameters)
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
         vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
+        grow_perm_fail(entryIdx) := false.B
       }
     })
   }
@@ -691,6 +693,7 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
+  io.dcache.req.bits.grow_perm_fail := grow_perm_fail(sbuffer_out_s1_evictionIdx)
 
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
@@ -741,6 +744,7 @@ class Sbuffer(implicit p: Parameters)
   when (io.dcache.replay_resp.fire) {
     missqReplayCount(replay_resp_id) := 0.U
     stateVec(replay_resp_id).w_timeout := true.B
+    grow_perm_fail(replay_resp_id) := io.dcache.replay_resp.bits.grow_perm_fail
     // waiting for timeout
     assert(io.dcache.replay_resp.bits.replay)
     assert(stateVec(replay_resp_id).state_inflight === true.B)

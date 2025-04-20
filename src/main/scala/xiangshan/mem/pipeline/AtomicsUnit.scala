@@ -80,6 +80,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   // `pdest2` is used to record the pdest of the second uop
   val pdest1, pdest2 = Reg(UInt(PhyRegIdxWidth.W))
   val pdest1Valid, pdest2Valid = RegInit(false.B)
+  val grow_perm_fail = RegInit(false.B)
   /**
     * The # of std uops that an atomic instruction require:
     * (1) For AMOs (except AMOCAS) and LR/SC, 1 std uop is wanted: X(rs2) with uopIdx = 0
@@ -140,6 +141,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       rs1 := io.in.bits.src_rs1
       state := s_tlb_and_flush_sbuffer_req
       have_sent_first_tlb_req := false.B
+      grow_perm_fail := false.B
     }
   }
 
@@ -358,6 +360,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       when (io.dcache.resp.bits.miss) {
         when (io.dcache.resp.bits.replay) {
           state := s_cache_req
+          grow_perm_fail := true.B
+        } .otherwise {
+          grow_perm_fail := false.B
         }
       }.otherwise {
         dcache_resp_data := io.dcache.resp.bits.data
