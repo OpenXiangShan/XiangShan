@@ -450,7 +450,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // Grow permission fail
   // Only in case BtoT will both cache and missqueue be occupied
   val s2_grow_perm = s2_shrink_perm === BtoT && !s2_has_permission
-  val s2_grow_perm_fail = PopCount(io.BtoT_ways_for_set) <= (nWays-2).U && s2_grow_perm
+  val s2_grow_perm_fail = PopCount(io.BtoT_ways_for_set) > (nWays-2).U && s2_grow_perm
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
