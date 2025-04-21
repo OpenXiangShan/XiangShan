@@ -867,6 +867,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
   XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
 
+  HardenXSPerfAccumulate("dcache_read_access", PopCount(ld_access.map(_.valid)))
+  HardenXSPerfAccumulate("dcache_write_access", st_access.valid)
+  HardenXSPerfAccumulate("dcache_read_miss", PopCount(io.lsu.load.map(x => x.resp.valid && x.resp.bits.miss)))
+  HardenXSPerfAccumulate("dcache_write_miss", io.lsu.store.refill_hit_resp.valid)
+  HardenXSPerfAccumulate("dcache_conflit", mainPipe.io.replace_req.valid)
+
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()
 }

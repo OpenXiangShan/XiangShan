@@ -1042,6 +1042,53 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     Mux(a > b, a, b)
   }
 
+
+  // performance counters
+  val intRegfileReads_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val intRegfileWrites_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val fpRegfileReads_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val fpRegfileWrites_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  io.enq.req.zip(canEnqueue.zipWithIndex).map {
+    case (req, (v, i)) =>
+      val intsrcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
+      val fpsrcValid = WireInit(VecInit(Seq.fill(3)(false.B)))
+      req.bits.ctrl.srcType.zip(req.bits.ctrl.lsrc).zipWithIndex.foreach{
+        case ((srctype, lsrc), j) =>
+          intsrcValid(j) := v && srctype === SrcType.reg && lsrc =/= 0.U && j.U =/= 2.U
+          fpsrcValid(j) := v && FuType.isFpExu(req.bits.ctrl.fuType) && srctype === SrcType.fp
+      }
+      intRegfileReads_vec(i) := PopCount(intsrcValid)
+      intRegfileWrites_vec(i) := Mux(v && req.bits.ctrl.rfWen, 1.U, 0.U)
+      fpRegfileReads_vec(i) := PopCount(fpsrcValid)
+      fpRegfileWrites_vec(i) := Mux(v && req.bits.ctrl.fpWen, 1.U, 0.U)
+  }
+
+  val intRegfileReads = Wire(UInt(64.W))
+  val intRegfileWrites = Wire(UInt(64.W))
+  val fpRegfileReads = Wire(UInt(64.W))
+  val fpRegfileWrites = Wire(UInt(64.W))
+  intRegfileReads := intRegfileReads_vec.reduce(_ + _)
+  intRegfileWrites := intRegfileWrites_vec.reduce(_ + _)
+  fpRegfileReads := fpRegfileReads_vec.reduce(_ + _)
+  fpRegfileWrites := fpRegfileWrites_vec.reduce(_ + _)
+
+  HardenXSPerfAccumulate("intRegfileReads", intRegfileReads)
+  HardenXSPerfAccumulate("intRegfileWrites", intRegfileWrites)
+  HardenXSPerfAccumulate("fpRegfileReads", fpRegfileReads)
+  HardenXSPerfAccumulate("fpRegfileWrites", fpRegfileWrites)
+
+
+  val intAluAccess = PopCount(io.enq.req.map(r => r.valid &&
+    (FuType.isIntExu(r.bits.ctrl.fuType) || r.bits.ctrl.fuType === FuType.mul || r.bits.ctrl.fuType === FuType.div)))
+  val fpuAccess = PopCount(io.enq.req.map(r => r.valid && FuType.isFpExu(r.bits.ctrl.fuType) ))
+  val mulAccess = PopCount(io.enq.req.map(r => r.valid &&
+    (r.bits.ctrl.fuType === FuType.mul || r.bits.ctrl.fuType === FuType.div || r.bits.ctrl.fuType === FuType.fDivSqrt)))
+
+  HardenXSPerfAccumulate("intAluAccess", intAluAccess)
+  HardenXSPerfAccumulate("fpuAccess", fpuAccess)
+  HardenXSPerfAccumulate("mulAccess", mulAccess)
+
+
   io.commits.commitValid.zip(commitDebugUop).zipWithIndex.map{
     case ((v, uop), i) =>
       val srcValid = WireInit(VecInit(Seq.fill(3)(false.B)))

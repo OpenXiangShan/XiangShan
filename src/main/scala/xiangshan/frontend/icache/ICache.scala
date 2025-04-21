@@ -689,6 +689,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   )
   generatePerfEvent()
 
+  HardenXSPerfAccumulate("ICache_read_access", PopCount(io.fetch.req.valid))
+  HardenXSPerfAccumulate("ICache_read_miss", PopCount(missUnit.io.req.map(_.valid)))
+  HardenXSPerfAccumulate("ICache_conflit", replacePipe.io.release_req.valid)
+
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("icache", CacheInstrucion.COP_ID_ICACHE))
   cacheOpDecoder.io.csr <> io.csr

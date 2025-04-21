@@ -315,6 +315,16 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
 
+  if (!q.shouldBlock) {
+    HardenXSPerfAccumulate(s"access_${q.name}", PopCount((0 until Width).map(i => validRegVec(i))))
+    HardenXSPerfAccumulate(s"miss_${q.name}", PopCount((0 until Width).map(i => validRegVec(i) && missVec(i))))
+  } else {
+    HardenXSPerfAccumulate(s"access_${q.name}", PopCount((0 until Width).map(i => io.requestor(i).req.fire )))
+    HardenXSPerfAccumulate(s"miss_${q.name}", PopCount((0 until Width).map(i => ptw.req(i).fire)))
+  }
+
+  HardenXSPerfAccumulate(s"replace_${q.name}", refill)
+
   val perfEvents = if(!q.shouldBlock) {
     Seq(
       ("access", PopCount((0 until Width).map(i => vmEnable_dup.head && validRegVec(i)))              ),
