@@ -939,6 +939,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cboZeroFlushSb     = GatedRegNext(cboZeroToSb)
 
   val cboZeroUop         = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt.map(x=>uop(x.value))), cboZeroToSb)
+  val cboZeroSqIdx       = RegEnable(PriorityMux(isCboZeroToSbVec, deqPtrExt), cboZeroToSb)
   val cboZeroValid       = RegInit(false.B)
   val cboZeroWaitFlushSb = RegInit(false.B)
 
@@ -1014,6 +1015,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // cbo Zero writeback to ROB
   io.cboZeroStout.valid                := cboZeroValid && !cboZeroWaitFlushSb
   io.cboZeroStout.bits.uop             := cboZeroUop
+  io.cboZeroStout.bits.uop.sqIdx       := cboZeroSqIdx
   io.cboZeroStout.bits.data            := DontCare
   io.cboZeroStout.bits.isFromLoadUnit  := DontCare
   io.cboZeroStout.bits.debug.isMMIO    := false.B
