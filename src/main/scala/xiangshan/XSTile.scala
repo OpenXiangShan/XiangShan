@@ -12,7 +12,7 @@ import huancun.{HCCacheParamsKey, HuanCun}
 import huancun.utils.ResetGen
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.{IntBuffer, TLClientsMerger, TLEdgeBuffer}
+import utils.{HardenXSPerfAccumulate, IntBuffer, TLClientsMerger, TLEdgeBuffer}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -173,6 +173,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
       l2cache.get.module.io.mshrs := pL2MSHRs
       l2cache.get.module.io.sets := pL2Sets
+
+      HardenXSPerfAccumulate("l2_read_access", l2cache.get.module.io.perf.read_access)
+      HardenXSPerfAccumulate("l2_read_miss", l2cache.get.module.io.perf.read_miss)
+      HardenXSPerfAccumulate("l2_write_access", l2cache.get.module.io.perf.write_access)
+      HardenXSPerfAccumulate("l2_write_miss", l2cache.get.module.io.perf.write_miss)
+      HardenXSPerfAccumulate("l2_conflit", l2cache.get.module.io.perf.conflit)
     }
     else {
       core.module.io.perfEvents <> DontCare
