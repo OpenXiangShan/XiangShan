@@ -206,8 +206,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   private val inst         = Wire(Vec(RenameWidth, new XSInstBitFields))
   private val isCsr        = Wire(Vec(RenameWidth, Bool()))
   private val isCsrr       = Wire(Vec(RenameWidth, Bool()))
-  private val isWaitForwardCsrr = Wire(Vec(RenameWidth, Bool()))
-  private val isBlockBackwardCsrr = Wire(Vec(RenameWidth, Bool()))
+  private val isNotWaitForwardCsrr = Wire(Vec(RenameWidth, Bool()))
+  private val isNotBlockBackwardCsrr = Wire(Vec(RenameWidth, Bool()))
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
   private val vtype        = uops.map(_.vpu.vtype)
@@ -291,9 +291,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     inst(i) := uops(i).instr.asTypeOf(new XSInstBitFields)
     isCsr(i) := inst(i).OPCODE5Bit === OPCODE5Bit.SYSTEM && inst(i).FUNCT3(1, 0) =/= 0.U
     isCsrr(i) := isCsr(i) && inst(i).FUNCT3 === BitPat("b?1?") && inst(i).RS1 === 0.U
-    isWaitForwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
+    isNotWaitForwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
       inst(i).CSRIDX, true.B, CSROoORead.waitForwardInOrderCsrReadList.map(_.U -> false.B))
-    isBlockBackwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
+    isNotBlockBackwardCsrr(i) := isCsrr(i) && LookupTreeDefault(
       inst(i).CSRIDX, true.B, CSROoORead.blockBackwardInOrderCsrReadList.map(_.U -> false.B))
 
     /*
@@ -303,8 +303,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
      *
      * Signal "isCsrr" contains not only "CSRR", but also other CSR instructions that do not require writing to CSR.
      */
-    uops(i).waitForward := io.in(i).bits.waitForward && !isWaitForwardCsrr(i)
-    uops(i).blockBackward := io.in(i).bits.blockBackward && !isBlockBackwardCsrr(i)
+    uops(i).waitForward := io.in(i).bits.waitForward && !isNotWaitForwardCsrr(i)
+    uops(i).blockBackward := io.in(i).bits.blockBackward && !isNotBlockBackwardCsrr(i)
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
