@@ -595,9 +595,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.redirect.meta.TOSW := recoverCfi.TOSW
   stack.redirect.meta.TOSR := recoverCfi.TOSR
   stack.redirect.meta.NOS  := recoverCfi.NOS
-  // Warning: There may be two possible implementations here depending on the type of recover_cfi.pc.
-  // They are: recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U), and recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 1.U, 2.U)
-  // Please verify whether recover_cfi.pc is of the PrunedAddr type and whether the definition of the PrunedAddr type has been modified.
+
   stack.redirect.callAddr := recoverCfi.pc + Mux(recoverCfi.pd.isRVC, 2.U, 4.U)
 
   val updateValid = RegNext(io.update.valid, init = false.B)
