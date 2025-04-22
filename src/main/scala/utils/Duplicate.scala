@@ -107,8 +107,8 @@ class Duplicate[T <: Data](
 
   sealed trait IndexType[A]
   object IndexType {
-    implicit def intIndex:    IndexType[Int]    = new IndexType[Int] {}
-    implicit def stringIndex: IndexType[String] = new IndexType[String] {}
+    implicit val intIndex:    IndexType[Int]    = new IndexType[Int] {}
+    implicit val stringIndex: IndexType[String] = new IndexType[String] {}
   }
 
   def apply[A: IndexType](index: A): T = index match {
