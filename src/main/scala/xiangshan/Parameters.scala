@@ -31,7 +31,6 @@ import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
@@ -122,27 +121,6 @@ case class XSCoreParameters
   SCCtrBits: Int = 6,
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
-  branchPredictor: (BranchPredictionResp, Parameters) => Tuple2[Seq[BasePredictor], BranchPredictionResp] =
-  (resp_in: BranchPredictionResp, p: Parameters) => {
-    val ftb = Module(new FTB()(p))
-    val uftb = Module(new FauFTB()(p))
-    val tage = Module(new Tage_SC()(p))
-    val ras = Module(new RAS()(p))
-    val ittage = Module(new ITTage()(p))
-    val preds = Seq(uftb, tage, ftb, ittage, ras)
-    preds.map(_.io := DontCare)
-
-    ftb.io.fauftb_entry_in  := uftb.io.fauftb_entry_out
-    ftb.io.fauftb_entry_hit_in := uftb.io.fauftb_entry_hit_out
-
-    uftb.io.in.bits.resp_in(0) := resp_in
-    tage.io.in.bits.resp_in(0) := uftb.io.out
-    ftb.io.in.bits.resp_in(0) := tage.io.out
-    ittage.io.in.bits.resp_in(0) := ftb.io.out
-    ras.io.in.bits.resp_in(0) := ittage.io.out
-
-    (preds, ras.io.out)
-  },
   ICacheForceMetaECCError: Boolean = false,
   ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
@@ -668,10 +646,6 @@ trait HasXSParameter {
   def RasSize = coreParams.RasSize
   def RasSpecSize = coreParams.RasSpecSize
   def RasCtrSize = coreParams.RasCtrSize
-
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
-    coreParams.branchPredictor(resp_in, p)
-  }
   def numBr = coreParams.numBr
   def TageTableInfos = coreParams.TageTableInfos
   def TageBanks = coreParams.numBr

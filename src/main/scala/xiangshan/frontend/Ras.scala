@@ -93,8 +93,26 @@ class RASDebug(implicit p: Parameters) extends XSBundle {
   val commit_stack = Output(Vec(RasSize, new RASEntry))
 }
 
-class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtrHelper {
-  override val meta_size = WireInit(0.U.asTypeOf(new RASMeta)).getWidth
+class RasInput(implicit p: Parameters) extends PredictorInput {
+  val updateMeta  = new RASMeta
+  val s3_redirect = Bool()
+  val redirect    = Valid(new BranchPredictionRedirect)
+}
+
+class RasOutput(implicit p: Parameters) extends PredictorOutput {
+  val meta = new RASMeta
+}
+
+class RasIO(implicit p: Parameters) extends XSBundle {
+  val in  = Input(new RasInput)
+  val out = Output(new RasOutput)
+}
+
+class RAS(implicit p: Parameters) extends XSModule
+    with HasPerfEvents with HasCircularQueuePtrHelper {
+  val io = IO(new RasIO)
+
+  io.out.resp := io.in.resp
 
   object RASEntry {
     def apply(retAddr: PrunedAddr, ctr: UInt): RASEntry = {
@@ -609,7 +627,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   val stack_near_overflow = stack.spec_near_overflow
   val s2_spec_push        = WireInit(false.B)
   val s2_spec_pop         = WireInit(false.B)
-  val s2_full_pred        = io.in.bits.resp_in(0).s2.full_pred(2)
+  val s2_full_pred        = io.in.resp.s2.full_pred(2)
   // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
   val s2_spec_new_addr = s2_full_pred.fallThroughAddr + Mux(s2_full_pred.last_may_be_rvi_call, 2.U, 0.U)
   stack.spec_push_valid := s2_spec_push && !stack_near_overflow
@@ -617,8 +635,8 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.spec_push_addr  := s2_spec_new_addr
 
   // confirm that the call/ret is the taken cfi
-  s2_spec_push := io.s2_fire(2) && s2_full_pred.hit_taken_on_call && !io.s3_redirect(2)
-  s2_spec_pop  := io.s2_fire(2) && s2_full_pred.hit_taken_on_ret && !io.s3_redirect(2)
+  s2_spec_push := io.in.s2_fire && s2_full_pred.hit_taken_on_call && !io.in.s3_redirect
+  s2_spec_pop  := io.in.s2_fire && s2_full_pred.hit_taken_on_ret && !io.in.s3_redirect
 
   // val s2_jalr_target = io.out.s2.full_pred.jalr_target
   // val s2_last_target_in = s2_full_pred.targets.last
@@ -627,16 +645,16 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   val s2_is_ret  = s2_full_pred.is_ret
   val s2_top     = stack.spec_pop_addr
   // assert(is_jalr && is_ret || !is_ret)
-  when(s2_is_ret && io.ctrl.ras_enable) {
-    io.out.s2.full_pred.map(_.jalr_target).foreach(_ := s2_top)
+  when(s2_is_ret && io.in.ctrl.ras_enable) {
+    io.out.resp.s2.full_pred.map(_.jalr_target).foreach(_ := s2_top)
     // FIXME: should use s1 globally
   }
   // s2_last_target_out := Mux(s2_is_jalr, s2_jalr_target, s2_last_target_in)
-  io.out.s2.full_pred.zipWithIndex.foreach { case (a, i) =>
+  io.out.resp.s2.full_pred.zipWithIndex.foreach { case (a, i) =>
     a.targets.last := Mux(
       s2_is_jalr,
-      io.out.s2.full_pred(i).jalr_target,
-      io.in.bits.resp_in(0).s2.full_pred(i).targets.last
+      io.out.resp.s2.full_pred(i).jalr_target,
+      io.in.resp.s2.full_pred(i).targets.last
     )
   }
 
@@ -647,43 +665,43 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   s2_meta.TOSW := stack.TOSW
   s2_meta.NOS  := stack.NOS
 
-  val s3_top           = RegEnable(stack.spec_pop_addr, io.s2_fire(2))
-  val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.s2_fire(2))
+  val s3_top           = RegEnable(stack.spec_pop_addr, io.in.s2_fire)
+  val s3_spec_new_addr = RegEnable(s2_spec_new_addr, io.in.s2_fire)
 
   // val s3_jalr_target = io.out.s3.full_pred.jalr_target
   // val s3_last_target_in = io.in.bits.resp_in(0).s3.full_pred(2).targets.last
   // val s3_last_target_out = io.out.s3.full_pred(2).targets.last
   val s3_is_jalr =
-    io.in.bits.resp_in(0).s3.full_pred(2).is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
-  val s3_is_ret = io.in.bits.resp_in(0).s3.full_pred(2).is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+    io.in.resp.s3.full_pred(2).is_jalr && !io.in.resp.s3.full_pred(2).fallThroughErr
+  val s3_is_ret = io.in.resp.s3.full_pred(2).is_ret && !io.in.resp.s3.full_pred(2).fallThroughErr
   // assert(is_jalr && is_ret || !is_ret)
-  when(s3_is_ret && io.ctrl.ras_enable) {
-    io.out.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
+  when(s3_is_ret && io.in.ctrl.ras_enable) {
+    io.out.resp.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
     // FIXME: should use s1 globally
   }
   // s3_last_target_out := Mux(s3_is_jalr, s3_jalr_target, s3_last_target_in)
-  io.out.s3.full_pred.zipWithIndex.foreach { case (a, i) =>
+  io.out.resp.s3.full_pred.zipWithIndex.foreach { case (a, i) =>
     a.targets.last := Mux(
       s3_is_jalr,
-      io.out.s3.full_pred(i).jalr_target,
-      io.in.bits.resp_in(0).s3.full_pred(i).targets.last
+      io.out.resp.s3.full_pred(i).jalr_target,
+      io.in.resp.s3.full_pred(i).targets.last
     )
   }
 
-  val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.s2_fire(2))
-  val s3_popped_in_s2 = RegEnable(s2_spec_pop, io.s2_fire(2))
+  val s3_pushed_in_s2 = RegEnable(s2_spec_push, io.in.s2_fire)
+  val s3_popped_in_s2 = RegEnable(s2_spec_pop, io.in.s2_fire)
   val s3_push =
-    io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+    io.in.resp.s3.full_pred(2).hit_taken_on_call && !io.in.resp.s3.full_pred(2).fallThroughErr
   val s3_pop =
-    io.in.bits.resp_in(0).s3.full_pred(2).hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+    io.in.resp.s3.full_pred(2).hit_taken_on_ret && !io.in.resp.s3.full_pred(2).fallThroughErr
 
-  val s3_cancel = io.s3_fire(2) && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
-  stack.s2_fire := io.s2_fire(2)
-  stack.s3_fire := io.s3_fire(2)
+  val s3_cancel = io.in.s3_fire && (s3_pushed_in_s2 =/= s3_push || s3_popped_in_s2 =/= s3_pop)
+  stack.s2_fire := io.in.s2_fire
+  stack.s3_fire := io.in.s3_fire
 
   stack.s3_cancel := s3_cancel && !stack_near_overflow
 
-  val s3_meta = RegEnable(s2_meta, io.s2_fire(2))
+  val s3_meta = RegEnable(s2_meta, io.in.s2_fire)
 
   stack.s3_meta        := s3_meta
   stack.s3_missed_pop  := s3_pop && !s3_popped_in_s2
@@ -693,19 +711,19 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   // no longer need the top Entry, but TOSR, TOSW, ssp sctr
   // TODO: remove related signals
 
-  val last_stage_meta = Wire(new RASMeta)
+  val last_stage_meta = WireDefault(0.U.asTypeOf(new RASMeta))
   last_stage_meta.ssp  := s3_meta.ssp
   last_stage_meta.TOSW := s3_meta.TOSW
 
-  io.out.last_stage_spec_info.sctr    := s3_meta.sctr
-  io.out.last_stage_spec_info.ssp     := s3_meta.ssp
-  io.out.last_stage_spec_info.TOSW    := s3_meta.TOSW
-  io.out.last_stage_spec_info.TOSR    := s3_meta.TOSR
-  io.out.last_stage_spec_info.NOS     := s3_meta.NOS
-  io.out.last_stage_spec_info.topAddr := s3_top
-  io.out.last_stage_meta              := last_stage_meta.asUInt
+  io.out.resp.last_stage_spec_info.sctr    := s3_meta.sctr
+  io.out.resp.last_stage_spec_info.ssp     := s3_meta.ssp
+  io.out.resp.last_stage_spec_info.TOSW    := s3_meta.TOSW
+  io.out.resp.last_stage_spec_info.TOSR    := s3_meta.TOSR
+  io.out.resp.last_stage_spec_info.NOS     := s3_meta.NOS
+  io.out.resp.last_stage_spec_info.topAddr := s3_top
+  io.out.meta                              := last_stage_meta
 
-  val redirect    = RegNextWithEnable(io.redirect)
+  val redirect    = RegNextWithEnable(io.in.redirect)
   val do_recover  = redirect.valid
   val recover_cfi = redirect.bits.cfiUpdate
 
@@ -725,19 +743,19 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.redirect_meta_NOS  := recover_cfi.NOS
   stack.redirect_callAddr  := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  val updateValid = RegNext(io.update.valid, init = false.B)
+  val updateValid = RegNext(io.in.update.valid, init = false.B)
   val update      = Wire(new BranchPredictionUpdate)
-  update := RegEnable(io.update.bits, io.update.valid)
+  update := RegEnable(io.in.update.bits, io.in.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
-  val update_pc = io.update.bits.pc
+  val update_pc = io.in.update.bits.pc
 
   // full core power down sequence need 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid)' to be
   // 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))',
   // but the fault-tolerance mechanism of the return stack needs to be updated in time. Using an unexpected old value on reset will cause errors.
   // Only 9 registers have clock gate efficiency affected, so we relaxed the control signals.
-  val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid)
+  val updateMeta = RegEnable(io.in.updateMeta, io.in.update.valid)
 
   stack.commit_valid      := updateValid
   stack.commit_push_valid := updateValid && update.is_call_taken
@@ -755,35 +773,35 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   XSPerfAccumulate("ras_s3_and_redirect_recover_at_the_same_time", s3_cancel && redirect.valid)
 
   val spec_debug = stack.debug
-  XSDebug(io.s2_fire(2), "----------------RAS----------------\n")
-  XSDebug(io.s2_fire(2), " TopRegister: 0x%x\n", stack.spec_pop_addr.toUInt)
-  XSDebug(io.s2_fire(2), "  index       addr           ctr           nos (spec part)\n")
+  XSDebug(io.in.s2_fire, "----------------RAS----------------\n")
+  XSDebug(io.in.s2_fire, " TopRegister: 0x%x\n", stack.spec_pop_addr.toUInt)
+  XSDebug(io.in.s2_fire, "  index       addr           ctr           nos (spec part)\n")
   for (i <- 0 until RasSpecSize) {
     XSDebug(
-      io.s2_fire(2),
+      io.in.s2_fire,
       "  (%d)   0x%x      %d       %d",
       i.U,
       spec_debug.spec_queue(i).retAddr.toUInt,
       spec_debug.spec_queue(i).ctr,
       spec_debug.spec_nos(i).value
     )
-    XSDebug(io.s2_fire(2) && i.U === stack.TOSW.value, "   <----TOSW")
-    XSDebug(io.s2_fire(2) && i.U === stack.TOSR.value, "   <----TOSR")
-    XSDebug(io.s2_fire(2) && i.U === stack.BOS.value, "   <----BOS")
-    XSDebug(io.s2_fire(2), "\n")
+    XSDebug(io.in.s2_fire && i.U === stack.TOSW.value, "   <----TOSW")
+    XSDebug(io.in.s2_fire && i.U === stack.TOSR.value, "   <----TOSR")
+    XSDebug(io.in.s2_fire && i.U === stack.BOS.value, "   <----BOS")
+    XSDebug(io.in.s2_fire, "\n")
   }
-  XSDebug(io.s2_fire(2), "  index       addr           ctr   (committed part)\n")
+  XSDebug(io.in.s2_fire, "  index       addr           ctr   (committed part)\n")
   for (i <- 0 until RasSize) {
     XSDebug(
-      io.s2_fire(2),
+      io.in.s2_fire,
       "  (%d)   0x%x      %d",
       i.U,
       spec_debug.commit_stack(i).retAddr.toUInt,
       spec_debug.commit_stack(i).ctr
     )
-    XSDebug(io.s2_fire(2) && i.U === stack.ssp, "   <----ssp")
-    XSDebug(io.s2_fire(2) && i.U === stack.nsp, "   <----nsp")
-    XSDebug(io.s2_fire(2), "\n")
+    XSDebug(io.in.s2_fire && i.U === stack.ssp, "   <----ssp")
+    XSDebug(io.in.s2_fire && i.U === stack.nsp, "   <----nsp")
+    XSDebug(io.in.s2_fire, "\n")
   }
   /*
   XSDebug(s2_spec_push, "s2_spec_push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
@@ -800,5 +818,6 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
       redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
    */
 
+  val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 }
