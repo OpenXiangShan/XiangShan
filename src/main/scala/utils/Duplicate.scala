@@ -199,7 +199,7 @@ object DuplicateInit {
       n:    Int,
       data: T
   ): Duplicate[T] = {
-    val dup = Wire(Duplicate[T](n, data.cloneType))
+    val dup = Wire(Duplicate[T](n, chiselTypeOf(data)))
     dup := data
     dup
   }
@@ -208,7 +208,7 @@ object DuplicateInit {
       names: Seq[String],
       data:  T
   ): Duplicate[T] = {
-    val dup = Wire(Duplicate[T](names, data.cloneType))
+    val dup = Wire(Duplicate[T](names, chiselTypeOf(data)))
     dup := data
     dup
   }
@@ -217,7 +217,7 @@ object DuplicateInit {
       groups: Map[String, Int],
       data:   T
   ): Duplicate[T] = {
-    val dup = Wire(Duplicate[T](groups, data.cloneType))
+    val dup = Wire(Duplicate[T](groups, chiselTypeOf(data)))
     dup := data
     dup
   }
@@ -225,7 +225,7 @@ object DuplicateInit {
   def apply[T <: Data](
       datas: Seq[T]
   ): Duplicate[T] = {
-    val dup = Wire(Duplicate[T](datas.length, datas.head.cloneType))
+    val dup = Wire(Duplicate[T](datas.length, chiselTypeOf(datas.head)))
     (dup.dup zip datas).foreach { case (dup, source) =>
       dup := source
     }
@@ -237,7 +237,7 @@ object DuplicateInit {
       datas: Seq[T]
   ): Duplicate[T] = {
     require(names.length == datas.length, "Duplicate names and datas should have the same length")
-    val dup = Wire(Duplicate[T](names, datas.head.cloneType))
+    val dup = Wire(Duplicate[T](names, chiselTypeOf(datas.head)))
     (dup.dup zip datas).foreach { case (dup, source) =>
       dup := source
     }
