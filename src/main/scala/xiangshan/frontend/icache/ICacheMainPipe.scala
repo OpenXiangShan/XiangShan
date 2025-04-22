@@ -194,7 +194,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_itlbPbmt           = RegEnable(s0_itlbPbmt, 0.U.asTypeOf(s0_itlbPbmt), s0_fire)
   private val s1_waymasks           = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
   private val s1_metaCodes          = RegEnable(s0_metaCodes, 0.U.asTypeOf(s0_metaCodes), s0_fire)
-  private val s1_maybeRvcMap        = RegEnable(s0_maybeRvcMap, 0.U.asTypeOf(s0_maybeRvcMap), s0_fire)
+  private val s1_sramMaybeRvcMap    = RegEnable(s0_maybeRvcMap, 0.U.asTypeOf(s0_maybeRvcMap), s0_fire)
 
   private val s1_vSetIdx = VecInit(s1_vAddr.map(get_idx))
   private val s1_pAddr   = getPAddrFromPTag(s1_vAddr, s1_pTags)
@@ -202,7 +202,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   // do metaArray ECC check
   private val s1_metaCorrupt = checkMetaEcc(
-    VecInit((s1_pTags zip s1_maybeRvcMap).map { case (pt, rvc) => ICacheMetadata(pt, rvc) }),
+    VecInit((s1_pTags zip s1_sramMaybeRvcMap).map { case (pt, rvc) => ICacheMetadata(pt, rvc) }),
     s1_metaCodes,
     s1_waymasks,
     eccEnable
@@ -268,6 +268,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   })
   private val s1_codes = DataHoldBypass(fromData.codes, RegNext(s0_fire))
 
+  private val s1_maybeRvcMap = VecInit((0 until PortNumber).map { i =>
+    DataHoldBypass(
+      Mux(s1_mshrHits(i), fromMiss.bits.maybeRvcMap, s1_sramMaybeRvcMap(i)),
+      s1_mshrHits(i) || RegNext(s0_fire)
+    )
+  })
+
   s1_flush := io.flush
   s1_ready := s2_ready || !s1_valid
   s1_fire  := s1_valid && s2_ready && !s1_flush
@@ -303,6 +310,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_hits           = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   private val s2_datas          = RegInit(VecInit(Seq.fill(ICacheDataBanks)(0.U((blockBits / ICacheDataBanks).W))))
   private val s2_dataIsFromMshr = RegInit(VecInit(Seq.fill(ICacheDataBanks)(false.B)))
+  private val s2_maybeRvcMap    = RegInit(VecInit(Seq.fill(PortNumber)(0.U(MaxInstNumPerBlock.W))))
+  private val s2_l2Corrupt      = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
 
   /**
     ******************************************************************************
@@ -385,21 +394,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   (0 until PortNumber).foreach { i =>
     when(s1_fire) {
-      s2_hits := s1_hits
+      s2_hits         := s1_hits
+      s2_maybeRvcMap  := s1_maybeRvcMap
+      s2_l2Corrupt(i) := false.B
     }.elsewhen(s2_mshrHits(i)) {
       // update s2_hits even if it's corrupt, to let s2_fire
       s2_hits(i) := true.B
       // also clear s2_metaCorrupt flag when re-fetched, to let s2_fire
       s2_metaCorrupt(i) := false.B
-    }
-  }
-
-  private val s2_l2Corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  (0 until PortNumber).foreach { i =>
-    when(s1_fire) {
-      s2_l2Corrupt(i) := false.B
-    }.elsewhen(s2_mshrHits(i)) {
-      s2_l2Corrupt(i) := fromMiss.bits.corrupt
+      // and update info
+      s2_maybeRvcMap(i) := fromMiss.bits.maybeRvcMap
+      s2_l2Corrupt(i)   := fromMiss.bits.corrupt
     }
   }
 
@@ -468,12 +473,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * response to IFU
     ******************************************************************************
     */
-  toIfuS1.valid            := s1_valid
-  toIfuS1.bits.maybeRvcMap := s1_maybeRvcMap
+  toIfuS1.valid := s1_fire
+  (0 until PortNumber).foreach { i =>
+    val needThisLine = if (i == 0) true.B else s1_doubleline
+    toIfuS1.bits.maybeRvcMap(i).valid := s1_fire && s1_hits(i) && needThisLine
+    toIfuS1.bits.maybeRvcMap(i).bits  := s1_maybeRvcMap(i)
+  }
 
   toIfuS2.valid                   := s2_fire
   toIfuS2.bits.doubleline         := s2_doubleline
   toIfuS2.bits.data               := s2_datas.asTypeOf(UInt(blockBits.W))
+  toIfuS2.bits.maybeRvcMap        := s2_maybeRvcMap
   toIfuS2.bits.isBackendException := s2_isBackendException
   toIfuS2.bits.vAddr              := s2_vAddr
   toIfuS2.bits.pAddr              := s2_pAddr
