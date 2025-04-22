@@ -116,11 +116,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
-  private val fromICache                    = io.fromICache.fetchResp
+  private val (fromICacheS1, fromICacheS2)  = (io.fromICache.s1Resp, io.fromICache.s2Resp)
   private val (toUncache, fromUncache)      = (io.toUncache.req, io.fromUncache.resp)
   private val (preDecoderIn, preDecoderOut) = (preDecoder.io.req, preDecoder.io.resp)
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
     (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
+
+  // FIXME: for debug purpose, delete this
+  dontTouch(fromICacheS1)
 
   private val s1_ready, s2_ready, s3_ready           = WireInit(false.B)
   private val s0_fire, s1_fire, s2_fire, s3_fire     = WireInit(false.B)
@@ -313,31 +316,31 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // TODO: addr compare may be timing critical
   private val s2_iCacheAllRespWire =
-    fromICache.valid &&
-      fromICache.bits.vAddr(0) === s2_ftqReq.startAddr &&
-      (fromICache.bits.doubleline && fromICache.bits.vAddr(1) === s2_ftqReq.nextlineStart || !s2_doubleline)
+    fromICacheS2.valid &&
+      fromICacheS2.bits.vAddr(0) === s2_ftqReq.startAddr &&
+      (fromICacheS2.bits.doubleline && fromICacheS2.bits.vAddr(1) === s2_ftqReq.nextlineStart || !s2_doubleline)
   private val s2_iCacheAllRespReg = ValidHold(s2_valid && s2_iCacheAllRespWire && !s3_ready, s2_fire, s2_flush)
 
   icacheRespAllValid := s2_iCacheAllRespReg || s2_iCacheAllRespWire
 
   io.toICache.stall := !s3_ready
 
-  private val s2_exceptionIn        = fromICache.bits.exception
-  private val s2_isBackendException = fromICache.bits.isBackendException
+  private val s2_exceptionIn        = fromICacheS2.bits.exception
+  private val s2_isBackendException = fromICacheS2.bits.isBackendException
   // paddr and gpAddr of [startAddr, nextLineAddr]
-  private val s2_pAddr             = fromICache.bits.pAddr
-  private val s2_gpAddr            = fromICache.bits.gpAddr
-  private val s2_isForVSnonLeafPTE = fromICache.bits.isForVSnonLeafPTE
+  private val s2_pAddr             = fromICacheS2.bits.pAddr
+  private val s2_gpAddr            = fromICacheS2.bits.gpAddr
+  private val s2_isForVSnonLeafPTE = fromICacheS2.bits.isForVSnonLeafPTE
 
   // FIXME: raise af if one fetch block crosses the cacheable/un-cacheable boundary, might not correct
   private val s2_mmioMismatchException = VecInit(Seq(
     ExceptionType.none, // mark the exception only on the second line
     Mux(
       // not double-line, skip check
-      !fromICache.bits.doubleline || (
+      !fromICacheS2.bits.doubleline || (
         // is double-line, ask for consistent pmp_mmio and itlb_pbmt value
-        fromICache.bits.pmpMmio(0) === fromICache.bits.pmpMmio(1) &&
-          fromICache.bits.itlbPbmt(0) === fromICache.bits.itlbPbmt(1)
+        fromICacheS2.bits.pmpMmio(0) === fromICacheS2.bits.pmpMmio(1) &&
+          fromICacheS2.bits.itlbPbmt(0) === fromICacheS2.bits.itlbPbmt(1)
       ),
       ExceptionType.none,
       ExceptionType.af
@@ -348,8 +351,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_exception = ExceptionType.merge(s2_exceptionIn, s2_mmioMismatchException)
 
   // we need only the first port, as the second is asked to be the same
-  private val s2_pmpMmio  = fromICache.bits.pmpMmio(0)
-  private val s2_itlbPbmt = fromICache.bits.itlbPbmt(0)
+  private val s2_pmpMmio  = fromICacheS2.bits.pmpMmio(0)
+  private val s2_itlbPbmt = fromICacheS2.bits.itlbPbmt(0)
 
   /**
     * reduce the number of registers, origin code
@@ -420,12 +423,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
    *                  cacheline 1 || 1-7 | 1-6 | 1-5 | 1-4 | 1-3 | 1-2 | 1-1 | 1-0 ||
    *                  cacheline 0 || 0-7 | 0-6 | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | 0-0 ||
    *    and ICacheDataArray will respond:
-   *         fromICache.bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
+   *         fromICacheS2.bits.data || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
    *    therefore simply make a copy of the response and `Cat` together, and obtain the requested data from centre:
    *                s2_copiedData || 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 | 0-7 | 0-6 | xxx | xxx | xxx | 1-2 | 1-1 | 1-0 ||
    *                                             requested data: ^-----------------------------^
    * For another example, pc falls on the 1st bank in cacheline 0, we have:
-   *         fromICache.bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
+   *         fromICacheS2.bits.data || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
    *                s2_copiedData || xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx | xxx | xxx | 0-5 | 0-4 | 0-3 | 0-2 | 0-1 | xxx ||
    *                                                                           requested data: ^-----------------------------^
    * Each "| x-y |" block is a 8B bank from cacheline(x).bank(y)
@@ -436,7 +439,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - ICache respond to IFU:
    * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
    */
-  private val s2_copiedData = Cat(fromICache.bits.data, fromICache.bits.data)
+  private val s2_copiedData = Cat(fromICacheS2.bits.data, fromICacheS2.bits.data)
 
   private val s2_cutData = cut(s2_copiedData, s2_cutPtr)
 

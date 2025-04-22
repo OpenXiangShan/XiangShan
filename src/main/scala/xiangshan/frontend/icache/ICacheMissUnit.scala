@@ -27,8 +27,11 @@ import utility.ChiselDB
 import utility.Constantin
 import utility.XSPerfAccumulate
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.ifu.PreDecodeHelper
 
-class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
+class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
+    with ICacheAddrHelper
+    with PreDecodeHelper {
   class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
     // difftest
     val hartId: Bool = Input(Bool())
@@ -215,7 +218,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   // get waymask from replacer when acquire fire
   io.victim.req.valid        := acquireArb.io.out.fire
   io.victim.req.bits.vSetIdx := acquireArb.io.out.bits.vSetIdx
-  private val waymask = UIntToOH(mshrResp.way)
+  private val waymask     = UIntToOH(mshrResp.way)
+  private val maybeRvcMap = getMaybeRvcMap(respDataReg.asUInt)
   // NOTE: when flush/fencei, missUnit will still send response to mainPipe/prefetchPipe
   //       this is intentional to fix timing (io.flush -> mainPipe/prefetchPipe s2_miss -> s2_ready -> ftq ready)
   //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
@@ -226,6 +230,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   // write SRAM
   io.metaWrite.req.bits.generate(
     phyTag = getPTagFromBlk(mshrResp.blkPAddr),
+    maybeRvcMap = maybeRvcMap,
     vSetIdx = mshrResp.vSetIdx,
     waymask = waymask,
     bankIdx = mshrResp.vSetIdx(0),
@@ -243,12 +248,13 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.dataWrite.req.valid := writeSramValid
 
   // response fetch
-  io.resp.valid         := respValid
-  io.resp.bits.blkPAddr := mshrResp.blkPAddr
-  io.resp.bits.vSetIdx  := mshrResp.vSetIdx
-  io.resp.bits.waymask  := waymask
-  io.resp.bits.data     := respDataReg.asUInt
-  io.resp.bits.corrupt  := corruptReg
+  io.resp.valid            := respValid
+  io.resp.bits.blkPAddr    := mshrResp.blkPAddr
+  io.resp.bits.vSetIdx     := mshrResp.vSetIdx
+  io.resp.bits.waymask     := waymask
+  io.resp.bits.data        := respDataReg.asUInt
+  io.resp.bits.corrupt     := corruptReg
+  io.resp.bits.maybeRvcMap := maybeRvcMap
 
   /**
     ******************************************************************************

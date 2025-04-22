@@ -55,6 +55,16 @@ trait PreDecodeHelper extends HasXSParameter {
     val maxWidth  = rviOffset.getWidth
     PrunedAddrInit(SignExt(Mux(isRvc, SignExt(rvcOffset, maxWidth), SignExt(rviOffset, maxWidth)), VAddrBits))
   }
+
+  def getMaybeRvcMap(data: UInt): UInt = {
+    require(data.getWidth % instBits == 0)
+    val instNum = data.getWidth / instBits
+    val dataVec = data.asTypeOf(Vec(instNum, UInt(instBits.W)))
+    if (HasCExtension)
+      VecInit(dataVec.map(isRVC)).asUInt
+    else // if C extension is not supported, all instructions cannot be Rvc
+      0.U(instNum.W)
+  }
 }
 
 trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {

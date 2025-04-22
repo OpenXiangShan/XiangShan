@@ -101,10 +101,11 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
-  val fetchResp:  Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
-  val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
-  val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
-  val fetchReady: Bool                    = Output(Bool())
+  val s1Resp:     Valid[ICacheS1RespBundle] = ValidIO(new ICacheS1RespBundle)
+  val s2Resp:     Valid[ICacheS2RespBundle] = ValidIO(new ICacheS2RespBundle)
+  val topdown:    ICacheTopdownInfo         = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo            = Output(new ICachePerfInfo)
+  val fetchReady: Bool                      = Output(Bool())
 }
 
 class IfuToICacheIO(implicit p: Parameters) extends XSBundle {

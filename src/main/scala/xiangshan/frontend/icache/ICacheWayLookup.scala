@@ -78,16 +78,18 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
   entries.zip(hits).foreach { case (entry, hit) =>
     val hitVec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
-      val (updated, newMask, newCode) = updateMetaInfo(
+      val (updated, newMask, newCode, newMaybeRvcMap) = updateMetaInfo(
         io.update,
         entry.waymask(i),
         entry.vSetIdx(i),
         entry.pTag(i),
-        entry.metaCodes(i)
+        entry.metaCodes(i),
+        entry.maybeRvcMap(i)
       )
       when(updated) {
-        entry.waymask(i)   := newMask
-        entry.metaCodes(i) := newCode
+        entry.waymask(i)     := newMask
+        entry.metaCodes(i)   := newCode
+        entry.maybeRvcMap(i) := newMaybeRvcMap
       }
       hitVec(i) := updated
     }
