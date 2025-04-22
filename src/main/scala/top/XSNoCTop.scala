@@ -214,7 +214,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val cpuReset = reset.asBool || !soc_rst_n
     val cpuReset_sync = withClockAndReset(clock, cpuReset)(ResetGen(2, io.dft_reset))
     //Interrupt sources collect
-
     val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
     val mtip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(1), 3, 0)}
     val meip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.head(0), 3, 0)}
@@ -223,7 +222,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val nmi_43 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(1), 3, 0)}
     val msi_info_vld = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(core_with_l2.module.io.msiInfo.valid, 3, 0)}
     val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, msi_info_vld)
-
     /*
      * CPU Low Power State:
      * 1. core+L2 Low power state transactions is triggered by l2 flush request from core CSR

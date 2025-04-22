@@ -378,11 +378,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
-  val s1_way_en = Mux(
-    RegEnable(io.pseudo_error.valid, false.B, s0_fire),
-    Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en),
-    Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
-  )
+  val s1_no_error_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
+  val s1_error_way_en = Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en)
+  val s1_way_en = Mux(io.pseudo_error.valid, s1_error_way_en, s1_no_error_way_en)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
   val s1_tag = s1_hit_tag
@@ -413,7 +411,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
   val s2_idx = get_idx(s2_req.vaddr)
 
-
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
   val s2_coh = Mux(s2_need_replacement, s2_repl_coh, RegEnable(s1_coh, s1_fire))
@@ -427,8 +424,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s2_hit = s2_tag_match && s2_has_permission
   val s2_sc = s2_req.cmd === M_XSC
+  val s2_lr = s2_req.cmd === M_XLR
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
+  val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
 
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR && s2_need_tag
@@ -978,7 +977,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s.s1.bits.way_en := s1_way_en
     s.s2.valid := s2_valid && !RegEnable(s1_req.replace, s1_fire)
     s.s2.bits.set := RegEnable(get_idx(s1_req.vaddr), s1_fire)
-    s.s2.bits.way_en := RegEnable(s1_way_en, s1_fire)
+    s.s2.bits.way_en := s2_way_en
     s.s3.valid := s3_valid && !RegEnable(s2_req.replace, s2_fire_to_s3)
     s.s3.bits.set := RegEnable(get_idx(s2_req.vaddr), s2_fire_to_s3)
     s.s3.bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
@@ -995,7 +994,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   // report error, update error csr
-  io.error.valid := s3_error && GatedValidRegNext(s2_fire && !(s2_req.isAMO || s2_req.isStore))
+  io.error.valid := s3_error && GatedValidRegNext(s2_fire && !s2_should_not_report_ecc_error)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
   io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && RegNext(s2_fire)
