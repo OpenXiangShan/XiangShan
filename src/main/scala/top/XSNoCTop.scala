@@ -36,6 +36,7 @@ import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.{ChiselAnnotation, annotate}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 
 import difftest.common.DifftestWiring
 import difftest.util.Profile
@@ -214,16 +215,16 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      2. SoC initialize reset during Power on/off flow
      */
     val cpuReset = reset.asBool || !soc_rst_n
-
+    val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(2, io.dft_reset))
     //Interrupt sources collect
-    val msip  = clint.head(0)
-    val mtip  = clint.head(1)
-    val meip  = plic.head(0)
-    val seip  = plic.last(0)
-    val nmi_31 = nmi.head(0)
-    val nmi_43 = nmi.head(1)
-    val debugIntr = debug.head(0)
-    val msi_info_vld = core_with_l2.module.io.msiInfo.valid
+    val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
+    val mtip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(1), 3, 0)}
+    val meip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.head(0), 3, 0)}
+    val seip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.last(0), 3, 0)}
+    val nmi_31 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(0), 3, 0)}
+    val nmi_43 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(1), 3, 0)}
+    val debugIntr = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(debug.head(0),3,0)}
+    val msi_info_vld = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(core_with_l2.module.io.msiInfo.valid, 3, 0)}
     val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, debugIntr, msi_info_vld)
 
     /*
@@ -233,11 +234,18 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      * 3. wait Core to wfi -> send out < io.o_cpu_no_op >
      */
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
-    val lpState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sIDLE)}
-    val l2_flush_en = core_with_l2.module.io.l2_flush_en.getOrElse(false.B)
-    val l2_flush_done = core_with_l2.module.io.l2_flush_done.getOrElse(false.B)
-    val isWFI = core_with_l2.module.io.cpu_halt
-    val exitco = !io.chi.syscoreq & !io.chi.syscoack
+    val lpState = withClockAndReset(clock, cpuReset_sync) {RegInit(sIDLE)}
+    val l2_flush_en = withClockAndReset(clock, cpuReset_sync) {
+      AsyncResetSynchronizerShiftReg(core_with_l2.module.io.l2_flush_en.getOrElse(false.B), 3, 0)
+    }
+    val l2_flush_done = withClockAndReset(clock, cpuReset_sync) {
+      AsyncResetSynchronizerShiftReg(core_with_l2.module.io.l2_flush_done.getOrElse(false.B), 3, 0)
+    }
+    val isWFI = withClockAndReset(clock, cpuReset_sync) {
+      AsyncResetSynchronizerShiftReg(core_with_l2.module.io.cpu_halt, 3, 0)
+    }
+    val exitco = withClockAndReset(clock, cpuReset_sync) {
+      AsyncResetSynchronizerShiftReg((!io.chi.syscoreq & !io.chi.syscoack),3, 0)}
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
@@ -249,11 +257,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      3. only reset/interrupt/snoop could recover core+l2 clock
     */
     val sNORMAL :: sGCLOCK :: sAWAKE :: sFLITWAKE :: Nil = Enum(4)
-    val wfiState = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(sNORMAL)}
+    val wfiState = withClockAndReset(clock, cpuReset_sync) {RegInit(sNORMAL)}
     val isNormal = lpState === sIDLE
-    val wfiGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
+    val wfiGateClock = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val flitpend = io.chi.rx.snp.flitpend | io.chi.rx.rsp.flitpend | io.chi.rx.dat.flitpend
-    wfiState := WfiStateNext(wfiState, isWFI, isNormal, flitpend, intSrc)
+    wfiState := withClockAndReset(clock, cpuReset_sync){WfiStateNext(wfiState, isWFI, isNormal, flitpend, intSrc)}
 
     if (WFIClockGate) {
       wfiGateClock := (wfiState === sGCLOCK)
@@ -264,7 +272,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
 
     /* during power down sequence, SoC reset will gate clock */
-    val pwrdownGateClock = withClockAndReset(clock, cpuReset.asAsyncReset) {RegInit(false.B)}
+    val pwrdownGateClock = withClockAndReset(clock, cpuReset_sync.asAsyncReset) {RegInit(false.B)}
     pwrdownGateClock := !soc_rst_n && lpState === sPOFFREQ
     /*
      physical power off handshake:
