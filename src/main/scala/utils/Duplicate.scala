@@ -39,7 +39,7 @@ import chisel3._
  *   }
  *   // here, x.head is equivalent to:
  *   // - x(0)
- *   // - x.get("inner_0")
+ *   // - x("inner_0")
  *
  *   when(io.loadingValues) {
  *     x := io.value1
@@ -49,8 +49,9 @@ import chisel3._
  *   io.outputGCD := x.group("output")
  *   // here, x.group("output") is equivalent to:
  *   // - x(1, 2)
- *   // - x.get("output_0", "output_1")
+ *   // - x("output_0", "output_1")
  *   // - x.tail
+ *   // NOTE: mixing different index types like x(1, "output_1") is not supported due to scala 2 limitations
  *   io.outputValid := y === 0.U
  * }
  * /** verilog
@@ -96,11 +97,11 @@ class Duplicate[T <: Data](
     names: Seq[String],
     gen:   T
 ) extends Bundle {
-  private val n = names.length
-  require(n > 0, "Duplicate should not be empty")
-  require(names.toSet.size == n, "Duplicate names should be unique")
+  private val num = names.length
+  require(num > 0, "Duplicate should not be empty")
+  require(names.toSet.size == num, "Duplicate names should be unique")
 
-  val dup: Vec[T] = Vec(n, gen)
+  val dup: Vec[T] = Vec(num, gen)
 
   private var next: Int = 0
 
@@ -133,8 +134,8 @@ class Duplicate[T <: Data](
   }
 
   def getNext: T = {
-    val ret = dup(next)
-    next = (next + 1) % n
+    val ret = this.dup(this.next)
+    this.next = (this.next + 1) % this.num
     ret
   }
 
@@ -155,15 +156,20 @@ class Duplicate[T <: Data](
     DuplicateInit(names, dups)
   }
 
-  def head: T = dup.head
+  def head: T = this.dup.head
 
-  def tail: Duplicate[T] = DuplicateInit(names.tail, this.dup.tail)
+  def tail: Duplicate[T] = DuplicateInit(this.names.tail, this.dup.tail)
 
-  def init: Duplicate[T] = DuplicateInit(names.init, this.dup.init)
+  def init: Duplicate[T] = DuplicateInit(this.names.init, this.dup.init)
 
-  def last: T = dup.last
+  def last: T = this.dup.last
 
-  def :=(source: T): Unit = dup.foreach(_ := source)
+  def slice(from: Int, until: Int): Duplicate[T] =
+    DuplicateInit(this.names.slice(from, until), this.dup.slice(from, until))
+
+  def toVec: Vec[T] = this.dup
+
+  def :=(source: T): Unit = this.dup.foreach(_ := source)
 }
 
 object Duplicate {
@@ -171,7 +177,7 @@ object Duplicate {
       n:    Int,
       data: T
   ): Duplicate[T] = {
-    val names = (0 until n).map(i => s"dup$i")
+    val names = (0 until n).map(i => s"${i}")
     new Duplicate[T](names, data)
   }
 
