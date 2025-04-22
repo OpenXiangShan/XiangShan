@@ -140,16 +140,11 @@ class Duplicate[T <: Data](
   }
 
   def group(name: String): Duplicate[T] = {
-    val selected = (this.dup zip this.names).map { case (d, n) =>
+    val selected = (this.dup zip this.names).filter { case (d, n) =>
       val uScoreIdx = n.lastIndexOf("_")
-      if (
-        uScoreIdx < 0 && n == name ||                       // no underscore, do full match
-        uScoreIdx >= 0 && n.substring(0, uScoreIdx) == name // substring before last underscore matches
-      )
-        (d, n)
-      else
-        null
-    }.filter(_ != null)
+      uScoreIdx < 0 && n == name ||                       // no underscore, do full match
+      uScoreIdx >= 0 && n.substring(0, uScoreIdx) == name // substring before last underscore matches
+    }
     val dups  = selected.map(_._1)
     val names = selected.map(_._2)
     require(names.nonEmpty, s"Duplicate group $name not found in names: ${this.names.mkString(", ")}")
