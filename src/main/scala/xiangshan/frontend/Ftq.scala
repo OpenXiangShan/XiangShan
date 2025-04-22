@@ -174,8 +174,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {
 }
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val meta      = UInt(MaxMetaLength.W)
-  val ftb_entry = new FTBEntry
+  val meta       = new PredictorMeta
+  val ftb_entry  = new FTBEntry
+  val paddingBit = if ((meta.getWidth + ftb_entry.getWidth) % 2 != 0) Some(UInt(1.W)) else None
 }
 
 class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
@@ -199,6 +200,7 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
 class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val redirect       = Valid(new BranchPredictionRedirect)
   val update         = Valid(new BranchPredictionUpdate)
+  val updateMeta     = Output(new PredictorMeta)
   val enq_ptr        = Output(new FtqPtr)
   val redirctFromIFU = Output(Bool())
 }
@@ -631,8 +633,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.lastStage.valid(3)
   ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.resp.bits.last_stage_meta
+  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.meta
   ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
+  if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
+    ftq_meta_1r_sram.io.wdata.paddingBit.get := 0.U // TODO: remove it
+  }
   //                                                            ifuRedirect + backendRedirect (commit moved to ftq_meta_1r_sram)
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(
     new FTBEntry_FtqMem,
@@ -1354,13 +1359,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update       := DontCare
   io.toBpu.update.valid := s2_commitValid && s2_readyToCommit
   val update = io.toBpu.update.bits
-  update.false_hit   := s2_commitHit === h_false_hit
-  update.pc          := s2_commitPcBundle.startAddr
-  update.meta        := s2_commitMeta
-  update.cfi_idx     := s2_commitCfi
-  update.full_target := s2_commitTarget
-  update.from_stage  := s2_commitStage
-  update.spec_info   := s2_commitSpecMeta
+  update.false_hit    := s2_commitHit === h_false_hit
+  update.pc           := s2_commitPcBundle.startAddr
+  io.toBpu.updateMeta := s2_commitMeta
+  update.cfi_idx      := s2_commitCfi
+  update.full_target  := s2_commitTarget
+  update.from_stage   := s2_commitStage
+  update.spec_info    := s2_commitSpecMeta
 
   val s2_commitRealHit = s2_commitHit === h_hit
   val update_ftb_entry = update.ftb_entry
@@ -1416,7 +1421,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val misPred = s2_commitMispredict(i)
     // val ghist = commit_spec_meta.ghist.predHist
     val histPtr   = s2_commitSpecMeta.histPtr
-    val predCycle = s2_commitMeta(63, 0)
+    val predCycle = s2_commitMeta.tageMeta.pred_cycle
     val target    = s2_commitTarget
 
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map { case (v, offset) =>
