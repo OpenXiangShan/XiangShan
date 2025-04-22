@@ -98,27 +98,37 @@ class Duplicate[T <: Data](
 ) extends Bundle {
   private val n = names.length
   require(n > 0, "Duplicate should not be empty")
+  require(names.toSet.size == n, "Duplicate names should be unique")
 
   val dup: Vec[T] = Vec(n, gen)
 
   private var next: Int = 0
 
-  def apply(index: Int): T = this.dup(index)
-
-  def apply(indexes: Int*): Duplicate[T] = {
-    val dups  = indexes.map(i => this.dup(i))
-    val names = indexes.map(i => this.names(i))
-    DuplicateInit(names, dups)
+  sealed trait IndexType[A]
+  object IndexType {
+    implicit def intIndex:    IndexType[Int]    = new IndexType[Int] {}
+    implicit def stringIndex: IndexType[String] = new IndexType[String] {}
   }
 
-  def get(name: String): T = {
-    val index = this.names.indexOf(name)
-    require(index >= 0, s"Name $name not found in names: ${this.names.mkString(", ")}")
-    apply(index)
+  def apply[A: IndexType](index: A): T = index match {
+    case i: Int => this.dup(i)
+    case n: String =>
+      val i = this.names.indexOf(n)
+      require(i >= 0, s"Duplicate name $n not found in names: ${this.names.mkString(", ")}")
+      this.dup(i)
   }
 
-  def get(names: String*): Duplicate[T] = {
-    val dups = names.map(get) // call get(name: String)
+  // NOTE: we do not use overloading here, as apply(i: Int*) and apply(i: String*) will conflict
+  def apply[A: IndexType](indexes: A*): Duplicate[T] = {
+    val selected = indexes.map {
+      case i: Int => (this.dup(i), this.names(i))
+      case n: String =>
+        val i = this.names.indexOf(n)
+        require(i >= 0, s"Duplicate name $n not found in names: ${this.names.mkString(", ")}")
+        (this.dup(i), n)
+    }
+    val dups  = selected.map(_._1)
+    val names = selected.map(_._2)
     DuplicateInit(names, dups)
   }
 
@@ -141,7 +151,7 @@ class Duplicate[T <: Data](
     }.filter(_ != null)
     val dups  = selected.map(_._1)
     val names = selected.map(_._2)
-    require(names.nonEmpty, s"Group $name not found in names: ${this.names.mkString(", ")}")
+    require(names.nonEmpty, s"Duplicate group $name not found in names: ${this.names.mkString(", ")}")
     DuplicateInit(names, dups)
   }
 
@@ -225,7 +235,7 @@ object DuplicateInit {
       names: Seq[String],
       datas: Seq[T]
   ): Duplicate[T] = {
-    require(names.length == datas.length, "names and datas should have the same length")
+    require(names.length == datas.length, "Duplicate names and datas should have the same length")
     val dup = Wire(Duplicate[T](names, datas.head.cloneType))
     (dup.dup zip datas).foreach { case (dup, source) =>
       dup := source
