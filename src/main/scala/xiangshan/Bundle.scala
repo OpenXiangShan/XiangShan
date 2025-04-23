@@ -31,7 +31,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr, FtqPtr, FtqToCtrlIO}
-import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RASPtr}
+import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RasPtr}
 import xiangshan.cache.HasDCacheParameters
 import utility._
 
@@ -44,7 +44,6 @@ import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
-import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.trace._
 import xiangshan.mem.prefetch.PrefetchCtrl
@@ -101,9 +100,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)
   val sctr = UInt(RasCtrSize.W)
-  val TOSW = new RASPtr
-  val TOSR = new RASPtr
-  val NOS = new RASPtr
+  val TOSW = new RasPtr
+  val TOSR = new RasPtr
+  val NOS = new RasPtr
   val topAddr = UInt(VAddrBits.W)
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
