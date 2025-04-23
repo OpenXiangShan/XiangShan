@@ -154,7 +154,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io_act_stride := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_stride, 2, Some(30.U))
     pf.io_stride_en := false.B
     pf.io_dcache_evict <> io.fromDCache.sms_agt_evict_req
-    pf.io.l1_req.ready := false.B
     val mbistSmsPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSms", hasMbist)
 
     for (i <- 0 until LD_TRAIN_WIDTH) {
@@ -188,8 +187,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(SMSIdx) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(SMSIdx)
 
-    l2_pf_arb.io.in(SMSIdx).valid := smsOpt.get.io.l2_req.valid
-    l2_pf_arb.io.in(SMSIdx).bits := smsOpt.get.io.l2_req.bits
+    l2_pf_arb.io.in(SMSIdx) <> pf.io.l2_req
+    pf.io.l1_req.ready := false.B
+    pf.io.l3_req.ready := false.B
   })
 
   val strideOpt: Option[L1Prefetcher] = if(hasStreamStride) Some(Module(new L1Prefetcher())) else None
@@ -226,11 +226,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(StrideIdx) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(StrideIdx)
 
-    l1_pf_arb.io.in(StrideIdx) <> strideOpt.get.io.l1_req
-    l2_pf_arb.io.in(StrideIdx).valid := strideOpt.get.io.l2_req.valid
-    l2_pf_arb.io.in(StrideIdx).bits := strideOpt.get.io.l2_req.bits
-    l3_pf_arb.io.in(StrideIdx).valid := strideOpt.get.io.l3_req.valid
-    l3_pf_arb.io.in(StrideIdx).bits := strideOpt.get.io.l3_req.bits
+    l1_pf_arb.io.in(StrideIdx) <> pf.io.l1_req
+    l2_pf_arb.io.in(StrideIdx) <> pf.io.l2_req
+    l3_pf_arb.io.in(StrideIdx) <> pf.io.l3_req
   })
 
   val bertiOpt: Option[BertiPrefetcher] = if(hasBerti) Some(Module(new BertiPrefetcher())) else None
@@ -267,11 +265,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(BertiIdx) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(BertiIdx)
 
-    l1_pf_arb.io.in(BertiIdx) <> bertiOpt.get.io.l1_req
-    l2_pf_arb.io.in(BertiIdx).valid := bertiOpt.get.io.l2_req.valid
-    l2_pf_arb.io.in(BertiIdx).bits := bertiOpt.get.io.l2_req.bits
-    l3_pf_arb.io.in(BertiIdx).valid := bertiOpt.get.io.l3_req.valid
-    l3_pf_arb.io.in(BertiIdx).bits := bertiOpt.get.io.l3_req.bits
+    l1_pf_arb.io.in(BertiIdx) <> pf.io.l1_req
+    l2_pf_arb.io.in(BertiIdx) <> pf.io.l2_req
+    l3_pf_arb.io.in(BertiIdx) <> pf.io.l3_req
   })
 
   /**
