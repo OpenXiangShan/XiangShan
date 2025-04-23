@@ -741,9 +741,9 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val histPtr = new CGHPtr
   val ssp     = UInt(log2Up(RasSize).W)
   val sctr    = UInt(RasCtrSize.W)
-  val TOSW    = new RASPtr
-  val TOSR    = new RASPtr
-  val NOS     = new RASPtr
+  val TOSW    = new RasPtr
+  val TOSR    = new RasPtr
+  val NOS     = new RasPtr
   val topAddr = PrunedAddr(VAddrBits)
 }
 
