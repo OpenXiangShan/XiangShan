@@ -288,6 +288,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_hit_error = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
   val s1_hit_prefetch = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
   val s1_hit_access = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).access))
+  val s1_hit_refill_latency = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).latency))
 
   // io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.valid := false.B
@@ -416,6 +417,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
   val s2_hit_access = RegEnable(s1_hit_access, s1_fire)
+  val s2_hit_refill_latency = RegEnable(s1_hit_refill_latency, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
 
@@ -477,6 +479,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
+  resp.bits.refill_latency := s2_hit_refill_latency
   resp.bits.tag_error := false.B
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.handled

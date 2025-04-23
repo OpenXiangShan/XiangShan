@@ -937,6 +937,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.bloom_filter_query.clr.valid := s3_fire && isFromL1Prefetch(s3_req.pf_source)
   io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(s3_req.addr)
 
+  XSPerfAccumulate("prefetch_write_valid", s3_fire && s3_req.miss)
+  XSPerfAccumulate("prefetch_write_valid_pf", io.prefetch_flag_write.valid && isFromL1Prefetch(s3_req.pf_source))
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
