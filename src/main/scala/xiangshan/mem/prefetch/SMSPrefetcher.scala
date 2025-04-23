@@ -59,7 +59,11 @@ case class SMSParams
 
 trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParameters
 { this: HasXSParameter =>
-  val smsParams = coreParams.prefetcher.get.asInstanceOf[SMSParams]
+  def smsParams = coreParams.prefetcher.find {
+    case p: SMSParams => true
+    case _ => false
+  }.get.asInstanceOf[SMSParams]
+
   val BLK_ADDR_WIDTH = VAddrBits - log2Up(dcacheParameters.blockBytes)
   val REGION_SIZE = smsParams.region_size
   val REGION_BLKS = smsParams.region_size / dcacheParameters.blockBytes
