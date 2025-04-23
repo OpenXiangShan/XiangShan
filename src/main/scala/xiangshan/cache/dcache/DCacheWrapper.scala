@@ -469,6 +469,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
+  val refill_latency = UInt(LATENCY_WIDTH.W)
   // s2
   val handled = Bool()
   val real_miss = Bool()
