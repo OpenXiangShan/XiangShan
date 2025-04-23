@@ -48,8 +48,8 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
   val fetchCacheTime = UInt(XLEN.W)
-  val cacheCompTime = UInt(XLEN.W)
-  val fetchTime = UInt(XLEN.W)
+  val cacheCompTime = UInt(DEGLEN.W)
+  val fetchTime = UInt(DEGLEN.W)
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
@@ -64,8 +64,8 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     crossPageIPFFix := fetch.crossPageIPFFix(i)
     triggered := fetch.triggered(i)
     fetchCacheTime := fetch.fetch_cache_time
-    cacheCompTime := fetch.cache_comp_time
-    fetchTime := GTimer()
+    cacheCompTime := fetch.cache_comp_time - fetch.fetch_cache_time
+    fetchTime := GTimer() - fetch.fetch_cache_time
     this
   }
 

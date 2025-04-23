@@ -98,7 +98,7 @@ trait PMAMethod extends PMAConst {
    * from  CPU
    * BASE            TOP             Size   Description     Attribute
    * 0x00_0000_0000  0x00_0FFF_FFFF         Reserved
-   * 0x00_1000_0000  0x00_1FFF_FFFF  256MB  QSPI Flash      RX
+   * 0x00_1000_0000  0x00_1FFF_FFFF  256MB  QSPI Flash      RWX
    * 0x00_2000_0000  0x00_2FFF_FFFF         Reserved
    * 0x00_3000_0000  0x00_3000_FFFF  64KB   GPU(V550)       RW
    * 0x00_3001_0000  0x00_3001_FFFF  64KB   G71             RW
@@ -202,7 +202,7 @@ trait PMAMethod extends PMAConst {
     addPMA(0x38000000L, a = 1)
     addPMA(0x31320000L, a = 1, w = true, r = true)
     addPMA(0x30000000L, a = 1)
-    addPMA(0x20000000L, a = 1, x = true, r = true)
+    addPMA(0x20000000L, a = 1, x = true, w = true, r = true)
     addPMA(0x10000000L, a = 1)
     addPMA(0)
     while (cfg_list.length < 16) {

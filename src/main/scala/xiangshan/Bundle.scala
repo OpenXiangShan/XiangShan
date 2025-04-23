@@ -127,8 +127,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val fetchCacheTime = UInt(XLEN.W)
-  val cacheCompTime = UInt(XLEN.W)
-  val fetchTime = UInt(XLEN.W)
+  val cacheCompTime = UInt(DEGLEN.W)
+  val fetchTime = UInt(DEGLEN.W)
 }
 
 
@@ -202,21 +202,21 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   val fetchCacheTime = UInt(XLEN.W)
-  val cacheCompTime = UInt(XLEN.W)
-  val fetchTime = UInt(XLEN.W)
-  val decodeTime = UInt(XLEN.W)
-  val renameTime = UInt(XLEN.W)
-  val dispatchTime = UInt(XLEN.W)
-  val enqRsTime = UInt(XLEN.W)
-  val readyIssueTime = UInt(XLEN.W)
-  val selectTime = UInt(XLEN.W)
-  val issueTime = UInt(XLEN.W)
-  val writebackTime = UInt(XLEN.W)
-  val enqRsTime_std = UInt(XLEN.W)
-  val readyIssueTime_std = UInt(XLEN.W)
-  val selectTime_std = UInt(XLEN.W)
-  val issueTime_std = UInt(XLEN.W)
-  val writebackTime_std = UInt(XLEN.W)
+  val cacheCompTime = UInt(DEGLEN.W)
+  val fetchTime = UInt(DEGLEN.W)
+  val decodeTime = UInt(DEGLEN.W)
+  val renameTime = UInt(DEGLEN.W)
+  val dispatchTime = UInt(DEGLEN.W)
+  val enqRsTime = UInt(DEGLEN.W)
+  val readyIssueTime = UInt(DEGLEN.W)
+  val selectTime = UInt(DEGLEN.W)
+  val issueTime = UInt(DEGLEN.W)
+  val writebackTime = UInt(DEGLEN.W)
+  val enqRsTime_std = UInt(DEGLEN.W)
+  val readyIssueTime_std = UInt(DEGLEN.W)
+  val selectTime_std = UInt(DEGLEN.W)
+  val issueTime_std = UInt(DEGLEN.W)
+  val writebackTime_std = UInt(DEGLEN.W)
   // val commitTime = UInt(64.W)
   val runahead_checkpoint_id = UInt(64.W)
   val block_from_rob = Bool()
@@ -226,8 +226,8 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val block_from_sq = Bool()
   val block_from_dpq = Bool()
   val block_from_serial = Bool()
-  val fuIdx = UInt(XLEN.W)
-  val rsIdx = UInt(XLEN.W)
+  val fuIdx = UInt(DEGLEN.W)
+  val rsIdx = UInt(DEGLEN.W)
 }
 
 // Separate LSQ

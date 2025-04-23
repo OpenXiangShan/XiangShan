@@ -228,15 +228,20 @@ class DSECtrlUnitImp(wrapper: DSECtrlUnit)(implicit p: Parameters) extends LazyR
       ctrlSelChangedStall := true.B
     }
 
+    val reset_avoid = RegInit(false.B)
+    val (reset_avoid_counter, reset_avoid_end) = Counter(coreResetReg, 10)
+    when (reset_avoid_end) {
+      reset_avoid := false.B
+    }
 
     // workload -> driver reset
-    val reach_instr_limit = (io.instrCnt >= max_instr_cnt)
-
+    val reach_instr_limit = (io.instrCnt >= max_instr_cnt) && (resetVectorReg === 0x80000000L.U) && !reset_avoid
 
     when (ctrlSelReset) {
       coreResetReg := true.B
       resetVectorReg := 0x80000000L.U
       ctrlSelChangedStall := false.B
+      reset_avoid := true.B
     }
 
     when (reach_instr_limit) {

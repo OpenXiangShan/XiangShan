@@ -58,13 +58,14 @@ class MinimalConfig(n: Int = 1) extends Config(
         DecodeWidth = 2,
         RenameWidth = 2,
         FetchWidth = 4,
+        CommitWidth = 4,
         IssQueSize = 8,
         NRPhyRegs = 64,
-        LoadQueueSize = 64,
+        LoadQueueSize = 16,
         LoadQueueNWriteBanks = 4,
-        StoreQueueSize = 64,
+        StoreQueueSize = 12,
         StoreQueueNWriteBanks = 4,
-        RobSize = 1024,
+        RobSize = 32,
         FtqSize = 8,
         IBufSize = 16,
         StoreBufferSize = 4,
@@ -179,7 +180,12 @@ class MinimalConfig(n: Int = 1) extends Config(
               aliasBitsOpt = None
             )
           },
-          simulation = !site(DebugOptionsKey).FPGAPlatform
+          sramClkDivBy2 = false,
+          tagECC = None,
+          dataECC = None,
+          simulation = !site(DebugOptionsKey).FPGAPlatform,
+          FPGAPlatform = site(DebugOptionsKey).FPGAPlatform,
+          elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
         )),
         L3NBanks = 1
       )
@@ -333,6 +339,7 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
       _.copy(
         DecodeWidth = 4,
         RenameWidth = 4,
+        CommitWidth = 4,
         FetchWidth = 8,
         IssQueSize = 8,
         NRPhyRegs = 128,
@@ -340,7 +347,7 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
         LoadQueueNWriteBanks = 4,
         StoreQueueSize = 64,
         StoreQueueNWriteBanks = 4,
-        RobSize = 256,
+        RobSize = 128,
         FtqSize = 64,
         IBufSize = 32,
         StoreBufferSize = 4,

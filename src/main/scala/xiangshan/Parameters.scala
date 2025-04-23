@@ -43,6 +43,7 @@ case class XSCoreParameters
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
+  DEGLEN: Int = 16,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -278,6 +279,7 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
+  val DEGLEN = coreParams.DEGLEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN

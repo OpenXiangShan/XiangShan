@@ -166,7 +166,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
         /* default */0.U))
 
     // Assign performance counters
-    uops(i).debugInfo.renameTime := GTimer()
+    uops(i).debugInfo.renameTime := GTimer() - uops(i).debugInfo.fetchCacheTime
     uops(i).debugInfo.block_from_intrf := block_from_intrf_record
     uops(i).debugInfo.block_from_fprf := block_from_fprf_record
 

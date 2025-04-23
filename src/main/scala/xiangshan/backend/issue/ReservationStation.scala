@@ -429,9 +429,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     when (s0_valid) {
       uop.bits := in.bits
       if (params.isStoreData) {
-        uop.bits.debugInfo.enqRsTime_std := GTimer()
+        uop.bits.debugInfo.enqRsTime_std := GTimer() - uop.bits.debugInfo.fetchCacheTime
       } else {
-        uop.bits.debugInfo.enqRsTime := GTimer()
+        uop.bits.debugInfo.enqRsTime := GTimer() - uop.bits.debugInfo.fetchCacheTime
       }
 
       // a temp fix for blocked. This will release the load wait for some instructions earlier.
@@ -536,10 +536,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
     if (params.isStoreData) {
       s1_out(i).bits.uop.debugInfo.readyIssueTime_std := Mux(s1_issue_oldest(i) || s1_in_selectPtrValid(i),
-        readyTimeVec(OHToUInt(s1_issuePtrOH(i).bits)), GTimer()-1.U)
+        readyTimeVec(OHToUInt(s1_issuePtrOH(i).bits)), GTimer()-1.U) - s1_out(i).bits.uop.debugInfo.fetchCacheTime
     } else {
       s1_out(i).bits.uop.debugInfo.readyIssueTime := Mux(s1_issue_oldest(i) || s1_in_selectPtrValid(i),
-        readyTimeVec(OHToUInt(s1_issuePtrOH(i).bits)), GTimer() - 1.U)
+        readyTimeVec(OHToUInt(s1_issuePtrOH(i).bits)), GTimer() - 1.U) - s1_out(i).bits.uop.debugInfo.fetchCacheTime
     }
 
     s1_is_first_issue(i) := Mux(s1_issue_oldest(i), statusArray.io.isFirstIssue.last,
@@ -552,9 +552,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     XSPerfAccumulate(s"deq_oldest_override_select_$i", s1_issue_oldest(i) && s1_in_selectPtrValid(i) && s1_out(i).ready)
   }
   if (params.isStoreData) {
-    s1_out.foreach(_.bits.uop.debugInfo.selectTime_std := GTimer())
+    s1_out.foreach{case o => o.bits.uop.debugInfo.selectTime_std := GTimer() - o.bits.uop.debugInfo.fetchCacheTime}
   } else {
-    s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
+    s1_out.foreach{case o => o.bits.uop.debugInfo.selectTime := GTimer() - o.bits.uop.debugInfo.fetchCacheTime}
   }
 
   for (i <- 0 until params.numDeq) {
@@ -597,9 +597,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       wakeupQueue.io.in.valid := s1_issuePtrOH(i).valid && s1_out(i).ready && fuCheck
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
       if (params.isStoreData) {
-        wakeupQueue.io.in.bits.debugInfo.issueTime_std := GTimer()
+        wakeupQueue.io.in.bits.debugInfo.issueTime_std := GTimer() - wakeupQueue.io.in.bits.debugInfo.fetchCacheTime
       } else {
-        wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer()
+        wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() - wakeupQueue.io.in.bits.debugInfo.fetchCacheTime
       }
       wakeupQueue.io.redirect := io.redirect
       io.fastWakeup.get(i) := wakeupQueue.io.out
@@ -658,15 +658,15 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       io.fastWakeup.get(i).bits := Mux(s1_issue_oldest_dup(i), oldest_uop_dup,
         Mux(select_ptr_dup(i).valid, select_uop_dup(i), uop.bits))
       if (params.isStoreData) {
-        io.fastWakeup.get(i).bits.debugInfo.selectTime_std := GTimer()
-        io.fastWakeup.get(i).bits.debugInfo.issueTime_std := GTimer()
+        io.fastWakeup.get(i).bits.debugInfo.selectTime_std := GTimer() - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
+        io.fastWakeup.get(i).bits.debugInfo.issueTime_std := GTimer() - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
         io.fastWakeup.get(i).bits.debugInfo.readyIssueTime_std := Mux(s1_issue_oldest_dup(i), readyTimeVec_dup(OHToUInt(oldest_sel_ptr_dup.bits)),
-          Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U))
+          Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U)) - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
       } else {
-        io.fastWakeup.get(i).bits.debugInfo.selectTime := GTimer()
-        io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer()
+        io.fastWakeup.get(i).bits.debugInfo.selectTime := GTimer() - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
+        io.fastWakeup.get(i).bits.debugInfo.issueTime := GTimer() - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
         io.fastWakeup.get(i).bits.debugInfo.readyIssueTime := Mux(s1_issue_oldest_dup(i), readyTimeVec_dup(OHToUInt(oldest_sel_ptr_dup.bits)),
-          Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U))
+          Mux(select_ptr_dup(i).valid, readyTimeVec_dup(OHToUInt(select_ptr_dup(i).bits)), GTimer() - 1.U)) - io.fastWakeup.get(i).bits.debugInfo.fetchCacheTime
       }
       io.fastWakeup.get(i).bits.debugInfo.rsIdx := Mux(s1_issue_oldest_dup(i), OHToUInt(oldest_sel_ptr_dup.bits),
         Mux(select_ptr_dup(i).valid, OHToUInt(select_ptr_dup(i).bits), OHToUInt(s1_allocatePtrOH_dup.last(i))))
@@ -841,9 +841,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     io.deq(i).valid := s2_deq(i).valid
     io.deq(i).bits := s2_deq(i).bits
     if (params.isStoreData) {
-      io.deq(i).bits.uop.debugInfo.issueTime_std := GTimer()
+      io.deq(i).bits.uop.debugInfo.issueTime_std := GTimer() - io.deq(i).bits.uop.debugInfo.fetchCacheTime
     } else {
-      io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
+      io.deq(i).bits.uop.debugInfo.issueTime := GTimer() - io.deq(i).bits.uop.debugInfo.fetchCacheTime
     }
     io.deq(i).bits.uop.debugInfo.fuIdx := (params.id * 2 + i).U
 

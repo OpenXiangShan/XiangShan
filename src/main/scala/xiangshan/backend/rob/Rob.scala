@@ -414,7 +414,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val enqIndex = allocatePtrVec(i).value
       // store uop in data module and debug_microOp Vec
       debug_microOp(enqIndex) := enqUop
-      debug_microOp(enqIndex).debugInfo.dispatchTime := timer
+      debug_microOp(enqIndex).debugInfo.dispatchTime := timer - enqUop.debugInfo.fetchCacheTime
       debug_microOp(enqIndex).debugInfo.enqRsTime := 0.U
       debug_microOp(enqIndex).debugInfo.selectTime := 0.U
       debug_microOp(enqIndex).debugInfo.issueTime := 0.U
@@ -824,7 +824,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       debug_microOp(wbIdx).debugInfo.readyIssueTime_std := RegNext(wb.bits.uop.debugInfo.readyIssueTime_std)
       debug_microOp(wbIdx).debugInfo.selectTime_std := RegNext(wb.bits.uop.debugInfo.selectTime_std)
       debug_microOp(wbIdx).debugInfo.issueTime_std := RegNext(wb.bits.uop.debugInfo.issueTime_std)
-      debug_microOp(wbIdx).debugInfo.writebackTime_std := GTimer()
+      debug_microOp(wbIdx).debugInfo.writebackTime_std := GTimer() - RegNext(wb.bits.uop.debugInfo.fetchCacheTime)
     }
   }
 
@@ -1050,6 +1050,15 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
           svalid := Mux(FuType.isFpExu(uop.ctrl.fuType), srctype === SrcType.fp,
             srctype === SrcType.reg && lsrc =/= 0.U && i.U =/= 2.U)
       }
+      val blocks = Cat(uop.debugInfo.block_from_rob.asUInt,
+        uop.debugInfo.block_from_dpq.asUInt,
+        uop.debugInfo.block_from_serial.asUInt,
+        uop.debugInfo.block_from_intrf.asUInt | uop.debugInfo.block_from_fprf.asUInt,
+        uop.debugInfo.block_from_lq.asUInt,
+        uop.debugInfo.block_from_sq.asUInt
+      ) 
+      val srcTypes = Cat(srcValid(2), srcValid(1), srcValid(0))
+      /*
       HardenXSPerfAccumulate.declareValid(i, v && io.commits.isCommit)
       HardenXSPerfAccumulate(s"cf", GTimer(), i)
       HardenXSPerfAccumulate(s"pc", uop.cf.pc, i)
@@ -1062,12 +1071,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       HardenXSPerfAccumulate(s"Fetch", uop.debugInfo.fetchTime, i)
       HardenXSPerfAccumulate(s"Decode", uop.debugInfo.decodeTime, i)
       HardenXSPerfAccumulate(s"Rename", uop.debugInfo.renameTime, i)
-      HardenXSPerfAccumulate(s"BlockFromROB", uop.debugInfo.block_from_rob.asUInt, i)
-      HardenXSPerfAccumulate(s"BlockFromDPQ", uop.debugInfo.block_from_dpq.asUInt, i)
-      HardenXSPerfAccumulate(s"BlockFromSerial", uop.debugInfo.block_from_serial.asUInt, i)
-      HardenXSPerfAccumulate(s"BlockFromRF", uop.debugInfo.block_from_intrf.asUInt | uop.debugInfo.block_from_fprf.asUInt, i)
-      HardenXSPerfAccumulate(s"BlockFromLQ", uop.debugInfo.block_from_lq.asUInt, i)
-      HardenXSPerfAccumulate(s"BlockFromSQ", uop.debugInfo.block_from_sq.asUInt, i)
+      HardenXSPerfAccumulate(s"Blocks", blocks, i)
+      // HardenXSPerfAccumulate(s"BlockFromROB", uop.debugInfo.block_from_rob.asUInt, i)
+      // HardenXSPerfAccumulate(s"BlockFromDPQ", uop.debugInfo.block_from_dpq.asUInt, i)
+      // HardenXSPerfAccumulate(s"BlockFromSerial", uop.debugInfo.block_from_serial.asUInt, i)
+      // HardenXSPerfAccumulate(s"BlockFromRF", uop.debugInfo.block_from_intrf.asUInt | uop.debugInfo.block_from_fprf.asUInt, i)
+      // HardenXSPerfAccumulate(s"BlockFromLQ", uop.debugInfo.block_from_lq.asUInt, i)
+      // HardenXSPerfAccumulate(s"BlockFromSQ", uop.debugInfo.block_from_sq.asUInt, i)
       HardenXSPerfAccumulate(s"EliminatedMove", uop.debugInfo.eliminatedMove, i)
       HardenXSPerfAccumulate(s"Dispatch", uop.debugInfo.dispatchTime, i)
       HardenXSPerfAccumulate(s"EnqRS", max(uop.debugInfo.enqRsTime, uop.debugInfo.enqRsTime_std), i)
@@ -1085,9 +1095,44 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       HardenXSPerfAccumulate(s"SRC1", uop.psrc(1), i)
       HardenXSPerfAccumulate(s"SRC2", uop.psrc(2), i)
       HardenXSPerfAccumulate(s"DST", uop.pdest, i)
-      HardenXSPerfAccumulate(s"SRCTYPE0", srcValid(0), i)
-      HardenXSPerfAccumulate(s"SRCTYPE1", srcValid(1), i)
-      HardenXSPerfAccumulate(s"SRCTYPE2", srcValid(2), i)
+      HardenXSPerfAccumulate(s"SRCTypes", srcTypes, i)
+      // HardenXSPerfAccumulate(s"SRCTYPE0", srcValid(0), i)
+      // HardenXSPerfAccumulate(s"SRCTYPE1", srcValid(1), i)
+      // HardenXSPerfAccumulate(s"SRCTYPE2", srcValid(2), i)
+      */
+
+      HardenXSPerfAccumulate.declareValid(i, v && io.commits.isCommit)
+      // HardenXSPerfAccumulate(s"cf", GTimer(), i)
+      HardenXSPerfAccumulate(s"pc", uop.cf.pc, i)
+      HardenXSPerfAccumulate(s"instr", uop.cf.instr, i)
+      HardenXSPerfAccumulate(s"fuTypefuOpType", Cat(uop.ctrl.fuType.asTypeOf(UInt(8.W)), uop.ctrl.fuOpType.asTypeOf(UInt(8.W)), Cat(blocks, uop.debugInfo.eliminatedMove).asTypeOf(UInt(16.W))), i)  // 4
+      // HardenXSPerfAccumulate(s"fuOpType", uop.ctrl.fuOpType, i) // 7
+      // HardenXSPerfAccumulate(s"fpu", uop.ctrl.fpu.asUInt, i)
+      HardenXSPerfAccumulate(s"FetchCacheLine", uop.debugInfo.fetchCacheTime, i)
+      HardenXSPerfAccumulate(s"ProCacheFetch", Cat(uop.debugInfo.cacheCompTime, uop.debugInfo.fetchTime), i)
+      // HardenXSPerfAccumulate(s"Fetch", uop.debugInfo.fetchTime, i)
+      HardenXSPerfAccumulate(s"DecodeRename", Cat(uop.debugInfo.decodeTime, uop.debugInfo.renameTime), i)
+      // HardenXSPerfAccumulate(s"Rename", uop.debugInfo.renameTime, i)
+      // HardenXSPerfAccumulate(s"BlocksElimiMove", Cat(blocks, uop.debugInfo.eliminatedMove), i)
+      // HardenXSPerfAccumulate(s"EliminatedMove", uop.debugInfo.eliminatedMove, i)
+      HardenXSPerfAccumulate(s"DispatchEnqRS", Cat(uop.debugInfo.dispatchTime, max(uop.debugInfo.enqRsTime, uop.debugInfo.enqRsTime_std)), i)
+      // HardenXSPerfAccumulate(s"EnqRS", max(uop.debugInfo.enqRsTime, uop.debugInfo.enqRsTime_std), i)
+      HardenXSPerfAccumulate(s"InsertReadyListSelect", Cat(max(uop.debugInfo.readyIssueTime, uop.debugInfo.readyIssueTime_std), max(uop.debugInfo.selectTime, uop.debugInfo.selectTime_std)), i)
+      // HardenXSPerfAccumulate(s"Select", max(uop.debugInfo.selectTime, uop.debugInfo.selectTime_std), i)
+      HardenXSPerfAccumulate(s"IssueComplete", Cat(max(uop.debugInfo.issueTime, uop.debugInfo.issueTime_std), max(uop.debugInfo.writebackTime, uop.debugInfo.writebackTime_std)), i)
+      // HardenXSPerfAccumulate(s"Complete", max(uop.debugInfo.writebackTime, uop.debugInfo.writebackTime_std), i)
+      HardenXSPerfAccumulate(s"Commit", GTimer(), i)
+      HardenXSPerfAccumulate(s"ROB", uop.robIdx.value, i)
+      HardenXSPerfAccumulate(s"LQSQ", Cat(uop.lqIdx.value.asTypeOf(UInt(16.W)), uop.sqIdx.value.asTypeOf(UInt(16.W))), i)
+      // HardenXSPerfAccumulate(s"SQ", uop.sqIdx.value, i)
+      HardenXSPerfAccumulate(s"RSFU", Cat(uop.debugInfo.rsIdx.asTypeOf(UInt(16.W)), uop.debugInfo.fuIdx.asTypeOf(UInt(16.W))), i)
+      // HardenXSPerfAccumulate(s"FU", uop.debugInfo.fuIdx, i)
+      HardenXSPerfAccumulate(s"SRC012DST", Cat(uop.psrc(0).asTypeOf(UInt(8.W)), uop.psrc(1).asTypeOf(UInt(8.W)), uop.psrc(2).asTypeOf(UInt(8.W)), uop.pdest.asTypeOf(UInt(8.W))), i)
+      // HardenXSPerfAccumulate(s"SRC1", uop.psrc(1), i)
+      // HardenXSPerfAccumulate(s"SRC2", uop.psrc(2), i)
+      // HardenXSPerfAccumulate(s"DST", uop.pdest, i)
+      HardenXSPerfAccumulate(s"SRCTypes", srcTypes, i)
+
       /*
       when(v && io.commits.isCommit) {
         printf(cf"${GTimer()}: system.switch_cpus: T0 : 0x${uop.cf.pc}%x : 0x${Hexadecimal(uop.cf.instr)}" +

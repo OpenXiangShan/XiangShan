@@ -14,7 +14,7 @@ object Constants {
 
 case class HardenPerfConfig(commitWidth: Int) {
   val batchSize = 64
-  val MaxDataByteLen = 2000
+  val MaxDataByteLen = 240
   val MaxDataBitLen = MaxDataByteLen * 8
   val validWidth = commitWidth
   val timeoutThreshold = 200000
@@ -27,7 +27,7 @@ class PerfEventBundle extends Bundle {
 object HardenXSPerfAccumulate {
   private val enabled = true
   private val instances = ListBuffer.empty[(Data, String)]
-  private val structInstances = List.fill(6)(ListBuffer.empty[(Data, String)])
+  private val structInstances = List.fill(4)(ListBuffer.empty[(Data, String)])
 
   // apply for normal performance counter
   def apply[T <: Data](
@@ -53,7 +53,7 @@ object HardenXSPerfAccumulate {
       }
 
       // add wire-source for the counter
-      BoringUtils.addSource(counter, name)
+      BoringUtils.addSource(RegNext(RegNext(RegNext(counter))), name)
     }
   }
 
@@ -84,7 +84,7 @@ object HardenXSPerfAccumulate {
 
       // add wire-source for the counter
       val probe = perfCnt.asTypeOf(UInt(Constants.PerfEventLen.W))
-      BoringUtils.addSource(probe, s"${name}_$commitIdx")
+      BoringUtils.addSource(RegNext(RegNext(RegNext(probe))), s"${name}_$commitIdx")
     }
   }
 
@@ -92,7 +92,7 @@ object HardenXSPerfAccumulate {
   def declareValid(index: Int, perfCnt: Bool)(implicit p: Parameters): Unit = {
     if (enabled) {
       val portal = WireInit(perfCnt)
-      BoringUtils.addSource(portal, s"valid_$index")
+      BoringUtils.addSource(RegNext(RegNext(RegNext(portal))), s"valid_$index")
     }
   }
 
@@ -117,7 +117,7 @@ object HardenXSPerfAccumulate {
     lazy val nrCntAll = nrStructCnt * commitWidth + nrNormalCnt
 
     // add wire-sink for all registered counters
-    assert(structInstances.map(_.length).distinct.size <= 1, "All ListBuffers in 'instances' must have the same length")
+    assert(structInstances.take(commitWidth).map(_.length).distinct.size <= 1, "All ListBuffers in 'instances' must have the same length")
     lazy val io_perf: Vec[PerfEventBundle] = IO(Output(Vec(nrNormalCnt, new PerfEventBundle)))
     lazy val deg_data = WireInit(VecInit(Seq.fill(commitWidth)(VecInit(Seq.fill(nrStructCnt)(0.U.asTypeOf(new PerfEventBundle))))))
 
