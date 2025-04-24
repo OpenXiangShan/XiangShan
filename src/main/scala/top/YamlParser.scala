@@ -56,6 +56,7 @@ case class YamlConfig(
   EnableDFX: Option[Boolean],
   EnableSramCtl: Option[Boolean],
   EnableCHINS: Option[Boolean],
+  CHIAddrWidth: Option[Int],
 )
 
 object YamlParser {
@@ -183,6 +184,11 @@ object YamlParser {
     yamlConfig.EnableCHINS.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case coupledL2.tl2chi.NonSecureKey => enable
+      })
+    }
+    yamlConfig.CHIAddrWidth.foreach { width =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case coupledL2.tl2chi.CHIAddrWidthKey => width
       })
     }
     newConfig
