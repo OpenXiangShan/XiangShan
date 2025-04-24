@@ -387,11 +387,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
-  val s1_way_en = Mux(
-    RegEnable(io.pseudo_error.valid, false.B, s0_fire),
-    Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en),
-    Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
-  )
+  val s1_no_error_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
+  val s1_error_way_en = Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en)
+  val s1_way_en = Mux(io.pseudo_error.valid, s1_error_way_en, s1_no_error_way_en)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
   val s1_tag = s1_hit_tag
