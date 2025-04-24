@@ -868,9 +868,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * NC Store
     * (1) req: when it has been commited, it can be sent to lower level.
     * (2) resp: because SQ data forward is required, it can only be deq when ncResp is received
+    * 
+    * NOTE: nc_req_ack is used to make sure that the request is written by the ubuffer and
+    * the ubuffer can forward the required data
     */
   // TODO: CAN NOT deal with vector nc now!
-  val nc_idle :: nc_req :: nc_resp :: Nil = Enum(3)
+  val nc_idle :: nc_req :: nc_req_ack :: nc_resp :: Nil = Enum(4)
   val ncState = RegInit(nc_idle)
   val rptr0 = rdataPtrExt(0).value
   switch(ncState){
@@ -882,6 +885,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(nc_req) {
       when(ncDoReq) {
+        ncState := nc_req_ack
+      }
+    }
+    is(nc_req_ack) {
+      when(ncSlaveAck) {
         when(io.uncacheOutstanding) {
           ncState := nc_idle
         }.otherwise{
