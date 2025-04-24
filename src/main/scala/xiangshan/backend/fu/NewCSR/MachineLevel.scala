@@ -352,7 +352,10 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  val mvendorid = Module(new CSRModule("Mvendorid") { rdata := 0.U })
+  val mvendorid = Module(new CSRModule("Mvendorid", new CSRBundle {
+    override val len = 32
+    val ALL = RO(31, 0)
+  }))
     .setAddr(CSRs.mvendorid)
 
   // architecture id for XiangShan is 25
