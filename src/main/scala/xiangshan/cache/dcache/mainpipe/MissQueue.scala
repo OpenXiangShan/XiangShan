@@ -388,7 +388,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Input(Bool())
     val main_pipe_refill_resp = Input(Bool())
-    val main_pipe_replay_to_mq = Input(Bool())
+    val main_pipe_replay = Input(Bool())
     val main_pipe_grow_perm_fail = Input(Bool())
 
     // for main pipe s2
@@ -661,7 +661,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
-  when (io.main_pipe_replay_to_mq || io.main_pipe_grow_perm_fail) {
+  when (io.main_pipe_replay || io.main_pipe_grow_perm_fail) {
     s_mainpipe_req := false.B
     grow_perm_fail := io.main_pipe_grow_perm_fail
   }
@@ -862,7 +862,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
-  XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay_to_mq)
+  XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
@@ -1129,7 +1129,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.acquire_fired_by_pipe_reg := acquire_from_pipereg.fire
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
-      e.io.main_pipe_replay_to_mq := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
       e.io.main_pipe_grow_perm_fail := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_grow_perm_fail && io.mainpipe_info.s2_miss_id === i.U
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
 
