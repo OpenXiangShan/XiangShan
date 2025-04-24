@@ -295,7 +295,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_fullva    = io.tlb.resp.bits.fullva
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
-  val s1_pbmt      = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
+  val s1_tlb_hit   = !io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
+  val s1_pbmt      = Mux(!s1_tlb_hit, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   //We don't want `StoreUnit` to have an additional effect on the Store of vector from a `misalignBuffer,`
@@ -403,7 +404,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits.isvec := s1_out.isvec || s1_frm_mab_vec
   io.lsq.bits.updateAddrValid := (!s1_in.isMisalign || s1_in.misalignWith16Byte) && (!s1_frm_mabuf || s1_in.isFinalSplit) || s1_exception
   // kill dcache write intent request when tlb miss or exception
-  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_out.nc || s1_in.uop.robIdx.needFlush(io.redirect))
   io.dcache.s1_paddr := s1_paddr
 
   // write below io.out.bits assign sentence to prevent overwriting values
