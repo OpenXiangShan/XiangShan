@@ -105,6 +105,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.probe_need_data := req.needData
     pipe_req.error := false.B
     pipe_req.id := io.id
+    pipe_req.grow_perm_fail := false.B
 
     when (io.pipe_req.fire) {
       state := s_wait_resp
