@@ -214,7 +214,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits := DontCare
     io.ncOut.bits.uop := selUop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.ncOut.bits.uop.exceptionVec(loadAccessFault) := nderr
+    io.ncOut.bits.uop.exceptionVec(hardwareError) := nderr
     io.ncOut.bits.data := rdataPartialLoad
     io.ncOut.bits.paddr := req.paddr
     io.ncOut.bits.vaddr := req.vaddr
@@ -229,7 +229,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioOut.bits := DontCare
     io.mmioOut.bits.uop := selUop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.mmioOut.bits.uop.exceptionVec(loadAccessFault) := nderr
+    io.mmioOut.bits.uop.exceptionVec(hardwareError) := nderr
     io.mmioOut.bits.data := rdataPartialLoad
     io.mmioOut.bits.debug.isMMIO := true.B
     io.mmioOut.bits.debug.isNC := false.B

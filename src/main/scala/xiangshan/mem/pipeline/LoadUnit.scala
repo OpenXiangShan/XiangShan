@@ -1028,8 +1028,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
+    s1_out.uop.exceptionVec(loadAccessFault)    := false.B
+    s1_out.uop.exceptionVec(hardwareError)      := s1_dly_err && s1_vecActive
     s1_out.isMisalign := false.B
-    s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
   }
 
   // pointer chasing
