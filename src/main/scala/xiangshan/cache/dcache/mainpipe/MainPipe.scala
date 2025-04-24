@@ -400,10 +400,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
-  val (s1_has_permission, s1_shrink_perm, _) = s1_hit_coh.onAccess(s1_req.cmd)
+  val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_store_or_amo = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO && s1_req.cmd =/= M_XSC)
   val s1_pregen_can_go_to_mq = s1_store_or_amo && !s1_hit
+  val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -413,7 +414,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_tag_match_way = RegEnable(s1_real_tag_match_way, s1_fire)
   val s2_tag_ecc_match_way = RegEnable(s1_tag_ecc_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val (s2_has_permission, s2_shrink_perm, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
+  val s2_has_permission = RegEnable(s1_has_permission, s1_fire)
+  val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_fire)
+  val s2_grow_perm = RegEnable(s1_grow_perm, s1_fire) && s2_tag_match
 
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
@@ -450,8 +453,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // Grow permission fail
   // Only in case BtoT will both cache and missqueue be occupied
-  val s2_grow_perm = s2_shrink_perm === BtoT && !s2_has_permission
-  val s2_grow_perm_fail = PopCount(io.BtoT_ways_for_set) > (nWays-2).U && s2_grow_perm
+  val s2_has_more_then_3_ways_BtoT = PopCount(io.BtoT_ways_for_set) > (nWays-2).U
+  val s2_has_at_least_1_way_BtoT = io.BtoT_ways_for_set.orR
+  val s2_grow_perm_fail = s2_has_more_then_3_ways_BtoT && s2_grow_perm
   XSError(s2_valid && s2_grow_perm && io.BtoT_ways_for_set.andR,
     "BtoT grow permission, but all ways are BtoT\n"
   )
@@ -819,7 +823,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.amo_cmp  := s2_req.amo_cmp
   miss_req.req_coh := s2_hit_coh
   miss_req.id := s2_req.id
-  miss_req.cancel := false.B
+  miss_req.cancel := s2_grow_perm_fail
   miss_req.pc := DontCare
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
@@ -833,7 +837,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_replay_resp.bits.miss := true.B
   io.store_replay_resp.bits.replay := true.B
   io.store_replay_resp.bits.id := s2_req.id
-  io.store_replay_resp.bits.grow_perm_fail := s2_grow_perm_fail
+  io.store_replay_resp.bits.grow_perm_fail := false.B
 
   io.store_hit_resp.valid := s3_valid && (s3_store_can_go || (s3_miss_can_go && s3_req.isStore))
   io.store_hit_resp.bits.data := DontCare
@@ -861,7 +865,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
-  atomic_replay_resp.grow_perm_fail := s2_grow_perm_fail
+  atomic_replay_resp.grow_perm_fail := false.B
 
   val atomic_replay_resp_valid = s2_valid && (s2_can_go_to_mq && replay || s2_grow_perm_fail) && s2_req.isAMO
   val atomic_hit_resp_valid = s3_valid && (s3_amo_can_go || s3_miss_can_go && s3_req.isAMO)
@@ -924,7 +928,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_addr.valid := s2_valid && s2_need_eviction
   io.replace_addr.bits  := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
 
-  io.grow_perm_addr := get_block_addr(s2_req.addr)
+  io.grow_perm_addr := get_block_addr(s2_req.addr) // only use set index
 
   assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 
@@ -1015,7 +1019,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s2_valid := s2_valid && s2_req.miss
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
   io.mainpipe_info.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
-  io.mainpipe_info.s2_grow_perm_fail := s2_valid && s2_grow_perm_fail
+  io.mainpipe_info.s2_grow_perm_fail := s2_valid && s2_has_at_least_1_way_BtoT && s2_need_eviction
   io.mainpipe_info.s3_valid := s3_valid
   io.mainpipe_info.s3_miss_id := s3_req.miss_id
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
