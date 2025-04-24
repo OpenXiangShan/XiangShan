@@ -106,6 +106,11 @@ ifeq ($(ENABLE_NS),1)
 COMMON_EXTRA_ARGS += --enable-ns
 endif
 
+# CHI physical address width
+ifneq ($(CHI_ADDR_WIDTH),)
+COMMON_EXTRA_ARGS += --chi-addr-width $(CHI_ADDR_WIDTH)
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
