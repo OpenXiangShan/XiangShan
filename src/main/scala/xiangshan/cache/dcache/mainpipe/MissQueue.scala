@@ -518,7 +518,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
     req.isBtoT := DontCare
-    req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, 0.U, miss_req_pipe_reg_bits.occupy_way)
+    req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, miss_req_pipe_reg_bits.occupy_way, 0.U)
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
     //only  load miss need keyword
@@ -572,7 +572,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
       req.isBtoT := DontCare
-      req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, 0.U, miss_req_pipe_reg_bits.occupy_way)
+      req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, miss_req_pipe_reg_bits.occupy_way, 0.U)
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
