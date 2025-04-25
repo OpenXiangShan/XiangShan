@@ -125,6 +125,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
   val req_valid = RegInit(false.B)
   val req = Reg(new StoreMisalignBufferEntry)
+  val recovery_req = Reg(new StoreMisalignBufferEntry)
 
   val cross4KBPageBoundary = Wire(Bool())
   val needFlushPipe = RegInit(false.B)
@@ -136,7 +137,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //  - s_resp:  Responds to a split store access request
   //  - s_wb:    writeback yo rob/vecMergeBuffer
   //  - s_block: Wait for this instr to reach the head of Rob.
-  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(6)
+  //  - s_recovery: Recovery from a cross page replacement revoke.
+  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: s_recovery :: Nil = Enum(7)
   val bufferState    = RegInit(s_idle)
 
   // enqueue
@@ -158,10 +160,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val s2_canEnq = GatedRegNext(canEnq)
   val s2_reqSelPort = GatedRegNext(reqSelPort)
-  val misalign_can_split = Wire(Bool())
-  misalign_can_split := Mux(s2_canEnq, (0 until enqPortNum).map {
-    case i => !io.enq(i).revoke && s2_reqSelPort === i.U
-  }.reduce(_|_), GatedRegNext(misalign_can_split))
+  val s2_needRevoke = s2_canEnq && (0 until enqPortNum).map {
+    case i => io.enq(i).revoke && s2_reqSelPort === i.U
+  }.reduce(_|_)
 
   when(canEnq) {
     connectSamePort(req, reqSelBits)
@@ -169,6 +170,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     req_valid := true.B
   }
   val cross4KBPageEnq = WireInit(false.B)
+  val needRecovery = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
     when(
       reqSelValid &&
@@ -179,6 +181,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       req.portIndex := reqSelPort
       cross4KBPageEnq := true.B
       needFlushPipe   := true.B
+
+      // if the current enq request is a cross page request and it'll be revoked,
+      // we need to recovery the previous request
+      recovery_req := req
+      needRecovery := s2_needRevoke
     } .otherwise {
       req := req
       cross4KBPageEnq := false.B
@@ -229,16 +236,20 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary && misalign_can_split) {
+      when(cross4KBPageBoundary && !s2_needRevoke) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid && misalign_can_split) {
+        when (req_valid && !s2_needRevoke) {
           bufferState := s_split
           isCrossPage := false.B
         }
+      }
+      when (needRecovery) {
+        bufferState := s_recovery
+        isCrossPage := false.B // make sure the state update synchronization.
       }
     }
 
@@ -336,6 +347,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         globalMMIO := false.B
         globalNC   := false.B
       }
+    }
+    is (s_recovery) {
+      // Recovery the previous request
+      req := recovery_req
+      needFlushPipe := false.B
+
+      // Restart state machine
+      bufferState := s_idle
     }
   }
 
@@ -638,9 +657,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
-  when (flush) {
+  when (flush || s2_needRevoke) {
     bufferState := s_idle
-    req_valid := Mux(cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect, req_valid, false.B)
+    req_valid := Mux(
+      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect,
+      req_valid, // when s2_needRevoke is true, previous request is valid, so req_valid = true
+      false.B
+    )
     curPtr := 0.U
     unSentStores := 0.U
     unWriteStores := 0.U
