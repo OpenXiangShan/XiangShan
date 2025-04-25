@@ -154,6 +154,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val cbo_assert_flag = LSUOpType.isCboAll(s0_out.uop.fuOpType)
   XSError(!s0_use_flow_rs && cbo_assert_flag && s0_valid, "cbo instruction selection error.")
 
+  // TODO：删掉
   val s0_alignType = Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0))
   // exception check
   val s0_addr_aligned = LookupTree(s0_alignType, List(
@@ -165,6 +166,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // if vector store sends 128-bit requests, its address must be 128-aligned
   XSError(s0_use_flow_vec && s0_vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
 
+  // TODO：删掉 storeAddrMisalign
   val s0_isMisalign = Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B)
   val s0_addr_low = s0_vaddr(4, 0)
   val s0_addr_Up_low = LookupTree(s0_alignType, List(
@@ -177,6 +179,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
+  // TODO：干啥的？
   s0_fullva := Mux(
     s0_use_flow_rs,
     s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), XLEN),
@@ -197,7 +200,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
         s0_use_flow_vec,
         s0_vecstin.mask,
         // -1.asSInt.asUInt
-        Fill(VLEN/8, 1.U(1.W))
+        Fill(VLEN/8, 1.U(1.W)) // TODO：？
       )
     )
   )
@@ -228,7 +231,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // NOTE: The store request does not wait for the dcache to be ready.
   //       If the dcache is not ready at this time, the dcache is not queried.
   //       But, store prefetch request will always wait for dcache to be ready to make progress.
-  io.dcache.req.valid              := s0_fire
+  io.dcache.req.valid              := s0_fire // TODO：只有 prefetch 需要访问 dcache
   io.dcache.req.bits.cmd           := MemoryOpConstants.M_PFW
   io.dcache.req.bits.vaddr         := s0_vaddr
   io.dcache.req.bits.instrtype     := s0_instr_type
@@ -282,7 +285,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_kill   = Wire(Bool())
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
-  val s1_vecActive    = RegEnable(s0_out.vecActive, true.B, s0_fire)
+  val s1_vecActive    = RegEnable(s0_out.vecActive, true.B, s0_fire) // TODO：为什么初始化是 true？为什么要单独写 Reg？
   val s1_frm_mabuf    = s1_in.isFrmMisAlignBuf
   val s1_is128bit     = s1_in.is128bit
 
@@ -295,7 +298,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_fullva    = io.tlb.resp.bits.fullva
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
-  val s1_pbmt      = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W))
+  val s1_pbmt      = Mux(!s1_tlb_miss, io.tlb.resp.bits.pbmt.head, 0.U(Pbmt.width.W)) // TODO
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   //We don't want `StoreUnit` to have an additional effect on the Store of vector from a `misalignBuffer,`
@@ -306,17 +309,17 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec && !s1_frm_mabuf)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
-  io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
+  io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready? // TODO：delete ready
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
+  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch // TODO 去掉 misalign
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
-  io.stld_nuke_query.bits.matchLine := (s1_in.isvec || s1_in.misalignWith16Byte) && s1_in.is128bit
+  io.stld_nuke_query.bits.matchLine := (s1_in.isvec || s1_in.misalignWith16Byte) && s1_in.is128bit // TODO 冗余
 
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
@@ -372,14 +375,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.nc        := Pbmt.isNC(s1_pbmt)
   s1_out.mmio      := Pbmt.isIO(s1_pbmt)
   s1_out.tlbMiss   := s1_tlb_miss
-  s1_out.atomic    := Pbmt.isIO(s1_pbmt)
+  s1_out.atomic    := Pbmt.isIO(s1_pbmt) // TODO：啥啊，删了
   s1_out.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   when (RegNext(io.tlb.req.bits.checkfullva) &&
     (s1_out.uop.exceptionVec(storePageFault) ||
       s1_out.uop.exceptionVec(storeAccessFault) ||
       s1_out.uop.exceptionVec(storeGuestPageFault))) {
     s1_out.uop.exceptionVec(storeAddrMisaligned) := false.B
-  }
+  } // TODO 删掉
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
@@ -403,7 +406,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq.bits.isvec := s1_out.isvec || s1_frm_mab_vec
   io.lsq.bits.updateAddrValid := (!s1_in.isMisalign || s1_in.misalignWith16Byte) && (!s1_frm_mabuf || s1_in.isFinalSplit) || s1_exception
   // kill dcache write intent request when tlb miss or exception
-  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_out.mmio || s1_in.uop.robIdx.needFlush(io.redirect)) // TODO 没有 NC
   io.dcache.s1_paddr := s1_paddr
 
   // write below io.out.bits assign sentence to prevent overwriting values
@@ -445,6 +448,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   val s2_pmp = WireInit(io.pmp)
 
+  // TODO vecAtive 删掉
   val s2_exception = RegNext(s1_feedback.bits.hit) &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && s2_vecActive
   val s2_un_misalign_exception =  RegNext(s1_feedback.bits.hit) &&
@@ -460,20 +464,22 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     s2_in.uop.exceptionVec(storeGuestPageFault)
   )
   // This real physical address is located in uncache space.
+  // TODO tlbMiss 和 hit 留一个
   val s2_actually_uncache = !s2_in.tlbMiss && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
   val s2_isCbo  = RegEnable(s1_isCbo, s1_fire) // all cbo instr
   val s2_isCbo_noZero = LSUOpType.isCbo(s2_in.uop.fuOpType)
 
+  // TODO mmio 一定不是 vec 不是 frm mabuf
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec && !s2_frm_mabuf) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
   s2_out.af     := s2_out.uop.exceptionVec(storeAccessFault)
   s2_out.mmio   := s2_mmio && !s2_exception
-  s2_out.atomic := s2_in.atomic || Pbmt.isPMA(s2_pbmt) && s2_pmp.atomic
+  s2_out.atomic := s2_in.atomic || Pbmt.isPMA(s2_pbmt) && s2_pmp.atomic // TODO 后面的 atomic 是原子指令，不是不能 outstanding
   s2_out.memBackTypeMM := s2_memBackTypeMM
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
                                                 s2_pmp.st ||
-                                                ((s2_in.isvec || s2_isCbo) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
+                                                ((s2_in.isvec || s2_isCbo) && s2_actually_uncache && RegNext(s1_feedback.bits.hit)) // TODO hit 多余
                                                 ) && s2_vecActive
   s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_actually_uncache && s2_in.isMisalign && !s2_un_misalign_exception
   s2_out.uop.vpu.vstart     := s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew
@@ -484,6 +490,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // TODO: dcache resp
   io.dcache.resp.ready := true.B
 
+  // 给 SQ 的 misalign
   val s2_mis_align = s2_valid && RegEnable(s1_mis_align, s1_fire) && !s2_exception
   // goto misalignBuffer
   io.misalign_enq.revoke := s2_exception
@@ -513,12 +520,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
 
   // prefetch related
-  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info // TODO miss 没有用
   io.lsq_replenish.updateAddrValid := !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) || s2_exception
   io.lsq_replenish.isvec := s2_out.isvec || s2_frm_mab_vec
 
   io.lsq_replenish.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
-    TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill
+    TriggerAction.isDmode(s2_out.uop.trigger) || s2_out.af) && s2_valid && !s2_kill // TODO af 删掉
 
 
   // RegNext prefetch train for better timing
