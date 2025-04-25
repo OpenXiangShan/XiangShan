@@ -334,23 +334,26 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val s_holdRobidx :: s_updateRobidx :: Nil = Enum(2)
   val singleStepState = RegInit(s_updateRobidx)
 
-  val robidxStepNext  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  val robidxStepHold  = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxStepReg   = RegInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
   val robidxCanCommitStepping = WireInit(0.U.asTypeOf(fromRename(0).bits.robIdx))
+  robidxStepReg := robidxCanCommitStepping
 
   when(!io.singleStep) {
     singleStepState := s_updateRobidx
   }.elsewhen(io.singleStep && fromRename(0).fire && io.enqRob.req(0).valid) {
     singleStepState := s_holdRobidx
-    robidxStepNext := fromRename(0).bits.robIdx
+    robidxStepHold := fromRename(0).bits.robIdx
   }
 
   when(singleStepState === s_updateRobidx) {
-    robidxStepReg := robidxStepNext
-    robidxCanCommitStepping := robidxStepNext
+    robidxCanCommitStepping := robidxStepHold
   }.elsewhen(singleStepState === s_holdRobidx) {
-    robidxStepReg := robidxStepReg
-    robidxCanCommitStepping := robidxStepReg
+    when(io.redirect.valid){
+      robidxCanCommitStepping.flag := !robidxStepReg.flag
+    }.otherwise {
+      robidxCanCommitStepping := robidxStepReg
+    }
   }
 
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
