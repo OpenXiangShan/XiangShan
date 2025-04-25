@@ -963,6 +963,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
   io.sbuffer.pc    := s1_in.uop.pc // FIXME: remove it
+  io.sbuffer.ncWithData := s1_nc_with_data
+
 
   io.ubuffer.valid := s1_valid && s1_nc_with_data && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.ubuffer.vaddr := s1_vaddr
@@ -971,6 +973,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ubuffer.sqIdx := s1_in.uop.sqIdx
   io.ubuffer.mask  := s1_in.mask
   io.ubuffer.pc    := s1_in.uop.pc // FIXME: remove it
+  io.ubuffer.ncWithData := s1_nc_with_data
 
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
@@ -980,6 +983,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.sqIdxMask := 0.U
   io.lsq.forward.mask      := s1_in.mask
   io.lsq.forward.pc        := s1_in.uop.pc // FIXME: remove it
+  io.lsq.forward.ncWithData := s1_nc_with_data
 
   // st-ld violation query
     // if store unit is 128-bits memory access, need match 128-bit

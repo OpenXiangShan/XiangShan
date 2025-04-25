@@ -687,12 +687,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
+    val ncWithData = Fill(StoreQueueSize, io.forward(i).ncWithData)
+
     //TODO If the previous store appears out of alignment, then simply FF, this is a very unreasonable way to do it.
     //TODO But for the time being, this is the way to ensure correctness. Such a suitable opportunity to support unaligned forward.
     // If addr match, data not ready, mark it as dataInvalid
     // load_s1: generate dataInvalid in load_s1 to set fastUop
-    val dataInvalidMask1 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask1.asUInt
-    val dataInvalidMask2 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | unaligned.asUInt & allocated.asUInt) & forwardMask2.asUInt
+    val dataInvalidMask1 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | ~ncWithData.asUInt & unaligned.asUInt & allocated.asUInt) & forwardMask1.asUInt
+    val dataInvalidMask2 = ((addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt) | ~ncWithData.asUInt & unaligned.asUInt & allocated.asUInt) & forwardMask2.asUInt
     val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2
     io.forward(i).dataInvalidFast := dataInvalidMask.orR
 

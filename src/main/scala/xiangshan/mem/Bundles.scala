@@ -176,6 +176,7 @@ object Bundles {
     val mask = Output(UInt((VLEN/8).W))
     val uop = Output(new DynInst) // for replay
     val pc = Output(UInt(VAddrBits.W)) //for debug
+    val ncWithData = Output(Bool())
     val valid = Output(Bool())
 
     val forwardMaskFast = Input(Vec((VLEN/8), Bool())) // resp to load_s1
