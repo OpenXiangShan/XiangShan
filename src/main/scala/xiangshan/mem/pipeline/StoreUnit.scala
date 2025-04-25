@@ -373,7 +373,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.nc        := Pbmt.isNC(s1_pbmt)
   s1_out.mmio      := Pbmt.isIO(s1_pbmt)
   s1_out.tlbMiss   := s1_tlb_miss
-  s1_out.atomic    := Pbmt.isIO(s1_pbmt)
   s1_out.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
   when (RegNext(io.tlb.req.bits.checkfullva) &&
     (s1_out.uop.exceptionVec(storePageFault) ||
@@ -438,6 +437,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s2_frm_mab_vec  = RegEnable(s1_frm_mab_vec, true.B, s1_fire)
   val s2_pbmt   = RegEnable(s1_pbmt, s1_fire)
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
+  val s2_tlb_hit = RegEnable(s1_tlb_hit, s1_fire)
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -470,7 +470,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out        := s2_in
   s2_out.af     := s2_out.uop.exceptionVec(storeAccessFault)
   s2_out.mmio   := s2_mmio && !s2_exception
-  s2_out.atomic := s2_in.atomic || Pbmt.isPMA(s2_pbmt) && s2_pmp.atomic
   s2_out.memBackTypeMM := s2_memBackTypeMM
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
                                                 s2_pmp.st ||

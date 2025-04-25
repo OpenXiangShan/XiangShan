@@ -61,7 +61,6 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
   val data = UInt(XLEN.W)
   val mask = UInt(DataBytes.W)
   val nc = Bool()
-  val atomic = Bool()
   val memBackTypeMM = Bool()
 
   val resp_nderr = Bool()
@@ -78,7 +77,6 @@ class UncacheEntry(implicit p: Parameters) extends UncacheBundle {
     mask := x.mask
     nc := x.nc
     memBackTypeMM := x.memBackTypeMM
-    atomic := x.atomic
     resp_nderr := false.B
     // fwd_data := 0.U
     // fwd_mask := 0.U
@@ -282,7 +280,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     // vaddr same, properties same
     getBlockAddr(x.vaddr) === getBlockAddr(e.vaddr) &&
       x.cmd === e.cmd && x.nc && e.nc &&
-      x.memBackTypeMM === e.memBackTypeMM && !x.atomic && !e.atomic &&
+      x.memBackTypeMM === e.memBackTypeMM &&
       continueAndAlign(x.mask | e.mask) &&
     // not receiving uncache response, not waitReturn -> no wake-up signal in these cases
       !(mem_grant.fire && mem_grant.bits.source === eid || states(eid).isWaitReturn())
@@ -482,7 +480,6 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   /******************************************************************
    * Buffer Flush
    * 1. when io.flush.valid is true: drain store queue and ubuffer
-   * 2. when io.lsq.req.bits.atomic is true: not support temporarily
    ******************************************************************/
   empty := !VecInit(states.map(_.isValid())).asUInt.orR
   io.flush.empty := empty
