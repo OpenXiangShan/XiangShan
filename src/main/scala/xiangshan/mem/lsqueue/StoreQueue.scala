@@ -857,6 +857,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mmioReq.bits.vaddr:= vaddrModule.io.rdata(0)
   mmioReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   mmioReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
+  mmioReq.bits.robIdx := uop(GatedRegNext(rdataPtrExtNext(0)).value).robIdx
   mmioReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   mmioReq.bits.nc := false.B
   mmioReq.bits.id := rdataPtrExt(0).value
@@ -913,6 +914,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncReq.bits.vaddr:= vaddrModule.io.rdata(0)
   ncReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
   ncReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
+  ncReq.bits.robIdx := uop(GatedRegNext(rdataPtrExtNext(0)).value).robIdx
   ncReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   ncReq.bits.nc := true.B
   ncReq.bits.id := rptr0

@@ -31,7 +31,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.DynInst
-import xiangshan.backend.rob.RobDebugRollingIO
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter}
 import xiangshan.mem.prefetch._
@@ -522,6 +522,7 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 
 class UncacheWordReq(implicit p: Parameters) extends DCacheBundle
 {
+  val robIdx = new RobPtr
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W) // for uncache buffer forwarding
