@@ -990,7 +990,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   })
 
-  private val regOut = Mux1H(csrOutMap.map { case (id, regOut) =>
+  private val rwMask = 0xc00
+  private val csrOutMapFilter = csrOutMap.filter { case (id, _) => (id & rwMask) != rwMask }
+
+  private val regOut = Mux1H(csrOutMapFilter.map { case (id, regOut) =>
     if (vsMapS.contains(id)) {
       ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> regOut
     } else if (sMapVS.contains(id)) {
