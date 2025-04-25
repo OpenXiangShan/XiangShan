@@ -74,7 +74,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   /**
     * The way isBtoT requests to occupy
     */
-  val occupy_way = UInt(log2Up(nWays).W)
+  val occupy_way = UInt(nWays.W)
 
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
