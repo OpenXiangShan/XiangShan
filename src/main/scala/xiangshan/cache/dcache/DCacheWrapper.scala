@@ -1519,8 +1519,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
   missQueue.io.replace_addr := mainPipe.io.replace_addr
-  missQueue.io.grow_perm_addr := mainPipe.io.grow_perm_addr
-  missQueue.io.BtoT_ways_for_set <> mainPipe.io.BtoT_ways_for_set
+  missQueue.io.evict_set := mainPipe.io.evict_set
+  missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
 
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
   missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)

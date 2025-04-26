@@ -283,8 +283,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     reg_valid() && get_block(req.addr) === get_block(release_addr)
   }
 
-  def grow_perm_set_match(grow_perm_addr: UInt): Bool = {
-    reg_valid() && get_idx(req.addr) === get_idx(grow_perm_addr)
+  def evict_set_match(evict_set: UInt): Bool = {
+    reg_valid() && req.isBtoT && addr_to_dcache_set(req.vaddr) === evict_set
   }
 }
 
@@ -389,7 +389,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val main_pipe_resp = Input(Bool())
     val main_pipe_refill_resp = Input(Bool())
     val main_pipe_replay = Input(Bool())
-    val main_pipe_grow_perm_fail = Input(Bool())
+    val main_pipe_evict_BtoT_way = Input(Bool())
+    val main_pipe_next_evict_way = Input(UInt(nWays.W))
 
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
@@ -398,6 +399,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val occupy_way = Output(UInt(nWays.W))
 
     val req_addr = ValidIO(UInt(PAddrBits.W))
+    val req_vaddr = ValidIO(UInt(VAddrBits.W))
+    val req_isBtoT = Output(Bool())
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -445,7 +448,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
-  val grow_perm_fail = RegInit(false.B)
+  val evict_BtoT_way = RegInit(false.B)
   // initial keyword
   val isKeyword = RegInit(false.B)
 
@@ -519,11 +522,11 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req_valid := true.B
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
-    req.isBtoT := DontCare
-    req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, miss_req_pipe_reg_bits.occupy_way, 0.U)
+    req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+    req.occupy_way := miss_req_pipe_reg_bits.occupy_way
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
-    grow_perm_fail := false.B
+    evict_BtoT_way := false.B
     //only  load miss need keyword
     isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B)
 
@@ -574,9 +577,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
-      req.isBtoT := DontCare
-      req.occupy_way := Mux(miss_req_pipe_reg_bits.isBtoT, miss_req_pipe_reg_bits.occupy_way, 0.U)
-      grow_perm_fail := false.B
+      req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+      req.occupy_way := miss_req_pipe_reg_bits.occupy_way
+      evict_BtoT_way := false.B
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
@@ -661,9 +664,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
-  when (io.main_pipe_replay || io.main_pipe_grow_perm_fail) {
+  when (io.main_pipe_replay || io.main_pipe_evict_BtoT_way) {
     s_mainpipe_req := false.B
-    grow_perm_fail := io.main_pipe_grow_perm_fail
+    when (io.main_pipe_evict_BtoT_way) {
+      req.occupy_way := io.main_pipe_next_evict_way
+      XSError(req.isBtoT, "BtoT request will never evict a way")
+    }
   }
 
   when (io.main_pipe_resp) {
@@ -843,13 +849,16 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
-  io.main_pipe_req.bits.grow_perm_fail := grow_perm_fail
+  io.main_pipe_req.bits.grow_perm_fail := false.B
 
   io.block_addr.valid := req_valid && w_grantlast
   io.block_addr.bits := req.addr
 
   io.req_addr.valid := req_valid
-  io.req_addr.bits := req.addr
+  io.req_addr.bits:= req.addr
+  io.req_vaddr.valid := req_valid
+  io.req_vaddr.bits := req.vaddr
+  io.req_isBtoT := req.isBtoT
 
   io.occupy_way := req.occupy_way
 
@@ -957,8 +966,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val replace_block = Output(Bool())
 
     // block all way for set to BtoT
-    val grow_perm_addr = Flipped(UInt(PAddrBits.W))
-    val BtoT_ways_for_set = Output(UInt(nWays.W))
+    val evict_set = Flipped(UInt())
+    val btot_ways_for_set = Output(UInt(nWays.W))
 
     // req blocked by wbq
     val wbq_block_miss_req = Input(Bool())
@@ -1130,7 +1139,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
-      e.io.main_pipe_grow_perm_fail := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_grow_perm_fail && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_evict_BtoT_way := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_evict_BtoT_way && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_next_evict_way := io.mainpipe_info.s2_next_evict_way
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
@@ -1183,9 +1193,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.probe_block := Cat(probe_block_vec).orR
 
   io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
-  val grow_perm_set_hit = entries.map(e => e.io.req_addr.valid && get_idx(e.io.req_addr.bits) === get_idx(io.grow_perm_addr)) ++
-    Seq(miss_req_pipe_reg.grow_perm_set_match(io.grow_perm_addr))
-  io.BtoT_ways_for_set := grow_perm_set_hit.zip(entries).map {
+  val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
+    Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
+  io.btot_ways_for_set := btot_evict_set_hit.zip(entries).map {
     case (hit, e) => Fill(nWays, hit) & e.io.occupy_way
   }.reduce(_|_)
 

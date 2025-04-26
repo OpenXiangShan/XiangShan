@@ -34,6 +34,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
+  val occupy_way = UInt(nWays.W)
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -111,7 +112,8 @@ class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
   val s2_valid = Bool()
   val s2_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For refill data selection
   val s2_replay_to_mq = Bool()
-  val s2_grow_perm_fail = Bool()
+  val s2_evict_BtoT_way = Bool()
+  val s2_next_evict_way = Bool()
   val s3_valid = Bool()
   val s3_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For mshr release
   val s3_refill_resp = Bool()
@@ -177,8 +179,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
 
-    val grow_perm_addr = Output(UInt(PAddrBits.W))
-    val BtoT_ways_for_set = Input(UInt(nWays.W))
+    val evict_set = Output(UInt())
+    val btot_ways_for_set = Input(UInt(nWays.W))
 
     // writeback addr to be replaced
     val replace_addr = ValidIO(UInt(PAddrBits.W))
@@ -366,23 +368,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
-  val alt_replacer = ReplacementPolicy.fromString("random", nWays)
   val s1_invalid_vec = wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
-  val s1_mux_repl_way = Mux(s1_req.grow_perm_fail, alt_replacer.way, io.replace_way.way)
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     GatedValidRegNext(s0_fire),
-    UIntToOH(s1_mux_repl_way),
+    Mux(s1_req.miss, s1_req.occupy_way, UIntToOH(io.replace_way.way)),
     RegEnable(s1_repl_way_en, s1_valid)
   )
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
-
-  val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
-  s1_repl_way_raw := Mux(GatedValidRegNext(s0_fire), s1_mux_repl_way, RegEnable(s1_repl_way_raw, s1_valid))
 
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
@@ -453,10 +450,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // Grow permission fail
   // Only in case BtoT will both cache and missqueue be occupied
-  val s2_has_more_then_3_ways_BtoT = PopCount(io.BtoT_ways_for_set) > (nWays-2).U
-  val s2_has_at_least_1_way_BtoT = io.BtoT_ways_for_set.orR
+  val s2_evict_BtoT_way = (io.btot_ways_for_set & s2_way_en).orR
+  val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
   val s2_grow_perm_fail = s2_has_more_then_3_ways_BtoT && s2_grow_perm
-  XSError(s2_valid && s2_grow_perm && io.BtoT_ways_for_set.andR,
+  XSError(s2_valid && s2_grow_perm && io.btot_ways_for_set.andR,
     "BtoT grow permission, but all ways are BtoT\n"
   )
 
@@ -928,7 +925,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_addr.valid := s2_valid && s2_need_eviction
   io.replace_addr.bits  := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
 
-  io.grow_perm_addr := get_block_addr(s2_req.addr) // only use set index
+  io.evict_set := addr_to_dcache_set(s2_req.vaddr) // only use set index
 
   assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 
@@ -1018,11 +1015,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.mainpipe_info.s2_valid := s2_valid && s2_req.miss
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
-  io.mainpipe_info.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
-  io.mainpipe_info.s2_grow_perm_fail := s2_valid && s2_has_at_least_1_way_BtoT && s2_need_eviction
+  io.mainpipe_info.s2_replay_to_mq := s2_can_go_to_mq_replay
+  io.mainpipe_info.s2_evict_BtoT_way := s2_evict_BtoT_way && s2_need_eviction
+  io.mainpipe_info.s2_next_evict_way := PriorityEncoderOH(~s2_way_en)
   io.mainpipe_info.s3_valid := s3_valid
   io.mainpipe_info.s3_miss_id := s3_req.miss_id
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
+  XSError(s2_way_en.andR, "s2_way_en should not be all 1")
 
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
