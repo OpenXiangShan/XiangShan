@@ -233,7 +233,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      * 2. wait L2 flush done
      * 3. wait Core to wfi -> send out < io.o_cpu_no_op >
      */
-    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sPOFFREQ :: Nil = Enum(5)
+    val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sWAITQ :: sQREQ :: sPOFFREQ :: Nil = Enum(7)
     val lpState = withClockAndReset(clock, cpuReset_sync) {RegInit(sIDLE)}
     val l2_flush_en = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg(core_with_l2.module.io.l2_flush_en.getOrElse(false.B), 3, 0)
