@@ -664,13 +664,15 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
+  val btot_evict_assert = WireInit(false.B)
   when (io.main_pipe_replay || io.main_pipe_evict_BtoT_way) {
     s_mainpipe_req := false.B
-    when (io.main_pipe_evict_BtoT_way) {
-      req.occupy_way := io.main_pipe_next_evict_way
-      XSError(req.isBtoT, "BtoT request will never evict a way")
-    }
   }
+  when (io.main_pipe_evict_BtoT_way) {
+    req.occupy_way := io.main_pipe_next_evict_way
+    btot_evict_assert := true.B
+  }
+  XSError(btot_evict_assert, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
