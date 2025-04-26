@@ -123,6 +123,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadLqIdx = Valid(new LqPtr)
     }
     val debugRolling = new RobDebugRollingIO
+    val debugInstrAddrTransType = Input(new AddrTransType) 
 
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
@@ -1481,11 +1482,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // These are the structures used by difftest only and should be optimized after synthesis.
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
+    val dt_pcTransType = Option.when(env.EnableDifftest)(Mem(RobSize, new AddrTransType))
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.preDecodeInfo.isRVC
+        dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }
     }
     for (wb <- exuWBs) {
@@ -1524,8 +1527,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
       }
       if (env.EnableDifftest) {
-        val uop = commitDebugUop(i)
-        difftest.pc := SignExt(uop.pc, XLEN)
+        val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)
+        difftest.pc := Mux(pcTransType.shouldBeSext, SignExt(uop.pc, XLEN), uop.pc)
         difftest.instr := uop.instr
         difftest.robIdx := ZeroExt(ptr, 10)
         difftest.lqIdx := ZeroExt(uop.lqIdx.value, 7)

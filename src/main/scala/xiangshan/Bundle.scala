@@ -670,6 +670,9 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
     sv48 && target(XLEN - 1, 48) =/= VecInit.fill(XLEN - 48)(target(47)).asUInt
   def checkGuestPageFault(target: UInt): Bool =
     sv39x4 && target(XLEN - 1, 41).orR || sv48x4 && target(XLEN - 1, 50).orR
+
+  def shouldBeSext: Bool = sv39 || sv48
+  def shouldBeZext: Bool = bare || sv39x4 || sv48x4
 }
 
 object AddrTransType {
