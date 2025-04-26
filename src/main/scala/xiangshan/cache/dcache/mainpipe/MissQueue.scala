@@ -664,15 +664,16 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
-  val btot_evict_assert = WireInit(false.B)
   when (io.main_pipe_replay || io.main_pipe_evict_BtoT_way) {
     s_mainpipe_req := false.B
   }
-  when (io.main_pipe_evict_BtoT_way) {
+  when (io.main_pipe_replay) {
+    evict_BtoT_way := false.B
+  } .elsewhen (io.main_pipe_evict_BtoT_way) {
+    evict_BtoT_way := true.B
     req.occupy_way := io.main_pipe_next_evict_way
-    btot_evict_assert := true.B
   }
-  XSError(btot_evict_assert, "BtoT request will never evict a way")
+  XSError(req_valid && req.isBtoT && io.main_pipe_evict_BtoT_way, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
@@ -851,7 +852,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
-  io.main_pipe_req.bits.grow_perm_fail := false.B
+  io.main_pipe_req.bits.occupy_way := req.occupy_way
+  io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
   io.block_addr.valid := req_valid && w_grantlast
   io.block_addr.bits := req.addr
@@ -874,6 +876,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
+  XSPerfAccumulate("miss_refill_evict_BtoT_way", io.main_pipe_evict_BtoT_way)
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)

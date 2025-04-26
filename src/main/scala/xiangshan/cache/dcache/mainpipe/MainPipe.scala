@@ -35,6 +35,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
   val occupy_way = UInt(nWays.W)
+  val miss_fail_cause_evict_btot = Bool()
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -74,8 +75,6 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   val id = UInt(reqIdWidth.W)
 
-  val grow_perm_fail = Bool()
-
   def isLoad: Bool = source === LOAD_SOURCE.U
   def isStore: Bool = source === STORE_SOURCE.U
   def isAMO: Bool = source === AMO_SOURCE.U
@@ -98,7 +97,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.replace := false.B
     req.error := false.B
     req.id := store.id
-    req.grow_perm_fail := store.grow_perm_fail
+    req.miss_fail_cause_evict_btot := store.miss_fail_cause_evict_btot
     req
   }
 }
@@ -374,7 +373,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     GatedValidRegNext(s0_fire),
-    Mux(s1_req.miss, s1_req.occupy_way, UIntToOH(io.replace_way.way)),
+    Mux(s1_req.miss_fail_cause_evict_btot, s1_req.occupy_way, UIntToOH(io.replace_way.way)),
     RegEnable(s1_repl_way_en, s1_valid)
   )
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
@@ -834,14 +833,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_replay_resp.bits.miss := true.B
   io.store_replay_resp.bits.replay := true.B
   io.store_replay_resp.bits.id := s2_req.id
-  io.store_replay_resp.bits.grow_perm_fail := false.B
 
   io.store_hit_resp.valid := s3_valid && (s3_store_can_go || (s3_miss_can_go && s3_req.isStore))
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := false.B
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := s3_req.id
-  io.store_hit_resp.bits.grow_perm_fail := false.B
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source
@@ -852,7 +849,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_hit_resp.replay := false.B
   atomic_hit_resp.ack_miss_queue := s3_req.miss
   atomic_hit_resp.id := lrsc_valid
-  atomic_hit_resp.grow_perm_fail := false.B
   val atomic_replay_resp = Wire(new MainPipeResp)
   atomic_replay_resp.source := s2_req.source
   atomic_replay_resp.data := DontCare
@@ -862,7 +858,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
-  atomic_replay_resp.grow_perm_fail := false.B
 
   val atomic_replay_resp_valid = s2_valid && (s2_can_go_to_mq && replay || s2_grow_perm_fail) && s2_req.isAMO
   val atomic_hit_resp_valid = s3_valid && (s3_amo_can_go || s3_miss_can_go && s3_req.isAMO)
@@ -1017,7 +1012,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
   io.mainpipe_info.s2_replay_to_mq := s2_can_go_to_mq_replay
   io.mainpipe_info.s2_evict_BtoT_way := s2_evict_BtoT_way && s2_need_eviction
-  io.mainpipe_info.s2_next_evict_way := PriorityEncoderOH(~s2_way_en)
+  io.mainpipe_info.s2_next_evict_way := PriorityEncoderOH(~io.btot_ways_for_set)
   io.mainpipe_info.s3_valid := s3_valid
   io.mainpipe_info.s3_miss_id := s3_req.miss_id
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
