@@ -253,6 +253,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
+  val completed = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) 
   val addrvalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val allvalid  = VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i)))
@@ -320,24 +321,26 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   )
 
   // deqPtrExtNext traces which inst is about to leave store queue
-  //
-  // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
-  // Before data write finish, sbuffer is unable to provide store to load
-  // forward data. As an workaround, deqPtrExt and allocated flag update
-  // is delayed so that load can get the right data from store queue.
-  //
-  // Modify deqPtrExtNext and io.sqDeq with care!
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
-  // Only sqNeedDeq can move the ptr
-  deqPtrExtNext := deqPtrExt.map(i =>  i +
-    RegNext(PopCount(VecInit(io.sbuffer.map(x=> x.fire && x.bits.sqNeedDeq)))) +
-    PopCount(ncDeqTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
-  )
-
-  io.sqDeq := RegNext(
-    RegNext(PopCount(VecInit(io.sbuffer.map(x=> x.fire && x.bits.sqNeedDeq)))) +
-    PopCount(ncDeqTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
-  )
+  val sqDeq = Wire(UInt(log2Ceil(EnsbufferWidth + 1).W))
+  val deqPtr2 = deqPtrExt(1).value
+  when(allocated(deqPtr) && completed(deqPtr) && allocated(deqPtr2) && completed(deqPtr2)){
+    sqDeq := 2.U
+    completed(deqPtr) := false.B
+    allocated(deqPtr) := false.B
+    completed(deqPtr2) := false.B
+    allocated(deqPtr2) := false.B
+    deqPtrExtNext := deqPtrExt.map(_ + 2.U)
+  }.elsewhen(allocated(deqPtr) && completed(deqPtr)){
+    sqDeq := 1.U
+    completed(deqPtr) := false.B
+    allocated(deqPtr) := false.B
+    deqPtrExtNext := deqPtrExt.map(_ + 1.U)
+  }.otherwise{
+    sqDeq := 0.U
+    deqPtrExtNext := deqPtrExt
+  }
+  io.sqDeq := RegNext(sqDeq)
 
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && (io.mmioStout.fire || io.vecmmioStout.fire)))
 
@@ -384,6 +387,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         vecLastFlow(i) := Mux(0.U === selectUpBound.value, selectBits.lastUop, false.B) else
         vecLastFlow(i) := Mux((i + 1).U === selectUpBound.value, selectBits.lastUop, false.B)
       allocated(i) := true.B
+      completed(i) := false.B
       datavalid(i) := false.B
       addrvalid(i) := false.B
       unaligned(i) := false.B
@@ -925,7 +929,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncResp.valid := io.uncache.resp.fire && io.uncache.resp.bits.nc
   ncResp.bits <> io.uncache.resp.bits
   when (ncDeqTrigger) {
-    allocated(ncPtr) := false.B
+    completed(ncPtr) := true.B
   }
   XSDebug(ncDeqTrigger,"nc fire: ptr %d\n", ncPtr)
 
@@ -1017,7 +1021,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Remove MMIO inst from store queue after MMIO request is being sent
   // That inst will be traced by uncache state machine
   when (io.mmioStout.fire) {
-    allocated(deqPtr) := false.B
+    completed(deqPtr) := true.B
   }
 
   // cbo Zero writeback to ROB
@@ -1060,7 +1064,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Remove MMIO inst from store queue after MMIO request is being sent
   // That inst will be traced by uncache state machine
   when (io.vecmmioStout.fire) {
-    allocated(deqPtr) := false.B
+    completed(deqPtr) := true.B
   }
 
   /**
@@ -1291,9 +1295,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // Before data write finish, sbuffer is unable to provide store to load
     // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
+    // ---
+    // Only sqNeedDeq can move the ptr.
+    // ---
+    // however, `completed` is register, when it turn true, the data has already been written to sbuffer    
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq)) {
-      allocated(RegEnable(ptr, io.sbuffer(i).fire)) := false.B
+    when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq) {
+
+      completed(ptr) := true.B
     }
     XSDebug(RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq), "sbuffer "+i+" fire: ptr %d\n", ptr)
   }
@@ -1431,6 +1440,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && !committed(i)
     when (needCancel(i)) {
       allocated(i) := false.B
+      completed(i) := false.B
     }
   }
 
