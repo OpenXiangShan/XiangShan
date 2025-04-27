@@ -210,6 +210,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(SeperateDM = true)
           }), tail)
+        case "--chi-addr-width" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIAddrWidthKey => value.toInt
+          }), tail)
         case "--wfi-resume" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))

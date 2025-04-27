@@ -27,7 +27,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, M
 import freechips.rocketchip.tilelink._
 import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2}
+import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -114,6 +114,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
+      case CHIAddrWidthKey => p(CHIAddrWidthKey)
+      case NonSecureKey => p(NonSecureKey)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
       case MaxHartIdBits => p(MaxHartIdBits)
       case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
