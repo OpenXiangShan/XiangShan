@@ -778,6 +778,7 @@ class CtrlBlockImp(
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
+  rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
