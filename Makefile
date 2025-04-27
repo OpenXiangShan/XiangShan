@@ -18,6 +18,9 @@
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
 
+# import docker support
+include scripts/Makefile.docker
+
 # if XSTopPrefix is specified in yaml, use it.
 ifneq ($(YAML_CONFIG),)
 HAS_PREFIX_FROM_YAML = $(shell grep 'XSTopPrefix *:' $(YAML_CONFIG))
@@ -230,7 +233,7 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
-verilog: $(TOP_V)
+verilog: $(call docker-deps,$(TOP_V))
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
@@ -256,7 +259,7 @@ endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 
-sim-verilog: $(SIM_TOP_V)
+sim-verilog: $(call docker-deps,$(SIM_TOP_V))
 
 clean:
 	$(MAKE) -C ./difftest clean
