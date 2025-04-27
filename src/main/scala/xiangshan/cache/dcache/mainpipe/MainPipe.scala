@@ -449,7 +449,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // Grow permission fail
   // Only in case BtoT will both cache and missqueue be occupied
-  val s2_evict_BtoT_way = (io.btot_ways_for_set & s2_way_en).orR
   val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
   val s2_grow_perm_fail = s2_has_more_then_3_ways_BtoT && s2_grow_perm
   XSError(s2_valid && s2_grow_perm && io.btot_ways_for_set.andR,
