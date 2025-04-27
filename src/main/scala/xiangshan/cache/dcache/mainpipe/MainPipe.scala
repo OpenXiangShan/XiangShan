@@ -112,7 +112,7 @@ class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
   val s2_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For refill data selection
   val s2_replay_to_mq = Bool()
   val s2_evict_BtoT_way = Bool()
-  val s2_next_evict_way = Bool()
+  val s2_next_evict_way = UInt(nWays.W)
   val s3_valid = Bool()
   val s3_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For mshr release
   val s3_refill_resp = Bool()
