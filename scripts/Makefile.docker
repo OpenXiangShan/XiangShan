@@ -68,3 +68,25 @@ sh:
 	@$(call DOCKER_RUN)
 
 .PHONY: image __prep_proxy sh
+
+#
+# docker envrionment switch helper
+#
+__switch_docker_env:
+	@mkdir -p out $(MILL_OUTPUT_DIR) $(BUILD_DIR)
+	@if [ -z "$(IN_XSDEV_DOCKER)" ]; then \
+		echo "\e[32mSwitching to Docker environment...\e[0m"; \
+		$(call DOCKER_RUN, -c "make $(DOCKER_TARGET)"); \
+		echo "\e[32mLeaving Docker envrionment...\e[0m"; \
+	fi
+.PHONY: __switch_docker_env
+
+define rule_docker_target
+$(1): | __$(1)
+__$(1): DOCKER_TARGET=$(1)
+__$(1): __switch_docker_env
+endef
+
+# run selected target in docker envrionment
+docker-deps = $(if $(NO_XSDEV_IMAGE)$(IN_XSDEV_DOCKER),$(1),__$(1) \
+		   $(eval $(rule_docker_target)))
