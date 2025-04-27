@@ -270,6 +270,10 @@ init:
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
 
+deps:
+	mill -i __.prepareOffline
+	mill -i xiangshan.resolveFirtoolDeps
+
 bsp:
 	mill -i mill.bsp.BSP/install
 
