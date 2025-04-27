@@ -454,7 +454,7 @@ class MediumConfig(n: Int = 1) extends Config(
 
 class FuzzConfig(dummy: Int = 0) extends Config(
   new WithFuzzer
-    ++ new DefaultConfig(1)
+    ++ new KunminghuV2Config(1)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
