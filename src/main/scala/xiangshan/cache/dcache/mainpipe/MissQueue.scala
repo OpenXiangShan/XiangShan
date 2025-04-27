@@ -1200,8 +1200,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
   val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
     Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
-  io.btot_ways_for_set := btot_evict_set_hit.zip(entries).map {
-    case (hit, e) => Fill(nWays, hit) & e.io.occupy_way
+  val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ Seq(miss_req_pipe_reg.req.occupy_way)
+  io.btot_ways_for_set := btot_evict_set_hit.zip(btot_occupy_ways).map {
+    case (hit, way) => Fill(nWays, hit) & way
   }.reduce(_|_)
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
