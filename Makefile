@@ -226,13 +226,8 @@ $(TOP_V): $(SCALA_FILE)
 		--num-cores $(NUM_CORES) $(TOPMAIN_ARGS)
 ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
+	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
 verilog: $(TOP_V)
@@ -246,13 +241,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
+	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 ifeq ($(PLDM),1)
 	sed -i -e 's/$$fatal/$$finish/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
 	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(RTL_DIR)/*.$(RTL_SUFFIX)
