@@ -56,7 +56,6 @@ object Bundles {
     val nc = Bool()
     val mmio = Bool()
     val memBackTypeMM = Bool() // 1: main memory, 0: IO
-    val atomic = Bool()
     val hasException = Bool()
     val isHyper = Bool()
     val isForVSnonLeafPTE = Bool()

@@ -878,11 +878,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                          !s2_exception &&
                          !s2_in.tlbMiss &&
                          !s2_ld_flow
-  val s2_st_atomic     = !s2_prf &&
-                          (RegNext(s1_mmio) || s2_pmp.atomic) &&
-                         !s2_exception &&
-                         !s2_in.tlbMiss &&
-                         !s2_ld_flow
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
                          io.ldu_io.lsq.forward.addrInvalid
@@ -1005,7 +1000,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.data             := 0.U // data will be generated in load s3
   s2_out.uop.fpWen        := s2_in.uop.fpWen && !s2_exception && s2_ld_flow
   s2_out.mmio             := s2_ld_mmio || s2_st_mmio
-  s2_out.atomic           := s2_st_atomic
   s2_out.uop.flushPipe    := false.B
   s2_out.uop.exceptionVec := s2_exception_vec
   s2_out.forwardMask      := s2_fwd_mask
@@ -1068,7 +1062,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_vec_feedback.bits.sourceType := RSFeedbackType.tlbMiss
   s2_vec_feedback.bits.paddr := s2_paddr
   s2_vec_feedback.bits.mmio := s2_st_mmio
-  s2_vec_feedback.bits.atomic := s2_st_mmio
   s2_vec_feedback.bits.exceptionVec := s2_exception_vec
 
   io.stu_io.lsq_replenish := s2_out
