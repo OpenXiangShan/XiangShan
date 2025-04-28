@@ -322,25 +322,20 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // deqPtrExtNext traces which inst is about to leave store queue
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
-  val sqDeq = Wire(UInt(log2Ceil(EnsbufferWidth + 1).W))
-  val deqPtr2 = deqPtrExt(1).value
-  when(allocated(deqPtr) && completed(deqPtr) && allocated(deqPtr2) && completed(deqPtr2)){
-    sqDeq := 2.U
-    completed(deqPtr) := false.B
-    allocated(deqPtr) := false.B
-    completed(deqPtr2) := false.B
-    allocated(deqPtr2) := false.B
-    deqPtrExtNext := deqPtrExt.map(_ + 2.U)
-  }.elsewhen(allocated(deqPtr) && completed(deqPtr)){
-    sqDeq := 1.U
-    completed(deqPtr) := false.B
-    allocated(deqPtr) := false.B
-    deqPtrExtNext := deqPtrExt.map(_ + 1.U)
-  }.otherwise{
-    sqDeq := 0.U
-    deqPtrExtNext := deqPtrExt
+  val sqDeqCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
+  val readyDeqVec = WireInit(VecInit((0 until EnsbufferWidth).map(i => 
+    allocated(deqPtrExt(i).value) && completed(deqPtrExt(i).value)
+  )))
+  for (i <- 0 until EnsbufferWidth) {
+    val ptr = deqPtrExt(i).value
+    when(readyDeqVec.take(i + 1).reduce(_ && _)) {
+      sqDeqCnt := (i + 1).U
+      allocated(ptr) := false.B
+      completed(ptr) := false.B
+    }
   }
-  io.sqDeq := RegNext(sqDeq)
+  deqPtrExtNext := deqPtrExt.map(_ + sqDeqCnt)
+  io.sqDeq := RegNext(sqDeqCnt)
 
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && (io.mmioStout.fire || io.vecmmioStout.fire)))
 
