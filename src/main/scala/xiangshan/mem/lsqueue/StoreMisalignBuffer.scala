@@ -125,7 +125,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
   val req_valid = RegInit(false.B)
   val req = Reg(new StoreMisalignBufferEntry)
-  val recovery_req = Reg(new StoreMisalignBufferEntry)
 
   val cross4KBPageBoundary = Wire(Bool())
   val needFlushPipe = RegInit(false.B)
@@ -169,7 +168,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     req_valid := true.B
   }
   val cross4KBPageEnq = WireInit(false.B)
-  val needRecovery = WireInit(false.B)
   when (cross4KBPageBoundary && !reqRedirect) {
     when(
       reqSelValid &&
@@ -180,11 +178,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       req.portIndex := reqSelPort
       cross4KBPageEnq := true.B
       needFlushPipe   := true.B
-
-      // if the current enq request is a cross page request and it'll be revoked,
-      // we need to recovery the previous request
-      recovery_req := req
-      needRecovery := s2_needRevoke
     } .otherwise {
       req := req
       cross4KBPageEnq := false.B
