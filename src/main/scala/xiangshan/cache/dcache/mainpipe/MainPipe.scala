@@ -380,6 +380,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_no_error_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_real_tag_match_way)
   val s1_error_way_en = Mux(ParallelORR(s1_real_tag_match_way), s1_real_tag_match_way, s1_repl_way_en)
+  val s1_has_pseudo_inj_hit = io.pseudo_error.valid && s1_error_way_en.orR
   val s1_way_en = Mux(io.pseudo_error.valid, s1_error_way_en, s1_no_error_way_en)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
@@ -405,7 +406,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_pf  = RegEnable(s1_repl_pf, s1_fire)
-  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
+  val s2_has_pseudo_inj_hit = RegEnable(s1_has_pseudo_inj_hit, s1_fire)
+  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire) && !s2_has_pseudo_inj_hit
   val s2_need_eviction = RegEnable(s1_need_eviction, s1_fire)
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
