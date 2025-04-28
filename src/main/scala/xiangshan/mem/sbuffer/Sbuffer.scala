@@ -387,7 +387,7 @@ class Sbuffer(implicit p: Parameters)
     firstInsertIdx,
     Mux(
       tsoActive,
-      Mux(canMerge(0), tsoTail, tsoTail + 1.U),
+      Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoTail, tsoTail + 1.U),
       Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
     )
   ) // slow to generate, for debug only
@@ -400,7 +400,7 @@ class Sbuffer(implicit p: Parameters)
     firstInsertVec,
     Mux(
       tsoActive,
-      Mux(canMerge(0), tsoInsertFirstMask, tsoInsertSecondMask),
+      Mux(canMerge(0) || !io.in(0).bits.vecValid, tsoInsertFirstMask, tsoInsertSecondMask),
       Mux(~enbufferSelReg, evenInsertVec, oddInsertVec)
     )
   ) // slow to generate, for debug only
@@ -413,14 +413,15 @@ class Sbuffer(implicit p: Parameters)
 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && io.in(0).ready
+  assert(io.in(0).valid || !io.in(1).valid) // 1 valid implies 0 valid
 
   val tsoTailInc = (
-    Mux(io.in(0).fire && !canMerge(0), 1.U, 0.U)
-    +& Mux(io.in(1).fire && !canMerge(1) && !sameTag, 1.U, 0.U)
+    Mux(io.in(0).fire && io.in(0).bits.vecValid && !canMerge(0), 1.U, 0.U)
+    +& Mux(io.in(1).fire && io.in(1).bits.vecValid && !canMerge(1) && !sameTag, 1.U, 0.U)
   )
-  assert(!(io.in(1).fire && canMerge(1)) || sameTag)
-  assert(!(io.in(1).fire && canMerge(1)) || canMerge(0))
-  assert(!(io.in(1).fire && canMerge(1)) || tsoMergeLast(0))
+  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || sameTag)
+  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || canMerge(0))
+  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || tsoMergeLast(0))
   tsoTail := tsoTail + tsoTailInc
 
   // Some TSO assertions
