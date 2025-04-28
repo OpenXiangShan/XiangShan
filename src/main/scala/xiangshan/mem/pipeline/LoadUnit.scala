@@ -1007,7 +1007,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.delayedLoadError  := s1_dly_err
-  s1_out.nc := s1_nc || Pbmt.isNC(s1_pbmt)
+  s1_out.nc := (s1_nc || Pbmt.isNC(s1_pbmt)) && !s1_prf
   s1_out.mmio := Pbmt.isIO(s1_pbmt)
 
   when (!s1_dly_err) {
