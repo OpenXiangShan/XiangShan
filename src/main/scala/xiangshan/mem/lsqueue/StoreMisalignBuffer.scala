@@ -137,8 +137,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //  - s_resp:  Responds to a split store access request
   //  - s_wb:    writeback yo rob/vecMergeBuffer
   //  - s_block: Wait for this instr to reach the head of Rob.
-  //  - s_recovery: Recovery from a cross page replacement revoke.
-  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: s_recovery :: Nil = Enum(7)
+  val s_idle :: s_split :: s_req :: s_resp :: s_wb :: s_block :: Nil = Enum(6)
   val bufferState    = RegInit(s_idle)
 
   // enqueue
@@ -247,10 +246,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           isCrossPage := false.B
         }
       }
-      when (needRecovery) {
-        bufferState := s_recovery
-        isCrossPage := false.B // make sure the state update synchronization.
-      }
     }
 
     is (s_split) {
@@ -347,14 +342,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
         globalMMIO := false.B
         globalNC   := false.B
       }
-    }
-    is (s_recovery) {
-      // Recovery the previous request
-      req := recovery_req
-      needFlushPipe := false.B
-
-      // Restart state machine
-      bufferState := s_idle
     }
   }
 
