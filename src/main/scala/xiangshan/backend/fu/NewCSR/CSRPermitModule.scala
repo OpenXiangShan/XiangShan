@@ -52,6 +52,7 @@ class CSRPermitModule(implicit p: Parameters) extends Module {
   indirectCSRPermitMod.io.in.csrAccess := io.in.csrAccess
   indirectCSRPermitMod.io.in.privState := io.in.privState
   indirectCSRPermitMod.io.in.aia       := io.in.aia
+  indirectCSRPermitMod.io.in.xstateen  := io.in.xstateen
 
   private val (ren, wen) = (
     io.in.csrAccess.ren,
@@ -486,6 +487,7 @@ class IndirectCSRPermitModule extends Module {
       val csrAccess = new csrAccessIO
       val privState = new PrivState
       val aia = new aiaIO
+      val xstateen = new xstateenIO
     })
     val out = Output(new Bundle {
       val indirectCSR_EX_II = Bool()
@@ -509,6 +511,11 @@ class IndirectCSRPermitModule extends Module {
     io.in.aia.vsiselect,
   )
 
+  private val (mstateen0, hstateen0) = (
+    io.in.xstateen.mstateen0,
+    io.in.xstateen.hstateen0,
+  )
+
   private val mvienSEIE = io.in.aia.mvienSEIE
 
   private val rwMireg_EX_II = miselectIsIllegal && addr === CSRs.mireg.U
@@ -516,12 +523,19 @@ class IndirectCSRPermitModule extends Module {
   private val rwSireg_EX_II = (
       (privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
       ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-      (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U))
+      (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U)) ||
+      (!privState.isModeM && !mstateen0.IMSIC.asBool && siselect >= 0x70.U && siselect <= 0xFF.U) ||  // xstateen.IMISC
+      (!privState.isModeM && !mstateen0.AIA.asBool && siselect >= 0x30.U && siselect <= 0x3F.U)       // xstateen.AIA
     ) && addr === CSRs.sireg.U
 
-  private val rwSireg_EX_VI = privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = (
+      privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) ||
+      privState.isVirtual && !hstateen0.IMSIC.asBool && !vsiselectIsIllegal
+    ) && addr === CSRs.sireg.U
 
-  private val rwVSireg_EX_II = vsiselectIsIllegal && addr === CSRs.vsireg.U
+  private val rwVSireg_EX_II = (
+      vsiselectIsIllegal || !privState.isModeM && !mstateen0.IMSIC.asBool
+    ) && addr === CSRs.vsireg.U
 
   io.out.indirectCSR_EX_II := rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
   io.out.indirectCSR_EX_VI := rwSireg_EX_VI
