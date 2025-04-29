@@ -158,10 +158,9 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val s2_canEnq = GatedRegNext(canEnq)
   val s2_reqSelPort = GatedRegNext(reqSelPort)
-  val misalign_can_split = Wire(Bool())
-  misalign_can_split := Mux(s2_canEnq, (0 until enqPortNum).map {
-    case i => !io.enq(i).revoke && s2_reqSelPort === i.U
-  }.reduce(_|_), GatedRegNext(misalign_can_split))
+  val s2_needRevoke = s2_canEnq && (0 until enqPortNum).map {
+    case i => io.enq(i).revoke && s2_reqSelPort === i.U
+  }.reduce(_|_)
 
   when(canEnq) {
     connectSamePort(req, reqSelBits)
@@ -229,13 +228,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   //state transition
   switch(bufferState) {
     is (s_idle) {
-      when(cross4KBPageBoundary && misalign_can_split) {
+      when(cross4KBPageBoundary && !s2_needRevoke) {
         when(robMatch) {
           bufferState := s_split
           isCrossPage := true.B
         }
       } .otherwise {
-        when (req_valid && misalign_can_split) {
+        when (req_valid && !s2_needRevoke) {
           bufferState := s_split
           isCrossPage := false.B
         }
@@ -638,9 +637,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)
 
-  when (flush) {
+  when (flush || s2_needRevoke) {
     bufferState := s_idle
-    req_valid := Mux(cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect, req_valid, false.B)
+    req_valid := Mux(
+      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect,
+      req_valid, // when s2_needRevoke is true, previous request is valid, so req_valid = true
+      false.B
+    )
     curPtr := 0.U
     unSentStores := 0.U
     unWriteStores := 0.U
