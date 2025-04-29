@@ -1291,15 +1291,24 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 
   def getVpn(vpn: UInt): UInt = {
-    val level = s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)
+    val level = MuxLookup(s2xlate, 0.U)(Seq(
+      onlyStage1 -> s1.entry.level.getOrElse(0.U),
+      onlyStage2 -> s2.entry.level.getOrElse(0.U),
+      allStage -> (s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U)),
+      noS2xlate -> s1.entry.level.getOrElse(0.U)
+    ))
     val s1tag = Cat(s1.entry.tag, OHToUInt(s1.pteidx))
     val s1_vpn = MuxLookup(level, s1tag)(Seq(
       3.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 3 - sectortlbwidth), vpn(vpnnLen * 3 - 1, 0)),
       2.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
       1.U -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)))
     )
-    val s2_vpn = s2.entry.tag
-    Mux(s2xlate === onlyStage2, s2_vpn, Mux(s2xlate === allStage, s1_vpn, s1tag))
+    val s2_vpn = MuxLookup(level, s2.entry.tag)(Seq(
+      3.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 3), vpn(vpnnLen * 3 - 1, 0)),
+      2.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(s2.entry.tag(gvpnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)))
+    )
+    Mux(s2xlate === onlyStage2, s2_vpn, s1_vpn)
   }
 
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
