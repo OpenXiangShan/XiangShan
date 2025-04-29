@@ -531,7 +531,7 @@ class InterruptFilter extends Module {
   intrVecReg := intrVec
   debugIntrReg := enableDebugIntr
   nmiReg := io.in.nmi
-  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5
+  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
   irToHSReg := irToHS
   irToVSReg := irToVS
   val delayedIntrVec = DelayN(intrVecReg, 5)
