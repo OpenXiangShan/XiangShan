@@ -828,13 +828,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         mmioState := s_wb
 
         when (io.uncache.resp.bits.nderr || io.cmoOpResp.bits.nderr) {
-          uncacheUop.exceptionVec(storeAccessFault) := true.B
+          uncacheUop.exceptionVec(hardwareError) := true.B
         }
       }
     }
     is(s_wb) {
       when (io.mmioStout.fire || io.vecmmioStout.fire) {
-        when (uncacheUop.exceptionVec(storeAccessFault)) {
+        when (uncacheUop.exceptionVec(hardwareError)) {
           mmioState := s_idle
         }.otherwise {
           mmioState := s_wait
