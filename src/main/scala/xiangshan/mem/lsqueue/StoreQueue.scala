@@ -541,6 +541,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
       memBackTypeMM(stWbIndexReg) := io.storeAddrInRe(i).memBackTypeMM
       hasException(stWbIndexReg) := io.storeAddrInRe(i).hasException
+      addrvalid(stWbIndexReg) := addrvalid(stWbIndexReg) || io.storeAddrInRe(i).hasException
       waitStoreS2(stWbIndexReg) := false.B
     }
     // dcache miss info (one cycle later than storeIn)
