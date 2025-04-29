@@ -250,13 +250,17 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
   val pendingstate = RegInit(s_idle)
+  val selectLq = (loadQueue.io.uncache.req.valid && !storeQueue.io.uncache.req.valid) || (
+    loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid && 
+    loadQueue.io.uncache.req.bits.robIdx < storeQueue.io.uncache.req.bits.robIdx
+  )
 
   switch(pendingstate){
     is(s_idle){
       when(io.uncache.req.fire){
         pendingstate :=
           Mux(io.uncacheOutstanding && io.uncache.req.bits.nc, s_idle,
-          Mux(loadQueue.io.uncache.req.valid, s_load,
+          Mux(selectLq, s_load,
           s_store))
       }
     }
@@ -281,7 +285,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.uncache.resp.valid := false.B
   storeQueue.io.uncache.idResp.valid := false.B
   when(pendingstate === s_idle){
-    when(loadQueue.io.uncache.req.valid){
+    when(selectLq){
       io.uncache.req <> loadQueue.io.uncache.req
     }.otherwise{
       io.uncache.req <> storeQueue.io.uncache.req
