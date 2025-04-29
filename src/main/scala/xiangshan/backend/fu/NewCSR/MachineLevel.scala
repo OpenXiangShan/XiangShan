@@ -640,11 +640,13 @@ class MvienBundle extends InterruptEnableBundle {
   this.SSIE.setRW().withReset(0.U)
   this.SEIE.setRW().withReset(0.U)
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIE.setRO().withReset(0.U)
 }
 
 class MvipBundle extends InterruptPendingBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIP.setRO().withReset(0.U)
 }
 
 class Epc extends CSRBundle {
