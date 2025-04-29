@@ -290,7 +290,10 @@ reformat:
 	mill xiangshan.reformat
 
 # verilator simulation
-emu: sim-verilog
+emu-mk: sim-verilog
+	$(MAKE) -C ./difftest emu-mk SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 emu-run: emu
