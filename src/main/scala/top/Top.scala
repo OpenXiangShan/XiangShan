@@ -190,8 +190,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val true_reset_vector = withClock(io.clock.asClock) {
       // RegEnable( Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector),
       // enable = true_reset_sync.asBool)
-      // RegNext(RegNext(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector)))
-      RegNextN(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector), 20)
+      RegNext(RegNext(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector)))
+      // RegNextN(Mux(reset_sync.asBool, io.reset_vector, dseCtrl.module.io.reset_vector), 20)
     }
 
     for ((core, i) <- core_with_l2.zipWithIndex) {

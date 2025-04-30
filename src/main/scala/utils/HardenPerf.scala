@@ -47,7 +47,7 @@ object HardenXSPerfAccumulate {
         BoringUtils.addSink(portal, name)
         perf.value := portal
     }
-    FileRegisters.add("HardenPerf.cpp", generateCppParser(true))
+    FileRegisters.add("HardenPerf.cpp", generateCppParser())
     FileRegisters.add("DSEMacro.v", generateVerilog())
     io_perf
   }

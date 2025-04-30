@@ -1077,6 +1077,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   HardenXSPerfAccumulate("fpRegfileReads", fpRegfileReads)
   HardenXSPerfAccumulate("fpRegfileWrites", fpRegfileWrites)
 
+  HardenXSPerfAccumulate("functionCalls", PopCount(commitDebugUop.map(uop => uop.ctrl.fuOpType === JumpOpType.jal)))
 
   val intAluAccess = PopCount(io.enq.req.map(r => r.valid &&
     (FuType.isIntExu(r.bits.ctrl.fuType) || r.bits.ctrl.fuType === FuType.mul || r.bits.ctrl.fuType === FuType.div)))

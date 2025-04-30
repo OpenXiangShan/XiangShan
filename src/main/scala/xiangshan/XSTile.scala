@@ -45,7 +45,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   val beu = LazyModule(new BusErrorUnit(
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
   ))
-  val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+  val busPMU = BusPerfMonitor(enable = false)
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 

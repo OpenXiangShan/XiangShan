@@ -5,7 +5,7 @@ import freechips.rocketchip.diplomacy.{AdapterNode, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import chisel3._
 import chisel3.util._
-import utils.{XSPerfAccumulate, XSPerfPrint}
+import utils.{HardenXSPerfAccumulate, XSPerfAccumulate, XSPerfPrint}
 
 class BusPerfMonitor()(implicit p: Parameters) extends LazyModule {
   val node = TLAdapterNode()
@@ -77,6 +77,8 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
       PERF_CHN(clientName, in.e)
     }
   }
+  HardenXSPerfAccumulate("memory_access", outer.node.in.map(in => (in._1.a.fire && (in._1.a.bits.opcode === TLMessages.AcquireBlock)).asUInt).reduce(_ + _))
+  HardenXSPerfAccumulate("memory_write", outer.node.in.map(in => (in._1.c.fire && (in._1.c.bits.opcode === TLMessages.ReleaseData)).asUInt).reduce(_ + _))
 }
 
 object BusPerfMonitor {
