@@ -263,6 +263,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s0_need_tag = io.tag_read.valid
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
   val s0_fire = req.valid && s0_can_go
+  val s0_may_go_to_mq = !s0_req.replace && !s0_req.probe && !s0_req.miss && (s0_req.isStore || s0_req.isAMO && s0_req.cmd =/= M_XSC)
 
   req.ready := s0_can_go
 
@@ -315,63 +316,45 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
-  meta_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegEnable(meta_resp, s1_valid))
-  // pseudo ecc enc tag
-  val pseudo_tag_toggle_mask = Mux(
-                                  io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
-                                  io.pseudo_error.bits(0).mask(tagBits - 1, 0),
-                                  0.U(tagBits.W)
-                              )
-  val pseudo_encTag_resp = io.tag_resp.map {
-    case real_enc =>
-      if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
-        val ecc = real_enc(encTagBits - 1, tagBits)
-        val toggleTag = real_enc(tagBits - 1, 0) ^ pseudo_tag_toggle_mask
-        Cat(ecc, toggleTag)
-      } else {
-        real_enc
-      }
+  val s1_meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
+  s1_meta_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegEnable(s1_meta_resp, s1_valid))
+  val s1_tag_resp = Wire(Vec(nWays, UInt(encTagBits.W)))
+  s1_tag_resp := Mux(GatedValidRegNext(s0_fire), io.tag_resp, RegEnable(s1_tag_resp, s1_valid))
+
+  val s1_meta_valids = wayMap((w: Int) =>
+    Meta(s1_meta_resp(w)).coh.isValid()
+  ).asUInt
+  val s1_tag_errors = match EnableTagEcc {
+    case true => wayMap((w: Int) =>
+      dcacheParameters.tagCode.decode(s1_tag_resp(w)).error
+    ).asUInt
+    case false => 0.U
   }
-  val encTag_resp = Wire(io.tag_resp.cloneType)
-  encTag_resp := Mux(GatedValidRegNext(s0_fire), VecInit(pseudo_encTag_resp), RegEnable(encTag_resp, s1_valid))
-  val tag_resp = encTag_resp.map(encTag => encTag(tagBits - 1, 0))
-  val s1_meta_valids = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid()).asUInt
-  val s1_tag_errors = wayMap((w: Int) => s1_meta_valids(w) && dcacheParameters.tagCode.decode(encTag_resp(w)).error).asUInt
-  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt
-  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
+  val s1_tag_match_way = wayMap((w: Int) =>
+    s1_meta_valids(w) && s1_tag_resp(w)(tagBits-1, 0) === get_tag(s1_req.addr) && !s1_tag_errors(w)
+  ).asUInt
   val s1_tag_match = ParallelORR(s1_tag_match_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
-  val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
+  val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => s1_meta_resp(w))))
   val s1_flag_error = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
   val s1_extra_meta = ParallelMux(s1_tag_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
-  io.pseudo_tag_error_inj_done := s1_fire && s1_meta_valids.orR
 
   XSPerfAccumulate("probe_unused_prefetch", s1_req.probe && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
   XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
-  val s1_invalid_vec = wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid())
+  val s1_invalid_vec = wayMap(w => !s1_meta_resp(w).asTypeOf(new Meta).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
-  val s1_has_tag_error = s1_tag_errors.orR
-  val s1_has_tag_eq_way = s1_tag_eq_way.orR
-  val s1_has_pseudo_tag_inject = s1_has_tag_eq_way && io.pseudo_error.valid
-  val s1_speical_repl_way = Mux(
-    s1_has_pseudo_tag_inject,
-    PriorityEncoderOH(s1_tag_eq_way),
-    PriorityEncoderOH(s1_tag_errors)
-  )
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     GatedValidRegNext(s0_fire),
-    Mux(s1_has_tag_error || s1_has_pseudo_tag_inject, s1_speical_repl_way, UIntToOH(io.replace_way.way)),
+    UIntToOH(io.replace_way.way),
     RegEnable(s1_repl_way_en, s1_valid)
   )
-
-  val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
-  val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => s1_tag_resp(w)))
+  val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => s1_meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
 
   val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
@@ -391,33 +374,53 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_hit = s1_tag_match && s1_has_permission
-  val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO && s1_req.cmd =/= M_XSC) && !s1_hit
+  val s1_may_go_to_mq = RegEnable(s0_may_go_to_mq, false.B, s0_fire)
+  val s1_pregen_can_go_to_mq = s1_may_go_to_mq && !s1_hit
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
-  val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
-  val s2_tag_eq_way = RegEnable(s1_tag_eq_way, s1_fire)
-  val s2_has_tag_eq_way = RegEnable(s1_has_tag_eq_way, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
+  val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val (s2_has_permission, _, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
+
+  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
+  val s2_need_eviction = RegEnable(s1_need_eviction, s1_fire)
+  val s2_idx = get_idx(s2_req.vaddr)
 
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_pf  = RegEnable(s1_repl_pf, s1_fire)
 
+  // s2 tag toggle mask for pseudo tag error injection
+  val s2_pseudo_tag_toggle_mask = Mux(
+    io.pseudo_error.valid && io.pseudo_error.bits(0).valid,
+    io.pseudo_error.bits(0).mask(tagBits - 1, 0),
+    0.U(tagBits.W)
+  )
+  val s2_pseudo_encTag_resp = {
+    if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
+      val ecc = s2_repl_tag(encTagBits - 1, tagBits)
+      val toggleTag = s2_repl_tag(tagBits - 1, 0) ^ s2_pseudo_tag_toggle_mask
+      Cat(ecc, toggleTag)
+    } else {
+      s2_repl_tag
+    }
+  }
+  val s2_repl_tag_error = WireInit(false.B)
+  if (EnableTagEcc) {
+    s2_repl_coh.isValid() &&
+    dcacheParameters.tagCode.decode(s2_pseudo_encTag_resp).error &&
+    s2_need_eviction
+  }
+
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
-  val s2_tag_error = WireInit(false.B)
+  val s2_tag_error = s2_repl_tag_error
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
-
-  val s2_can_replacement = s2_tag_error || !s2_has_tag_eq_way
-  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire) && s2_can_replacement
-  val s2_need_eviction = RegEnable(s1_need_eviction, s1_fire) && s2_can_replacement
-  val s2_idx = get_idx(s2_req.vaddr)
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
@@ -430,10 +433,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
   val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
-
-  if(EnableTagEcc) {
-    s2_tag_error := (s2_tag_errors & s2_way_en).orR && s2_need_tag
-  }
 
   s2_s0_set_conlict := s2_valid && s0_idx === s2_idx
   s2_s0_set_conlict_store := s2_valid && store_idx === s2_idx
@@ -474,7 +473,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s2_store_data_merged_without_cache(i) := mergePutData(0.U(DCacheSRAMRowBits.W), new_data, s2_merge_mask(i))
   }
 
-  io.pseudo_data_error_inj_done := s2_fire_to_s3 && (s2_tag_error || s2_hit) && s2_may_report_data_error
+  io.pseudo_tag_error_inj_done := s2_fire_to_s3 && s2_need_eviction
+  io.pseudo_data_error_inj_done := s2_fire_to_s3 && s2_may_report_data_error
   io.pseudo_error.ready := false.B
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
