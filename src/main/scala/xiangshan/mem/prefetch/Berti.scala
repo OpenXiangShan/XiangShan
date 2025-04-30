@@ -34,6 +34,7 @@ case class BertiParams
   ht_way_cnt: Int = 16,
   dt_way_cnt: Int = 16,
   dt_delta_size: Int = 16,
+  use_byte_addr: Boolean = false,
 ) extends PrefetcherParams{
   override def TRAIN_FILTER_SIZE = 6
   override def PREFETCH_FILTER_SIZE = 16
@@ -60,6 +61,7 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def DtPcTagWidth: Int = 10
   def DtCntWidth: Int = 4
 
+  def useByteAddr: Boolean = bertiParams.use_byte_addr
   def HtSetSize: Int = bertiParams.ht_set_cnt
   def DtWaySize: Int = bertiParams.dt_way_cnt
   def HtWaySize: Int = bertiParams.ht_way_cnt
@@ -67,6 +69,39 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def DtDeltaIndexWidth: Int = log2Up(DtDeltaSize)
 
   def HtSetWidth: Int = log2Up(HtSetSize)
+  def DtWayWidth: Int = log2Up(DtWaySize)
+
+  def DELTA_MIN: Int = -(1 << (DeltaWidth - 1))
+  def DELTA_MAX: Int = (1 << (DeltaWidth - 1)) - 1
+  def DELTA_THRESHOLD: Int = if (useByteAddr) blockBytes else 1 // 64 Bytes = 1 line
+
+  def _getLineVAddr(vaddr: UInt): UInt = {
+    vaddr(vaddr.getWidth - 1, HtLineOffsetWidth)
+  }
+
+  def _signedExtend(x: UInt, width: Int): UInt = {
+    if (x.getWidth >= width) {
+      x
+    } else {
+      Cat(Fill(width - x.getWidth, x.head(1)), x)
+    }
+  }
+
+  def getTrainBaseAddr(vaddr: UInt): UInt = {
+    if (useByteAddr) {
+      vaddr
+    } else {
+      _getLineVAddr(vaddr)
+    }
+  }
+
+  def getPrefetchVAddr(triggerVA: UInt, delta: SInt): UInt = {
+    if (useByteAddr) {
+      triggerVA + _signedExtend(delta.asUInt, VAddrBits)
+    } else {
+      triggerVA + _signedExtend((delta.asUInt << HtLineOffsetWidth), VAddrBits)
+    }
+  }
 }
 
 abstract class BertiBundle(implicit p: Parameters) extends XSBundle with HasBertiHelper
@@ -83,39 +118,58 @@ class HTSearchReq(implicit p: Parameters) extends BertiBundle {
 }
 class LearnDeltasLiteIO(implicit p: Parameters) extends BertiBundle {
   val valid = Bool()
-  val delta = UInt(DeltaWidth.W)
+  val delta = SInt(DeltaWidth.W)
   val pc = UInt(VAddrBits.W)
 }
 
 class LearnDeltasIO(implicit p: Parameters) extends BertiBundle {
   val validVec = Vec(HtWaySize, Bool())
-  val deltaVec = Vec(HtWaySize, UInt(DeltaWidth.W))
+  val deltaVec = Vec(HtWaySize, SInt(DeltaWidth.W))
   val pc = UInt(VAddrBits.W)
 }
 
 class HistoryTable()(implicit p: Parameters) extends BertiModule {
+  /*** static variable ***/
+  val stat_overflow = WireInit(false.B)
+  val stat_dissatisfy = WireInit(false.B)
+  val stat_histLineVA = WireInit(0.U(HtLineVAddrWidth.W))
+  val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   /*** built-in function */
+  def wayMap[T <: Data](f: Int => T) = VecInit((0 until HtWaySize).map(f))
   def getIndex(pc: UInt): UInt = pc(HtSetWidth + PcOffsetWidth - 1, PcOffsetWidth)
   def getTag(pc: UInt): UInt = pc(HtPcTagWidth + HtSetWidth + PcOffsetWidth - 1, HtSetWidth + HtSetWidth + PcOffsetWidth)
-  def getLineVAddr(vaddr: UInt): UInt = {
-    vaddr(HtLineVAddrWidth + HtLineOffsetWidth - 1, HtLineOffsetWidth)
+  def getTrainBaseAddr2HT(vaddr: UInt): UInt = {
+    getTrainBaseAddr(vaddr)(HtLineVAddrWidth - 1, 0)
   }
-  def wayMap[T <: Data](f: Int => T) = VecInit((0 until HtWaySize).map(f))
+  def checkDissatisfy(delta: SInt): Bool = {
+    delta < (DELTA_THRESHOLD).S(DeltaWidth.W) && delta > (-DELTA_THRESHOLD).S(DeltaWidth.W)
+  }
+  def getDelta(lineVA1: UInt, lineVA2: UInt): SInt = {
+    // here should handle the overflow
+    val diffFull = (lineVA1.zext - lineVA2.zext).asSInt
+    val overflow = diffFull < DELTA_MIN.S(DeltaWidth.W) || diffFull > DELTA_MAX.S(DeltaWidth.W)
+    val dissatisfy = checkDissatisfy(diffFull)
+    stat_overflow := overflow
+    stat_dissatisfy := dissatisfy
+    stat_currLineVA := lineVA1
+    stat_histLineVA := lineVA2
+    Mux(overflow, 0.S(DeltaWidth.W), diffFull)
+  }
 
   /*** built-in class */
   class Entry()(implicit p: Parameters) extends BertiBundle {
     val pcTag = UInt(HtPcTagWidth.W)
-    val lineVAddr = UInt(HtLineVAddrWidth.W)
+    val baseVAddr = UInt(HtLineVAddrWidth.W)
     val tsp = UInt(LATENCY_WIDTH.W)
 
-    def alloc(_pcTag: UInt, _lineVAddr: UInt, _tsp: UInt): Unit = {
+    def alloc(_pcTag: UInt, _baseVAddr: UInt, _tsp: UInt): Unit = {
       pcTag := _pcTag
-      lineVAddr := _lineVAddr
+      baseVAddr := _baseVAddr
       tsp := _tsp
     }
 
-    def update(_lineVAddr: UInt, _tsp: UInt): Unit = {
-      lineVAddr := _lineVAddr
+    def update(_baseVAddr: UInt, _tsp: UInt): Unit = {
+      baseVAddr := _baseVAddr
       tsp := _tsp
     }
   }
@@ -170,19 +224,19 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val isReplace = Wire(Bool())
     val set = getIndex(pc)
     val tag = getTag(pc)
-    val lineVaddr = getLineVAddr(vaddr)
+    val baseVAddr = getTrainBaseAddr2HT(vaddr)
 
     val matchVec = wayMap(w => valids(set)(w) && entries(set)(w).pcTag === tag)
     assert(PopCount(matchVec) <= 1.U, s"matchVec should not have more than one match in ${this.getClass.getSimpleName}")
 
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
-      entries(set)(hitWay).update(lineVaddr, currTime)
+      entries(set)(hitWay).update(baseVAddr, currTime)
       replacer.access(set, hitWay)
       isReplace := false.B
     }.otherwise{
       val way = replacer.way(set)
-      entries(set)(way).alloc(tag, lineVaddr, currTime)
+      entries(set)(way).alloc(tag, baseVAddr, currTime)
       valids(set)(way) := true.B
       isReplace := true.B
     }
@@ -202,12 +256,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       val hitWay = OHToUInt(matchVec)
       res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
       res.pc := pc
-      res.delta := getLineVAddr(vaddr) - entries(set)(hitWay).lineVAddr
-      // replacer.access(set, hitWay) // FIFO policy should not access when searching
+      res.delta := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
+      replacer.access(set, hitWay)
     }.otherwise{
       res.valid := false.B
       res.pc := 0.U
-      res.delta := 0.U
+      res.delta := 0.S
     }
 
     res
@@ -220,7 +274,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     valids(set)(way) := true.B
     entries(set)(way).alloc(
       getTag(pc),
-      getLineVAddr(vaddr),
+      getTrainBaseAddr2HT(vaddr),
       currTime
     )
     accessPtrs(set) := accessPtrs(set) + 1.U
@@ -228,39 +282,38 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     isReplace
   }
 
-
-
   def searchLiteFIFO(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasLiteIO = {
     val res = Wire(new LearnDeltasLiteIO)
     val set = getIndex(pc)
     val tag = getTag(pc)
-    /**
-     * method1: use learnPtrs
-     * method2: tag match (may get more than one entry)
-     */
     val way = learnPtrs(set).value
     res.pc := pc
     res.valid := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
-    res.delta := getLineVAddr(vaddr) - entries(set)(way).lineVAddr
+    res.delta := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
     learnPtrs(set) := learnPtrs(set) + 1.U
     res
   }
 
-  def searchFIFO(pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasIO = {
+  def searchFIFO(valid: Bool, pc: UInt, vaddr: UInt, latency: UInt): LearnDeltasIO = {
     val set = getIndex(pc)
     val tag = getTag(pc)
     val res = Wire(new LearnDeltasIO)
-    res.pc := pc
-    for(i <- 0 until HtWaySize){
-      // method1: low wiring complexity; BUT no order
-      // val way = i.U
+    when(valid){
+      res.pc := pc
+      for(i <- 0 until HtWaySize){
+        // method1: low wiring complexity; BUT no order
+        // val way = i.U
 
-      // method2: order of visit from newest to oldest; BUT the wiring complexity is very high
-      // FIXME lyq: to check physically for the wiring complexity
-      val way = accessPtrs(set).value - (i.U + 1.U)
+        // method2: order of visit from newest to oldest; BUT the wiring complexity is very high
+        // FIXME lyq: to check physically for the wiring complexity
+        val way = accessPtrs(set).value - (i.U + 1.U)
 
-      res.validVec(i) := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
-      res.deltaVec(i) := getLineVAddr(vaddr) - entries(set)(way).lineVAddr
+        res.validVec(i) := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
+        res.deltaVec(i) := getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
+      }
+    }.otherwise{
+      res := DontCare
+      res.validVec := 0.U.asTypeOf(chiselTypeOf(res.validVec))
     }
     res
   }
@@ -268,30 +321,74 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** processing logic */
   val isReplace = Wire(Bool())
   when(io.access.valid){
-    isReplace := this.accessLRU(io.access.bits.pc, io.access.bits.vaddr)
+    isReplace := this.accessFIFO(io.access.bits.pc, io.access.bits.vaddr)
   }.otherwise{
     isReplace := false.B
   }
 
+  val searchResult = Wire(new LearnDeltasLiteIO)
   when(io.search.req.valid){
     val searchReq = io.search.req.bits
-    io.search.resp := this.searchLiteLRU(searchReq.pc, searchReq.vaddr, searchReq.latency)
+    searchResult := this.searchLiteFIFO(searchReq.pc, searchReq.vaddr, searchReq.latency)
   }.otherwise{
-    io.search.resp := DontCare
-    io.search.resp.valid := false.B
+    searchResult := DontCare
+    searchResult.valid := false.B
   }
+  io.search.resp := searchResult
+  io.search.resp.valid := searchResult.valid && !checkDissatisfy(searchResult.delta)
 
   /*** performance counter */
   XSPerfAccumulate("access_req", io.access.valid)
   XSPerfAccumulate("access_replace", io.access.valid && isReplace)
   XSPerfAccumulate("search_req", io.search.req.valid)
-  XSPerfAccumulate("search_resp", io.search.resp.valid)
-  XSPerfAccumulate("search_resp_0", io.search.resp.valid && io.search.resp.delta === 0.U)
-  XSPerfAccumulate("search_resp_non_0", io.search.resp.valid && io.search.resp.delta =/= 0.U)
+  XSPerfAccumulate("search_resp_find_total", searchResult.valid)
+  XSPerfAccumulate("search_resp_find_overflow", searchResult.valid && stat_overflow)
+  XSPerfAccumulate("search_resp_find_dissatisfy", searchResult.valid && stat_dissatisfy)
+  XSPerfAccumulate("search_resp_find_valid", io.search.resp.valid)
 
+  class SearchLogDb extends Bundle {
+    val histLineVA = UInt(HtLineVAddrWidth.W)
+    val currLineVA = UInt(HtLineVAddrWidth.W)
+    val calDelta = UInt(DeltaWidth.W)
+  }
+  val searchLog = Wire(new SearchLogDb())
+  searchLog.histLineVA := stat_histLineVA
+  searchLog.currLineVA := stat_currLineVA
+  searchLog.calDelta := io.search.resp.delta.asUInt
+  val searchLogDb = ChiselDB.createTable("berti_searchLog" + p(XSCoreParamsKey).HartId.toString, new SearchLogDb, basicDB = true)
+  searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
+
+  class ParallelSearchResult extends Bundle {
+    val validVec = Vec(HtWaySize, Bool())
+    val deltaVec = Vec(HtWaySize, UInt(DeltaWidth.W))
+    val pc = UInt(VAddrBits.W)
+  }
+  val debug_parallelSearchResult = Wire(new ParallelSearchResult())
+  val _res = this.searchFIFO(
+    io.search.req.valid, io.search.req.bits.pc,
+    io.search.req.bits.vaddr, io.search.req.bits.latency
+  )
+  debug_parallelSearchResult.pc := _res.pc
+  debug_parallelSearchResult.validVec := _res.validVec
+  debug_parallelSearchResult.deltaVec zip _res.deltaVec map {case(x,y) => x := y.asUInt}
+  val debug_parallelSearchLogDb = ChiselDB.createTable("berti_parallel_search_result" + p(XSCoreParamsKey).HartId.toString, new ParallelSearchResult, basicDB = true)
+  debug_parallelSearchLogDb.log(
+    data = debug_parallelSearchResult,
+    en = io.search.req.valid,
+    clock = clock, reset = reset
+  )
 }
 
 class DeltaTable()(implicit p: Parameters) extends BertiModule {
+  val stat_update_isEntryHit = WireInit(false.B)
+  val stat_update_isEntryMiss = WireInit(false.B)
+  val stat_update_isEntryReplace = WireInit(false.B)
+  val stat_update_isDeltaHit = WireInit(false.B)
+  val stat_update_isDeltaMiss = WireInit(false.B)
+  val stat_update_isDeltaReplace = WireInit(false.B)
+  val stat_update_evictEntryIdx = WireInit(0.U(DtWayWidth.W)) // TODO lyq: if have chiselMap, it may be eaiser to statistic evicted data
+  val stat_update_evictDelta = WireInit(0.S(DeltaWidth.W)) // TODO lyq: have no idea how to output this
+  val stat_prefetch_isEntryHit = WireInit(false.B)
   /*** built-in function */
   def thresholdOfMax: Int = (1 << DtCntWidth) - 1
   def thresholdOfHalf: Int = (1 << (DtCntWidth - 1)) - 1
@@ -322,17 +419,17 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
 
   /*** built-in class */
   class DeltaInfo()(implicit p: Parameters) extends BertiBundle {
-    val delta = UInt(DeltaWidth.W)
+    val delta = SInt(DeltaWidth.W)
     val coverageCnt = UInt(DtCntWidth.W)
     val status = DeltaStatus()
 
     def init(): Unit = {
-      delta := 0.U
+      delta := 0.S
       coverageCnt := 0.U
       status := DeltaStatus.NO_PREF
     }
 
-    def set(_delta: UInt): Unit = {
+    def set(_delta: SInt): Unit = {
       delta := _delta
       coverageCnt := 1.U
     }
@@ -389,7 +486,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       }
     }
 
-    def setLite(_pcTag: UInt, _delta: UInt): Unit = {
+    def setLite(_pcTag: UInt, _delta: SInt): Unit = {
       pcTag := _pcTag
       counter := 1.U
 
@@ -398,7 +495,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       bestDeltaIdx := 0.U
     }
 
-    def updateLite(_delta: UInt): Unit = {
+    def updateLite(_delta: SInt): Unit = {
       /**
         * 1. update
         *    1. hit: match and update
@@ -406,7 +503,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
         * 2. check for status reset
         */
 
-      assert(_delta =/= 0.U, s"delta should not be 0.U when call ${Thread.currentThread().getStackTrace()(1).getMethodName} of ${this.getClass.getSimpleName}")
+      assert(_delta =/= 0.S, s"delta should not be 0.U when call ${Thread.currentThread().getStackTrace()(1).getMethodName} of ${this.getClass.getSimpleName}")
 
       // update
       val nextCounter = counter + 1.U
@@ -423,14 +520,20 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
         when(deltaList(updateIdx).coverageCnt >= deltaList(bestDeltaIdx).coverageCnt){
           bestDeltaIdx := updateIdx
         }
+        stat_update_isDeltaHit := true.B
       }.otherwise{
+        stat_update_isDeltaMiss := true.B
         val (allocIdx1, canAlloc1) = PriorityEncoderWithFlag(invalidVec1)
         val (allocIdx2, canAlloc2) = PriorityEncoderWithFlag(invalidVec2)
         // It doesn't matter if allocIdx* === bestDeltaIdx, because the status is low anyway.
         when(canAlloc1) {
           deltaList(allocIdx1).set(_delta)
+          stat_update_isDeltaReplace := true.B
+          stat_update_evictDelta := deltaList(allocIdx1).delta
         }.elsewhen(canAlloc2){
           deltaList(allocIdx2).set(_delta)
+          stat_update_isDeltaReplace := true.B
+          stat_update_evictDelta := deltaList(allocIdx2).delta
         }.otherwise{
           // drop the new delta
         }
@@ -470,7 +573,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
   }
 
   def updateLite(learn: LearnDeltasLiteIO): Unit = {
-    when(learn.valid && learn.delta =/= 0.U) {
+    when(learn.valid && learn.delta =/= 0.S) {
       val pcTag = getPcTag(learn.pc)
       val matchVec = VecInit((0 until DtWaySize).map(i => valids(i) && entries(i).pcTag === pcTag)).asUInt
       val hit = matchVec.orR
@@ -478,10 +581,14 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
         val way = OHToUInt(matchVec)
         entries(way).updateLite(learn.delta)
         replacer.access(way)
+        stat_update_isEntryHit := true.B
       }.otherwise {
         val way = replacer.way
         entries(way).setLite(pcTag, learn.delta)
         valids(way) := true.B
+        stat_update_isEntryMiss := true.B
+        stat_update_isEntryReplace := true.B
+        stat_update_evictEntryIdx := way
       }
     }
   }
@@ -495,6 +602,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
       val pcTag = getPcTag(train.bits.pc)
       val matchOH = VecInit((0 until DtWaySize).map(i => train.valid && valids(i) && entries(i).pcTag === pcTag)).asUInt
       when(matchOH.orR){
+        stat_prefetch_isEntryHit := true.B
         val way = OHToUInt(matchOH)
         replacer.access(way)
         deltaInfo := entries(way).deltaList(entries(way).bestDeltaIdx)
@@ -503,7 +611,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
           res.valid := train.valid
           res.bits.triggerPC := train.bits.pc
           res.bits.triggerVA := train.bits.vaddr
-          res.bits.prefetchVA := train.bits.vaddr + deltaInfo.delta
+          res.bits.prefetchVA := getPrefetchVAddr(train.bits.vaddr, deltaInfo.delta)
           when(deltaInfo.status === DeltaStatus.L1_PREF) {
             res.bits.prefetchTarget := PrefetchTarget.L1.id.U
           }.elsewhen(deltaInfo.status === DeltaStatus.L2_PREF || deltaInfo.status === DeltaStatus.L2_PREF_REPL){
@@ -533,17 +641,24 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     val status = UInt(2.W)
   }
   val deltaInfo2Db = Wire(new DeltaInfo2Db())
-  deltaInfo2Db.delta := pfRes._2.delta
+  deltaInfo2Db.delta := pfRes._2.delta.asUInt
   deltaInfo2Db.coverageCnt := pfRes._2.coverageCnt
   deltaInfo2Db.status := pfRes._2.status.asUInt
-  val prefetchDeltaTable = ChiselDB.createTable("prefetchDeltaTable" + p(XSCoreParamsKey).HartId.toString, new DeltaInfo2Db, basicDB = true)
+  val prefetchDeltaTable = ChiselDB.createTable("berti_prefetchDeltaTable" + p(XSCoreParamsKey).HartId.toString, new DeltaInfo2Db, basicDB = true)
   prefetchDeltaTable.log(data = deltaInfo2Db, en = io.prefetch.valid, clock = clock, reset = reset)
-
+  
   XSPerfAccumulate("learn_req", io.learn.valid)
-  XSPerfAccumulate("learn_req_0", io.learn.valid && io.learn.delta === 0.U)
-  XSPerfAccumulate("learn_req_non_0", io.learn.valid && io.learn.delta =/= 0.U)
+  XSPerfAccumulate("learn_req_0", io.learn.valid && io.learn.delta === 0.S)
+  XSPerfAccumulate("learn_req_non_0", io.learn.valid && io.learn.delta =/= 0.S)
   XSPerfAccumulate("train_req", io.train.valid)
   XSPerfAccumulate("prefetch_req", io.prefetch.valid)
+  XSPerfAccumulate("stat_update_isEntryHit", stat_update_isEntryHit)
+  XSPerfAccumulate("stat_update_isEntryMiss", stat_update_isEntryMiss)
+  XSPerfAccumulate("stat_update_isEntryReplace", stat_update_isEntryReplace)
+  XSPerfAccumulate("stat_update_isDeltaHit", stat_update_isDeltaHit)
+  XSPerfAccumulate("stat_update_isDeltaMiss", stat_update_isDeltaMiss)
+  XSPerfAccumulate("stat_update_isDeltaReplace", stat_update_isDeltaReplace)
+  XSPerfAccumulate("stat_prefetch_isEntryHit", stat_prefetch_isEntryHit)
 
 }
 
@@ -847,4 +962,9 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   XSPerfAccumulate("demandMiss", demandMiss)
   XSPerfAccumulate("demandPfHit", demandPfHit)
   XSPerfAccumulate("demandRefill", demandRefill)
+  XSPerfAccumulate("demandRefill_searchValid", demandRefill && historyTable.io.search.resp.valid && historyTable.io.search.resp.delta =/= 0.S)
+  XSPerfAccumulate("demandPfHit_searchValid", demandPfHit && historyTable.io.search.resp.valid && historyTable.io.search.resp.delta =/= 0.S)
+  XSPerfAccumulate("demandMiss_prefetchValid", demandMiss && detlaTable.io.prefetch.valid)
+  XSPerfAccumulate("demandPfHit_prefetchValid", demandPfHit && detlaTable.io.prefetch.valid)
+
 }
