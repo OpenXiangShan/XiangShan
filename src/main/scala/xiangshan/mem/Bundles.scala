@@ -139,10 +139,7 @@ object Bundles {
         case false  => input
       }
       connectSamePort(this, inputReg)
-      this.meta_prefetch := DontCare
-      this.meta_access := DontCare
-      this.is_from_hw_pf := DontCare
-      this.refillLatency := 0.U // FIXME lyq: best to use parameter
+      // The remaining variables must be assigned outside the function to ensure correctness
     }
 
     def toPrefetchReqBundle(): PrefetchReqBundle = {
