@@ -269,12 +269,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
 
     for (i <- 0 until ST_TRAIN_WIDTH) {
-      val source = io.trainSource.s3_store(i)
-      pf.io.st_in(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromBerti(source.bits.meta_prefetch)
-      )
-      pf.io.st_in(i).bits := source.bits
-      pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
+      pf.io.st_in(i).valid := false.B
+      pf.io.st_in(i).bits := DontCare
+      // val source = io.trainSource.s3_store(i)
+      // pf.io.st_in(i).valid := source.valid && source.bits.isFirstIssue && (
+      //  source.bits.miss || isFromBerti(source.bits.meta_prefetch)
+      // )
+      // pf.io.st_in(i).bits := source.bits
+      // pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
     }
 
     pf.io.refillTrain := io.fromDCache.refillTrain
