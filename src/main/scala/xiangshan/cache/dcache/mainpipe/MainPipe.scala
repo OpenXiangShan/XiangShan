@@ -324,11 +324,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_meta_valids = wayMap((w: Int) =>
     Meta(s1_meta_resp(w)).coh.isValid()
   ).asUInt
-  val s1_tag_errors = match EnableTagEcc {
-    case true => wayMap((w: Int) =>
-      dcacheParameters.tagCode.decode(s1_tag_resp(w)).error
-    ).asUInt
-    case false => 0.U
+  val s1_tag_errors = if (EnableTagEcc) {
+    wayMap((w: Int) => dcacheParameters.tagCode.decode(s1_tag_resp(w)).error).asUInt
+  } else {
+    0.U
   }
   val s1_tag_match_way = wayMap((w: Int) =>
     s1_meta_valids(w) && s1_tag_resp(w)(tagBits-1, 0) === get_tag(s1_req.addr) && !s1_tag_errors(w)
@@ -399,14 +398,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.pseudo_error.bits(0).mask(tagBits - 1, 0),
     0.U(tagBits.W)
   )
-  val s2_pseudo_encTag_resp = {
-    if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
-      val ecc = s2_repl_tag(encTagBits - 1, tagBits)
-      val toggleTag = s2_repl_tag(tagBits - 1, 0) ^ s2_pseudo_tag_toggle_mask
-      Cat(ecc, toggleTag)
-    } else {
-      s2_repl_tag
-    }
+  val s2_pseudo_encTag_resp = if (cacheCtrlParamsOpt.nonEmpty && EnableTagEcc) {
+    Cat(s2_repl_tag(encTagBits - 1, tagBits), s2_repl_tag(tagBits - 1, 0) ^ s2_pseudo_tag_toggle_mask)
+  } else {
+    s2_repl_tag
   }
   val s2_repl_tag_error = WireInit(false.B)
   if (EnableTagEcc) {
