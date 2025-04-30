@@ -943,6 +943,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasPerfEvents with HasL1PrefetchSourceParameter {
 
   val io = IO(new DCacheIO)
+
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
