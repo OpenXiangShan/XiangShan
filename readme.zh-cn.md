@@ -84,7 +84,7 @@ make idea
 
 ## 生成 Verilog
 
-* 运行 `make verilog` 以生成 verilog 代码。输出文件为 `build/XSTop.v`。
+* 运行 `make verilog` 以生成 verilog 代码。该命令会在 `build/rtl/` 目录下生成多个 `.sv` 文件（例如 `build/rtl/XSTop.sv`）。
 * 更多信息详见 `Makefile`。
 
 ## 仿真运行
