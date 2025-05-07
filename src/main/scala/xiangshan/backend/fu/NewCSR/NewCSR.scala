@@ -492,7 +492,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.xcounteren.scounteren := scounteren.rdata
 
   permitMod.io.in.xstateen.mstateen0 := mstateen0.rdata
+  permitMod.io.in.xstateen.mstateen1 := mstateen1.rdata
+  permitMod.io.in.xstateen.mstateen2 := mstateen2.rdata
+  permitMod.io.in.xstateen.mstateen3 := mstateen3.rdata
   permitMod.io.in.xstateen.hstateen0 := hstateen0.rdata
+  permitMod.io.in.xstateen.hstateen1 := hstateen1.rdata
+  permitMod.io.in.xstateen.hstateen2 := hstateen2.rdata
+  permitMod.io.in.xstateen.hstateen3 := hstateen3.rdata
   permitMod.io.in.xstateen.sstateen0 := sstateen0.rdata
 
   permitMod.io.in.xenvcfg.menvcfg := menvcfg.rdata
@@ -752,8 +758,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
-      case m: HasStateen0Bundle =>
+      case m: HasStateenBundle =>
         m.fromMstateen0 := mstateen0.regOut
+        m.fromMstateen1 := mstateen1.regOut
+        m.fromMstateen2 := mstateen2.regOut
+        m.fromMstateen3 := mstateen3.regOut
         m.fromHstateen0 := hstateen0.regOut
         m.privState     := privState
       case _ =>

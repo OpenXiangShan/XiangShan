@@ -186,6 +186,9 @@ class MLevelPermitModule extends Module {
   private val mcounteren = io.in.xcounteren.mcounteren
 
   private val mstateen0 = io.in.xstateen.mstateen0
+  private val mstateen1 = io.in.xstateen.mstateen1
+  private val mstateen2 = io.in.xstateen.mstateen2
+  private val mstateen3 = io.in.xstateen.mstateen3
 
   private val mcounterenTM = mcounteren(1)
 
@@ -228,13 +231,17 @@ class MLevelPermitModule extends Module {
   private val rwStopei_EX_II = privState.isModeHS && mvienSEIE && (addr === CSRs.stopei.U)
 
   /**
-   * Sm/Ssstateen0 begin
+   * Sm/Ssstateen begin
    */
-  // SE0 bit 63
-  private val csrIsHstateen0 = addr === CSRs.hstateen0.U
-  private val csrIsSstateen0 = addr === CSRs.sstateen0.U
-  private val csrIsStateen0 = csrIsHstateen0 || csrIsSstateen0
-  private val accessStateen0_EX_II = csrIsStateen0 && !privState.isModeM && !mstateen0.SE0.asBool
+  // SE bit 63
+  private val accessStateen_EX_II = (
+    mstateen0.SE0.asBool +: Seq(mstateen1, mstateen2, mstateen3).map(_.SE.asBool)
+    ).zipWithIndex.map{ case(se, i) => {
+    val csrIsHstateen = addr === (CSRs.hstateen0 + i).U
+    val csrIsSstateen = addr === (CSRs.sstateen0 + i).U
+    val csrIsStateen = csrIsHstateen || csrIsSstateen
+    csrIsStateen && !privState.isModeM && !se
+  }}.reduce(_ || _)
 
   // ENVCFG bit 62
   private val csrIsHenvcfg = addr === CSRs.henvcfg.U
@@ -280,7 +287,7 @@ class MLevelPermitModule extends Module {
   private val allCustom      = csrIsHVSCustom || csrIsSCustom || csrIsUCustom
   private val accessCustom_EX_II = allCustom && !privState.isModeM && !mstateen0.C.asBool
 
-  val xstateControlAccess_EX_II = accessStateen0_EX_II || accessEnvcfg_EX_II || accessIND_EX_II || accessAIA_EX_II ||
+  private val xstateControlAccess_EX_II = accessStateen_EX_II || accessEnvcfg_EX_II || accessIND_EX_II || accessAIA_EX_II ||
     accessTopie_EX_II || accessContext_EX_II || accessCustom_EX_II
   /**
    * Sm/Ssstateen end
@@ -411,8 +418,11 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
 
   private val henvcfgSTCE = henvcfg(63)
 
-  private val (hstateen0, sstateen0) = (
+  private val (hstateen0, hstateen1, hstateen2, hstateen3, sstateen0) = (
     io.in.xstateen.hstateen0,
+    io.in.xstateen.hstateen1,
+    io.in.xstateen.hstateen2,
+    io.in.xstateen.hstateen3,
     io.in.xstateen.sstateen0,
   )
 
@@ -437,11 +447,16 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
     )
 
   /**
-   * Sm/Ssstateen0 begin
+   * Sm/Ssstateen begin
    */
-  // SE0 bit 63
-  private val csrIsSstateen0 = addr === CSRs.sstateen0.U
-  private val accessStateen0_EX_VI = csrIsSstateen0 && privState.isVirtual && !hstateen0.SE0.asBool
+
+  //  SE0 bit 63
+  private val accessStateen_EX_VI = (
+    hstateen0.SE0.asBool +: Seq(hstateen1, hstateen2, hstateen3).map(_.SE.asBool)
+    ).zipWithIndex.map{case(se, i) => {
+    val csrIsSstateen = addr === (CSRs.sstateen0 + i).U
+    csrIsSstateen && privState.isVirtual && !se
+  }}.reduce(_ || _)
 
   // ENVCFG bit 62
   private val csrIsSenvcfg = addr === CSRs.senvcfg.U
@@ -474,7 +489,7 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
   private val accessCustom_EX_VI = (csrIsSCustom || csrIsUCustom) && privState.isVirtual && !hstateen0.C.asBool ||
     csrIsUCustom && privState.isModeVU && hstateen0.C.asBool && !sstateen0.C.asBool
 
-  private val xstateControlAccess_EX_VI = accessStateen0_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
+  private val xstateControlAccess_EX_VI = accessStateen_EX_VI || accessEnvcfg_EX_VI || accessIND_EX_VI || accessAIA_EX_VI ||
     accessTopie_EX_VI || accessContext_EX_VI || accessCustom_EX_VI
 
   io.out.virtualLevelPermit_EX_II := rwVStopei_EX_II
@@ -606,9 +621,15 @@ class xenvcfgIO extends Bundle {
 
 class xstateenIO extends Bundle {
   // Sm/Ssstateen: to control state access
-  val mstateen0 = new MstateenBundle0
-  val hstateen0 = new HstateenBundle0
-  val sstateen0 = new SstateenBundle0
+  val mstateen0 = new Mstateen0Bundle
+  val mstateen1 = new MstateenNonZeroBundle
+  val mstateen2 = new MstateenNonZeroBundle
+  val mstateen3 = new MstateenNonZeroBundle
+  val hstateen0 = new Hstateen0Bundle
+  val hstateen1 = new HstateenNonZeroBundle
+  val hstateen2 = new HstateenNonZeroBundle
+  val hstateen3 = new HstateenNonZeroBundle
+  val sstateen0 = new Sstateen0Bundle
 }
 
 class aiaIO extends Bundle {
