@@ -285,6 +285,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
   val cmtPtr = cmtPtrExt(0).value
+  val rdPtr = rdataPtrExt(0).value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   val allowEnqueue = validCount <= (StoreQueueSize - LSQStEnqWidth).U
@@ -316,7 +317,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   rdataPtrExtNext := rdataPtrExt.map(i => i +
     PopCount(dataBuffer.io.enq.map(x=> x.fire && x.bits.sqNeedDeq)) +
-    PopCount(ncReadNextTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
+    PopCount(completed(rdPtr) && (nc(rdPtr) || mmio(rdPtr)))
   )
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -1419,9 +1420,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // invalidate sq term using robIdx
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := (uop(i).robIdx.needFlush(io.brqRedirect) & !isVec(i) || isAfter(uop(i).robIdx, io.brqRedirect.bits.robIdx) && io.brqRedirect.valid && isVec(i)) && allocated(i) && !committed(i)
+    // for nc exception: committed -> no uncache request -> completed when need cancel
+    val ncFastComplete = uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && nc(i) && committed(i)
     when (needCancel(i)) {
       allocated(i) := false.B
       completed(i) := false.B
+    }.elsewhen(ncFastComplete) {
+      completed(i) := true.B
     }
   }
 
