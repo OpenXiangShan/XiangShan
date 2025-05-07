@@ -381,7 +381,13 @@ trait MachineLevel { self: NewCSR =>
   }))
     .setAddr(CSRs.mconfigptr)
 
-  val mstateen0 = Module(new CSRModule("Mstateen", new MstateenBundle0)).setAddr(CSRs.mstateen0)
+  val mstateen0 = Module(new CSRModule("Mstateen0", new Mstateen0Bundle)).setAddr(CSRs.mstateen0)
+
+  val mstateen1 = Module(new CSRModule("Mstateen1", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen1)
+
+  val mstateen2 = Module(new CSRModule("Mstateen2", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen2)
+
+  val mstateen3 = Module(new CSRModule("Mstateen3", new MstateenNonZeroBundle)).setAddr(CSRs.mstateen3)
 
   // smrnmi extension
   val mnepc = Module(new CSRModule("Mnepc", new Epc) with TrapEntryMNEventSinkBundle {
@@ -432,6 +438,9 @@ trait MachineLevel { self: NewCSR =>
     mhartid,
     mconfigptr,
     mstateen0,
+    mstateen1,
+    mstateen2,
+    mstateen3,
     mnepc,
     mncause,
     mnstatus,
