@@ -39,6 +39,7 @@ SIMTOP  = top.SimTop
 RTL_SUFFIX ?= sv
 TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
 SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
+JAR = $(BUILD_DIR)/xsgen.jar
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
@@ -215,8 +216,12 @@ version:
 jar:
 	mill -i xiangshan.assembly
 
-test-jar:
-	mill -i xiangshan.test.assembly
+$(JAR):
+	@mkdir -p $(@D); \
+	JAR_REF=$(shell mill -i show xiangshan.test.assembly); \
+	[ ! -z $${JAR_REF} ] && echo $${JAR_REF} | sed 's/"//g' | awk -F: '{print $$4}' \
+		| xargs -I{} cp {} $@
+test-jar: $(call docker-deps,$(JAR))
 
 comp:
 	mill -i xiangshan.compile
