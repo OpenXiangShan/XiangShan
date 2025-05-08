@@ -531,6 +531,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(IntData(), VecData(), VecData(), V0Data(), VlData()),  // rs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -551,6 +552,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(IntData(), VecData(), VecData(), V0Data(), VlData()),  // rs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -571,6 +573,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(IntData(), VecData(), VecData(), V0Data(), VlData()),  // rs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = false,
     writeVecRf = true,
@@ -589,6 +592,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VPPU(cfg)(p).suggestName("Vppu")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(IntData(), VecData(), VecData(), V0Data(), VlData()),  // rs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,

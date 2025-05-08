@@ -5,10 +5,12 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.FuConfig.VialuCfg
+import xiangshan.backend.fu.FuConfig.VppuCfg
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
 import yunsuan.VialuFixType
+import yunsuan.VpermType
 
 trait VecFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
@@ -59,10 +61,20 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   with HasPipelineReg
   with VecFuncUnitAlias
 {
-  private val src0 = inData.src(0)
+  private val extedVs1 = Wire(UInt(VLEN.W))
+  private val scalaDupToVector = Module(new ScalaDupToVector(VLEN))
+  scalaDupToVector.io.in.scalaData := inData.src(0)
+  scalaDupToVector.io.in.vsew := vsew
+  extedVs1 := scalaDupToVector.io.out.vecData
+  // when instruction is not (FuType.vialuF, VialuFixType.vmv_s_x) or (FuType.vppu, VpermType.vslideup) or (FuType.vppu, VpermType.vslidedown) or (FuType.vppu, VpermType.vrgather_vx) need to extend vs1
+  val noneedScalaSrc = if (cfg == VialuCfg) inCtrl.fuOpType === VialuFixType.vmv_s_x
+                    else if (cfg == VppuCfg) inCtrl.fuOpType === VpermType.vslideup || inCtrl.fuOpType === VpermType.vslidedown || inCtrl.fuOpType === VpermType.vrgather_vx || inCtrl.fuOpType === VpermType.vslide1down || inCtrl.fuOpType === VpermType.vslide1up || inCtrl.fuOpType === VpermType.vfslide1down || inCtrl.fuOpType === VpermType.vfslide1up
+                    else false.B
+  private val src0IsVec = vecCtrl.src1IsVec
+  private val src0 = Mux(noneedScalaSrc || src0IsVec, inData.src(0), extedVs1)
   private val src1 = WireInit(inData.src(1)) // vs2 only
-  protected val vs2 = src1
-  protected val vs1 = src0
+  protected val vs2 = Mux(isReverse, src0, src1)
+  protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
 
   protected val outCtrl     = ctrlVec.last

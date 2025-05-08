@@ -1,7 +1,7 @@
 package xiangshan.backend.fu.vector
 
 import org.chipsalliance.cde.config.Parameters
-import chisel3._
+import chisel3._ 
 import chisel3.util._
 import utility.DataHoldBypass
 import xiangshan.backend.fu.vector.Bundles.VConfig
@@ -13,11 +13,17 @@ import yunsuan.VialuFixType
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with VecFuncUnitAlias
 {
-  private val src0 = inData.src(0)
+  private val extedVs1 = Wire(UInt(VLEN.W))
+  private val scalaDupToVector = Module(new ScalaDupToVector(VLEN))
+  scalaDupToVector.io.in.scalaData := inData.src(0)
+  scalaDupToVector.io.in.vsew := vsew
+  extedVs1 := scalaDupToVector.io.out.vecData
+  // when instruction is not (FuType.vialuF, VialuFixType.vmv_s_x) or (FuType.vppu, VpermType.vslideup) or (FuType.vppu, VpermType.vslidedown) or (FuType.vppu, VpermType.vrgather_vx) need to extend vs1
+  private val src0IsVec = vecCtrl.src1IsVec
+  private val src0 = Mux(src0IsVec, inData.src(0), extedVs1)
   private val src1 = WireInit(inData.src(1)) // vs2 only
-
-  protected val vs2 = src1
-  protected val vs1 = src0
+  protected val vs2 = Mux(isReverse, src0, src1)
+  protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
 
   protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)

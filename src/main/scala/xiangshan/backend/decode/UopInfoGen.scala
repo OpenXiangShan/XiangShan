@@ -207,16 +207,11 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_VFM -> (lmul +& 1.U),
     UopSplitType.VEC_VFRED -> numOfUopVFRED,
     UopSplitType.VEC_VFREDOSUM -> numOfUopVFREDOSUM,
-    UopSplitType.VEC_VXM -> (lmul +& 1.U),
-    UopSplitType.VEC_VXV -> (lmul +& 1.U),
     UopSplitType.VEC_VFW -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_WFW -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_VVW -> numOfUopWV, // lmul <= 4
     UopSplitType.VEC_WVW -> numOfUopWV, // lmul <= 4
-    UopSplitType.VEC_VXW -> numOfUopWX, // lmul <= 4
-    UopSplitType.VEC_WXW -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_WVV -> numOfUopWV, // lmul <= 4
-    UopSplitType.VEC_WXV -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_SLIDE1UP -> (lmul +& 1.U),
     UopSplitType.VEC_FSLIDE1UP -> (lmul +& 1.U),
     UopSplitType.VEC_SLIDE1DOWN -> Cat(lmul, 0.U(1.W)),
@@ -228,7 +223,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_MVV -> (Cat(lmul, 0.U(1.W)) - 1.U),
     UopSplitType.VEC_VWW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
-    UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
     UopSplitType.VEC_COMPRESS -> numOfUopVcompress,
     UopSplitType.VEC_MVNR -> (vmvn +& 1.U),

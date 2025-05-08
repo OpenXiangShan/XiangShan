@@ -450,12 +450,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   vfScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.vfUops
-  vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
+  vfScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   vfScheduler.io.fpWriteBack := 0.U.asTypeOf(vfScheduler.io.fpWriteBack)
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   vfScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
   vfScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
-  vfScheduler.io.intWriteBackDelayed := 0.U.asTypeOf(intWriteBackDelayed)
+  vfScheduler.io.intWriteBackDelayed := intWriteBackDelayed
   vfScheduler.io.fpWriteBackDelayed := 0.U.asTypeOf(fpWriteBackDelayed)
   vfScheduler.io.vfWriteBackDelayed := vfWriteBackDelayed
   vfScheduler.io.v0WriteBackDelayed := v0WriteBackDelayed

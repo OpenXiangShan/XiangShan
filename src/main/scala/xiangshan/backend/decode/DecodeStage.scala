@@ -229,10 +229,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   io.out.zipWithIndex.foreach { case (inst, i) =>
     inst.valid := finalDecodedInstValid(i) && !io.fromRob.isResumeVType
     inst.bits := finalDecodedInst(i)
-    inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
-    inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))
-    inst.bits.srcType(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(1), finalDecodedInst(i).srcType(0))
-    inst.bits.srcType(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(0), finalDecodedInst(i).srcType(1))
     inst.bits.v0Wen := finalDecodedInst(i).vecWen && finalDecodedInst(i).ldest === 0.U || finalDecodedInst(i).v0Wen
     inst.bits.vecWen := finalDecodedInst(i).vecWen && finalDecodedInst(i).ldest =/= 0.U
     // when src0/src1/src2 read V0, src3 read V0

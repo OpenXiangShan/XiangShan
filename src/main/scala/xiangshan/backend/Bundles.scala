@@ -445,6 +445,7 @@ object Bundles {
     val isDstMask = Bool() // vvm, vvvm, mmm
     val isOpMask  = Bool() // vmand, vmnand
     val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
+    val src1IsVec = Bool() // src1 is vector
 
     val isDependOldVd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
