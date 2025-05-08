@@ -877,7 +877,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rptr0 = rdataPtrExt(0).value
   switch(ncState){
     is(nc_idle) {
-      when(nc(rptr0) && allocated(rptr0) && committed(rptr0) && !mmio(rptr0) && !isVec(rptr0) && !hasException(rptr0)) {
+      when(nc(rptr0) && allocated(rptr0) && committed(rptr0) && !mmio(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !completed(rptr0)) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
       }
