@@ -253,7 +253,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
-  val completed = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) 
+  val completed = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val addrvalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val allvalid  = VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i)))
@@ -322,7 +322,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // deqPtrExtNext traces which inst is about to leave store queue
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   val sqDeqCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
-  val readyDeqVec = WireInit(VecInit((0 until EnsbufferWidth).map(i => 
+  val readyDeqVec = WireInit(VecInit((0 until EnsbufferWidth).map(i =>
     allocated(deqPtrExt(i).value) && completed(deqPtrExt(i).value)
   )))
   for (i <- 0 until EnsbufferWidth) {
@@ -866,7 +866,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * NC Store
     * (1) req: when it has been commited, it can be sent to lower level.
     * (2) resp: because SQ data forward is required, it can only be deq when ncResp is received
-    * 
+    *
     * NOTE: nc_req_ack is used to make sure that the request is written by the ubuffer and
     * the ubuffer can forward the required data
     */
@@ -1279,7 +1279,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // ---
     // Only sqNeedDeq can move the ptr.
     // ---
-    // however, `completed` is register, when it turn true, the data has already been written to sbuffer    
+    // however, `completed` is register, when it turn true, the data has already been written to sbuffer
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
     when (io.sbuffer(i).fire && io.sbuffer(i).bits.sqNeedDeq) {
 
