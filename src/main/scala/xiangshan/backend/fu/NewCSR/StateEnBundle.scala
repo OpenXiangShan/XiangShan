@@ -21,7 +21,7 @@ class Hstateen0Bundle extends Sstateen0Bundle {
   val CSRIND  = RW(60)                // m: [vs|s]iselect, [vs|s]ireg*  h: siselect, sireg*
   val AIA     = RW(59)                // all other state added by the AIA and not controlled by bits 60 and 58
   val IMSIC   = RW(58)                // m: [vs|s]topei                 h: stopei
-  val CONTEXT = RO(57).withReset(0.U) // m: [h|s]context in Sdtrig      h: scontext
+  val CONTEXT = RW(57)                // m: [h|s]context in Sdtrig      h: scontext
 }
 
 class Mstateen0Bundle extends Hstateen0Bundle {
@@ -32,6 +32,7 @@ class Mstateen0Bundle extends Hstateen0Bundle {
   override val CSRIND  = RW(60).withReset(0.U) // m: [vs|s]iselect, [vs|s]ireg*  h: siselect, sireg*
   override val AIA     = RW(59).withReset(0.U) // all other state added by the AIA and not controlled by bits 60 and 58
   override val IMSIC   = RW(58).withReset(0.U) // m: [vs|s]topei                 h: stopei
+  override val CONTEXT = RW(57).withReset(0.U) // m: [h|s]context in Sdtrig      h: scontext
   val P1P13            = RO(56).withReset(0.U) // hedelegh in Priv Spec V1.13
   override val C       = RW(0).withReset(0.U)  // custom state enable, [m|h|s]stateen is standard, not custom.
 }

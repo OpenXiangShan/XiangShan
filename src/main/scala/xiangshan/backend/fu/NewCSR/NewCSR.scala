@@ -1216,6 +1216,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.frontendTrigger := debugMod.io.out.frontendTrigger
   io.status.memTrigger      := debugMod.io.out.memTrigger
+
+  mcontext.fromHcontext <> hcontext.toMcontext
+  hcontext.fromMcontext <> mcontext.toHcontext
   /**
    * debug_end
    */

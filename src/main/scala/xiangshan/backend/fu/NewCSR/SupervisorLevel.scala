@@ -176,6 +176,8 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
 
   val sstateen3 = Module(new CSRModule("Sstateen3", new SstateenNonZeroBundle)).setAddr(CSRs.sstateen3)
 
+  val scontext = Module(new CSRModule("Scontext", new ScontextBundle)).setAddr(CSRs.scontext)
+
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
     sie,
     stvec,
@@ -193,6 +195,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     sstateen1,
     sstateen2,
     sstateen3,
+    scontext,
   )
 
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
@@ -246,6 +249,11 @@ class SatpBundle extends CSRBundle {
   val ASID = RW(44 - 1 + ASIDLEN, 44).withReset(0.U)
   // Do WARL in SatpModule/VSatpModule
   val PPN  = RW(43, 0).withReset(0.U)
+}
+
+class ScontextBundle extends CSRBundle {
+  override val len = 32
+  val ALL = RW(31, 0)
 }
 
 class SEnvCfg extends EnvCfg
