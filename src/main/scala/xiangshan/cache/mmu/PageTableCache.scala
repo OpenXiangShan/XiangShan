@@ -642,7 +642,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && stageDelay_valid_1cycle }
     for (i <- 0 until l2tlbParams.spSize) {
-      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).vsatp.asid, io.csr_dup(0).hgatp.vmid, s2xlate = h_search =/= noS2xlate)} spv:${spv(i)}\n")
+      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).vsatp.asid, io.csr_dup(0).hgatp.vmid, allType = true, s2xlate = h_search =/= noS2xlate)} spv:${spv(i)}\n")
     }
     XSDebug(stageDelay_valid_1cycle, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
 
@@ -1121,11 +1121,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
         l0v := l0v & ~(l0virthit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, allType = true, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
       } .otherwise {
         // specific leaf of addr && specific asid
         l0v := l0v & ~(l0virthit & ~l0g & l0asidhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, allType = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
       }
     }
   }
@@ -1165,10 +1165,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
         l0v := l0v & ~(l0hhit & l0vmidhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, allType = true, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
         l0v := l0v & ~(l0hhit & l0vmidhit & ~l0g & l0asidhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, s2xlate = true.B))).asUInt)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.vmid, allType = true, s2xlate = true.B))).asUInt)
       }
     }
   }
@@ -1209,10 +1209,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
         l0v := l0v & ~(l0hhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, allType = true, ignoreAsid = true, s2xlate = false.B))).asUInt)
       }.otherwise {
         l0v := l0v & ~(l0hhit & l0vmidhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, allType = true, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }
     }
   }

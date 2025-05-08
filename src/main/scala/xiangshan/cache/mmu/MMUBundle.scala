@@ -836,24 +836,6 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
   val prefetch = Bool()
   val v = Bool()
 
-  def is_normalentry(): Bool = {
-    if (!hasLevel) true.B
-    else level.get === 2.U
-  }
-
-  def genPPN(vpn: UInt): UInt = {
-    if (!hasLevel) {
-      ppn
-    } else {
-      MuxLookup(level.get, 0.U)(Seq(
-        3.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*3), vpn(vpnnLen*3-1, 0)),
-        2.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
-        1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
-        0.U -> ppn)
-      )
-    }
-  }
-
   //s2xlate control whether compare vmid or not
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     require(vpn.getWidth == vpnLen)
@@ -879,20 +861,6 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
         2.U -> (tag_match(3) && tag_match(2)),
         1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
         0.U -> (tag_match(3) && tag_match(2) && tag_match(1) && tag_match(0)))
-      )
-
-      asid_hit && vmid_hit && level_match
-    } else if (hasLevel) {
-      val tag_match = Wire(Vec(3, Bool())) // SuperPage, 512GB, 1GB or 2MB
-      tag_match(0) := tag(tagLen - 1, tagLen - vpnnLen - extendVpnnBits) === vpn(vpnLen - 1, vpnLen - vpnnLen - extendVpnnBits)
-      for (i <- 1 until 3) {
-        tag_match(i) := tag(tagLen - vpnnLen * i - extendVpnnBits - 1, tagLen - vpnnLen * (i + 1) - extendVpnnBits) === vpn(vpnLen - vpnnLen * i - extendVpnnBits - 1, vpnLen - vpnnLen * (i + 1) - extendVpnnBits)
-      }
-
-      val level_match = MuxLookup(level.getOrElse(0.U), false.B)(Seq(
-        3.U -> tag_match(0),
-        2.U -> (tag_match(0) && tag_match(1)),
-        1.U -> (tag_match(0) && tag_match(1) && tag_match(2)))
       )
 
       asid_hit && vmid_hit && level_match
@@ -978,6 +946,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     getVpnClip(vpn, level)(log2Up(num) - 1, 0)
   }
 
+  // For PTWCache l0 & l1 entries, need not consider napot
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     val asid_value = Mux(s2xlate, vasid, asid)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
@@ -1141,11 +1110,14 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
 
   def hit(gvpn: UInt, vmid: UInt): Bool = {
     val vmid_hit = this.entry.vmid.getOrElse(0.U) === vmid
-    val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
-    for (i <- 0 until 3) {
+    val tag_match = Wire(Vec(Level + 1, Bool()))
+    tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
+      entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0),
+      entry.tag(vpnnLen - 1, pteNapotBits) === gvpn(vpnnLen - 1, pteNapotBits))
+    for (i <- 1 until Level) {
       tag_match(i) := entry.tag(vpnnLen * (i + 1)  - 1, vpnnLen * i) === gvpn(vpnnLen * (i + 1)  - 1, vpnnLen * i)
     }
-    tag_match(3) := entry.tag(gvpnLen - 1, vpnnLen * 3) === gvpn(gvpnLen - 1, vpnnLen * 3)
+    tag_match(Level) := entry.tag(gvpnLen - 1, vpnnLen * Level) === gvpn(gvpnLen - 1, vpnnLen * Level)
 
     val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
       3.U -> tag_match(3),
@@ -1192,41 +1164,29 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
 
   def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
     require(vpn.getWidth == vpnLen)
-    //    require(this.asid.getWidth <= asid.getWidth)
+    require(allType)
+    // require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid)
     val vmid_hit = Mux(s2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
-    if (allType) {
-      val addr_low_hit = valididx(vpn(sectortlbwidth - 1, 0))
-      val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
-      tag_match(0) := entry.tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth)
-      for (i <- 1 until 3) {
-        tag_match(i) := entry.tag(vpnnLen * (i + 1) - sectortlbwidth - 1, vpnnLen * i - sectortlbwidth) === vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
-      }
-      tag_match(3) := entry.tag(sectorvpnLen - 1, vpnnLen * 3 - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * 3)
 
-      val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
-        3.U -> tag_match(3),
-        2.U -> (tag_match(3) && tag_match(2)),
-        1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
-        0.U -> (tag_match(3) && tag_match(2) && tag_match(1) && tag_match(0)))
-      )
-
-      asid_hit && vmid_hit && level_match && addr_low_hit
-    } else {
-      val addr_low_hit = valididx(vpn(sectortlbwidth - 1, 0))
-      val tag_match = Wire(Vec(3, Bool())) // SuperPage, 512GB, 1GB or 2MB
-      for (i <- 0 until 3) {
-        tag_match(i) := entry.tag(sectorvpnLen - vpnnLen * i - 1, sectorvpnLen - vpnnLen * (i + 1)) === vpn(vpnLen - vpnnLen * i - 1, vpnLen - vpnnLen * (i + 1))
-      }
-
-      val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
-        3.U -> tag_match(0),
-        2.U -> (tag_match(0) && tag_match(1)),
-        1.U -> (tag_match(0) && tag_match(1) && tag_match(2)))
-      )
-
-      asid_hit && vmid_hit && level_match && addr_low_hit
+    val addr_low_hit = valididx(vpn(sectortlbwidth - 1, 0))
+    val tag_match = Wire(Vec(Level + 1, Bool()))
+    tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
+      entry.tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth),
+      entry.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth) === vpn(vpnnLen - 1, pteNapotBits))
+    for (i <- 1 until Level) {
+      tag_match(i) := entry.tag(vpnnLen * (i + 1) - sectortlbwidth - 1, vpnnLen * i - sectortlbwidth) === vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
     }
+    tag_match(Level) := entry.tag(sectorvpnLen - 1, vpnnLen * Level - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * Level)
+
+    val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
+      3.U -> tag_match(3),
+      2.U -> (tag_match(3) && tag_match(2)),
+      1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
+      0.U -> (tag_match(3) && tag_match(2) && tag_match(1) && tag_match(0)))
+    )
+
+    asid_hit && vmid_hit && level_match && addr_low_hit
   }
 }
 
@@ -1321,12 +1281,25 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
                   // when allStage, level is the smaller one of stage1 and stage2
                   // e.g. stage1 is 1GB page, stage2 is 2MB page，then level is 2MB
                   s1.entry.level.getOrElse(0.U) min s2.entry.level.getOrElse(0.U))
+    // When all stage, the size of the TLB entry is the smaller one of two-stage translation result
+    // n is valid (represents a 64KB page) when:
+    // 1. s1 is napot(64KB) and s2 is superpage(greater than or equal to 2MB)
+    // 2. s2 is napot(64KB) and s1 is superpage(greater than or equal to 2MB)
+    // 3. s1 is napot(64KB) and s2 is also napot(64KB)
+    val allStage_n = (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.level.getOrElse(0.U) =/= 0.U) ||
+      (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
+      (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
+    val n = Mux(this.s2xlate === onlyStage1, s1.entry.n.getOrElse(0.U), allStage_n)
 
-    val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB, not parameterized here
-    for (i <- 0 until 3) {
+    val tag_match = Wire(Vec(Level + 1, Bool()))
+    tag_match(0) := Mux(n === 0.U,
+      vpn(vpnnLen - 1, 0) === s1vpn(vpnnLen - 1, 0),
+      vpn(vpnnLen - 1, pteNapotBits) === s1vpn(vpnnLen - 1, pteNapotBits))
+    for (i <- 1 until Level) {
       tag_match(i) := vpn(vpnnLen * (i + 1) - 1, vpnnLen * i) === s1vpn(vpnnLen * (i + 1) - 1, vpnnLen * i)
     }
-    tag_match(3) := vpn(vpnLen - 1, vpnnLen * 3) === s1vpn(vpnLen - 1, vpnnLen * 3)
+    tag_match(Level) := vpn(vpnLen - 1, vpnnLen * Level) === s1vpn(vpnLen - 1, vpnnLen * Level)
+
     val level_match = MuxLookup(level, false.B)(Seq(
       3.U -> tag_match(3),
       2.U -> (tag_match(3) && tag_match(2)),
