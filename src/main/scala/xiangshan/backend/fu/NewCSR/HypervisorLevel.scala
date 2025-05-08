@@ -185,6 +185,14 @@ trait HypervisorLevel { self: NewCSR =>
     regOut := reg.asUInt & fromMstateen3.asUInt
   }).setAddr(CSRs.hstateen3)
 
+  val hcontext = Module(new CSRModule("Hcontext", new McontextBundle) {
+    val fromMcontext = IO(Input(new McontextBundle))
+    val toMcontext   = IO(ValidIO(new McontextBundle))
+    toMcontext.valid := wen
+    toMcontext.bits.HCONTEXT := wdata.HCONTEXT.asUInt
+    regOut.HCONTEXT := fromMcontext.HCONTEXT.asUInt
+  }).setAddr(CSRs.hcontext)
+
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,
     hedeleg,
@@ -208,6 +216,7 @@ trait HypervisorLevel { self: NewCSR =>
     hstateen1,
     hstateen2,
     hstateen3,
+    hcontext,
   )
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(

@@ -410,6 +410,18 @@ trait MachineLevel { self: NewCSR =>
   val mnscratch = Module(new CSRModule("Mnscratch"))
     .setAddr(CSRs.mnscratch)
 
+  val mcontext = Module(new CSRModule("Mcontext", new McontextBundle) {
+    val fromHcontext = IO(Flipped(ValidIO(new McontextBundle)))
+    val toHcontext   = IO(Output(new McontextBundle))
+    toHcontext.HCONTEXT := regOut.HCONTEXT.asUInt
+    when(wen) {
+      reg.HCONTEXT := wdata.HCONTEXT.asUInt
+    }.elsewhen(fromHcontext.valid) {
+      reg.HCONTEXT := fromHcontext.bits.HCONTEXT
+    }
+  })
+    .setAddr(CSRs.mcontext)
+
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
     misa,
@@ -445,6 +457,7 @@ trait MachineLevel { self: NewCSR =>
     mncause,
     mnstatus,
     mnscratch,
+    mcontext,
   ) ++ mhpmevents ++ mhpmcounters ++ (if (HasBitmapCheck) Seq(mbmc.get) else Seq())
 
 
@@ -739,6 +752,11 @@ object OPTYPE extends CSREnum with WARLApply {
   val ADD = Value(4.U)
 
   override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(OR, AND, XOR, ADD)
+}
+
+class McontextBundle extends CSRBundle {
+  override val len = 14
+  val HCONTEXT = RW(13, 0)
 }
 
 trait HasOfFromPerfCntBundle { self: CSRModule[_] =>

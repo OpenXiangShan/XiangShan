@@ -269,7 +269,7 @@ class MLevelPermitModule extends Module {
   private val csrIsTpoie = csrIsStopei || csrIsVStopei
   private val accessTopie_EX_II = csrIsTpoie && !privState.isModeM && !mstateen0.IMSIC.asBool
 
-  // CONTEXT bit 57 context reg (Sdtrig extensions), this is not implemented
+  // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsHcontext = addr === CSRs.hcontext.U
   private val csrIsScontext = addr === CSRs.scontext.U
   private val csrIsContext = csrIsHcontext || csrIsScontext
@@ -475,7 +475,7 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
   private val csrIsStopei = addr === CSRs.stopei.U
   private val accessTopie_EX_VI = csrIsStopei && privState.isVirtual && !hstateen0.IMSIC.asBool
 
-  // CONTEXT bit 57 context reg (Sdtrig extensions), this is not implemented
+  // CONTEXT bit 57 context reg (Sdtrig extensions)
   private val csrIsScontext = addr === CSRs.scontext.U
   private val accessContext_EX_VI = csrIsScontext && privState.isVirtual && !hstateen0.CONTEXT.asBool
 
