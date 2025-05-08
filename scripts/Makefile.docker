@@ -56,6 +56,10 @@ image: $(if $(HTTP_PROXY),__prep_proxy) init
 		    echo "Docker image build failed, maybe you need a proxy?"; \
 		    echo "\n make image HTTP_PROXY=\"http://<proxy-ip>:<port>\"\n"; false)
 
+# pull docker image
+pull-image:
+	@docker pull $(XSDEV_IMAGE)
+
 # run interactive shell
 sh:
 	$(if $(HAVE_XSDEV_IMAGE),,\
