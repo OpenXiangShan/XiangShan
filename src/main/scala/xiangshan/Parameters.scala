@@ -563,7 +563,7 @@ case class DebugOptions
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
-  AlwaysBasicDB: Boolean = true,
+  AlwaysBasicDB: Boolean = false,
   EnableRollingDB: Boolean = false
 )
 
