@@ -204,6 +204,22 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
 
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: changes
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build docker image
+        run: make image
+
+      - name: Compile generator JAR
+        run: make test-jar
+
   emu-performance:
     runs-on: bosc
     needs: changes
