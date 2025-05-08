@@ -57,7 +57,12 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
   newCSRInst.ftqOffset := io.faultCsrUop.bits.ftqInfo.ftqOffset
 
   when (flush.valid && valid && trapInstInfo.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
-    valid := false.B
+    // when flush and CSR exception happen together
+    when (newCSRInstValid && !newCSRInst.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
+      trapInstInfo := newCSRInst
+    }.otherwise {
+      valid := false.B
+    }
   }.elsewhen(io.readClear) {
     valid := false.B
   }.elsewhen(newCSRInstValid) {
