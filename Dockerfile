@@ -35,6 +35,9 @@ WORKDIR /work
 VOLUME /work/out
 VOLUME /work/build
 
+# disable git safe.directory check
+RUN git config --global --add safe.directory '*'
+
 #
 # download dependencies
 #
