@@ -105,6 +105,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with VirtualSupervisorLevel
   with Unprivileged
   with CSRAIA
+  with CSRIND
   with HasExternalInterruptBundle
   with HasNonMaskableIRPBundle
   with CSREvents
@@ -317,6 +318,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     debugCSRMap ++
     aiaCSRMap ++
     customCSRMap ++
+    indCSRMap ++
     pmpCSRMap ++
     pmaCSRMap
 
@@ -328,6 +330,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     unprivilegedCSRMods ++
     debugCSRMods ++
     aiaCSRMods ++
+    indCSRMods ++
     customCSRMods ++
     pmpCSRMods ++
     pmaCSRMods
@@ -340,6 +343,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     unprivilegedCSROutMap ++
     debugCSROutMap ++
     aiaCSROutMap ++
+    indCSROutMap ++
     customCSROutMap ++
     pmpCSROutMap ++
     pmaCSROutMap
@@ -499,9 +503,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.vsstatusFSOff := vsstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.vsstatusVSOff := vsstatus.regOut.VS === ContextStatus.Off
 
-  permitMod.io.in.aia.miselectIsIllegal  := miselect.isIllegal
-  permitMod.io.in.aia.siselectIsIllegal  := siselect.isIllegal
-  permitMod.io.in.aia.vsiselectIsIllegal := vsiselect.isIllegal
+  permitMod.io.in.aia.miselect := miselect.rdata
   permitMod.io.in.aia.siselect := siselect.rdata
   permitMod.io.in.aia.vsiselect := vsiselect.rdata
   permitMod.io.in.aia.mvienSEIE := mvien.regOut.SEIE.asBool

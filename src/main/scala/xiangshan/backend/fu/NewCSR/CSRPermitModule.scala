@@ -244,8 +244,8 @@ class MLevelPermitModule extends Module {
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]     VS: [0x250, 0x257]
-  private val csrIsSi = addr.head(9) === CSRs.siselect.U.head(9)
-  private val csrIsVSi = addr.head(9) === CSRs.vsiselect.U.head(9)
+  private val csrIsSi = Ireg.isInSCsrInd(addr)
+  private val csrIsVSi = Ireg.isInVSCsrInd(addr)
   private val csrIsIND = csrIsSi || csrIsVSi
   private val accessIND_EX_II = csrIsIND && !privState.isModeM && !mstateen0.CSRIND.asBool
 
@@ -449,7 +449,7 @@ class VirtualLevelPermitModule(implicit val p: Parameters) extends Module with H
 
   // CSRIND bit 60 indirect reg (Sscsrind extensions), this is not implemented
   // csr addr S: [0x150, 0x157]
-  private val csrIsSi = addr.head(9) === CSRs.siselect.U.head(9)
+  private val csrIsSi = Ireg.isInSCsrInd(addr)
   private val accessIND_EX_VI = csrIsSi && privState.isVirtual && !hstateen0.CSRIND.asBool
 
   // AIA bit 59
@@ -500,13 +500,8 @@ class IndirectCSRPermitModule extends Module {
     io.in.privState,
   )
 
-  private val (miselectIsIllegal, siselectIsIllegal, vsiselectIsIllegal) = (
-    io.in.aia.miselectIsIllegal,
-    io.in.aia.siselectIsIllegal,
-    io.in.aia.vsiselectIsIllegal,
-  )
-
-  private val (siselect, vsiselect) = (
+  private val (miselect, siselect, vsiselect) = (
+    io.in.aia.miselect,
     io.in.aia.siselect,
     io.in.aia.vsiselect,
   )
@@ -518,27 +513,45 @@ class IndirectCSRPermitModule extends Module {
 
   private val mvienSEIE = io.in.aia.mvienSEIE
 
-  private val rwMireg_EX_II = miselectIsIllegal && addr === CSRs.mireg.U
+  private val rwMireg_EX_II = (
+      Iselect.isInAIA(miselect) && Iselect.isOdd(miselect) ||
+      Iselect.isInOthers(miselect)
+    ) && addr === CSRs.mireg.U
+
+  private val rwMireg2_6_EX_II = Ireg.isInMireg2_6(addr)
 
   private val rwSireg_EX_II = (
-      (privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
-      ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
-      (privState.isModeVS && (vsiselect < 0x30.U || (vsiselect >= 0x40.U && vsiselect < 0x70.U) || vsiselect > 0xFF.U)) ||
-      (!privState.isModeM && !mstateen0.IMSIC.asBool && siselect >= 0x70.U && siselect <= 0xFF.U) ||  // xstateen.IMISC
-      (!privState.isModeM && !mstateen0.AIA.asBool && siselect >= 0x30.U && siselect <= 0x3F.U)       // xstateen.AIA
+      !privState.isVirtual && (
+        Iselect.isInAIA(siselect) && Iselect.isOdd(siselect) ||
+        Iselect.isInOthers(siselect)
+      ) ||
+      privState.isModeHS && (
+        mvienSEIE && Iselect.isInImsic(siselect) ||
+        !mstateen0.AIA.asBool && Iselect.isInAIA(siselect) ||
+        !mstateen0.IMSIC.asBool && Iselect.isInImsic(siselect)
+      ) ||
+      privState.isVirtual && (
+        Iselect.isInOthers(vsiselect) ||
+        !mstateen0.AIA.asBool && Iselect.isInAIA(vsiselect) ||
+        !mstateen0.IMSIC.asBool && Iselect.isInImsic(vsiselect)
+      )
     ) && addr === CSRs.sireg.U
 
-  private val rwSireg_EX_VI = (
-      privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U) ||
-      privState.isVirtual && !hstateen0.IMSIC.asBool && !vsiselectIsIllegal
-    ) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect) && !hstateen0.IMSIC.asBool) && addr === CSRs.sireg.U
+
+  private val rwSireg2_6_EX_VI = privState.isVirtual && (Iselect.isInAIA(vsiselect) || Iselect.isInImsic(vsiselect)) && Ireg.isInSireg2_6(addr)
+
+  private val rwSireg2_6_EX_II = Ireg.isInSireg2_6(addr) && !rwSireg2_6_EX_VI
 
   private val rwVSireg_EX_II = (
-      vsiselectIsIllegal || !privState.isModeM && !mstateen0.IMSIC.asBool
+      !Iselect.isInImsic(vsiselect) ||
+      !privState.isModeM && !mstateen0.IMSIC.asBool
     ) && addr === CSRs.vsireg.U
 
-  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
-  io.out.indirectCSR_EX_VI := rwSireg_EX_VI
+  private val rwVSireg2_6_EX_II = Ireg.isInVSireg2_6(addr)
+
+  io.out.indirectCSR_EX_II := rwMireg_EX_II || rwMireg2_6_EX_II || rwSireg_EX_II || rwSireg2_6_EX_II || rwVSireg_EX_II || rwVSireg2_6_EX_II
+  io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
 class csrAccessIO extends Bundle {
@@ -599,9 +612,7 @@ class xstateenIO extends Bundle {
 }
 
 class aiaIO extends Bundle {
-  val miselectIsIllegal = Bool()
-  val siselectIsIllegal = Bool()
-  val vsiselectIsIllegal = Bool()
+  val miselect = UInt(64.W)
   val siselect = UInt(64.W)
   val vsiselect = UInt(64.W)
   val mvienSEIE = Bool()
