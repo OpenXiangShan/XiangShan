@@ -419,7 +419,6 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
 }
 
 class ITTage(implicit p: Parameters) extends BaseITTage {
-  override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
   val tables = ITTageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) =>
@@ -470,7 +469,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   val resp_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
 
-  io.out.last_stage_meta := resp_meta.asUInt
+  io.meta.ittageMeta := resp_meta
 
   // Update logic
   val u_valid = RegNext(io.update.valid, init = false.B)
@@ -478,9 +477,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val update = Wire(new BranchPredictionUpdate)
   update := RegEnable(io.update.bits, io.update.valid)
 
-  // meta is splited by composer
   val updateMeta = Wire(new ITTageMeta)
-  update.meta := updateMeta.asUInt
+  update.meta.ittageMeta := updateMeta
 
   // The pc register has been moved outside of predictor
   // pc field of update bundle and other update data are not in the same stage
@@ -488,7 +486,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val update_pc = io.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  val u_meta = io.update.bits.meta.asTypeOf(new ITTageMeta)
+  val u_meta = io.update.bits.meta.ittageMeta
   updateMeta := RegEnable(u_meta, io.update.valid)
   updateMeta.provider.bits := RegEnable(
     u_meta.provider.bits,

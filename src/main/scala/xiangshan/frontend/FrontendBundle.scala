@@ -786,7 +786,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s1_uftbHasIndirect = Bool()
   val s1_ftbCloseReq     = Bool()
 
-  val last_stage_meta      = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry
   val last_stage_ftb_entry = new FTBEntry
 
@@ -826,7 +825,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val false_hit         = Bool()
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry         = Bool()
-  val meta              = UInt(MaxMetaLength.W)
+  val meta              = new PredictorMeta
   val full_target       = PrunedAddr(VAddrBits)
   val from_stage        = UInt(2.W)
   val ghist             = UInt(HistoryLength.W)

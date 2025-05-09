@@ -119,6 +119,14 @@ trait BPUUtils extends HasXSParameter {
   }
 }
 
+class PredictorMeta(implicit p: Parameters) extends XSBundle {
+  val uftbMeta   = new FauFTBMeta
+  val ftbMeta    = new FTBMeta
+  val tageMeta   = new TageMeta
+  val ittageMeta = new ITTageMeta
+  val rasMeta    = new RasMeta
+}
+
 class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
 
@@ -164,6 +172,8 @@ class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst 
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
 
+  val meta = Output(new PredictorMeta)
+
   val update          = Flipped(Valid(new BranchPredictionUpdate))
   val redirect        = Flipped(Valid(new BranchPredictionRedirect))
   val redirectFromIFU = Input(Bool())
@@ -171,17 +181,15 @@ class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst 
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
     with HasBPUConst with BPUUtils with HasPerfEvents {
-  val meta_size      = 0
-  val spec_meta_size = 0
-  val is_fast_pred   = false
-  val io             = IO(new BasePredictorIO())
+  val is_fast_pred = false
+  val io           = IO(new BasePredictorIO())
 
   io.out := io.in.bits.resp_in(0)
 
   io.fauftb_entry_out     := io.fauftb_entry_in
   io.fauftb_entry_hit_out := io.fauftb_entry_hit_in
 
-  io.out.last_stage_meta := 0.U
+  io.meta := 0.U.asTypeOf(new PredictorMeta)
 
   io.in.ready := !io.redirect.valid
 
@@ -216,13 +224,14 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
 }
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
-  io.in.ready            := true.B
-  io.out.last_stage_meta := 0.U
-  io.out                 := io.in.bits.resp_in(0)
+  io.in.ready := true.B
+  io.meta     := 0.U.asTypeOf(new PredictorMeta)
+  io.out      := io.in.bits.resp_in(0)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   val resp = DecoupledIO(new BpuToFtqBundle())
+  val meta = Output(new PredictorMeta)
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
@@ -450,6 +459,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       s3_fire_dup(2) && s3_redirect_dup(2)
   io.bpu_to_ftq.resp.bits                              := predictors.io.out
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr := s3_ghist_ptr_dup(2)
+
+  io.bpu_to_ftq.meta := predictors.io.meta
 
   val full_pred_diff        = WireInit(false.B)
   val full_pred_diff_stage  = WireInit(0.U)
