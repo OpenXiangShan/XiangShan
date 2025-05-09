@@ -316,8 +316,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   rdataPtrExtNext := rdataPtrExt.map(i => i +
+    // if there has mmio/nc, there has no dataBuffer enq because `ncStall`
     PopCount(dataBuffer.io.enq.map(x=> x.fire && x.bits.sqNeedDeq)) +
-    PopCount(completed(rdPtr) && (nc(rdPtr) || mmio(rdPtr)))
+    // here may be 2 nc set completed at the same cycle, because one of these may have exception.
+    // so it should ensure synchronization with deqPtr
+    PopCount(rdataPtrExt.map(x => allocated(x.value) && completed(x.value) && nc(x.value))) +
+    // only one
+    PopCount(io.mmioStout.fire || io.vecmmioStout.fire)
   )
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -877,7 +882,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rptr0 = rdataPtrExt(0).value
   switch(ncState){
     is(nc_idle) {
-      when(nc(rptr0) && allocated(rptr0) && committed(rptr0) && !mmio(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !completed(rptr0)) {
+      when(
+        nc(rptr0) && allocated(rptr0) && !completed(rptr0) && committed(rptr0) &&
+        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0) 
+      ) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
       }
