@@ -95,7 +95,6 @@ class RasDebug(implicit p: Parameters) extends XSBundle {
 }
 
 class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtrHelper {
-  override val meta_size = WireInit(0.U.asTypeOf(new RasMeta)).getWidth
 
   object RasEntry {
     def apply(retAddr: PrunedAddr, ctr: UInt): RasEntry = {
@@ -575,7 +574,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   io.out.last_stage_spec_info.TOSR    := s3_meta.TOSR
   io.out.last_stage_spec_info.NOS     := s3_meta.NOS
   io.out.last_stage_spec_info.topAddr := s3_top
-  io.out.last_stage_meta              := last_stage_meta.asUInt
+  io.meta.rasMeta                     := last_stage_meta
 
   val redirect   = RegNextWithEnable(io.redirect)
   val doRecover  = redirect.valid
@@ -610,7 +609,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   // 'val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RASMeta), io.update.valid && (io.update.bits.is_call || io.update.bits.is_ret))',
   // but the fault-tolerance mechanism of the return stack needs to be updated in time. Using an unexpected old value on reset will cause errors.
   // Only 9 registers have clock gate efficiency affected, so we relaxed the control signals.
-  val updateMeta = RegEnable(io.update.bits.meta.asTypeOf(new RasMeta), io.update.valid)
+  val updateMeta = RegEnable(io.update.bits.meta.rasMeta, io.update.valid)
 
   stack.commit.valid     := updateValid
   stack.commit.pushValid := updateValid && update.is_call_taken

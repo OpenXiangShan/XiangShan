@@ -54,37 +54,20 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.ctrl            := DelayN(io.ctrl, 1)
     c.io.redirectFromIFU := io.redirectFromIFU
 
-    if (c.meta_size > 0) {
-      metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size - 1, 0)
-    }
-    meta_sz = meta_sz + c.meta_size
+    c.io.update := io.update
   }
-  println(s"total meta size: $meta_sz\n\n")
+
+  //  Seq(uftb, tage, ftb, ittage, ras)
+  io.meta.uftbMeta   := components(0).io.meta.uftbMeta
+  io.meta.tageMeta   := components(1).io.meta.tageMeta
+  io.meta.ftbMeta    := components(2).io.meta.ftbMeta
+  io.meta.ittageMeta := components(3).io.meta.ittageMeta
+  io.meta.rasMeta    := components(4).io.meta.rasMeta
 
   io.in.ready := components.map(_.io.s1_ready).reduce(_ && _)
 
   io.s1_ready := components.map(_.io.s1_ready).reduce(_ && _)
   io.s2_ready := components.map(_.io.s2_ready).reduce(_ && _)
-
-  require(meta_sz <= MaxMetaLength)
-  io.out.last_stage_meta := metas
-
-  var update_meta = io.update.bits.meta
-  for (c <- components.reverse) {
-    c.io.update           := io.update
-    c.io.update.bits.meta := update_meta
-    update_meta = update_meta >> c.meta_size
-  }
-
-  def extractMeta(meta: UInt, idx: Int): UInt = {
-    var update_meta = meta
-    var metas: Seq[UInt] = Nil
-    for (c <- components.reverse) {
-      metas = metas :+ update_meta
-      update_meta = update_meta >> c.meta_size
-    }
-    metas(idx)
-  }
 
   override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_ ++ _))
 
