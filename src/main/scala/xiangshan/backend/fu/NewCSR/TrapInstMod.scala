@@ -23,6 +23,7 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
 
     val fromRob = Input(new Bundle {
       val flush = ValidIO(new FtqInfo)
+      val isInterrupt = ValidIO(Bool())
     })
 
     val faultCsrUop = Input(ValidIO(new Bundle {
@@ -36,7 +37,8 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
   })
 
   // alias
-  val flush = io.fromRob.flush
+  // delay flush one cycle to alias fromrob trap
+  val flush = RegNext(io.fromRob.flush)
   val newTrapInstInfo = io.fromDecode.trapInstInfo
 
   val valid = RegInit(false.B)
@@ -56,15 +58,21 @@ class TrapInstMod(implicit p: Parameters) extends Module with HasCircularQueuePt
   newCSRInst.ftqPtr := io.faultCsrUop.bits.ftqInfo.ftqPtr
   newCSRInst.ftqOffset := io.faultCsrUop.bits.ftqInfo.ftqOffset
 
-  when (flush.valid && valid && trapInstInfo.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
-    // when flush and CSR exception happen together
-    when (newCSRInstValid && !newCSRInst.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
-      trapInstInfo := newCSRInst
-    }.otherwise {
+  when (flush.valid && valid ) {
+    when (trapInstInfo.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
+      when (newCSRInstValid && !newCSRInst.needFlush(flush.bits.ftqPtr, flush.bits.ftqOffset)) {
+        // when flush and CSR exception happen together
+        trapInstInfo := newCSRInst
+      }.otherwise {
+        valid := false.B
+      }
+    }.elsewhen(io.readClear) {
+      // as flush has been delay ,read clear and flush in the same cycle
+      valid := false.B
+    }.elsewhen (trapInstInfo.sameInst(flush.bits.ftqPtr, flush.bits.ftqOffset) && io.fromRob.isInterrupt.valid && io.fromRob.isInterrupt.bits) {
+      // check whether the exception store is attached with an interrupt
       valid := false.B
     }
-  }.elsewhen(io.readClear) {
-    valid := false.B
   }.elsewhen(newCSRInstValid) {
     valid := true.B
     when (!valid) {

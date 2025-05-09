@@ -154,9 +154,13 @@ object Bundles {
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
 
-    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool ={
+    def needFlush(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
       val sameFlush = this.ftqPtr === ftqPtr && this.ftqOffset > ftqOffset
       sameFlush || isAfter(this.ftqPtr, ftqPtr)
+    }
+
+    def sameInst(ftqPtr: FtqPtr, ftqOffset: UInt): Bool = {
+      this.ftqPtr === ftqPtr && this.ftqOffset === ftqOffset
     }
 
     def fromDecodedInst(decodedInst: DecodedInst): this.type = {
