@@ -1635,7 +1635,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_frm_mis_flush     = s3_frm_mabuf &&
     (io.misalign_ldout.bits.rep_info.fwd_fail || io.misalign_ldout.bits.rep_info.mem_amb || io.misalign_ldout.bits.rep_info.nuke
-      || io.misalign_ldout.bits.rep_info.rar_nack)
+      || io.misalign_ldout.bits.rep_info.rar_nack || io.misalign_ldout.bits.rep_info.raw_nack)
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_frm_mis_flush) && !s3_exception
   io.rollback.bits             := DontCare
