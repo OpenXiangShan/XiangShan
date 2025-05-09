@@ -971,7 +971,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val replace_block = Output(Bool())
 
     // block all way for set to BtoT
-    val evict_set = Flipped(UInt())
+    val evict_set = Input(UInt())
     val btot_ways_for_set = Output(UInt(nWays.W))
 
     // req blocked by wbq

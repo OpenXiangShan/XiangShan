@@ -394,7 +394,6 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
-  val miss_fail_cause_evict_btot = Bool()
   def dump(cond: Bool) = {
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)

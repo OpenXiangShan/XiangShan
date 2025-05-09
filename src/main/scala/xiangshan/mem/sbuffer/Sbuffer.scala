@@ -691,7 +691,6 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
-  io.dcache.req.bits.miss_fail_cause_evict_btot := false.B
 
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"

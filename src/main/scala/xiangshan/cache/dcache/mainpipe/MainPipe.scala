@@ -97,7 +97,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.replace := false.B
     req.error := false.B
     req.id := store.id
-    req.miss_fail_cause_evict_btot := store.miss_fail_cause_evict_btot
+    req.miss_fail_cause_evict_btot := false.B
     req
   }
 }
@@ -420,7 +420,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
   val s2_idx = get_idx(s2_req.vaddr)
-
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
