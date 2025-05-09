@@ -774,7 +774,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
   s0_out.vaddr         := Mux(s0_nc_with_data, s0_sel_src.vaddr, s0_dcache_vaddr)
-  s0_out.fullva        := s0_tlb_fullva
+  s0_out.fullva        := Mux(s0_sel_src.frm_mabuf, s0_out.vaddr, s0_tlb_fullva)
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
