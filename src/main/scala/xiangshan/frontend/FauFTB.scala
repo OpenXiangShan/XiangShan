@@ -89,7 +89,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val replacer_touch_ways = Wire(Vec(2, Valid(UInt(log2Ceil(numWays).W))))
 
   // pred req
-  ways.foreach(_.io.req_tag := getTag(s1_pc_dup(0)))
+  ways.foreach(_.io.req_tag := getTag(s1_pc))
 
   // pred resp
   val s1_hit_oh              = VecInit(ways.map(_.io.resp_hit)).asUInt
@@ -101,7 +101,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
     fp.hit      := DontCare
     fp.multiHit := false.B
-    fp.fromFtbEntry(e, s1_pc_dup(0))
+    fp.fromFtbEntry(e, s1_pc)
     for (i <- 0 until numBr) {
       fp.br_taken_mask(i) := c(i)(1) || e.strong_bias(i)
     }
@@ -110,30 +110,30 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_fauftbentry = Mux1H(s1_hit_oh, s1_all_entries)
   XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
-  io.out.s1.full_pred.map(_ := s1_hit_full_pred)
-  io.out.s1.full_pred.map(_.hit := s1_hit && fauftb_enable)
+  io.out.s1.full_pred     := s1_hit_full_pred
+  io.out.s1.full_pred.hit := s1_hit && fauftb_enable
   io.fauftb_entry_out     := s1_hit_fauftbentry
   io.fauftb_entry_hit_out := s1_hit && fauftb_enable
 
   // Illegal check for FTB entry reading
-  val s1_pc_startLower = Cat(0.U(1.W), s1_pc_dup(0)(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
+  val s1_pc_startLower             = Cat(0.U(1.W), s1_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
   val uftb_entry_endLowerwithCarry = Cat(s1_hit_fauftbentry.carry, s1_hit_fauftbentry.pftAddr)
   val fallThroughErr               = s1_pc_startLower + PredictWidth.U >= uftb_entry_endLowerwithCarry
-  when(io.s1_fire(0) && s1_hit) {
+  when(io.s1_fire && s1_hit) {
     assert(fallThroughErr, s"FauFTB read entry fallThrough address error!")
   }
 
   // assign metas
   io.meta.uftbMeta := resp_meta
-  resp_meta.hit    := RegEnable(RegEnable(s1_hit, io.s1_fire(0)), io.s2_fire(0))
+  resp_meta.hit    := RegEnable(RegEnable(s1_hit, io.s1_fire), io.s2_fire)
   if (resp_meta.pred_way.isDefined) {
-    resp_meta.pred_way.get := RegEnable(RegEnable(s1_hit_way, io.s1_fire(0)), io.s2_fire(0))
+    resp_meta.pred_way.get := RegEnable(RegEnable(s1_hit_way, io.s1_fire), io.s2_fire)
   }
 
   // pred update replacer state
-  val s1_fire = io.s1_fire(0)
-  replacer_touch_ways(0).valid := RegNext(s1_fire(0) && s1_hit)
-  replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire(0) && s1_hit)
+  val s1_fire = io.s1_fire
+  replacer_touch_ways(0).valid := RegNext(s1_fire && s1_hit)
+  replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire && s1_hit)
 
   /********************** update ***********************/
   // s0: update_valid, read and tag comparison
@@ -204,7 +204,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   replacer.access(replacer_touch_ways)
 
   /********************** perf counters **********************/
-  val s0_fire_next_cycle = RegNext(io.s0_fire(0))
+  val s0_fire_next_cycle = RegNext(io.s0_fire)
   val u_pred_hit_way_map = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hit_way === w.U)
   XSPerfAccumulate("uftb_read_hits", s0_fire_next_cycle && s1_hit)
   XSPerfAccumulate("uftb_read_misses", s0_fire_next_cycle && !s1_hit)

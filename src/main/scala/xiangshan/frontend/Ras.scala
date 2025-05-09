@@ -526,36 +526,32 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   val stackNearOverflow = stack.specNearOverflow
   val s3_specPush       = WireInit(false.B)
   val s3_specPop        = WireInit(false.B)
-  val s3_full_pred      = io.in.bits.resp_in(0).s3.full_pred(2)
+  val s3_full_pred      = io.in.bits.resp_in(0).s3.full_pred
 
   // when last inst is an rvi call, fall through address would be set to the middle of it, so an addition is needed
   val s3_specNewAddr = s3_full_pred.fallThroughAddr + Mux(s3_full_pred.last_may_be_rvi_call, 2.U, 0.U)
   stack.spec.pushValid := s3_specPush && !stackNearOverflow
   stack.spec.popValid  := s3_specPop && !stackNearOverflow
   stack.spec.pushAddr  := s3_specNewAddr
-  stack.s3_fire        := io.s3_fire(2)
+  stack.s3_fire        := io.s3_fire
 
   // confirm that the call/ret is the taken cfi
-  s3_specPush := io.s3_fire(2) && s3_full_pred.hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred(
-    2
-  ).fallThroughErr
-  s3_specPop := io.s3_fire(2) && s3_full_pred.hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  s3_specPush := io.s3_fire && s3_full_pred.hit_taken_on_call && !io.in.bits.resp_in(0).s3.full_pred.fallThroughErr
+  s3_specPop  := io.s3_fire && s3_full_pred.hit_taken_on_ret && !io.in.bits.resp_in(0).s3.full_pred.fallThroughErr
 
-  val s3_isJalr = s3_full_pred.is_jalr && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
-  val s3_isRet  = s3_full_pred.is_ret && !io.in.bits.resp_in(0).s3.full_pred(2).fallThroughErr
+  val s3_isJalr = s3_full_pred.is_jalr && !io.in.bits.resp_in(0).s3.full_pred.fallThroughErr
+  val s3_isRet  = s3_full_pred.is_ret && !io.in.bits.resp_in(0).s3.full_pred.fallThroughErr
   val s3_top    = stack.spec.popAddr
 
   when(s3_isRet && io.ctrl.ras_enable) {
-    io.out.s3.full_pred.map(_.jalr_target).foreach(_ := s3_top)
+    io.out.s3.full_pred.jalr_target := s3_top
     // FIXME: should use s1 globally
   }
-  io.out.s3.full_pred.zipWithIndex.foreach { case (a, i) =>
-    a.targets.last := Mux(
-      s3_isJalr,
-      io.out.s3.full_pred(i).jalr_target,
-      io.in.bits.resp_in(0).s3.full_pred(i).targets.last
-    )
-  }
+  io.out.s3.full_pred.targets.last := Mux(
+    s3_isJalr,
+    io.out.s3.full_pred.jalr_target,
+    io.in.bits.resp_in(0).s3.full_pred.targets.last
+  )
 
   val s3_meta = Wire(new RasInternalMeta)
   s3_meta.ssp  := stack.meta.ssp
@@ -625,27 +621,27 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
 
   val specDebug = stack.debug
-  XSDebug(io.s3_fire(2), "----------------RAS----------------\n")
-  XSDebug(io.s3_fire(2), " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
-  XSDebug(io.s3_fire(2), "  index       addr           ctr           nos (spec part)\n")
+  XSDebug(io.s3_fire, "----------------RAS----------------\n")
+  XSDebug(io.s3_fire, " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
+  XSDebug(io.s3_fire, "  index       addr           ctr           nos (spec part)\n")
   for (i <- 0 until RasSpecSize) {
     XSDebug(
-      io.s3_fire(2),
+      io.s3_fire,
       "  (%d)   0x%x      %d       %d",
       i.U,
       specDebug.specQueue(i).retAddr.toUInt,
       specDebug.specQueue(i).ctr,
       specDebug.specNOS(i).value
     )
-    XSDebug(io.s3_fire(2) && i.U === stack.meta.TOSW.value, "   <----TOSW")
-    XSDebug(io.s3_fire(2) && i.U === stack.meta.TOSR.value, "   <----TOSR")
-    XSDebug(io.s3_fire(2) && i.U === specDebug.BOS.value, "   <----BOS")
-    XSDebug(io.s3_fire(2), "\n")
+    XSDebug(io.s3_fire && i.U === stack.meta.TOSW.value, "   <----TOSW")
+    XSDebug(io.s3_fire && i.U === stack.meta.TOSR.value, "   <----TOSR")
+    XSDebug(io.s3_fire && i.U === specDebug.BOS.value, "   <----BOS")
+    XSDebug(io.s3_fire, "\n")
   }
-  XSDebug(io.s3_fire(2), "  index       addr           ctr   (committed part)\n")
+  XSDebug(io.s3_fire, "  index       addr           ctr   (committed part)\n")
   for (i <- 0 until RasSize) {
     XSDebug(
-      io.s3_fire(3),
+      io.s3_fire,
       "  (%d)   0x%x      %d",
       i.U,
       specDebug.commitStack(i).retAddr.toUInt,

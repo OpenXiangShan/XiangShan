@@ -115,12 +115,12 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   def fromBranchPrediction(resp: BranchPredictionBundle): Unit = {
     def carryPos(addr: UInt) = addr(instOffsetBits + log2Ceil(PredictWidth) + 1)
-    this.startAddr    := resp.pc(3)
-    this.nextLineAddr := resp.pc(3) + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.startAddr    := resp.pc
+    this.nextLineAddr := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
-      (resp.pc(3)(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool
+      (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool
     ))
-    this.fallThruError := resp.fallThruError(3)
+    this.fallThruError := resp.fallThruError
     this
   }
   override def toPrintable: Printable =
@@ -596,8 +596,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val bpu_s2_resp     = io.fromBpu.resp.bits.s2
   val bpu_s3_resp     = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = bpu_s2_resp.valid(3) && bpu_s2_resp.hasRedirect(3)
-  val bpu_s3_redirect = bpu_s3_resp.valid(3) && bpu_s3_resp.hasRedirect(3)
+  val bpu_s2_redirect = bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
+  val bpu_s3_redirect = bpu_s3_resp.valid && bpu_s3_resp.hasRedirect
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire    = io.fromBpu.resp.fire && allowBpuIn // from bpu s1
@@ -624,14 +624,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     hasRen = true
   ))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_redirect_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid
   ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.lastStage.valid
   ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.meta
   ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
@@ -646,7 +646,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     1,
     hasRen = true
   ))
-  ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid(3)
+  ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
@@ -673,8 +673,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val last_cycle_bpu_in       = RegNext(bpu_in_fire)
   val last_cycle_bpu_in_ptr   = RegEnable(bpu_in_resp_ptr, bpu_in_fire)
   val last_cycle_bpu_in_idx   = last_cycle_bpu_in_ptr.value
-  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.getTarget(3), bpu_in_fire)
-  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.cfiIndex(3), bpu_in_fire)
+  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.getTarget, bpu_in_fire)
+  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.cfiIndex, bpu_in_fire)
   val last_cycle_bpu_in_stage = RegEnable(bpu_in_stage, bpu_in_fire)
 
   val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))
@@ -704,7 +704,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // record s1 pred cycles
   pred_s1_cycle.map { vec =>
     when(bpu_in_fire && (bpu_in_stage === BP_S1)) {
-      vec(bpu_in_resp_ptr.value) := bpu_in_resp.full_pred(0).predCycle.getOrElse(0.U)
+      vec(bpu_in_resp_ptr.value) := bpu_in_resp.full_pred.predCycle.getOrElse(0.U)
     }
   }
 
@@ -721,8 +721,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   // only use ftb result to assign hit status
-  when(bpu_s2_resp.valid(3)) {
-    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred(3).hit, h_hit, h_not_hit)
+  when(bpu_s2_resp.valid) {
+    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred.hit, h_hit, h_not_hit)
   }
 
   io.toIfu.flushFromBpu.s2.valid    := bpu_s2_redirect
@@ -1542,8 +1542,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)
-  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc(0), from_bpu.last_stage_ftb_entry)
-  XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid(0), 0, PredictWidth + 1, 1)
+  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc, from_bpu.last_stage_ftb_entry)
+  XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid, 0, PredictWidth + 1, 1)
 
   XSPerfHistogram("ftq_has_entry", validEntries, true.B, 0, FtqSize + 1, 1)
 
