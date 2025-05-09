@@ -470,8 +470,6 @@ class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implic
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
     with HasCircularQueuePtrHelper with HasPerfEvents {
-  override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
-
   val ftbAddr = new FTBTableAddr(log2Up(numSets), 1, 3)
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
@@ -755,7 +753,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val update_pc = io.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  update.meta := RegEnable(io.update.bits.meta, io.update.valid && !io.update.bits.old_entry)
+  update.meta.ftbMeta := RegEnable(io.update.bits.meta.ftbMeta, io.update.valid && !io.update.bits.old_entry)
 
   // Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
@@ -814,9 +812,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.s3.full_pred.zipWithIndex.map { case (fp, i) => fp.fallThroughErr := real_s3_fallThroughErr_dup(i) }
 
   io.out.last_stage_ftb_entry := s3_ftb_entry_dup(0)
-  io.out.last_stage_meta      := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire(0))
-  io.out.s1_ftbCloseReq       := s1_close_ftb_req
-  io.out.s1_uftbHit           := io.fauftb_entry_hit_in
+  io.meta.ftbMeta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire(0)).asTypeOf(
+    new FTBMeta
+  )
+  io.out.s1_ftbCloseReq := s1_close_ftb_req
+  io.out.s1_uftbHit     := io.fauftb_entry_hit_in
   val s1_uftbHasIndirect = io.fauftb_entry_in.jmpValid &&
     io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.isRet // uFTB determines that it's real JALR, RET and JAL are excluded
   io.out.s1_uftbHasIndirect := s1_uftbHasIndirect
@@ -846,7 +846,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   )
 
   // Update logic
-  val u_meta  = update.meta.asTypeOf(new FTBMeta)
+  val u_meta  = update.meta.ftbMeta
   val u_valid = update_valid && !update.old_entry && !s0_close_ftb_req
 
   val (_, delay2_pc)    = DelayNWithValid(update_pc, u_valid, 2)
