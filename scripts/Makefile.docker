@@ -48,7 +48,6 @@ __prep_proxy: .mill-jvm-opts
 
 # build docker image
 image: $(if $(HTTP_PROXY),__prep_proxy) init
-	@mkdir -p out $(MILL_OUTPUT_DIR)
 	@docker build -t $(XSDEV_IMAGE) \
 		$(if $(HTTP_PROXY),--build-arg  HTTP_PROXY=$(HTTP_PROXY) \
 				  --build-arg HTTPS_PROXY=$(HTTP_PROXY)) . \
