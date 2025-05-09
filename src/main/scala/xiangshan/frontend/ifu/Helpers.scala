@@ -31,14 +31,14 @@ trait PreDecodeHelper extends HasXSParameter {
   def isLink(reg: UInt): Bool = reg === 1.U || reg === 5.U
 
   def getBrType(inst: UInt): UInt =
-    ListLookup(inst, List(BrType.notCFI), PreDecodeInst.brTable).head
+    ListLookup(inst, List(BrType.NotCfi), PreDecodeInst.brTable).head
 
   def getBrInfo(inst: UInt): (UInt, Bool, Bool) = {
     val brType = getBrType(inst)
     val rd     = Mux(isRVC(inst), inst(12), inst(11, 7))
-    val rs     = Mux(isRVC(inst), Mux(brType === BrType.jal, 0.U, inst(11, 7)), inst(19, 15))
-    val isCall = (brType === BrType.jal && !isRVC(inst) || brType === BrType.jalr) && isLink(rd) // Only for RV64
-    val isRet  = brType === BrType.jalr && isLink(rs) && !isCall
+    val rs     = Mux(isRVC(inst), Mux(brType === BrType.Jal, 0.U, inst(11, 7)), inst(19, 15))
+    val isCall = (brType === BrType.Jal && !isRVC(inst) || brType === BrType.Jalr) && isLink(rd) // Only for RV64
+    val isRet  = brType === BrType.Jalr && isLink(rs) && !isCall
     (brType, isCall, isRet)
   }
 
