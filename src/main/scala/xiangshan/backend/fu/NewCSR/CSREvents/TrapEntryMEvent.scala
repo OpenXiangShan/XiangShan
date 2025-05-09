@@ -117,7 +117,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.MIE          := 0.U
   out.mstatus.bits.MDT          := 1.U
   out.mepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
-  out.mcause.bits.Interrupt     := isInterrupt
+  out.mcause.bits.Interrupt     := isInterrupt && !isDTExcp
   out.mcause.bits.ExceptionCode := Mux(isDTExcp, ExceptionNO.EX_DT.U, highPrioTrapNO)
   out.mtval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   out.mtval2.bits.ALL           := Mux(isDTExcp, precause, tval2 >> 2)
