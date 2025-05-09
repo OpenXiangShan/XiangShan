@@ -19,7 +19,7 @@ package top
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.{DebugOptionsKey, DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
@@ -196,11 +196,11 @@ object ArgParser {
           }), tail)
         case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = value.toBoolean))
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableMbist = value.toBoolean)
           }), tail)
         case "--sram-with-ctl" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => up(XSTileKey).map(_.copy(hasSramCtl = true))
+            case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = true)
           }), tail)
         case "--seperate-tl-bus" :: tail =>
           nextOption(config.alter((site, here, up) => {
