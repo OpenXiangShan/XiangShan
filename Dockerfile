@@ -42,6 +42,6 @@ RUN git config --global --add safe.directory '*'
 # download dependencies
 #
 RUN --mount=type=bind,source=.,target=/work,readonly \
-    --mount=type=tmpfs,destination=/work/out,rw <<EOF
-make deps
+    --mount=type=tmpfs,destination=/tmp/.mill-out,rw <<EOF
+make deps MILL_OUTPUT_DIR=/tmp/.mill-out
 EOF
