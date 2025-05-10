@@ -167,11 +167,23 @@ trait HypervisorLevel { self: NewCSR =>
   })
     .setAddr(CSRs.hgeip)
 
-  val hstateen0 = Module(new CSRModule("Hstateen", new HstateenBundle0) with HasStateen0Bundle {
+  val hstateen0 = Module(new CSRModule("Hstateen0", new HstateenBundle0) with HasStateenBundle {
     // For every bit in an mstateen CSR that is zero (whether read-only zero or set to zero), the same bit
     // appears as read-only zero in the matching hstateen and sstateen CSRs.
     regOut := reg.asUInt & fromMstateen0.asUInt
   }).setAddr(CSRs.hstateen0)
+
+  val hstateen1 = Module(new CSRModule("Hstateen1", new StateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen1.asUInt
+  }).setAddr(CSRs.hstateen1)
+
+  val hstateen2 = Module(new CSRModule("Hstateen2", new StateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen2.asUInt
+  }).setAddr(CSRs.hstateen2)
+
+  val hstateen3 = Module(new CSRModule("Hstateen3", new StateenNonZeroBundle) with HasStateenBundle {
+    regOut := reg.asUInt & fromMstateen3.asUInt
+  }).setAddr(CSRs.hstateen3)
 
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,
@@ -193,6 +205,9 @@ trait HypervisorLevel { self: NewCSR =>
     hgatp,
     hgeip,
     hstateen0,
+    hstateen1,
+    hstateen2,
+    hstateen3,
   )
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
