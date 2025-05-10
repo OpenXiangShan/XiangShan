@@ -315,15 +315,23 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   assert(EnsbufferWidth <= 2)
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
-  rdataPtrExtNext := rdataPtrExt.map(i => i +
-    // if there has mmio/nc, there has no dataBuffer enq because `ncStall`
-    PopCount(dataBuffer.io.enq.map(x=> x.fire && x.bits.sqNeedDeq)) +
-    // here may be 2 nc set completed at the same cycle, because one of these may have exception.
-    // so it should ensure synchronization with deqPtr
-    PopCount(rdataPtrExt.map(x => allocated(x.value) && completed(x.value) && nc(x.value))) +
-    // only one
-    PopCount(io.mmioStout.fire || io.vecmmioStout.fire)
-  )
+  val sqReadCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
+  val readyReadGoVec = WireInit(VecInit((0 until EnsbufferWidth).map(i =>
+    if(i == 0) {
+      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) ||
+      io.mmioStout.fire || io.vecmmioStout.fire
+    } else {
+      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
+    }
+  )))
+  for (i <- 0 until EnsbufferWidth) {
+    when(readyReadGoVec.take(i + 1).reduce(_ && _)) {
+      sqReadCnt := (i + 1).U // increase one by one
+    }
+  }
+  rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
   // deqPtrExtNext traces which inst is about to leave store queue
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
