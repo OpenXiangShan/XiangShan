@@ -3,6 +3,8 @@ name: Release Jobs
 on:
   push:
     branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
 jobs:
   build-xsdev-image:
@@ -13,6 +15,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: init
+        run: make init
 
       - uses: docker/metadata-action@v5
         id: metadata
@@ -36,6 +41,6 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          push: ${{ github.ref == 'refs/heads/master' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
