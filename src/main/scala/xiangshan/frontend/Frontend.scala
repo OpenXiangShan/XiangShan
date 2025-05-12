@@ -168,6 +168,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   icache.io.ftqPrefetch <> ftq.io.toPrefetch
   icache.io.softPrefetch <> io.softPrefetch
 
+  // wfi (backend-icache, backend-instrUncache)
+  icache.io.wfi.wfiReq       := io.backend.wfi.wfiReq
+  instrUncache.io.wfi.wfiReq := io.backend.wfi.wfiReq
+  io.backend.wfi.wfiSafe     := icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe
+
   // IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
   ftq.io.toIfu.req.ready := ifu.io.ftqInter.fromFtq.req.ready && icache.io.fetch.req.ready
