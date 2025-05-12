@@ -264,6 +264,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
 
+  io.mem.wfi <> ctrlBlock.io.toMem.wfi
+
   io.mem.lsqEnqIO <> ctrlBlock.io.toMem.lsqEnqIO
   ctrlBlock.io.fromMemToDispatch.scommit := io.mem.sqDeq
   ctrlBlock.io.fromMemToDispatch.lcommit := io.mem.lqDeq
@@ -1023,6 +1025,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val isStoreException = Output(Bool())
   val isVlsException = Output(Bool())
 
+  val wfi = new WfiReqBundle
   // ATTENTION: The issue ports' sequence order should be the same as IQs' deq config
   private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
     issueSta ++

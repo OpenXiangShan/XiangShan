@@ -764,6 +764,12 @@ class CtrlBlockImp(
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
 
+  // wfi
+  io.frontend.wfi.wfiReq := rob.io.wfi.wfiReq
+  rob.io.wfi.safeFromFrontend := io.frontend.wfi.wfiSafe
+  io.toMem.wfi.wfiReq := rob.io.wfi.wfiReq
+  rob.io.wfi.safeFromMem := io.toMem.wfi.wfiSafe
+
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
@@ -874,6 +880,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   //toMem
   val toMem = new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
+    val wfi = new WfiReqBundle
   }
   val toDispatch = new Bundle {
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
@@ -933,7 +940,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val vtype = Output(ValidIO(VType()))
       val hasVsetvl = Output(Bool())
     }
-
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
       val robidx = Input(new RobPtr)

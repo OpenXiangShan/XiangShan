@@ -88,6 +88,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val robFull = Output(Bool())
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
+    val wfi = new Bundle {
+      val wfiReq = Output(Bool())
+      val safeFromMem = Input(Bool())
+      val safeFromFrontend = Input(Bool())
+    }
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
@@ -400,7 +405,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // io.csr.wfiEvent will be asserted if the WFI can resume execution, and we change the state to s_wfi_idle.
   // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
   val hasWFI = RegInit(false.B)
-  io.cpu_halt := hasWFI
+  val wfiSafe = io.wfi.safeFromMem && io.wfi.safeFromFrontend
+  io.wfi.wfiReq   := hasWFI
+  io.cpu_halt := hasWFI && wfiSafe
   // WFI Timeout: 2^20 = 1M cycles
   val wfi_cycles = RegInit(0.U(20.W))
   if (wfiResume) {

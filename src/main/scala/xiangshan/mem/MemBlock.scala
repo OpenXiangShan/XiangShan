@@ -361,6 +361,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val toL2Top     = new TraceCoreInterface
     }
 
+    val wfi = Flipped(new WfiReqBundle)
+
     val topDownInfo = new Bundle {
       val fromL2Top = Input(new TopDownFromL2Top)
       val toBackend = Flipped(new TopDownInfo)
@@ -2062,6 +2064,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     ) << instOffsetBits)
   }
 
+  // wfi safety
+  io.wfi.wfiSafe := true.B
 
   io.mem_to_ooo.storeDebugInfo := DontCare
   // store event difftest information

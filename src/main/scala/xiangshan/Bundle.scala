@@ -473,6 +473,11 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
   val canAccept = Input(Bool())
+
+  val wfi = Flipped(new Bundle {
+    val wfiReq = Output(Bool())
+    val wfiSafe = Input(Bool())
+  })
 }
 
 class SatpStruct(implicit p: Parameters) extends XSBundle {
