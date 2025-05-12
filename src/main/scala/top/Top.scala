@@ -500,7 +500,8 @@ object TopMain extends App {
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
   if (config(SoCParamsKey).UseXSNoCDiffTop) {
-    Generator.execute(firrtlOpts, DisableMonitors(p => new XSNoCDiffTop()(p))(config), firtoolOpts)
+    val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
+    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
     Generator.execute(firrtlOpts, DisableMonitors(p => new XSTileDiffTop()(p))(config), firtoolOpts)
   } else {

@@ -99,7 +99,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           python3 ./difftest/scripts/st_tools/interface.py ./difftest/build/rtl/GatewayEndpoint.sv
-          python3 ./difftest/scripts/st_tools/interface.py ./build/rtl/XSDiffTop.sv --core --filelist ./build/rtl/filelist.f --simtop ./difftest/build/rtl/SimTop.sv
+          python3 ./difftest/scripts/st_tools/interface.py ./build/rtl/XSTop.sv --core --filelist ./build/rtl/filelist.f --simtop ./difftest/build/rtl/SimTop.sv
           cp -r -v ./difftest/build/* ./build/
           verilator --lint-only -Wno-fatal --top-module XSDiffTopChecker build/XSDiffTopChecker.sv build/rtl/*sv build/rtl/*v -Ibuild/generated-src/ -LDFLAGS -"lreadline"
 
