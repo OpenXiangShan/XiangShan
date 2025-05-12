@@ -65,6 +65,17 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val req_coh = new ClientMetadata
   val id = UInt(reqIdWidth.W)
 
+  /**
+    * isBtoT is used to mark whether the current request requires BtoT permission.
+    * If so, other requests for BtoT in the same set are blocked. Otherwise,
+    * they are not blocked.
+    */
+  val isBtoT = Bool()
+  /**
+    * The way isBtoT requests to occupy
+    */
+  val occupy_way = UInt(nWays.W)
+
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
   // * cancel is slow to generate, it will not be used until the last moment
@@ -271,6 +282,10 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def block_match(release_addr: UInt): Bool = {
     reg_valid() && get_block(req.addr) === get_block(release_addr)
   }
+
+  def evict_set_match(evict_set: UInt): Bool = {
+    reg_valid() && req.isBtoT && addr_to_dcache_set(req.vaddr) === evict_set
+  }
 }
 
 class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
@@ -374,13 +389,18 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val main_pipe_resp = Input(Bool())
     val main_pipe_refill_resp = Input(Bool())
     val main_pipe_replay = Input(Bool())
+    val main_pipe_evict_BtoT_way = Input(Bool())
+    val main_pipe_next_evict_way = Input(UInt(nWays.W))
 
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
+    val occupy_way = Output(UInt(nWays.W))
 
     val req_addr = ValidIO(UInt(PAddrBits.W))
+    val req_vaddr = ValidIO(UInt(VAddrBits.W))
+    val req_isBtoT = Output(Bool())
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -428,6 +448,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
+  val evict_BtoT_way = RegInit(false.B)
   // initial keyword
   val isKeyword = RegInit(false.B)
 
@@ -501,8 +522,11 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req_valid := true.B
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
-    req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+    req.occupy_way := miss_req_pipe_reg_bits.occupy_way
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
+    req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    evict_BtoT_way := false.B
     //only  load miss need keyword
     isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B)
 
@@ -553,6 +577,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
+      req.isBtoT := miss_req_pipe_reg_bits.isBtoT
+      req.occupy_way := miss_req_pipe_reg_bits.occupy_way
+      evict_BtoT_way := false.B
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
@@ -637,9 +664,16 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     mainpipe_req_fired := true.B
   }
 
-  when (io.main_pipe_replay) {
+  when (io.main_pipe_replay || io.main_pipe_evict_BtoT_way) {
     s_mainpipe_req := false.B
   }
+  when (io.main_pipe_replay) {
+    evict_BtoT_way := false.B
+  } .elsewhen (io.main_pipe_evict_BtoT_way) {
+    evict_BtoT_way := true.B
+    req.occupy_way := io.main_pipe_next_evict_way
+  }
+  XSError(req_valid && req.isBtoT && io.main_pipe_evict_BtoT_way, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
@@ -818,12 +852,19 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.occupy_way := req.occupy_way
+  io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
   io.block_addr.valid := req_valid && w_grantlast
   io.block_addr.bits := req.addr
 
   io.req_addr.valid := req_valid
-  io.req_addr.bits := req.addr
+  io.req_addr.bits:= req.addr
+  io.req_vaddr.valid := req_valid
+  io.req_vaddr.bits := req.vaddr
+  io.req_isBtoT := req.isBtoT
+
+  io.occupy_way := req.occupy_way
 
   io.refill_info.valid := req_valid && w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
@@ -835,6 +876,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
+  XSPerfAccumulate("miss_refill_evict_BtoT_way", io.main_pipe_evict_BtoT_way)
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
@@ -927,6 +969,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // block replace when release an addr valid in mshr
     val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
     val replace_block = Output(Bool())
+
+    // block all way for set to BtoT
+    val evict_set = Input(UInt())
+    val btot_ways_for_set = Output(UInt(nWays.W))
 
     // req blocked by wbq
     val wbq_block_miss_req = Input(Bool())
@@ -1098,6 +1144,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_evict_BtoT_way := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_evict_BtoT_way && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_next_evict_way := io.mainpipe_info.s2_next_evict_way
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
@@ -1150,6 +1198,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.probe_block := Cat(probe_block_vec).orR
 
   io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
+  val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
+    Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
+  val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ Seq(miss_req_pipe_reg.req.occupy_way)
+  io.btot_ways_for_set := btot_evict_set_hit.zip(btot_occupy_ways).map {
+    case (hit, way) => Fill(nWays, hit) & way
+  }.reduce(_|_)
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 

@@ -34,6 +34,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
+  val occupy_way = UInt(nWays.W)
+  val miss_fail_cause_evict_btot = Bool()
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -95,6 +97,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.replace := false.B
     req.error := false.B
     req.id := store.id
+    req.miss_fail_cause_evict_btot := false.B
     req
   }
 }
@@ -108,6 +111,8 @@ class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
   val s2_valid = Bool()
   val s2_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For refill data selection
   val s2_replay_to_mq = Bool()
+  val s2_evict_BtoT_way = Bool()
+  val s2_next_evict_way = UInt(nWays.W)
   val s3_valid = Bool()
   val s3_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For mshr release
   val s3_refill_resp = Bool()
@@ -172,6 +177,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val replace_access = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
+
+    val evict_set = Output(UInt())
+    val btot_ways_for_set = Input(UInt(nWays.W))
 
     // writeback addr to be replaced
     val replace_addr = ValidIO(UInt(PAddrBits.W))
@@ -365,15 +373,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     GatedValidRegNext(s0_fire),
-    UIntToOH(io.replace_way.way),
+    Mux(s1_req.miss_fail_cause_evict_btot, s1_req.occupy_way, UIntToOH(io.replace_way.way)),
     RegEnable(s1_repl_way_en, s1_valid)
   )
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
-
-  val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
-  s1_repl_way_raw := Mux(GatedValidRegNext(s0_fire), io.replace_way.way, RegEnable(s1_repl_way_raw, s1_valid))
 
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
@@ -389,9 +394,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
-  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
+  val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_tag_match && s1_has_permission
-  val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO && s1_req.cmd =/= M_XSC) && !s1_hit
+  val s1_store_or_amo = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO && s1_req.cmd =/= M_XSC)
+  val s1_pregen_can_go_to_mq = s1_store_or_amo && !s1_hit
+  val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -399,8 +406,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
   val s2_tag_match_way = RegEnable(s1_real_tag_match_way, s1_fire)
+  val s2_tag_ecc_match_way = RegEnable(s1_tag_ecc_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val (s2_has_permission, _, s2_new_hit_coh) = s2_hit_coh.onAccess(s2_req.cmd)
+  val s2_has_permission = RegEnable(s1_has_permission, s1_fire)
+  val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_fire)
+  val s2_grow_perm = RegEnable(s1_grow_perm, s1_fire) && s2_tag_match
 
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
@@ -436,9 +446,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_s0_set_conlict := s2_valid && s0_idx === s2_idx
   s2_s0_set_conlict_store := s2_valid && store_idx === s2_idx
 
+  // Grow permission fail
+  // Only in case BtoT will both cache and missqueue be occupied
+  val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
+  val s2_grow_perm_fail = s2_has_more_then_3_ways_BtoT && s2_grow_perm
+  XSError(s2_valid && s2_grow_perm && io.btot_ways_for_set.andR,
+    "BtoT grow permission, but all ways are BtoT\n"
+  )
+
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
-  val s2_can_go_to_mq_replay = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) || io.replace_block // miss_req in s2 but refill data is invalid, can block 1 cycle
+  val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
+  val s2_can_go_to_mq_evict_fail = io.replace_block // dcache and miss queue both occupy the same set, (BtoT scheme)
+  val s2_can_go_to_mq_replay = s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   val s2_can_go_to_s3 = (s2_sc || s2_req.replace || s2_req.probe || (s2_req.miss && io.refill_info.valid && !io.replace_block) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
@@ -799,14 +819,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.amo_cmp  := s2_req.amo_cmp
   miss_req.req_coh := s2_hit_coh
   miss_req.id := s2_req.id
-  miss_req.cancel := false.B
+  miss_req.cancel := s2_grow_perm_fail
   miss_req.pc := DontCare
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
+  miss_req.isBtoT := s2_grow_perm
+  miss_req.occupy_way := s2_tag_ecc_match_way
 
   io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
   io.wbq_conflict_check.bits := s2_req.addr
 
-  io.store_replay_resp.valid := s2_valid && s2_can_go_to_mq && replay && s2_req.isStore
+  io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay || s2_grow_perm_fail) && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare
   io.store_replay_resp.bits.miss := true.B
   io.store_replay_resp.bits.replay := true.B
@@ -837,7 +859,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
 
-  val atomic_replay_resp_valid = s2_valid && s2_can_go_to_mq && replay && s2_req.isAMO
+  val atomic_replay_resp_valid = s2_valid && (s2_can_go_to_mq && replay || s2_grow_perm_fail) && s2_req.isAMO
   val atomic_hit_resp_valid = s3_valid && (s3_amo_can_go || s3_miss_can_go && s3_req.isAMO)
 
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
@@ -897,6 +919,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.replace_addr.valid := s2_valid && s2_need_eviction
   io.replace_addr.bits  := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
+
+  io.evict_set := addr_to_dcache_set(s2_req.vaddr) // only use set index
 
   assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 
@@ -986,10 +1010,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.mainpipe_info.s2_valid := s2_valid && s2_req.miss
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
-  io.mainpipe_info.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
+  io.mainpipe_info.s2_replay_to_mq := s2_can_go_to_mq_no_data
+  io.mainpipe_info.s2_evict_BtoT_way := s2_can_go_to_mq_evict_fail
+  io.mainpipe_info.s2_next_evict_way := PriorityEncoderOH(~io.btot_ways_for_set)
   io.mainpipe_info.s3_valid := s3_valid
   io.mainpipe_info.s3_miss_id := s3_req.miss_id
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
+  XSError(s2_valid && s2_way_en.andR, "s2_way_en should not be all 1")
 
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
