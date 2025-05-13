@@ -822,6 +822,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
+  val wfi = Flipped(new WfiReqBundle)
 }
 
 private object ArbiterCtrl {
@@ -1016,12 +1017,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
 
+  //
+  io.wfi.wfiSafe := missQueue.io.wfi.wfiSafe && wb.io.wfi.wfiSafe
+
+  //
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
+  missQueue.io.wfi.wfiReq := io.wfi.wfiReq
   mainPipe.io.refill_info := missQueue.io.refill_info
   mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
@@ -1561,7 +1567,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-
+  wb.io.wfi.wfiReq := io.wfi.wfiReq
   wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
   // wb.io.release_wakeup := refillPipe.io.release_wakeup

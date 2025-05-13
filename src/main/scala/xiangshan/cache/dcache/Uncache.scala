@@ -174,6 +174,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val flush = Flipped(new UncacheFlushBundle)
   val lsq = Flipped(new UncacheWordIO)
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  val wfi = Flipped(new WfiReqBundle)
 }
 
 // convert DCacheIO to TileLink
@@ -233,6 +234,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
   val s_idle :: s_inflight :: s_wait_return :: Nil = Enum(3)
   val uState = RegInit(s_idle)
+  val noPending = RegInit(VecInit(Seq.fill(UncacheBufferSize)(true.B)))
 
   // drain buffer
   val empty = Wire(Bool())
@@ -417,12 +419,13 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
 
-  mem_acquire.valid := q0_canSent
+  mem_acquire.valid := q0_canSent && !io.wfi.wfiReq
   mem_acquire.bits := Mux(q0_isStore, q0_store, q0_load)
   mem_acquire.bits.user.lift(MemBackTypeMM).foreach(_ := q0_entry.memBackTypeMM)
   mem_acquire.bits.user.lift(MemPageTypeNC).foreach(_ := q0_entry.nc)
   when(mem_acquire.fire){
     states(q0_canSentIdx).setInflight(true.B)
+    noPending(q0_canSentIdx) := false.B
 
     // q0 should judge whether wait same block
     (0 until UncacheBufferSize).map(j =>
@@ -454,6 +457,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val id = mem_grant.bits.source
     entries(id).update(mem_grant.bits)
     states(id).updateUncacheResp()
+    noPending(id) := true.B
     assert(refill_done, "Uncache response should be one beat only!")
 
     // remove state of wait same block
@@ -464,6 +468,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     )
   }
 
+  io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
   /******************************************************************
    * Return to LSQ
    ******************************************************************/

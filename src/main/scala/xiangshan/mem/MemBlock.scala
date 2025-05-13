@@ -614,6 +614,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   dcache.io.lqEmpty := lsq.io.lqEmpty
+  dcache.io.wfi.wfiReq := io.wfi.wfiReq
+  lsq.io.wfi.wfiReq := io.wfi.wfiReq
+  io.wfi.wfiSafe := dcache.io.wfi.wfiSafe && uncache.io.wfi.wfiSafe && lsq.io.wfi.wfiSafe
 
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
@@ -1377,6 +1380,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
+  uncache.io.wfi.wfiReq := io.wfi.wfiReq
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq

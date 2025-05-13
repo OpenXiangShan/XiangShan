@@ -18,11 +18,12 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import xiangshan.WfiReqBundle
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
-import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.{GatedValidRegNext, XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
@@ -135,6 +136,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
 
     val block_addr  = Output(Valid(UInt()))
+
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   val s_invalid :: s_release_req :: s_release_resp ::Nil = Enum(3)
@@ -150,6 +153,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
   val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid))) //TODO: clock gate
+  val no_pending = RegInit(true.B)
 
   val remain = RegInit(0.U(refillCycles.W))
   val remain_dup_0 = RegInit(0.U(refillCycles.W))
@@ -262,15 +266,16 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     assert(!req.dirty || req.hasData)
   }
 
-  io.mem_release.valid := busy
+  val (_, _, release_done, release_count) = edge.count(io.mem_release)
+
+  io.mem_release.valid := busy && Mux(release_count =/= 0.U, true.B, !io.wfi.wfiReq)
   io.mem_release.bits  := Mux(req.voluntary,
     Mux(req.hasData, voluntaryReleaseData, voluntaryRelease),
     Mux(req.hasData, probeResponseData, probeResponse))
 
 
   when (io.mem_release.fire) {remain_clr := PriorityEncoderOH(remain_dup_1)}
-
-  val (_, _, release_done, _) = edge.count(io.mem_release)
+  when (io.mem_release.fire) { no_pending := false.B }
 
   when(state === s_release_req && release_done){
     state := Mux(req.voluntary, s_release_resp, s_invalid)
@@ -290,8 +295,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (io.mem_grant.fire) {
       state := s_invalid
       state_dup_for_mp.foreach(_ := s_invalid)
+      no_pending := true.B
     }
   }
+
+  io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   // data update logic
   when(!s_data_override && (req.hasData || RegNext(alloc))) {
@@ -322,6 +330,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // 5 miss_req to check: 3*LoadPipe + 1*MainPipe + 1*missReqArb_out
     val miss_req_conflict_check = Vec(LoadPipelineWidth + 2, Flipped(Valid(UInt())))
     val block_miss_req = Vec(LoadPipelineWidth + 2, Output(Bool()))
+
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -370,7 +380,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       //when (i.U === io.mem_grant.bits.source) {
       //  io.mem_grant.ready := entry.io.mem_grant.ready
       //}
+
+      // WFI control signal
+      entry.io.wfi.wfiReq := io.wfi.wfiReq
   }
+
+  io.wfi.wfiSafe := entries.map(_.io.wfi.wfiSafe).reduce(_&_)
 
   io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
     rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !block_conflict
