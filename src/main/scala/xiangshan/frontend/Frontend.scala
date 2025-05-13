@@ -169,9 +169,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   icache.io.softPrefetch <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
-  icache.io.wfi.wfiReq       := io.backend.wfi.wfiReq
-  instrUncache.io.wfi.wfiReq := io.backend.wfi.wfiReq
-  io.backend.wfi.wfiSafe     := icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe
+  // DelayN for better timing, FIXME: maybe 1 cycle is not enough, to be evaluated
+  private val wfiReq = DelayN(io.backend.wfi.wfiReq, 1)
+  icache.io.wfi.wfiReq       := wfiReq
+  instrUncache.io.wfi.wfiReq := wfiReq
+  // return safe only when both icache & instrUncache are safe, also only when has wfiReq (like, safe := wfiReq.fire)
+  io.backend.wfi.wfiSafe := DelayN(wfiReq && icache.io.wfi.wfiSafe && instrUncache.io.wfi.wfiSafe, 1)
 
   // IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
