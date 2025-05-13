@@ -29,6 +29,7 @@ import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
+import xiangshan.frontend.bpu._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
