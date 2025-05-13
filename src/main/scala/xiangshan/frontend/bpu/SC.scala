@@ -25,18 +25,20 @@
 * Branch Prediction (CBP). 2016.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
 import utility.sram.SRAMConflictBehavior
 import utility.sram.SRAMTemplate
 import xiangshan._
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.WrBypass
 
 trait HasSCParameter extends TageParams {}
 

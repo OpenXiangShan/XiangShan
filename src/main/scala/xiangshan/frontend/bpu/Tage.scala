@@ -26,18 +26,18 @@
 * (CBP) 9: 1-6. 2007.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import scala.{Tuple2 => &}
 import scala.math.min
 import utility._
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import utility.sram.SRAMConflictBehavior
 import xiangshan._
+import xiangshan.frontend._
 
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)

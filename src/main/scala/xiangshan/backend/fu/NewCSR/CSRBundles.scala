@@ -8,7 +8,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.fpu.Bundles.Fflags
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxsat}
-import xiangshan.frontend.BPUCtrl
+import xiangshan.frontend.bpu.BPUCtrl
 import xiangshan.mem.prefetch.PrefetchCtrl
 import chisel3.experimental.noPrefix
 
