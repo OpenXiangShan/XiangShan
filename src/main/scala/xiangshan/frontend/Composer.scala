@@ -32,8 +32,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     io.out.s1 := fast_pred.io.out.s1
   }
 
-  var metas   = 0.U(1.W)
-  var meta_sz = 0
   for (c <- components) {
     c.io.reset_vector           := io.reset_vector
     c.io.in.valid               := io.in.valid
@@ -46,9 +44,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.s1_fire := io.s1_fire
     c.io.s2_fire := io.s2_fire
     c.io.s3_fire := io.s3_fire
-
-    c.io.s2_redirect := io.s2_redirect
-    c.io.s3_redirect := io.s3_redirect
 
     c.io.redirect        := io.redirect
     c.io.ctrl            := DelayN(io.ctrl, 1)
