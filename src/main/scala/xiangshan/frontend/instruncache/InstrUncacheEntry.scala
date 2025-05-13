@@ -21,7 +21,7 @@ import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
-import utils.NamedUInt
+import utils.EnumUInt
 
 // One miss entry deals with one mmio request
 class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule {
@@ -40,7 +40,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   val io: InstrUncacheEntryIO = IO(new InstrUncacheEntryIO(edge))
 
   private def nState: Int = 4
-  private object State extends NamedUInt(log2Up(nState)) {
+  private object State extends EnumUInt(nState) {
     def Invalid:    UInt = 0.U(width.W)
     def RefillReq:  UInt = 1.U(width.W)
     def RefillResp: UInt = 2.U(width.W)

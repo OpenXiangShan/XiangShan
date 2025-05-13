@@ -81,9 +81,9 @@ object Itype extends NamedUInt(4) {
   def jumpTypeGen(brType: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
-    val isJal       = brType === BrType.jal
-    val isJalr      = brType === BrType.jalr
-    val isBranch    = brType === BrType.branch
+    val isJal       = brType === BrType.Jal
+    val isJalr      = brType === BrType.Jalr
+    val isBranch    = brType === BrType.Branch
 
     // push to RAS when rd is link, pop from RAS when rs is link
     def isUninferableCall      = isJalr && rd.isLink && (!rs.isLink || rs.isLink && isEqualRdRs)  //8   push

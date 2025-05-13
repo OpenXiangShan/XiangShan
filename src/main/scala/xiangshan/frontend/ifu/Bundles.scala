@@ -18,7 +18,7 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 
 /* ***
@@ -32,14 +32,14 @@ import xiangshan.frontend.PrunedAddr
  * *** */
 
 /* ***** PreDecode ***** */
-object PreDecodeFaultType extends NamedUInt(3) {
-  def noFault:      UInt = "b000".U(width.W)
-  def jalFault:     UInt = "b001".U(width.W) // not CFI taken or invalid instruction taken
-  def retFault:     UInt = "b010".U(width.W) // not CFI taken or invalid instruction taken
-  def targetFault:  UInt = "b011".U(width.W)
-  def notCfiFault:  UInt = "b100".U(width.W) // not CFI taken or invalid instruction taken
-  def invalidTaken: UInt = "b101".U(width.W)
-  def jalrFault:    UInt = "b110".U(width.W)
+object PreDecodeFaultType extends EnumUInt(7) {
+  def NoFault:      UInt = 0.U(width.W)
+  def JalFault:     UInt = 1.U(width.W) // not CFI taken or invalid instruction taken
+  def RetFault:     UInt = 2.U(width.W) // not CFI taken or invalid instruction taken
+  def TargetFault:  UInt = 3.U(width.W)
+  def NotCfiFault:  UInt = 4.U(width.W) // not CFI taken or invalid instruction taken
+  def InvalidTaken: UInt = 5.U(width.W)
+  def JalrFault:    UInt = 6.U(width.W)
 }
 
 /* ***** Ifu last half ***** */
