@@ -34,6 +34,7 @@ import utility.sram.SplittedSRAMTemplate
 import utils._
 import xiangshan._
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.bpu._
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
 

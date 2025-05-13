@@ -14,11 +14,12 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
-import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import xiangshan._
+import xiangshan.frontend._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst with HasPerfEvents {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)

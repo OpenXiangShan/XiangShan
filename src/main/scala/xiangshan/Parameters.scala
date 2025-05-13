@@ -31,7 +31,8 @@ import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, Ras, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.BranchPredictionResp
+import xiangshan.frontend.bpu.{BasePredictor, FTB, FakePredictor, Ras, Tage, ITTage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._

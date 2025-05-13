@@ -14,16 +14,19 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import scala.{Tuple2 => &}
 import utility._
 import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
 import xiangshan._
+import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.TableAddr
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
   val numEntries = FtbSize
