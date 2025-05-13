@@ -441,9 +441,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   val s2_resps = VecInit(tables.map(t => t.io.resp))
 
-  val debug_pc_s1 = RegEnable(s0_pc_dup(3), io.s0_fire(3))
-  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
-  val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire(3))
+  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
 
   val s2_tageTarget        = Wire(PrunedAddr(VAddrBits))
   val s2_providerTarget    = Wire(PrunedAddr(VAddrBits))
@@ -456,16 +455,16 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_providerCtr       = Wire(UInt(ITTageCtrBits.W))
   val s2_altProviderCtr    = Wire(UInt(ITTageCtrBits.W))
 
-  val s3_tageTarget_dup    = io.s2_fire.map(f => RegEnable(s2_tageTarget, f))
-  val s3_providerTarget    = RegEnable(s2_providerTarget, io.s2_fire(3))
-  val s3_altProviderTarget = RegEnable(s2_altProviderTarget, io.s2_fire(3))
-  val s3_provided          = RegEnable(s2_provided, io.s2_fire(3))
-  val s3_provider          = RegEnable(s2_provider, io.s2_fire(3))
-  val s3_altProvided       = RegEnable(s2_altProvided, io.s2_fire(3))
-  val s3_altProvider       = RegEnable(s2_altProvider, io.s2_fire(3))
-  val s3_providerU         = RegEnable(s2_providerU, io.s2_fire(3))
-  val s3_providerCtr       = RegEnable(s2_providerCtr, io.s2_fire(3))
-  val s3_altProviderCtr    = RegEnable(s2_altProviderCtr, io.s2_fire(3))
+  val s3_tageTarget        = RegEnable(s2_tageTarget, io.s2_fire)
+  val s3_providerTarget    = RegEnable(s2_providerTarget, io.s2_fire)
+  val s3_altProviderTarget = RegEnable(s2_altProviderTarget, io.s2_fire)
+  val s3_provided          = RegEnable(s2_provided, io.s2_fire)
+  val s3_provider          = RegEnable(s2_provider, io.s2_fire)
+  val s3_altProvided       = RegEnable(s2_altProvided, io.s2_fire)
+  val s3_altProvider       = RegEnable(s2_altProvider, io.s2_fire)
+  val s3_providerU         = RegEnable(s2_providerU, io.s2_fire)
+  val s3_providerCtr       = RegEnable(s2_providerCtr, io.s2_fire)
+  val s3_altProviderCtr    = RegEnable(s2_altProviderCtr, io.s2_fire)
 
   val resp_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
 
@@ -539,9 +538,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Predict
   tables.map { t =>
-    t.io.req.valid            := io.s1_fire(3) && s1_isIndirect
-    t.io.req.bits.pc          := s1_pc_dup(3)
-    t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist(3)
+    t.io.req.valid            := io.s1_fire && s1_isIndirect
+    t.io.req.bits.pc          := s1_pc
+    t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist
   }
 
   // access tag tables and output meta info
@@ -570,7 +569,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val altProviderInfo = selectedInfo.second
   val providerNull    = providerInfo.ctr === 0.U
 
-  val baseTarget             = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
+  val baseTarget             = io.in.bits.resp_in(0).s2.full_pred.jalr_target // use ftb pred as base target
   val region_r_target_offset = VecInit(s2_resps.map(r => r.bits.target_offset))
 
   rTable.io.req_pointer.zipWithIndex.map { case (req_pointer, i) =>
@@ -582,7 +581,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     region_targets(i) := PrunedAddrInit(Mux(
       rTable.io.resp_hit(i) && !region_r_target_offset(i).usePCRegion,
       Cat(rTable.io.resp_region(i), region_r_target_offset(i).offset.toUInt),
-      Cat(targetGetRegion(s2_pc_dup(0)), region_r_target_offset(i).offset.toUInt)
+      Cat(targetGetRegion(s2_pc), region_r_target_offset(i).offset.toUInt)
     ))
   }
 
@@ -609,13 +608,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_providerTarget    := providerCatTarget
   s2_altProviderTarget := altproviderCatTarget
 
-  XSDebug(io.s2_fire(3), p"hit_taken_jalr:")
+  XSDebug(io.s2_fire, p"hit_taken_jalr:")
 
-  for (
-    fp & s3_tageTarget <-
-      io.out.s3.full_pred zip s3_tageTarget_dup
-  )
-    yield fp.jalr_target := s3_tageTarget
+  io.out.s3.full_pred.jalr_target := s3_tageTarget
 
   resp_meta.provider.valid    := s3_provided
   resp_meta.provider.bits     := s3_provider
@@ -637,8 +632,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
   val s2_maskedEntry = PriorityEncoder(s2_allocatableSlots & s2_allocLFSR)
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
-  resp_meta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, io.s2_fire(3))
-  resp_meta.allocate.bits  := RegEnable(s2_allocEntry, io.s2_fire(3))
+  resp_meta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, io.s2_fire)
+  resp_meta.allocate.bits  := RegEnable(s2_allocEntry, io.s2_fire)
 
   // Update in loop
   val updateRealTarget       = update.full_target
@@ -757,7 +752,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
   XSPerfAccumulate("ittage_allocate", updateAlloc.reduce(_ || _))
 
-  private def pred_perf(name:   String, cond: Bool) = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire(3))
+  private def pred_perf(name:   String, cond: Bool) = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)
   private def commit_perf(name: String, cond: Bool) = XSPerfAccumulate(s"${name}_at_commit", cond && updateValid)
   private def ittage_perf(name: String, pred_cond: Bool, commit_cond: Bool) = {
     pred_perf(s"ittage_${name}", pred_cond)
@@ -811,13 +806,13 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("updated", updateValid)
 
   if (debug) {
-    val s2_resps_regs = RegEnable(s2_resps, io.s2_fire(3))
-    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3).toUInt)
-    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1.toUInt)
+    val s2_resps_regs = RegEnable(s2_resps, io.s2_fire)
+    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc.toUInt)
+    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1.toUInt)
     XSDebug(
       "s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n",
       debug_pc_s2.toUInt,
-      io.out.s2.getTarget(3).toUInt,
+      io.out.s2.getTarget.toUInt,
       s2_provided
     )
     for (i <- 0 until ITTageNTables) {
