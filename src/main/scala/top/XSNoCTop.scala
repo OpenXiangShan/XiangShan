@@ -214,7 +214,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      1. normal reset from SoC
      2. SoC initialize reset during Power on/off flow
      */
-    val cpuReset = reset.asBool || !soc_rst_n
+    //val cpuReset = reset.asBool || !soc_rst_n
+    val cpuReset = reset.asBool
     val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(2, io.dft_reset))
     //Interrupt sources collect
     val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
