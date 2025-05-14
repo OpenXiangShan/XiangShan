@@ -1018,7 +1018,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wb           = Module(new WritebackQueue(edge))
 
   //
-  io.wfi.wfiSafe := missQueue.io.wfi.wfiSafe && wb.io.wfi.wfiSafe
+  io.wfi.wfiSafe := missQueue.io.wfi.wfiSafe
 
   //
   missQueue.io.lqEmpty := io.lqEmpty
@@ -1567,7 +1567,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-  wb.io.wfi.wfiReq := io.wfi.wfiReq
   wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
   // wb.io.release_wakeup := refillPipe.io.release_wakeup
