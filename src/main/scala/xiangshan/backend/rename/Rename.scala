@@ -35,10 +35,6 @@ import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.NewCSR.CSROoORead
 import xiangshan.backend.{Pvt, PvtReadPort}
-import xiangshan.backend.PvtReadPort
-
-import scala.annotation.meta.param
-import freechips.rocketchip.formal.MonitorDirection.Cover.flip
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler}
 import yunsuan.{VfaluType, VipuType}
@@ -174,6 +170,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
   // pvt read
+  pvt.io.intReadPorts.map{ port =>
+    port.valid := false.B
+    port.addr := 0.U
+  }
+  pvt.io.fpReadPorts.map{ port =>
+    port.valid := false.B
+    port.addr := 0.U
+  }
+  pvt.io.intSrcPred.foreach{_.addr := 0.U}
+  pvt.io.fpSrcPred.foreach{_.addr := 0.U}
   pvt.io.intReadPorts.zip(io.intPvtRead.flatten).foreach{ case(r, p) => r <> p}
   pvt.io.intSrcPred.zip(io.intSrcPred.flatten.flatten).foreach{ case(r, p) => r <> p}
   pvt.io.fpReadPorts.zip(io.fpPvtRead.flatten).foreach{ case(r, p) => r <> p}

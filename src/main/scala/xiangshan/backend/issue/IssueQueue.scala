@@ -304,7 +304,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   // find src pred
   for (i <- 0 until params.numEnq) {
     for (j <- 0 until io.srcPred(i).length) {
-//      io.srcPred(i)(j).addr := io.enq(i).bits.psrc(j)
       io.srcPred(i)(j).addr := io.enq(i).bits.psrc(j)
     }
   }

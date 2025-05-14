@@ -979,7 +979,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
       a := 0.U
     }
   }
-  io.torename := 0.U.asTypeOf(Vec(backendParams.LduCnt, new LvpPredict))
   lvp.io.fromload.zip(io.fromload).foreach{ case (sink, source) =>
     sink.pc := source.bits.loadpc
     sink.loadvalue := source.bits.loadvalue

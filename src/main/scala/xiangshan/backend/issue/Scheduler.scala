@@ -14,7 +14,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.{BusyTable, RatPredPort, VlBusyTable}
-import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
 import xiangshan.backend.regcache.RegCacheTagTable

@@ -123,10 +123,10 @@ class LoadToPvt(implicit p: Parameters) extends XSBundle {
   val fpWen = Output(Bool())
 }
 
-class LoadReadPc(implicit p: Parameters) extends XSBundle {
-  val robidx = Output(new RobPtr)
-  val debugpc = Input(UInt(VAddrBits.W))
-}
+//class LoadReadPc(implicit p: Parameters) extends XSBundle {
+//  val robidx = Output(new RobPtr)
+//  val debugpc = Input(UInt(VAddrBits.W))
+//}
 
 class LoadUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
@@ -231,7 +231,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // lvp
     val toifu            = Valid(new LoadToIfu)
-    val readPc           = new LoadReadPc
     val toPvt            = Valid(new LoadToPvt)
   })
   PerfCCT.updateInstPos(io.ldin.bits.uop.debug_seqNum, PerfCCT.InstPos.AtFU.id.U, io.ldin.valid, clock, reset)
@@ -1773,20 +1772,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_ldout_valid  = s3_mmio_req.valid ||
                         s3_out.valid && RegNext(!s2_out.isvec && !s2_out.isFrmMisAlignBuf)
   val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
-  val ldoutValid      = s3_mmio.valid || (s3_out.valid && !s3_vecout.isvec && !s3_frm_mabuf)
+  io.ldout.valid       := s3_ldout_valid
   io.ldout.bits        := s3_ld_wb_meta
-  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-
-  io.ldout.valid       := ldoutValid
+  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
-
   
   //to lvp
-  io.toifu.valid := ldoutValid
-  io.toifu.bits.loadpc := DontCare
-  io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
-  io.toPvt.valid := ldoutValid
-  io.toPvt.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe, s3_ld_data_frm_mmio)
+  io.toifu.valid := s3_ldout_valid
+  io.toifu.bits.loadpc := s3_in.uop.pc
+  io.toifu.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
+  io.toPvt.valid := s3_ldout_valid
+  io.toPvt.bits.loadvalue := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
   io.toPvt.bits.pdest := io.ldout.bits.uop.pdest
   io.toPvt.bits.rfWen := io.ldout.bits.uop.rfWen
   io.toPvt.bits.fpWen := io.ldout.bits.uop.fpWen
@@ -1798,10 +1794,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.toPvt.bits.misPredict.ftqOffset   := io.ldout.bits.uop.ftqOffset
   io.toPvt.bits.misPredict.level       := RedirectLevel.flushAfter
   io.toPvt.bits.misPredict.cfiUpdate.target := io.ldout.bits.uop.pc
+  io.toPvt.bits.misPredict.cfiUpdate.pc := s3_in.uop.pc
   io.toPvt.bits.misPredict.debug_runahead_checkpoint_id := io.ldout.bits.uop.debugInfo.runahead_checkpoint_id
 
   //to rob readpc
-  io.readPc.robidx := io.ldout.bits.uop.robIdx
+//  io.readPc.robidx := io.ldout.bits.uop.robIdx
 
   io.ldout.bits.isFromLoadUnit := true.B
   io.ldout.bits.uop.fuType := Mux(

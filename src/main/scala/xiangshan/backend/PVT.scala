@@ -52,7 +52,7 @@ trait HasPvtConst extends HasXSParameter {
     val IntEntryNum = IntPhyRegs
     val FpEntryNum = FpPhyRegs
     val IntReadPortNum = 8
-    val FpReadPortNum = 10
+    val FpReadPortNum = 6
     val WritePortNum = RenameWidth
 }
 
@@ -84,7 +84,6 @@ class PvtIO(implicit p: Parameters) extends PvtBundle{
     val intSrcPred = Vec(IntReadPortNum*3, new RatPredPort)
     val fpSrcPred = Vec(FpReadPortNum*3, new RatPredPort)
 }
-
 class Pvt(implicit p: Parameters) extends PvtModule{
     val io = IO(new PvtIO)
 

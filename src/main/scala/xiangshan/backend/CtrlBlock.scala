@@ -35,7 +35,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatPredPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{DecodeToLvp, FtqPtr, FtqRead, Ftq_RF_Components}
-import xiangshan.mem.{LoadReadPc, LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
 
@@ -85,8 +85,6 @@ class CtrlBlockImp(
   println(s"pcMem read num: $numPcMemRead")
 
   val io = IO(new CtrlBlockIO())
-
-  dontTouch(io.memLdPcRead)
 
   val dispatch = Module(new NewDispatch)
   val gpaMem = wrapper.gpaMem.module
@@ -180,6 +178,7 @@ class CtrlBlockImp(
       }
     }
   }
+
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
@@ -832,7 +831,7 @@ class CtrlBlockImp(
   rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
 
-  rob.io.loadRdPc <> io.loadRdPc
+//  rob.io.loadRdPc <> io.loadRdPc
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
@@ -1039,7 +1038,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debugRolling = new RobDebugRollingIO
   val debugEnqLsq = Input(new LsqEnqIO)
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
-  val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
+//  val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val loadToPvt = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
   val intPvtRead = Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))
   val fpPvtRead = Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.length, Vec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.numEnq).max, new PvtReadPort))

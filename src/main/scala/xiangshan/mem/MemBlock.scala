@@ -352,8 +352,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     //lvp
     val loadtolvp = Vec(LduCnt, Valid(new LoadToIfu))
     val loadToPvt = Vec(LduCnt, Valid(new LoadToPvt))
-    //read pc from rob
-    val loadRdPc = Vec(LduCnt, new LoadReadPc)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -455,12 +453,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   for (i <- 0 until LduCnt) {
     io.loadtolvp(i).valid := loadUnits(i).io.toifu.valid
     io.loadtolvp(i).bits := loadUnits(i).io.toifu.bits
-//    io.loadtolvp(i).bits.loadpc := RegNextN(io.ooo_to_mem.loadPc(i), 2)
-    io.loadtolvp(i).bits.loadpc := io.loadRdPc(i).debugpc
-    io.loadRdPc(i) <> loadUnits(i).io.readPc
+//    io.loadtolvp(i).bits.loadpc := io.loadRdPc(i).debugpc
+//    io.loadRdPc(i) <> loadUnits(i).io.readPc
     io.loadToPvt(i).valid := loadUnits(i).io.toPvt.valid
     io.loadToPvt(i).bits := loadUnits(i).io.toPvt.bits
-    io.loadToPvt(i).bits.misPredict.cfiUpdate.pc := io.loadRdPc(i).debugpc
   }
 
   val hartId = p(XSCoreParamsKey).HartId
@@ -562,6 +558,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.otherFastWakeup.drop(HyuCnt).take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   io.mem_to_ooo.otherFastWakeup.take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
   val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyuSta
+
 
   // prefetch to l1 req
   // Stream's confidence is always 1

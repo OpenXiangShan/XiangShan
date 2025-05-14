@@ -49,7 +49,7 @@ import xiangshan.backend.issue.{IntScheduler, Scheduler, SchedulerArithImp, Sche
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.{DecodeToLvp, FtqPtr, FtqRead, PreDecodeInfo}
-import xiangshan.mem.{LoadReadPc, LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LoadToPvt, LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable
 
@@ -198,8 +198,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   val io = IO(new BackendIO()(p, wrapper.params))
 
-  dontTouch(io.mem.loadPcRead)
-
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val intScheduler: SchedulerImpBase = wrapper.intScheduler.get.module
   private val fpScheduler = wrapper.fpScheduler.get.module
@@ -320,12 +318,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugEnqLsq.iqAccept := ctrlBlock.io.toMem.lsqEnqIO.iqAccept
   ctrlBlock.io.intPvtRead <> intScheduler.io.pvtRead
   ctrlBlock.io.fpPvtRead <> fpScheduler.io.pvtRead
-  ctrlBlock.io.debugEnqLsq.iqAccept := memScheduler.io.memIO.get.lsqEnqIO.iqAccept
   ctrlBlock.io.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   ctrlBlock.io.intSrcPred <> intScheduler.io.srcPred
   ctrlBlock.io.fpSrcPred <> fpScheduler.io.srcPred
   ctrlBlock.io.decode2Lvp <> io.decode2Lvp
-  ctrlBlock.io.loadRdPc <> io.loadRdPc
+//  ctrlBlock.io.loadRdPc <> io.loadRdPc
   ctrlBlock.io.loadToPvt <> io.loadToPvt
 
   val intWriteBackDelayed = Wire(chiselTypeOf(wbDataPath.io.toIntPreg))
@@ -1112,7 +1109,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
 
   val loadToPvt = Vec(backendParams.LduCnt, Flipped(Valid(new LoadToPvt)))
   val decode2Lvp = Vec(DecodeWidth, Flipped(new DecodeToLvp))
-  val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
+//  val loadRdPc = Vec(backendParams.LduCnt, Flipped(new LoadReadPc))
   val topDownInfo = new TopDownInfo
   val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
   val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))

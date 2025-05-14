@@ -138,7 +138,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.readLvp <> backend.io.decode2Lvp
 
   backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
-  backend.io.loadRdPc <> memBlock.io.loadRdPc
+//  backend.io.loadRdPc <> memBlock.io.loadRdPc
   backend.io.loadToPvt <> memBlock.io.loadToPvt
 
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
