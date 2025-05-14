@@ -26,8 +26,8 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqICacheInfo
-import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.ftq.FtqPtr
 
 /* ***
  * Naming:

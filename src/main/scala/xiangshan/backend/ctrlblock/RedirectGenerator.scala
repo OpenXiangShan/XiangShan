@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 import chisel3._
 import utility.{HasCircularQueuePtrHelper, XORFold, GatedValidRegNext}
-import xiangshan.frontend.{FtqRead, PreDecodeInfo}
+import xiangshan.frontend.{PreDecodeInfo}
+import xiangshan.frontend.ftq.FtqRead
 import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule, AddrTransType}
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule

@@ -6,7 +6,8 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import utility.SyncDataModuleTemplate
 import xiangshan.HasXSParameter
-import xiangshan.frontend.{FtqPtr, IfuToBackendIO}
+import xiangshan.frontend.{IfuToBackendIO}
+import xiangshan.frontend.ftq.FtqPtr
 
 class GPAMem(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false

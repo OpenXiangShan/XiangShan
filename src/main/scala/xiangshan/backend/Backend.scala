@@ -48,7 +48,8 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
+import xiangshan.frontend.{PreDecodeInfo}
+import xiangshan.frontend.ftq.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
 import scala.collection.mutable

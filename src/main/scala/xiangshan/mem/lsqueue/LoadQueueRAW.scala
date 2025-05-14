@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.mem.mdp._

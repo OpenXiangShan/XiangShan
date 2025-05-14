@@ -18,6 +18,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import ftq.FtqToBpuIO
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
 import utility._

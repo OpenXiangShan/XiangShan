@@ -28,7 +28,7 @@ import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}

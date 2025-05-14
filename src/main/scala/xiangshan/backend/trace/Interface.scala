@@ -5,7 +5,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 import xiangshan.HasXSParameter
-import xiangshan.frontend.{BrType, FtqPtr, PreDecodeInfo}
+import xiangshan.frontend.{BrType, PreDecodeInfo}
+import xiangshan.frontend.ftq.FtqPtr
 
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
