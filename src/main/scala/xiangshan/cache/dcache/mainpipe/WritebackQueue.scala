@@ -279,6 +279,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   when(state === s_release_req && release_done){
     state := Mux(req.voluntary, s_release_resp, s_invalid)
+    no_pending := Mux(req.voluntary, no_pending, true.B)
     when(req.voluntary){
       state_dup_for_mp.foreach(_ := s_release_resp)
     } .otherwise{
