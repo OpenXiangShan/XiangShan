@@ -208,7 +208,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val bankNumWidth = log2Up(bankNum)
   val deqPtrWidth = deqPtr.value.getWidth
   val highDeqPtrThisLine = deqPtr.value(deqPtrWidth - 1, bankNumWidth)
-  val highDeqPtrMax = RobSize.U(deqPtrWidth - 1, bankNumWidth)
+  val highDeqPtrMax = (RobSize - 1).U(deqPtrWidth - 1, bankNumWidth)
   val highDeqPtrNextLine = Mux(highDeqPtrThisLine === highDeqPtrMax, 0.U, highDeqPtrThisLine + 1.U)
   val robIdxThisLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrThisLine, i.U(bankNumWidth.W))))
   val robIdxNextLine = VecInit((0 until bankNum).map(i => Cat(highDeqPtrNextLine, i.U(bankNumWidth.W))))
