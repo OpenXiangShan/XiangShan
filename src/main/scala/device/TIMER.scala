@@ -9,13 +9,13 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.subsystem._
+import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
 object TIMERConsts
 {
-  def msipOffset(hart: Int) = hart * msipBytes
-  def timecmpOffset(hart: Int) = 0x4000 + hart * timecmpBytes
+  def timecmpOffset = 0x4000
   def timeOffset = 0x7ff8//not use by simtop
   def msipBytes = 4
   def timecmpBytes = 8
@@ -64,6 +64,7 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
 
     val io = IO(new Bundle {
       val time = Input(ValidIO(UInt(timeWidth.W)))
+      val hartId = Input(UInt(p(MaxHartIdBits).W))
     })
 
     val time = RegInit(0.U(timeWidth.W))
@@ -95,12 +96,31 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
       0 -> RegFieldGroup("msip", Some("MSIP Bits"), ipi.zipWithIndex.flatMap { case (r, i) =>
         RegField(1, r, RegFieldDesc(s"msip_$i", s"MSIP bit for Hart $i", reset = Some(0))) :: RegField(ipiWidth - 1) :: Nil
       }),
-      timecmpOffset(0) -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
+      timecmpOffset -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
         RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
       },
       timeOffset -> RegFieldGroup("mtime", Some("Timer Register"),
         RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true))))
     )
+
+    val msipAddr = params.baseAddress.U + io.hartId * msipBytes.U
+    val timecmpAddr = params.baseAddress.U + timecmpOffset.U + io.hartId * timecmpBytes.U
+
+    val bundleIn = node.in.head._1
+    val a = bundleIn.a
+    val d = bundleIn.d
+
+    val isMsipAccess = a.bits.address === msipAddr
+    val isTimecmpAccess = a.bits.address === timecmpAddr
+
+    val isCorrectAccess = isMsipAccess || isTimecmpAccess
+
+    // filter out accesses not belonging to this hart
+    when(!isCorrectAccess) {
+      d.bits.opcode := TLMessages.AccessAckData
+      d.bits.denied := true.B
+    }
+
   }
 }
 

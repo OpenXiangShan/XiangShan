@@ -114,8 +114,8 @@ case class SoCParameters
     HasTEEIMSIC = false
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
-  EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
-  SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  EnableClintAsyncBridge: Option[AsyncQueueParams] = None, //Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
+  SeperateTLAsyncBridge: Option[AsyncQueueParams] = None, //Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   WFIClockGate: Boolean = false,
   EnablePowerDown: Boolean = false
 ){

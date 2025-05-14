@@ -71,7 +71,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   // imsic bus top
   val u_imsic_bus_top = LazyModule(new imsic_bus_top)
   //clint timer
-  val l_clint = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
+  val asyncClint = Option.when(SeperateTLBus && EnableSeperateTLAsync)(LazyModule(new TIMER(TIMERParams(soc.TIMERRange.base), 8)))
   // interrupts
   val SeperateTLsync = SeperateTLBus && (!EnableSeperateTLAsync)
   val clintIntNode = Option.when(!SeperateTLBus)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
@@ -82,7 +82,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   if (!SeperateTLBus)
     core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
   else
-    core_with_l2.clintIntNode.map(_ := l_clint.get.intnode) //from clint integrated in xstop
+    core_with_l2.clintIntNode.map(_ := asyncClint.get.intnode) //from clint integrated in xstop
 
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
@@ -128,7 +128,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   // seperate TL bus
   println(s"SeperateTLBus = $SeperateTLBus")
   println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
-  l_clint.foreach(_.node := tlXbar.get)//TLXbar node out connnect with timer mmio
+  asyncClint.foreach(_.node := tlXbar.get)//TLXbar node out connnect with timer mmio
   tl.foreach(_ := tlXbar.get)
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
@@ -230,14 +230,22 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
      */
     val cpuReset = reset.asBool || !soc_rst_n
 
+    if (SeperateTLBus && EnableSeperateTLAsync) {
+      asyncClint.get.module.io.hartId := io.hartId
+    }
+
     //Interrupt sources collect
-    val mip_mux = Wire(Vec(2,Bool()))
+    val msip  = WireDefault(false.B)
+    val mtip  = WireDefault(false.B)
 
-    core_with_l2.clintIntNode.foreach( clint => mip_mux := clint.out.head._1) //seperate==0,or seperate & tlasyc
-    core_with_l2.clint.foreach(clint =>mip_mux := clint.intnode.out.head._1)//seperae & !tlasync
+    if (!SeperateTLBus) { // from CHI
+      msip := clint.get.head(0)
+      mtip := clint.get.head(1)
+    } else { // from (TL & async)
+      msip := asyncClint.get.intnode.out.head._1(0)
+      mtip := asyncClint.get.intnode.out.head._1(1)
+    }
 
-    val msip  = mip_mux(0)
-    val mtip  = mip_mux(1)
     val meip  = plic.head(0)
     val seip  = plic.last(0)
     val nmi_31 = nmi.head(0)
