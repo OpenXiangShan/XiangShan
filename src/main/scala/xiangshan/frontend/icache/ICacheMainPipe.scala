@@ -503,22 +503,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /**
     ******************************************************************************
-    * report Tilelink corrupt error
-    ******************************************************************************
-    */
-  (0 until PortNumber).foreach { i =>
-    when(RegNext(s2_fire && s2_l2Corrupt(i))) {
-      io.errors(i).valid              := true.B
-      io.errors(i).bits.report_to_beu := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).bits.paddr         := RegNext(s2_pAddr(i).toUInt)
-      io.errors(i).bits.source.tag    := false.B
-      io.errors(i).bits.source.data   := false.B
-      io.errors(i).bits.source.l2     := true.B
-    }
-  }
-
-  /**
-    ******************************************************************************
     * performance info. TODO: need to simplify the logic
     ***********************************************************s*******************
     */
