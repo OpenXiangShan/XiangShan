@@ -150,6 +150,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   )
 
   val s0_isCbo = s0_use_flow_rs && LSUOpType.isCboAll(s0_stin.uop.fuOpType)
+  val s0_isCbo_noZero = s0_use_flow_rs && LSUOpType.isCbo(s0_stin.uop.fuOpType)
   // only simulation
   val cbo_assert_flag = LSUOpType.isCboAll(s0_out.uop.fuOpType)
   XSError(!s0_use_flow_rs && cbo_assert_flag && s0_valid, "cbo instruction selection error.")
@@ -206,7 +207,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.vaddr              := s0_vaddr
   io.tlb.req.bits.fullva             := s0_fullva
   io.tlb.req.bits.checkfullva        := s0_use_flow_rs || s0_use_flow_vec
-  io.tlb.req.bits.cmd                := TlbCmd.write
+  io.tlb.req.bits.cmd                := Mux(s0_isCbo_noZero, TlbCmd.read, TlbCmd.write)
   io.tlb.req.bits.isPrefetch         := s0_use_flow_prf
   io.tlb.req.bits.size               := s0_size
   io.tlb.req.bits.kill               := false.B
@@ -380,9 +381,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       s1_out.uop.exceptionVec(storeGuestPageFault))) {
     s1_out.uop.exceptionVec(storeAddrMisaligned) := false.B
   }
-  s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
-  s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
-  s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
+  s1_out.uop.exceptionVec(storePageFault)      := (io.tlb.resp.bits.excp(0).pf.st  || io.tlb.resp.bits.excp(0).pf.ld ) && s1_vecActive
+  s1_out.uop.exceptionVec(storeAccessFault)    := (io.tlb.resp.bits.excp(0).af.st  || io.tlb.resp.bits.excp(0).af.ld ) && s1_vecActive
+  s1_out.uop.exceptionVec(storeGuestPageFault) := (io.tlb.resp.bits.excp(0).gpf.st || io.tlb.resp.bits.excp(0).gpf.ld) && s1_vecActive
 
   s1_out.uop.flushPipe                := false.B
   s1_out.uop.trigger                  := s1_trigger_action
@@ -473,6 +474,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out.memBackTypeMM := s2_memBackTypeMM
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
                                                 s2_pmp.st ||
+                                                s2_pmp.ld && s2_isCbo_noZero || // cmo need read permission but produce store exception
                                                 ((s2_in.isvec || s2_isCbo) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
                                                 ) && s2_vecActive
   s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_actually_uncache && s2_in.isMisalign && !s2_un_misalign_exception
