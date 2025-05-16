@@ -88,7 +88,7 @@ make idea
 
 ## Generate Verilog
 
-* Run `make verilog` to generate verilog code. The output file is `build/XSTop.v`.
+* Run `make verilog` to generate verilog code. This generates multiple `.sv` files in the `build/rtl/` folder (e.g., `build/rtl/XSTop.sv`).
 * Refer to `Makefile` for more information.
 
 
