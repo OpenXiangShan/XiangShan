@@ -61,7 +61,7 @@ CHIIssue: E.b
 
 WFIClockGate: false
 
-EnablePowerDown: false
+EnablePowerDown: true
 
 XSTopPrefix: ""
 
