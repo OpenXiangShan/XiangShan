@@ -41,7 +41,7 @@ import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 import difftest.common.DifftestWiring
 import difftest.util.Profile
 
-class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 {
   override lazy val desiredName: String = "XSTop"
 

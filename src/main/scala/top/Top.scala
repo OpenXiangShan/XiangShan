@@ -50,6 +50,7 @@ import difftest.common.DifftestWiring
 import difftest.util.Profile
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
+  with HasSoCParameter
   with BindingScope
 {
   // val misc = LazyModule(new SoCMisc())
@@ -57,7 +58,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   lazy val json = JSON(bindingTree)
 }
 
-class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
+class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 {
   val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
   val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
