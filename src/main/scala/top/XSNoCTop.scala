@@ -45,22 +45,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
   override lazy val desiredName: String = "XSTop"
 
-  ResourceBinding {
-    val width = ResourceInt(2)
-    val model = "freechips,rocketchip-unknown"
-    Resource(ResourceAnchors.root, "model").bind(ResourceString(model))
-    Resource(ResourceAnchors.root, "compat").bind(ResourceString(model + "-dev"))
-    Resource(ResourceAnchors.soc, "compat").bind(ResourceString(model + "-soc"))
-    Resource(ResourceAnchors.root, "width").bind(width)
-    Resource(ResourceAnchors.soc, "width").bind(width)
-    Resource(ResourceAnchors.cpus, "width").bind(ResourceInt(1))
-    def bindManagers(xbar: TLNexusNode) = {
-      ManagerUnification(xbar.edges.in.head.manager.managers).foreach{ manager =>
-        manager.resources.foreach(r => r.bind(manager.toResource))
-      }
-    }
-  }
-
   require(enableCHI)
 
   // xstile
@@ -127,17 +111,16 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val core_rst_node = BundleBridgeSource(() => Reset())
   core_with_l2.tile.core_reset_sink := core_rst_node
 
-  class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper) {
+  class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper)
+                                       with HasDTSImp[BaseXSSoc] {
+    def dtsLM = wrapper
+
     soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
       annotate(new ChiselAnnotation {
         def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
       })
     }
-    FileRegisters.add("dts", dts)
-    FileRegisters.add("graphml", graphML)
-    FileRegisters.add("json", json)
-    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
