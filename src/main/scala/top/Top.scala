@@ -53,17 +53,11 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
   with BindingScope
 {
-  // val misc = LazyModule(new SoCMisc())
+  lazy val tlManagers: List[TLNexusNode] = List()
   lazy val dts = DTS(bindingTree)
   lazy val json = JSON(bindingTree)
-}
 
-class XSTop()(implicit p: Parameters) extends BaseXSSoc()
-{
-  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
-  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
-  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
-
+  // collect info for DTS
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "xiangshan," + os.read(os.resource / "publishVersion")
@@ -79,11 +73,28 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         manager.resources.foreach(r => r.bind(manager.toResource))
       }
     }
-    if (!enableCHI) {
-      bindManagers(misc.l3_xbar.get.asInstanceOf[TLNexusNode])
-      bindManagers(misc.peripheralXbar.get.asInstanceOf[TLNexusNode])
-    }
+    tlManagers.foreach(xbar => bindManagers(xbar))
   }
+}
+
+trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
+  val dtsLM = wrapper.asInstanceOf[L]
+  FileRegisters.add("dts", dtsLM.dts)
+  FileRegisters.add("graphml", dtsLM.graphML)
+  FileRegisters.add("json", dtsLM.json)
+  FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+}
+
+class XSTop()(implicit p: Parameters) extends BaseXSSoc()
+{
+  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
+  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
+  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
+
+  override lazy val tlManagers = List(
+    misc.l3_xbar.map(_.asInstanceOf[TLNexusNode]),
+    misc.peripheralXbar.map(_.asInstanceOf[TLNexusNode])
+  ).flatten
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
@@ -228,18 +239,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     }
   }
 
-  class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+  class XSTopImp(wrapper: XSTop) extends LazyRawModuleImp(wrapper)
+    with HasDTSImp[XSTop]
+  {
     soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
       annotate(new ChiselAnnotation {
         def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
       })
     }
-
-    FileRegisters.add("dts", dts)
-    FileRegisters.add("graphml", graphML)
-    FileRegisters.add("json", json)
-    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
     val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))
