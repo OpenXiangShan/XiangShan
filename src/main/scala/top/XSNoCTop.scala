@@ -145,8 +145,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
-    private val hasMbist = tiles.head.hasMbist
-    private val hasSramCtl = tiles.head.hasSramCtl
+    private val hasMbist = p(DFTOptionsKey).EnableMbist
+    private val hasSramCtl = p(DFTOptionsKey).EnableSramCtl
     private val hasDFT = hasMbist || hasSramCtl
     val io = IO(new Bundle {
       val hartId = Input(UInt(p(MaxHartIdBits).W))

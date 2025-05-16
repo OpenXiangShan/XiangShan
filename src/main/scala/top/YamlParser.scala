@@ -23,7 +23,7 @@ import aia.IMSICParams
 import org.chipsalliance.cde.config.Parameters
 import system.SoCParamsKey
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
-import xiangshan.XSTileKey
+import xiangshan.{DFTOptionsKey, XSTileKey}
 import freechips.rocketchip.devices.debug.{DebugAttachParams, ExportDebug}
 import freechips.rocketchip.devices.debug.{DMI, JTAG, CJTAG, APB}
 import freechips.rocketchip.devices.debug.{DebugModuleKey, DebugModuleParams}
@@ -173,12 +173,12 @@ object YamlParser {
     }
     yamlConfig.EnableDFX.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
-        case XSTileKey => up(XSTileKey).map(_.copy(hasMbist = enable))
+        case DFTOptionsKey => up(DFTOptionsKey).copy(EnableMbist = enable)
       })
     }
     yamlConfig.EnableSramCtl.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
-        case XSTileKey => up(XSTileKey).map(_.copy(hasSramCtl = enable))
+        case DFTOptionsKey => up(DFTOptionsKey).copy(EnableSramCtl = enable)
       })
     }
     yamlConfig.EnableCHINS.foreach { enable =>
