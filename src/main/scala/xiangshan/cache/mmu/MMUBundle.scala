@@ -1326,6 +1326,7 @@ class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
+  val wfi = Flipped(new WfiReqBundle)
   val csr = new Bundle {
     val tlb = Input(new TlbCsrBundle)
     val distribute_csr = Flipped(new DistributedCSRIO)

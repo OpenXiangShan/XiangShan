@@ -31,6 +31,7 @@ import freechips.rocketchip.tilelink.TLMasterParameters
 import freechips.rocketchip.tilelink.TLMasterPortParameters
 import org.chipsalliance.cde.config.Parameters
 import utils._
+import xiangshan.WfiReqBundle
 import xiangshan.frontend._
 
 class InsUncacheReq(implicit p: Parameters) extends ICacheBundle {
@@ -51,7 +52,8 @@ class InstrMMIOEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBu
   val mmio_acquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
   val mmio_grant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-  val flush: Bool = Input(Bool())
+  val flush: Bool         = Input(Bool())
+  val wfi:   WfiReqBundle = Flipped(new WfiReqBundle)
 }
 
 // One miss entry deals with one mmio request
@@ -76,6 +78,9 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   io.mmio_grant.ready := false.B
 
+  // we are safe to enter wfi if we have no pending response from L2
+  io.wfi.wfiSafe := state =/= s_refill_resp
+
   private val needFlush = RegInit(false.B)
 
   when(io.flush && (state =/= s_invalid) && (state =/= s_send_resp))(needFlush := true.B)
@@ -94,7 +99,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   when(state === s_refill_req) {
     val address_aligned = req.addr(req.addr.getWidth - 1, log2Ceil(mmioBusBytes))
-    io.mmio_acquire.valid := true.B
+    io.mmio_acquire.valid := !io.wfi.wfiReq // if there is a pending wfi request, we should not send new requests to L2
     io.mmio_acquire.bits := edge.Get(
       fromSource = io.id,
       toAddress = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
@@ -147,6 +152,7 @@ class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
   val req:   DecoupledIO[InsUncacheReq]  = Flipped(DecoupledIO(new InsUncacheReq))
   val resp:  DecoupledIO[InsUncacheResp] = DecoupledIO(new InsUncacheResp)
   val flush: Bool                        = Input(Bool())
+  val wfi:   WfiReqBundle                = Flipped(new WfiReqBundle)
 }
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -195,6 +201,8 @@ class InstrUncacheImp(outer: InstrUncache)
     entry.io.id    := i.U(log2Up(cacheParams.nMMIOs).W)
     entry.io.flush := io.flush
 
+    entry.io.wfi.wfiReq := io.wfi.wfiReq
+
     // entry req
     entry.io.req.valid := (i.U === entry_alloc_idx) && req.valid
     entry.io.req.bits  := req.bits
@@ -220,5 +228,9 @@ class InstrUncacheImp(outer: InstrUncache)
 
   req.ready := req_ready
   resp <> resp_arb.io.out
+
   TLArbiter.lowestFromSeq(edge, mmio_acquire, entries.map(_.io.mmio_acquire))
+
+  // we are safe to enter wfi if all entries have no pending response from L2
+  io.wfi.wfiSafe := entries.map(_.io.wfi.wfiSafe).reduce(_ && _)
 }

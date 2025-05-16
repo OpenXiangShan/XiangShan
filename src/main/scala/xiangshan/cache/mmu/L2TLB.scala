@@ -382,6 +382,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     assert(!flush_latch(i) || waiting_resp(i)) // when sfence_latch wait for mem resp, waiting_resp should be true
   }
 
+  val wfiReq = DelayN(io.wfi.wfiReq, 1)
+
+  // When no left pending response from L2, can be safe to enter wfi
+  io.wfi.wfiSafe := DelayN(wfiReq && !waiting_resp.reduce(_ || _), 1)
+
   val llptw_out = llptw.io.out
   val llptw_mem = llptw.io.mem
   llptw_mem.flush_latch := flush_latch.take(l2tlbParams.llptwsize)
@@ -398,7 +403,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   if (HasBitmapCheck) {
     mem_arb.io.in(3) <> bitmap.get.io.mem.req
   }
-  mem_arb.io.out.ready := mem.a.ready && !flush
+  mem_arb.io.out.ready := mem.a.ready && !flush && !wfiReq
 
   // // assert, should not send mem access at same addr for twice.
   // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
@@ -436,7 +441,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     lgSize     = log2Up(l2tlbParams.blockBytes).U
   )._2
   mem.a.bits := memRead
-  mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.valid := mem_arb.io.out.fire && !flush
   mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
   mem.d.ready := true.B
   // mem -> data buffer
