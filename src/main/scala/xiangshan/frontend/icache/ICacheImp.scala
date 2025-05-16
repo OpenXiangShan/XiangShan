@@ -197,8 +197,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.toIfu.fetchReady := mainPipe.io.req.ready
 
   // send resp
-  io.toIfu.s1Resp <> mainPipe.io.s1Resp
-  io.toIfu.s2Resp <> mainPipe.io.s2Resp
+  io.toIfu.resp <> mainPipe.io.resp
 
   // perf
   io.toIfu.perf    := mainPipe.io.perf

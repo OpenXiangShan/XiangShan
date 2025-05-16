@@ -181,16 +181,7 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
-class ICacheS1RespBundle(implicit p: Parameters) extends ICacheBundle {
-  /* maybeRvcMapMap: each bit indicates whether the corresponding 2B of data may be a Rvc instruction
-   * i.e. if maybeRvcMap(i) === true.B, then data((i+1)*16, i*16) may be a Rvc instruction
-   *                                 i.e. data(i*16+2, i*16) =/= "b11".U
-   * */
-  // s1Resp.maybeRvcMap is valid iff ICache hits
-  val maybeRvcMap: Vec[Valid[UInt]] = Vec(PortNumber, ValidIO(UInt(MaxInstNumPerBlock.W)))
-}
-
-class ICacheS2RespBundle(implicit p: Parameters) extends ICacheBundle {
+class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
   val doubleline:         Bool            = Bool()
   val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
   val data:               UInt            = UInt(blockBits.W)
