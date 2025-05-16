@@ -561,6 +561,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle {
   // flush
   val fencei: Bool = Input(Bool())
   val flush:  Bool = Input(Bool())
+  // wfi
+  val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
 
   // perf
   val perfInfo: ICachePerfInfo = Output(new ICachePerfInfo)
@@ -688,6 +690,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
   missUnit.io.flush  := io.flush
+  missUnit.io.wfi <> io.wfi
   missUnit.io.fetch_req <> mainPipe.io.mshr.req
   missUnit.io.prefetch_req <> prefetcher.io.MSHRReq
   missUnit.io.mem_grant.valid := false.B
