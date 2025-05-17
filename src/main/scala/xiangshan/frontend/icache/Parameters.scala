@@ -83,8 +83,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def ICacheDataSRAMWidth: Int = cacheParams.ICacheDataSRAMWidth
   def partWayNum:          Int = cacheParams.partWayNum
 
-  def ICacheMetaBits:      Int = tagBits // FIXME: unportable: maybe use somemethod to get width
-  def ICacheMetaCodeBits:  Int = 1       // FIXME: unportable: maybe use cacheParams.tagCode.somemethod to get width
+  def ICacheMetaBits:      Int = (new ICacheMetadata).getWidth
+  def ICacheMetaCodeBits:  Int = 1 // FIXME: unportable: maybe use cacheParams.tagCode.somemethod to get width
   def ICacheMetaEntryBits: Int = ICacheMetaBits + ICacheMetaCodeBits
 
   def ICacheDataBits: Int = blockBits / ICacheDataBanks
@@ -95,6 +95,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def ICacheDataEntryBits: Int = ICacheDataBits + ICacheDataCodeBits
   def ICacheBankVisitNum:  Int = 32 * 8 / ICacheDataBits + 1
   def highestIdxBit:       Int = log2Ceil(nSets) - 1
+
+  def MaxInstNumPerBlock: Int = blockBytes / instBytes
 
   require((ICacheDataBanks >= 2) && isPow2(ICacheDataBanks))
   require(ICacheDataSRAMWidth >= ICacheDataEntryBits)

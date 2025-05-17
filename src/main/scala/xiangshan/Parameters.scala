@@ -847,8 +847,9 @@ trait HasXSParameter {
   def l2tlbParams = coreParams.l2tlbParameters
   def NumPerfCounters = coreParams.NumPerfCounters
 
-  def instBytes = if (HasCExtension) 2 else 4
-  def instOffsetBits = log2Ceil(instBytes)
+  def instBytes:      Int = if (HasCExtension) 2 else 4
+  def instBits:       Int = instBytes * 8
+  def instOffsetBits: Int = log2Ceil(instBytes)
 
   def icacheParameters = coreParams.icacheParameters
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())

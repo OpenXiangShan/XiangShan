@@ -41,7 +41,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     def apply(meta: ICacheMetadata, poison: Bool)(implicit p: Parameters): ICacheMetaEntry = {
       val entry = Wire(new ICacheMetaEntry)
       entry.meta := meta
-      entry.code := encodeMetaEccByPort(meta.asUInt, poison)
+      entry.code := encodeMetaEccByPort(meta, poison)
       entry
     }
   }
@@ -66,9 +66,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
   private val writeBank1 = io.write.req.valid && io.write.req.bits.bankIdx
 
   private val writeMetaBits = ICacheMetaEntry(
-    meta = ICacheMetadata(
-      tag = io.write.req.bits.phyTag
-    ),
+    meta = io.write.req.bits.meta,
     poison = io.write.req.bits.poison
   )
 
