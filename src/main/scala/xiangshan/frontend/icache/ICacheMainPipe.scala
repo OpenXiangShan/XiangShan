@@ -27,7 +27,6 @@ import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
-import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqToFetchBundle
 
@@ -221,39 +220,28 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // select data
   private val s1_bankMshrHit = getBankValid(s1_mshrHits, s1_offset)
 
+  // should data hold registers be updated: when mshr update is valid or new request is coming from s0 stage
+  private val s1_bankHoldUpdate = VecInit((0 until ICacheDataBanks).map(i => s1_bankMshrHit(i) || RegNext(s0_fire)))
+  private val s1_portHoldUpdate = VecInit((0 until PortNumber).map(i => s1_mshrHits(i) || RegNext(s0_fire)))
+
   private val s1_dataIsFromMshr = VecInit((0 until ICacheDataBanks).map { i =>
-    DataHoldBypass(
-      s1_bankMshrHit(i),
-      s1_bankMshrHit(i) || RegNext(s0_fire)
-    )
+    DataHoldBypass(s1_bankMshrHit(i), s1_bankHoldUpdate(i))
   })
 
   private val s1_hits = VecInit((0 until PortNumber).map { i =>
-    DataHoldBypass(
-      s1_mshrHits(i) || s1_sramHits(i),
-      s1_mshrHits(i) || RegNext(s0_fire)
-    )
+    DataHoldBypass(s1_mshrHits(i) || s1_sramHits(i), s1_portHoldUpdate(i))
   })
 
   private val s1_datas = VecInit((0 until ICacheDataBanks).map { i =>
-    DataHoldBypass(
-      Mux(s1_bankMshrHit(i), s1_mshrDatas(i), s1_sramDatas(i)),
-      s1_bankMshrHit(i) || RegNext(s0_fire)
-    )
+    DataHoldBypass(Mux(s1_bankMshrHit(i), s1_mshrDatas(i), s1_sramDatas(i)), s1_bankHoldUpdate(i))
   })
 
   private val s1_maybeRvcMap = VecInit((0 until PortNumber).map { i =>
-    DataHoldBypass(
-      Mux(s1_mshrHits(i), s1_mshrMaybeRvcMap, s1_sramMaybeRvcMap(i)),
-      s1_mshrHits(i) || RegNext(s0_fire)
-    )
+    DataHoldBypass(Mux(s1_mshrHits(i), s1_mshrMaybeRvcMap, s1_sramMaybeRvcMap(i)), s1_portHoldUpdate(i))
   })
 
   private val s1_l2Corrupt = VecInit((0 until PortNumber).map { i =>
-    DataHoldBypass(
-      s1_mshrHits(i) && fromMiss.bits.corrupt,
-      s1_mshrHits(i) || RegNext(s0_fire)
-    )
+    DataHoldBypass(s1_mshrHits(i) && fromMiss.bits.corrupt, s1_portHoldUpdate(i))
   })
 
   /* *******************************************************************
@@ -305,11 +293,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     s1_sramHits
   )
 
+  private val s1_corruptPulse = (s1_metaCorrupt zip s1_dataCorrupt).map { case (m, d) =>
+    (m || d) && RegNext(s0_fire)
+  }
+
   // send errors to top
   // TODO: support RERI spec standard interface
   (0 until PortNumber).foreach { i =>
-    io.errors(i).valid              := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
-    io.errors(i).bits.report_to_beu := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
+    io.errors(i).valid              := s1_corruptPulse(i)
+    io.errors(i).bits.report_to_beu := s1_corruptPulse(i)
     io.errors(i).bits.paddr         := s1_pAddr(i).toUInt
     io.errors(i).bits.source        := DontCare
     io.errors(i).bits.source.tag    := s1_metaCorrupt(i)
@@ -320,7 +312,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
   // flush metaArray to prepare for re-fetch
   (0 until PortNumber).foreach { i =>
-    toMetaFlush(i).valid        := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
+    toMetaFlush(i).valid        := s1_corruptPulse(i)
     toMetaFlush(i).bits.vSetIdx := s1_vSetIdx(i)
     // if is meta corrupt, clear all way (since waymask may be unreliable)
     // if is data corrupt, only clear the way that has error
@@ -338,11 +330,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //  assert(!(assert_valid && assert_val))
 
   private val s1_corruptRefetch = VecInit((0 until PortNumber).map { i =>
-    ValidHoldBypass(
-      (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire),
-      s1_mshrHits(i), // clear re-fetch flag when re-fetched from mshr
-      s1_flush
-    )
+    DataHoldBypass(s1_corruptPulse(i), s1_portHoldUpdate(i))
   })
 
   /* *******************************************************************
