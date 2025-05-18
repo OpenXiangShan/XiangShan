@@ -27,10 +27,10 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
-import xiangshan.frontend.BpuFlushInfo
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.ftq.BpuFlushInfo
 
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper

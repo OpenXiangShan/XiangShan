@@ -8,7 +8,8 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
-import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
+import xiangshan.frontend.{PreDecodeInfo}
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr

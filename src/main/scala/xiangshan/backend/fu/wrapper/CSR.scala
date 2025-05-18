@@ -16,7 +16,7 @@ import xiangshan.backend.decode.Imm_Z
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.rob.RobPtr
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.ftq.FtqPtr
 import CSRConst._
 
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
