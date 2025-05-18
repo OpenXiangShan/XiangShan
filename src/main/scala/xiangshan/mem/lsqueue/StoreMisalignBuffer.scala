@@ -23,7 +23,7 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
