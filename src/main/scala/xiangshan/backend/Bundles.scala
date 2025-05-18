@@ -25,6 +25,7 @@ import xiangshan.mem.{VecMissalignedDebugBundle}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
 import utility._
+import xiangshan.frontend.ftq.FtqPtr
 
 object Bundles {
   /**

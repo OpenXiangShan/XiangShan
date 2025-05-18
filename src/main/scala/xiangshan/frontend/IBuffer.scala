@@ -18,6 +18,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
