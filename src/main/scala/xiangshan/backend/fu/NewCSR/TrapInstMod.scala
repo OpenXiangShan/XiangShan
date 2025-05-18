@@ -7,7 +7,7 @@ import utility.{HasCircularQueuePtrHelper, XSError}
 import xiangshan._
 import xiangshan.backend.Bundles.TrapInstInfo
 import xiangshan.backend.decode.Imm_Z
-import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.decode.isa.bitfield.OPCODE5Bit
 
 class FtqInfo(implicit p: Parameters) extends XSBundle {
