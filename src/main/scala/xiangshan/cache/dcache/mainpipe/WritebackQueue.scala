@@ -22,7 +22,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
-import utility.{GatedValidRegNext, XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {

@@ -854,7 +854,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  mmioReq.valid := mmioState === s_req && !LSUOpType.isCbo(uop(deqPtr).fuOpType)
+  mmioReq.valid := mmioState === s_req && !LSUOpType.isCbo(uop(deqPtr).fuOpType) && !io.wfi.wfiReq
   mmioReq.bits := DontCare
   mmioReq.bits.cmd  := MemoryOpConstants.M_XWR
   mmioReq.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
@@ -887,14 +887,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(nc_req) {
       when(ncDoReq) {
-        noPending := false.B
         ncState := nc_req_ack
       }
     }
     is(nc_req_ack) {
       when(ncSlaveAck) {
-        noPending := true.B
-        when(io.uncacheOutstanding && !io.wfi.wfiReq) {
+        when(io.uncacheOutstanding) {
           ncState := nc_idle
         }.otherwise{
           ncState := nc_resp
@@ -913,7 +911,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncSlaveAck := io.uncache.idResp.valid && io.uncache.idResp.bits.nc
   ncSlaveAckMid := io.uncache.idResp.bits.mid
 
-  ncReq.valid := ncState === nc_req
+  ncReq.valid := ncState === nc_req && !io.wfi.wfiReq
   ncReq.bits := DontCare
   ncReq.bits.cmd  := MemoryOpConstants.M_XWR
   ncReq.bits.addr := paddrModule.io.rdata(0)
@@ -935,7 +933,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   mmioReq.ready := io.uncache.req.ready
   ncReq.ready := io.uncache.req.ready && !mmioReq.valid
-  io.uncache.req.valid := (mmioReq.valid || ncReq.valid) && !io.wfi.wfiReq
+  io.uncache.req.valid := mmioReq.valid || ncReq.valid
   io.uncache.req.bits := Mux(mmioReq.valid, mmioReq.bits, ncReq.bits)
 
   // CBO op type check can be delayed for 1 cycle,

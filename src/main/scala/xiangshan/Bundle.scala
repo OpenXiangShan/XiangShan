@@ -464,7 +464,7 @@ class LoadCancelIO(implicit p: Parameters) extends XSBundle {
   val ld2Cancel = Bool()
 }
 
-class WfiReqBundle(implicit p: Parameters) extends XSBundle {
+class WfiReqBundle extends Bundle {
   val wfiReq = Output(Bool())
   val wfiSafe = Input(Bool())
 }

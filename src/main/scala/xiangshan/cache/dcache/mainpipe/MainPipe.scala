@@ -25,7 +25,7 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utils._
 import utility._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey, WfiReqBundle}
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 import xiangshan.mem.prefetch._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 
