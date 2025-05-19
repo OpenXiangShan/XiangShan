@@ -1370,7 +1370,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // the event that nc store to main memory
     val ncmmStoreEvent = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
-    val dataMask = Cat((0 until DCacheWordBytes).reverse.map(i => Fill(DCacheWordBytes, ncReq.bits.mask(i))))
+    val dataMask = Cat((0 until DCacheWordBytes).reverse.map(i => Fill(8, ncReq.bits.mask(i))))
     ncmmStoreEvent.coreid := io.hartId
     ncmmStoreEvent.index := 0.U
     ncmmStoreEvent.valid := ncReq.fire && ncReq.bits.memBackTypeMM
