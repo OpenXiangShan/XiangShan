@@ -1095,25 +1095,32 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
     // don't mark misalign store as committed
+    val ptr = cmtPtrExt(i).value
+    val isCommit = WireInit(false.B)
     when (
-      allocated(cmtPtrExt(i).value) &&
-      isNotAfter(uop(cmtPtrExt(i).value).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
-      !needCancel(cmtPtrExt(i).value) &&
-      (!waitStoreS2(cmtPtrExt(i).value) || isVec(cmtPtrExt(i).value))) {
+      allocated(ptr) &&
+      isNotAfter(uop(ptr).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
+      !needCancel(ptr) &&
+      (!waitStoreS2(ptr) || isVec(ptr))) {
       if (i == 0){
         // TODO: fixme for vector mmio
         when ((mmioState === s_idle) || (mmioState === s_wait && scommit > 0.U)){
-          when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
-            committed(cmtPtrExt(0).value) := true.B
+          when ((isVec(ptr) && vecMbCommit(ptr)) || !isVec(ptr)) {
+            isCommit := true.B
+            committed(ptr) := true.B
             commitVec(0) := true.B
           }
         }
       } else {
-        when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
-          committed(cmtPtrExt(i).value) := commitVec(i - 1) || committed(cmtPtrExt(i).value)
+        when ((isVec(ptr) && vecMbCommit(ptr)) || !isVec(ptr)) {
+          isCommit := commitVec(i - 1) || committed(ptr)
+          committed(ptr) := commitVec(i - 1) || committed(ptr)
           commitVec(i) := commitVec(i - 1)
         }
       }
+    }
+    when(isCommit && nc(ptr) && hasException(ptr)) {
+      completed(ptr) := true.B
     }
   }
 
@@ -1436,13 +1443,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // invalidate sq term using robIdx
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := (uop(i).robIdx.needFlush(io.brqRedirect) & !isVec(i) || isAfter(uop(i).robIdx, io.brqRedirect.bits.robIdx) && io.brqRedirect.valid && isVec(i)) && allocated(i) && !committed(i)
-    // for nc exception: committed -> no uncache request -> completed when need cancel
-    val ncFastComplete = uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && nc(i) && committed(i)
     when (needCancel(i)) {
       allocated(i) := false.B
       completed(i) := false.B
-    }.elsewhen(ncFastComplete) {
-      completed(i) := true.B
     }
   }
 
