@@ -323,14 +323,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
     //syscnt io input descrip
     val ref_reset_sync = withClockAndReset(io.rtc_clock, io.reset) { ResetGen() }
-    misc.syscnt.module.io.update_en := false.B
-    misc.syscnt.module.io.update_value := 0.U
-    misc.syscnt.module.io.stop_en := false.B
-    misc.syscnt.module.clock := io.rtc_clock //syscnt clock
-    misc.syscnt.module.reset := ref_reset_sync.asAsyncReset
+
+    misc.module.scntIO.update_en := false.B
+    misc.module.scntIO.update_value := 0.U
+    misc.module.scntIO.stop_en := false.B
+
+    misc.module.rtc_clock := io.rtc_clock //syscnt clock
+    misc.module.rtc_reset := ref_reset_sync.asAsyncReset
     //timevld instance
-    misc.module.ClintVldGen.clock := io.rtc_clock
-    misc.module.ClintVldGen.reset := ref_reset_sync
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U

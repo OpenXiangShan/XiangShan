@@ -241,7 +241,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     if (!SeperateTLBus) { // from CHI
       msip := clint.get.head(0)
       mtip := clint.get.head(1)
-    } else { // from (TL & async)
+    } else if (SeperateTLBus && EnableSeperateTLAsync){ // from (TL & async)
       msip := asyncClint.get.intnode.out.head._1(0)
       mtip := asyncClint.get.intnode.out.head._1(1)
     }

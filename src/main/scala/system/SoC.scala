@@ -549,16 +549,16 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(new debugModule.DebugModuleIO)
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
-    val rtc_clock = IO(Input(Bool()))
+    val rtc_clock = IO(Input(Clock()))
+    val rtc_reset = IO(Input(Reset()))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
     val clintTime = IO(Output(ValidIO(UInt(64.W))))
-    val scnt = IO(new Bundle {
+    val scntIO = IO(new Bundle {
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
       val stop_en = Input(Bool())
-//      val time = Output(UInt(timeWidth.W))
       val time_freq = Output(UInt(3.W)) // 0: 1GHz,1:500MHz,2:250MHz,3:125MHz,4:62.5MHz,..
     })
     debugModule.module.io <> debug_module_io
@@ -590,17 +590,23 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     //timevldgen instant to generate timestamp valid
     val ClintVldGen = Module(new TimeVldGen())
     ClintVldGen.io.i_time := syscnt.module.io.time
+    ClintVldGen.clock := rtc_clock
+    ClintVldGen.reset := rtc_reset
     // timer instance
     val time_async = Module(new TimeAsync())
     time_async.io.i_time <> ClintVldGen.io.o_time
     clintTime := time_async.io.o_time //syscnt->timevldgen ->timeasync
 
     timer.module.io.time <> ClintVldGen.io.o_time
+    timer.module.io.hartId := 0.U
+
     // instance syscnt
-    syscnt.module.io.update_en := scnt.update_en
-    syscnt.module.io.update_value := scnt.update_value
-    syscnt.module.io.stop_en := scnt.stop_en
-    scnt.time_freq := syscnt.module.io.time_freq
+    syscnt.module.clock := rtc_clock
+    syscnt.module.reset := rtc_reset
+    syscnt.module.io.update_en := scntIO.update_en
+    syscnt.module.io.update_value := scntIO.update_value
+    syscnt.module.io.stop_en := scntIO.stop_en
+    scntIO.time_freq := syscnt.module.io.time_freq
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 

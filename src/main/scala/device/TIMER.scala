@@ -117,7 +117,6 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
 
     // filter out accesses not belonging to this hart
     when(!isCorrectAccess) {
-      d.bits.opcode := TLMessages.AccessAckData
       d.bits.denied := true.B
     }
 
