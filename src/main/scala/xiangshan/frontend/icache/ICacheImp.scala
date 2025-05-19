@@ -127,7 +127,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     metaArray.io.read <> prefetcher.io.metaRead
   }
 
-  prefetcher.io.flush        := io.flush
+  prefetcher.io.flush        := io.fromFtq.redirectFlush
   prefetcher.io.csrPfEnable  := io.csrPfEnable
   prefetcher.io.eccEnable    := eccEnable
   prefetcher.io.missResp     := missUnit.io.resp
@@ -162,14 +162,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
-  missUnit.io.flush  := io.flush
+  missUnit.io.flush  := io.fromFtq.redirectFlush
   missUnit.io.fetchReq <> mainPipe.io.missReq
   missUnit.io.prefetchReq <> prefetcher.io.missReq
   missUnit.io.memGrant.valid := false.B
   missUnit.io.memGrant.bits  := DontCare
   missUnit.io.memGrant <> bus.d
 
-  mainPipe.io.flush     := io.flush
+  mainPipe.io.flush     := io.fromFtq.redirectFlush
   mainPipe.io.respStall := io.fromIfu.stall
   mainPipe.io.eccEnable := eccEnable
   mainPipe.io.hartId    := io.hartId
@@ -177,7 +177,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.req <> io.fromFtq.fetchReq
   mainPipe.io.wayLookupRead <> wayLookup.io.read
 
-  wayLookup.io.flush := io.flush
+  wayLookup.io.flush := io.fromFtq.redirectFlush
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
   wayLookup.io.update := missUnit.io.resp
 

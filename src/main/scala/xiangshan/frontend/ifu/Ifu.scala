@@ -58,7 +58,6 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.PmpCheckBundle
-import xiangshan.frontend.mmioCommitRead
 
 class Ifu(implicit p: Parameters) extends IfuModule
     with HasICacheParameters
@@ -73,8 +72,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
     // Ftq: request / write back
     val fromFtq: FtqToIfuIO = Flipped(new FtqToIfuIO)
     val toFtq:   IfuToFtqIO = new IfuToFtqIO
-    // ftq: mmio commit read
-    val mmioCommitRead: mmioCommitRead = new mmioCommitRead
 
     // ICache: response / stall
     val fromICache: ICacheToIfuIO = Flipped(new ICacheToIfuIO)
@@ -135,7 +132,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val itlbMissBubble   = io.fromICache.topdown.itlbMiss
 
   // only driven by clock, not valid-ready
-  topdownStages(0) := fromFtq.req.bits.topdown_info
+  topdownStages(0) := fromFtq.req.bits.topdownInfo
   for (i <- 1 until numOfStage) {
     topdownStages(i) := topdownStages(i - 1)
   }
@@ -603,7 +600,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val isFirstInstr = RegInit(true.B)
 
   /* Determine whether the MMIO instruction is executable based on the previous prediction block */
-  io.mmioCommitRead.mmioFtqPtr := RegNext(s3_ftqReq.ftqIdx - 1.U)
+  io.toFtq.mmioCommitRead.mmioFtqPtr := RegNext(s3_ftqReq.ftqIdx - 1.U)
 
   // do mmio fetch only when pmp/pbmt shows it is a un-cacheable address and no exception occurs
   private val s3_reqIsMmio =
@@ -671,7 +668,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       when(isFirstInstr) {
         mmioState := MmioFsmState.SendReq
       }.otherwise {
-        mmioState := Mux(io.mmioCommitRead.mmioLastCommit, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
+        mmioState := Mux(io.toFtq.mmioCommitRead.mmioLastCommit, MmioFsmState.SendReq, MmioFsmState.WaitLastCommit)
       }
     }
 

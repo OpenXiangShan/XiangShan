@@ -4,7 +4,8 @@
 //
 // XiangShan is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at: https://license.coscl.org.cn/MulanPSL2
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
@@ -46,28 +47,14 @@ class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val predStage = UInt(2.W)
 }
 
-class FtqRfComponents(implicit p: Parameters) extends FtqBundle with BPUUtils {
+class FtqEntry(implicit p: Parameters) extends FtqBundle with BPUUtils {
   val startAddr     = PrunedAddr(VAddrBits)
   val nextLineAddr  = PrunedAddr(VAddrBits)
-  val isNextMask    = Vec(PredictWidth, Bool())
   val fallThruError = Bool()
-  // val carry = Bool()
-  def getPc(offset: UInt): UInt = {
-    def getHigher(pc: PrunedAddr): UInt = pc(VAddrBits - 1, log2Ceil(PredictWidth) + instOffsetBits + 1)
-    def getOffset(pc: PrunedAddr): UInt = pc(log2Ceil(PredictWidth) + instOffsetBits, instOffsetBits)
-    Cat(
-      getHigher(Mux(isNextMask(offset) && startAddr(log2Ceil(PredictWidth) + instOffsetBits), nextLineAddr, startAddr)),
-      getOffset(startAddr) + offset,
-      0.U(instOffsetBits.W)
-    )
-  }
-  def fromBranchPrediction(resp: BranchPredictionBundle): Unit = {
-    def carryPos(addr: UInt) = addr(instOffsetBits + log2Ceil(PredictWidth) + 1)
-    this.startAddr    := resp.pc
-    this.nextLineAddr := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
-    this.isNextMask := VecInit((0 until PredictWidth).map(i =>
-      (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool
-    ))
+
+  def :=(resp: BranchPredictionBundle): Unit = {
+    this.startAddr     := resp.pc
+    this.nextLineAddr  := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
     this.fallThruError := resp.fallThruError
   }
   override def toPrintable: Printable =
@@ -157,6 +144,15 @@ class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQue
   // a packet from bpu s3 can reach f1 at most
   val s2 = Valid(new FtqPtr)
   val s3 = Valid(new FtqPtr)
+
+  def stage(idx: Int): Valid[FtqPtr] = {
+    require(idx >= 2 && idx <= 3)
+    idx match {
+      case 2 => s2
+      case 3 => s3
+    }
+  }
+
   def shouldFlushBy(src: Valid[FtqPtr], idx_to_flush: FtqPtr) =
     src.valid && !isAfter(src.bits, idx_to_flush)
   def shouldFlushByStage2(idx: FtqPtr) = shouldFlushBy(s2, idx)
@@ -167,7 +163,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   // write to backend pc mem
   val pc_mem_wen   = Output(Bool())
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
-  val pc_mem_wdata = Output(new FtqRfComponents)
+  val pc_mem_wdata = Output(new FtqEntry)
   // newest target
   val newest_entry_en     = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))

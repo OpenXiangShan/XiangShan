@@ -28,13 +28,13 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.{CoreDispatchTopDownIO}
+import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.dispatch.NewDispatch
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.ftq.{FtqPtr, FtqRead, FtqRfComponents}
+import xiangshan.frontend.ftq.{FtqPtr, FtqRead, FtqEntry}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
@@ -94,7 +94,7 @@ class CtrlBlockImp(
   val rename = Module(new Rename)
   val redirectGen = Module(new RedirectGenerator)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(new FtqRfComponents, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  private val pcMem = Module(new SyncDataModuleTemplate(new FtqEntry, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 

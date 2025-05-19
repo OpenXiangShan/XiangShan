@@ -19,9 +19,9 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
+import ftq.FtqEntry
 import ftq.FtqPtr
 import ftq.FtqRedirectSramEntry
-import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils.NamedUInt
@@ -48,24 +48,13 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   val ftqIdx    = new FtqPtr
   val ftqOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 
-  val topdown_info = new FrontendTopDownBundle
+  val topdownInfo = new FrontendTopDownBundle
 
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
 
-  def fromFtqPcBundle(b: FtqRfComponents) = {
+  def :=(b: FtqEntry): Unit = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
-    // when (b.fallThruError) {
-    //   val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
-    //   val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
-    //   this.nextStartAddr :=
-    //     Cat(nextBlockHigher,
-    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
-    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
-    //       0.U(instOffsetBits.W)
-    //     )
-    // }
-    this
   }
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startAddr.toUInt)} [next] ${Hexadecimal(nextlineStart.toUInt)}" +
@@ -78,7 +67,7 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
   val nextlineStart  = PrunedAddr(VAddrBits)
   val ftqIdx         = new FtqPtr
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
-  def fromFtqPcBundle(b: FtqRfComponents) = {
+  def fromFtqPcBundle(b: FtqEntry) = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
     this
@@ -99,9 +88,10 @@ class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICachePa
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
   // NOTE: req.bits must be prepare in T cycle
   // while req.valid is set true in T + 1 cycle
-  val fetchReq:     DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
-  val prefetchReq:  DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
-  val flushFromBpu: BpuFlushInfo                     = new BpuFlushInfo
+  val fetchReq:      DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
+  val prefetchReq:   DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
+  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
+  val redirectFlush: Bool                             = Output(Bool())
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
@@ -131,7 +121,8 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val pdWb: Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
+  val pdWb:           Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
+  val mmioCommitRead: MmioCommitRead                  = new MmioCommitRead
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
@@ -146,7 +137,7 @@ class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
   val instrRange = Vec(PredictWidth, Bool())
 }
 
-class mmioCommitRead(implicit p: Parameters) extends XSBundle {
+class MmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioFtqPtr     = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
 }
@@ -793,6 +784,15 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val last_stage_ftb_entry = new FTBEntry
 
   val topdown_info = new FrontendTopDownBundle
+
+  def stage(idx: Int): BranchPredictionBundle = {
+    require(idx >= 1 && idx <= 3)
+    idx match {
+      case 1 => s1
+      case 2 => s2
+      case 3 => s3
+    }
+  }
 
   def selectedResp = {
     val res =
