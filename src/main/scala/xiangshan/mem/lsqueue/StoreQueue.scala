@@ -285,6 +285,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
   val cmtPtr = cmtPtrExt(0).value
+  val rdPtr = rdataPtrExt(0).value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   val allowEnqueue = validCount <= (StoreQueueSize - LSQStEnqWidth).U
@@ -314,10 +315,23 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   assert(EnsbufferWidth <= 2)
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
-  rdataPtrExtNext := rdataPtrExt.map(i => i +
-    PopCount(dataBuffer.io.enq.map(x=> x.fire && x.bits.sqNeedDeq)) +
-    PopCount(ncReadNextTrigger || io.mmioStout.fire || io.vecmmioStout.fire)
-  )
+  val sqReadCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
+  val readyReadGoVec = WireInit(VecInit((0 until EnsbufferWidth).map(i =>
+    if(i == 0) {
+      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) ||
+      io.mmioStout.fire || io.vecmmioStout.fire
+    } else {
+      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
+    }
+  )))
+  for (i <- 0 until EnsbufferWidth) {
+    when(readyReadGoVec.take(i + 1).reduce(_ && _)) {
+      sqReadCnt := (i + 1).U // increase one by one
+    }
+  }
+  rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
   // deqPtrExtNext traces which inst is about to leave store queue
   val deqPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
@@ -876,7 +890,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rptr0 = rdataPtrExt(0).value
   switch(ncState){
     is(nc_idle) {
-      when(nc(rptr0) && allocated(rptr0) && committed(rptr0) && !mmio(rptr0) && !isVec(rptr0)) {
+      when(
+        nc(rptr0) && allocated(rptr0) && !completed(rptr0) && committed(rptr0) &&
+        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0) 
+      ) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
       }
@@ -1078,25 +1095,32 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
     // don't mark misalign store as committed
+    val ptr = cmtPtrExt(i).value
+    val isCommit = WireInit(false.B)
     when (
-      allocated(cmtPtrExt(i).value) &&
-      isNotAfter(uop(cmtPtrExt(i).value).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
-      !needCancel(cmtPtrExt(i).value) &&
-      (!waitStoreS2(cmtPtrExt(i).value) || isVec(cmtPtrExt(i).value))) {
+      allocated(ptr) &&
+      isNotAfter(uop(ptr).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
+      !needCancel(ptr) &&
+      (!waitStoreS2(ptr) || isVec(ptr))) {
       if (i == 0){
         // TODO: fixme for vector mmio
         when ((mmioState === s_idle) || (mmioState === s_wait && scommit > 0.U)){
-          when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
-            committed(cmtPtrExt(0).value) := true.B
+          when ((isVec(ptr) && vecMbCommit(ptr)) || !isVec(ptr)) {
+            isCommit := true.B
+            committed(ptr) := true.B
             commitVec(0) := true.B
           }
         }
       } else {
-        when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
-          committed(cmtPtrExt(i).value) := commitVec(i - 1) || committed(cmtPtrExt(i).value)
+        when ((isVec(ptr) && vecMbCommit(ptr)) || !isVec(ptr)) {
+          isCommit := commitVec(i - 1) || committed(ptr)
+          committed(ptr) := commitVec(i - 1) || committed(ptr)
           commitVec(i) := commitVec(i - 1)
         }
       }
+    }
+    when(isCommit && nc(ptr) && hasException(ptr)) {
+      completed(ptr) := true.B
     }
   }
 
