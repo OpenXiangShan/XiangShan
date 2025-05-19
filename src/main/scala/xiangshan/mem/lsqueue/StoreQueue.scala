@@ -154,6 +154,10 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
 
 }
 
+class GenerateInfoFromSBuffer extends Bundle{
+  val diffStoreEventCount = UInt(64.W)
+}
+
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -196,6 +200,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
+    val generateFromSBuffer = Input(new GenerateInfoFromSBuffer)
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -1372,7 +1377,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val ncmmStoreEvent = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
     val dataMask = Cat((0 until DCacheWordBytes).reverse.map(i => Fill(8, ncReq.bits.mask(i))))
     ncmmStoreEvent.coreid := io.hartId
-    ncmmStoreEvent.index := 0.U
+    ncmmStoreEvent.index := io.generateFromSBuffer.diffStoreEventCount
     ncmmStoreEvent.valid := ncReq.fire && ncReq.bits.memBackTypeMM
     ncmmStoreEvent.addr := Cat(ncReq.bits.addr(PAddrBits-1, DCacheWordOffset), 0.U(DCacheWordOffset.W)) // aligned to 8 bytes
     ncmmStoreEvent.data := ncReq.bits.data & dataMask // data align

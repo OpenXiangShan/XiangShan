@@ -204,6 +204,8 @@ class Sbuffer(implicit p: Parameters)
     val store_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq)) // to dcache
     val memSetPattenDetected = Input(Bool())
     val force_write = Input(Bool())
+
+    val generateToSQ = Output(new GenerateInfoFromSBuffer)
   })
 
   val dataModule = Module(new SbufferData)
@@ -902,6 +904,8 @@ class Sbuffer(implicit p: Parameters)
     // To align with 'nemu', we need:
     //  For 'unit-store' and 'whole' vector store instr, we re-split here,
     //  and for the res, we do nothing.
+    var diffStoreEventCount: Int = 0
+    io.generateToSQ.diffStoreEventCount := diffStoreEventCount.U
     for (i <- 0 until EnsbufferWidth) {
       io.vecDifftestInfo(i).ready := io.in(i).ready
 
@@ -936,6 +940,7 @@ class Sbuffer(implicit p: Parameters)
 
       // A common difftest interface for scalar and vector instr
       val difftestCommon = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
+      diffStoreEventCount += 1
       when (isVSLine) {
         val splitMask         = UIntSlice(rawMask, EEB - 1.U, 0.U)(7,0)  // Byte
         val splitData         = UIntSlice(rawData, EEWBits - 1.U, 0.U)(63,0) // Double word
@@ -973,6 +978,7 @@ class Sbuffer(implicit p: Parameters)
 
       for (index <- 0 until WlineMaxNumber) {
         val difftest = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
+        diffStoreEventCount += 1
 
         val storeCommit = io.in(i).fire && io.in(i).bits.vecValid
         val blockAddr = get_block_addr(io.in(i).bits.addr)
@@ -994,6 +1000,7 @@ class Sbuffer(implicit p: Parameters)
       // Only the interface used by the 'unit-store' and 'whole' vector store instr
       for (index <- 1 until VecMemFLOWMaxNumber) {
         val difftest = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
+        diffStoreEventCount += 1
 
         // I've already done something process with 'mask' outside:
         //  Different cases of 'vm' have been considered:
@@ -1023,6 +1030,7 @@ class Sbuffer(implicit p: Parameters)
         }
       }
     }
+    println("SBuffer: diffStoreEventCount = " + diffStoreEventCount)
   }
 
   val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
