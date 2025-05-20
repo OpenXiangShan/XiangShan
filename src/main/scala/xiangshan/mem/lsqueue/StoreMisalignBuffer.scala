@@ -214,6 +214,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   // debug info
   val globalMMIO = RegInit(false.B)
   val globalNC   = RegInit(false.B)
+  val globalMemBackTypeMM = RegInit(false.B)
 
   val hasException = io.splitStoreResp.bits.vecActive && !io.splitStoreResp.bits.need_rep &&
     ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR || TriggerAction.isDmode(io.splitStoreResp.bits.uop.trigger)
@@ -264,6 +265,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
           globalUncache := isUncache
           globalMMIO := io.splitStoreResp.bits.mmio
           globalNC   := io.splitStoreResp.bits.nc
+          globalMemBackTypeMM := io.splitStoreResp.bits.memBackTypeMM
         } .elsewhen(io.splitStoreResp.bits.need_rep || (unSentStores & (~clearOh).asUInt).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
@@ -295,6 +297,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
           globalMMIO := false.B
           globalNC   := false.B
+          globalMemBackTypeMM := false.B
         }
 
       }.otherwise {
@@ -311,6 +314,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
           globalMMIO := false.B
           globalNC   := false.B
+          globalMemBackTypeMM := false.B
         } .elsewhen(io.writeBack.fire && isCrossPage) {
           bufferState := s_block
         } .otherwise {
@@ -334,6 +338,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
         globalMMIO := false.B
         globalNC   := false.B
+        globalMemBackTypeMM := false.B
       }
     }
   }
@@ -602,7 +607,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.data := DontCare
   io.writeBack.bits.isFromLoadUnit := DontCare
   io.writeBack.bits.debug.isMMIO := globalMMIO
-  io.writeBack.bits.debug.isNC := globalNC
+  io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
@@ -654,6 +659,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
     globalMMIO := false.B
     globalNC   := false.B
+    globalMemBackTypeMM := false.B
   }
 
   // NOTE: spectial case (unaligned store cross page, page fault happens in next page)

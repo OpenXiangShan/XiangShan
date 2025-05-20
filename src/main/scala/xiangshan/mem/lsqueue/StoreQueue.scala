@@ -154,6 +154,10 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
 
 }
 
+class GenerateInfoFromSBuffer extends Bundle{
+  val diffStoreEventCount = UInt(64.W)
+}
+
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -196,6 +200,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
+    val generateFromSBuffer = Input(new GenerateInfoFromSBuffer)
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -1025,7 +1030,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.isFromLoadUnit := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
-  io.mmioStout.bits.debug.isNC := false.B
+  io.mmioStout.bits.debug.isNCIO := false.B
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.debug.vaddr := DontCare
@@ -1042,7 +1047,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.cboZeroStout.bits.data            := DontCare
   io.cboZeroStout.bits.isFromLoadUnit  := DontCare
   io.cboZeroStout.bits.debug.isMMIO    := false.B
-  io.cboZeroStout.bits.debug.isNC      := false.B
+  io.cboZeroStout.bits.debug.isNCIO      := false.B
   io.cboZeroStout.bits.debug.paddr     := DontCare
   io.cboZeroStout.bits.debug.isPerfCnt := false.B
   io.cboZeroStout.bits.debug.vaddr     := DontCare
@@ -1068,7 +1073,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.vecmmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.vecmmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.vecmmioStout.bits.debug.isMMIO := true.B
-  io.vecmmioStout.bits.debug.isNC   := false.B
+  io.vecmmioStout.bits.debug.isNCIO   := false.B
   io.vecmmioStout.bits.debug.paddr := DontCare
   io.vecmmioStout.bits.debug.isPerfCnt := false.B
   io.vecmmioStout.bits.debug.vaddr := DontCare
@@ -1391,6 +1396,18 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     cmoInvalEvent.coreid := io.hartId
     cmoInvalEvent.valid  := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
     cmoInvalEvent.addr   := cboMmioAddr
+
+    // the event that nc store to main memory
+    val ncmmStoreEvent = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
+    val dataMask = Cat((0 until DCacheWordBytes).reverse.map(i => Fill(8, ncReq.bits.mask(i))))
+    ncmmStoreEvent.coreid := io.hartId
+    ncmmStoreEvent.index := io.generateFromSBuffer.diffStoreEventCount
+    ncmmStoreEvent.valid := ncReq.fire && ncReq.bits.memBackTypeMM
+    ncmmStoreEvent.addr := Cat(ncReq.bits.addr(PAddrBits-1, DCacheWordOffset), 0.U(DCacheWordOffset.W)) // aligned to 8 bytes
+    ncmmStoreEvent.data := ncReq.bits.data & dataMask // data align
+    ncmmStoreEvent.mask := ncReq.bits.mask
+    ncmmStoreEvent.pc := uop(rptr0).pc
+    ncmmStoreEvent.robidx := uop(rptr0).robIdx.value
   }
 
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })

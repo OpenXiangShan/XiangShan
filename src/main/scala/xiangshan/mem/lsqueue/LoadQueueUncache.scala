@@ -217,7 +217,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioOut.bits.uop.exceptionVec(hardwareError) := nderr
     io.mmioOut.bits.data := uncacheData
     io.mmioOut.bits.debug.isMMIO := true.B
-    io.mmioOut.bits.debug.isNC := false.B
+    io.mmioOut.bits.debug.isNCIO := false.B
     io.mmioOut.bits.debug.paddr := req.paddr
     io.mmioOut.bits.debug.vaddr := req.vaddr
     io.mmioRawData.lqData := uncacheData
