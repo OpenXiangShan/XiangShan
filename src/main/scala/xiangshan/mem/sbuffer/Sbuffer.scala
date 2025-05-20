@@ -882,6 +882,8 @@ class Sbuffer(implicit p: Parameters)
   for (i <- 0 until EnsbufferWidth) {
     io.vecDifftestInfo(i) := DontCare
   }
+
+  io.generateToSQ.diffStoreEventCount := 0.U // initializtion
   if (env.EnableDifftest) {
     val VecMemFLOWMaxNumber = 16
     val WlineMaxNumber = blockWords
