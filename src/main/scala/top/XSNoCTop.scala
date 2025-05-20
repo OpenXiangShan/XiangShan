@@ -44,9 +44,8 @@ import difftest.util.Profile
 abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper)
 {
   def socParams = wrapper.asInstanceOf[HasSoCParameter]
-  def soc = socParams.soc
 
-  soc.XSTopPrefix.foreach { prefix =>
+  socParams.soc.XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(new ChiselAnnotation {
       def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
@@ -61,14 +60,7 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
   private val hasDFT = hasMbist || hasSramCtl
 
   val io = IO(new Bundle {
-    val hartId = Input(UInt(p(MaxHartIdBits).W))
-    val riscv_halt = Output(Bool())
-    val riscv_critical_error = Output(Bool())
-    val hartResetReq = Input(Bool())
-    val hartIsInReset = Output(Bool())
-    val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
     val chi = new PortIO
-    val nodeID = Input(UInt(soc.NodeIDWidthList(socParams.issue).W))
     val clintTime = Input(ValidIO(UInt(64.W)))
     val traceCoreInterface = new Bundle {
       val fromEncoder = Input(new Bundle {
@@ -199,9 +191,7 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
   }
 }
 
-class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
-{
-  override lazy val desiredName: String = "XSTop"
+trait HasXSTile { this: BaseXSSoc =>
 
   require(enableCHI)
 
@@ -230,6 +220,45 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
+
+  // reset nodes
+  val core_rst_node = BundleBridgeSource(() => Reset())
+  core_with_l2.tile.core_reset_sink := core_rst_node
+}
+
+trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =>
+  def core_with_l2 = wrapper.asInstanceOf[L].core_with_l2
+  def clint = wrapper.asInstanceOf[L].clint
+  def plic = wrapper.asInstanceOf[L].plic
+  def nmi = wrapper.asInstanceOf[L].nmi
+  def debug = wrapper.asInstanceOf[L].debug
+
+  val tileio = IO(new Bundle {
+    val hartId = Input(UInt(p(MaxHartIdBits).W))
+    val riscv_halt = Output(Bool())
+    val riscv_critical_error = Output(Bool())
+    val hartResetReq = Input(Bool())
+    val hartIsInReset = Output(Bool())
+    val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
+    val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
+  }).suggestName("tileio")
+
+  core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
+  core_with_l2.module.soc_reset := soc_reset
+
+  tileio.riscv_halt := core_with_l2.module.io.cpu_halt
+  tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
+  core_with_l2.module.io.hartResetReq := tileio.hartResetReq
+  tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
+  core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
+  core_with_l2.module.io.hartId := tileio.hartId
+  core_with_l2.module.io.nodeID.get := tileio.nodeID
+}
+
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
+  with HasXSTile
+{
+  override lazy val desiredName: String = "XSTop"
 
   // asynchronous bridge sink node
   val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
@@ -265,12 +294,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 
-  // reset nodes
-  val core_rst_node = BundleBridgeSource(() => Reset())
-  core_with_l2.tile.core_reset_sink := core_rst_node
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
     with HasAsyncClockImp
+    with HasXSTileImp[XSNoCTop]
     with HasCoreLowPowerImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
@@ -310,15 +337,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     /* CPU Low Power State */
     core_with_l2.module.clock := buildLowPower(clock, cpuReset_sync)
     core_with_l2.module.reset := cpuReset.asAsyncReset
-    core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
-    core_with_l2.module.soc_reset := soc_reset
-    core_with_l2.module.io.hartId := io.hartId
-    core_with_l2.module.io.nodeID.get := io.nodeID
-    io.riscv_halt := core_with_l2.module.io.cpu_halt
-    io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
-    core_with_l2.module.io.hartResetReq := io.hartResetReq
-    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
-    core_with_l2.module.io.reset_vector := io.riscv_rst_vec
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
     traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
