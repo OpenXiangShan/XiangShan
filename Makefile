@@ -216,9 +216,10 @@ version:
 jar:
 	mill -i xiangshan.assembly
 
-$(JAR):
+$(JAR): FORCE
+	mill -i xiangshan.test.assembly
 	@mkdir -p $(@D); \
-	JAR_REF=$(shell mill -i show xiangshan.test.assembly); \
+	JAR_REF=$(shell mill -i show xiangshan.test.assembly 2> /dev/null); \
 	[ ! -z $${JAR_REF} ] && echo $${JAR_REF} | sed 's/"//g' | awk -F: '{print $$4}' \
 		| xargs -I{} cp {} $@
 test-jar: $(call docker-deps,$(JAR))
@@ -325,4 +326,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog emu clean help init bump bsp $(REF_SO)
