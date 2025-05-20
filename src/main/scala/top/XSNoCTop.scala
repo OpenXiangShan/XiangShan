@@ -274,11 +274,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.l3Miss := false.B
 }
 
-class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
-  with HasXSTile
-{
-  override lazy val desiredName: String = "XSTop"
-
+trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
   // asynchronous bridge sink node
   val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
     LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
@@ -312,11 +308,30 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   tl.foreach(_ := tlXbar.get)
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
+}
 
+trait HasSeperatedTLBusImpOpt[+L <: HasSeperatedTLBusOpt] {
+  this: BaseXSSocImp with HasAsyncClockImp =>
+
+  def tlAsyncSinkOpt = wrapper.asInstanceOf[L].tlAsyncSinkOpt
+
+  // Seperate DebugModule TL Async Queue Sink
+  if (socParams.SeperateTLBus && socParams.EnableSeperateTLAsync) {
+    tlAsyncSinkOpt.get.module.clock := soc_clock
+    tlAsyncSinkOpt.get.module.reset := soc_reset_sync
+  }
+}
+
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
+  with HasXSTile
+  with HasSeperatedTLBusOpt
+{
+  override lazy val desiredName: String = "XSTop"
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
     with HasAsyncClockImp
     with HasXSTileImp[XSNoCTop]
+    with HasSeperatedTLBusImpOpt[XSNoCTop]
     with HasCoreLowPowerImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
@@ -376,12 +391,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
         }
       case None =>
         io.chi <> core_with_l2.module.io.chi
-    }
-
-    // Seperate DebugModule TL Async Queue Sink
-    if (SeperateTLBus && EnableSeperateTLAsync) {
-      tlAsyncSinkOpt.get.module.clock := soc_clock
-      tlAsyncSinkOpt.get.module.reset := soc_reset_sync
     }
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.msiio.vld_req
