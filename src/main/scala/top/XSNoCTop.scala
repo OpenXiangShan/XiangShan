@@ -255,11 +255,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.nodeID.get := tileio.nodeID
 }
 
-class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
-  with HasXSTile
-{
-  override lazy val desiredName: String = "XSTop"
-
+trait HasSeperatedTLBus { this: BaseXSSoc with HasXSTile =>
   // asynchronous bridge sink node
   val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
     LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
@@ -293,7 +289,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   tl.foreach(_ := tlXbar.get)
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
+}
 
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
+  with HasXSTile
+  with HasSeperatedTLBus
+{
+  override lazy val desiredName: String = "XSTop"
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
     with HasAsyncClockImp
