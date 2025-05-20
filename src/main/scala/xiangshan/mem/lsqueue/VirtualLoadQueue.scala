@@ -44,7 +44,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3
-    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
+    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
     // global
@@ -246,11 +246,11 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
-    val need_rep = io.ldin(i).bits.rep_info.need_rep
+    val need_rep = io.ldin(i).bits.needReplay
     val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
-      when (!need_rep && need_valid && !io.ldin(i).bits.isvec) {
+      when (!need_rep && need_valid && !io.ldin(i).bits.isVector) {
         committed(loadWbIndex) := true.B
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
@@ -258,16 +258,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       }
     }
     XSInfo(io.ldin(i).valid && !need_rep && need_valid,
-      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
+      "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x mmio %x isVector %x\n",
       io.ldin(i).bits.uop.lqIdx.asUInt,
       io.ldin(i).bits.uop.pc,
       io.ldin(i).bits.vaddr,
       io.ldin(i).bits.paddr,
       io.ldin(i).bits.mask,
-      io.ldin(i).bits.forwardData.asUInt,
-      io.ldin(i).bits.forwardMask.asUInt,
       io.ldin(i).bits.mmio,
-      io.ldin(i).bits.isvec
+      io.ldin(i).bits.isVector
     )
   }
 

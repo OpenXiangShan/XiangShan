@@ -753,6 +753,21 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   }
 }
 
+class MissQueueForwardReqBundle(implicit p: Parameters) extends DCacheBundle {
+  val mshrId = UInt(log2Up(cfg.nMissEntries).W)
+  val paddr = UInt(PAddrBits.W)
+}
+
+class MissQueueForwardRespBundle(implicit p: Parameters) extends DCacheBundle {
+  val forwardMshr = Bool()
+  val forwardData = Vec(VLEN/8, UInt(8.W))
+  val forwardResultValid = Bool()
+
+  def forward() = {
+    (forwardResultValid, forwardMshr, forwardData)
+  }
+}
+
 // forward mshr's data to ldu
 class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   // TODO: use separate Bundles for req and resp

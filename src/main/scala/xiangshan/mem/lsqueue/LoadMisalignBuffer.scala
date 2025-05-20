@@ -92,7 +92,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     truncateData(XLEN - 1, 0)
   }
 
-  def selectOldest[T <: LqWriteBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     if (valid.length == 0 || valid.length == 1) {
       (valid, bits)
@@ -119,7 +119,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
     val rob             = Flipped(new RobLsqIO)
     val splitLoadReq    = Decoupled(new LsPipelineBundle)
-    val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
+    val splitLoadResp   = Flipped(Valid(new LsPipelineBundle))
     val writeBack       = Decoupled(new MemExuOutput)
     val vecWriteBack    = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
     val loadOutValid    = Input(Bool())
@@ -139,7 +139,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
 
   val req_valid = RegInit(false.B)
-  val req = Reg(new LqWriteBundle)
+  val req = Reg(new LsPipelineBundle)
 
   io.loadMisalignFull := req_valid
 
@@ -170,7 +170,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   val s_idle :: s_split :: s_req :: s_resp :: s_comb_wakeup_rep :: s_wb :: Nil = Enum(6)
   val bufferState = RegInit(s_idle)
   val splitLoadReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
-  val splitLoadResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LqWriteBundle))))
+  val splitLoadResp = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val unSentLoads = RegInit(0.U(maxSplitNum.W))
   val curPtr = RegInit(0.U(log2Ceil(maxSplitNum).W))
@@ -218,19 +218,19 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
           globalUncache := isUncache
           globalMMIO := io.splitLoadResp.bits.mmio
           globalNC   := io.splitLoadResp.bits.nc
-        } .elsewhen(io.splitLoadResp.bits.rep_info.need_rep || (unSentLoads & ~clearOh).orR) {
+        } .elsewhen(io.splitLoadResp.bits.needReplay || (unSentLoads & ~clearOh).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
         } .otherwise {
           // merge the split load results
           bufferState := s_comb_wakeup_rep
-          needWakeUpWB := !req.isvec
+          needWakeUpWB := !req.isVector
         }
       }
     }
 
     is (s_comb_wakeup_rep) {
-      when(!req.isvec) {
+      when(!req.isVector) {
         when(io.splitLoadReq.fire) {
           bufferState := s_wb
         }.otherwise {
@@ -244,7 +244,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     }
 
     is (s_wb) {
-      when(req.isvec) {
+      when(req.isVector) {
         when(io.vecWriteBack.fire) {
           bufferState := s_idle
           req_valid := false.B
@@ -276,7 +276,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val alignedType = Mux(req.isvec, req.alignedType(1,0), req.uop.fuOpType(1, 0))
+  val alignedType = Mux(req.isVector, req.alignType(1,0), req.uop.fuOpType(1, 0))
   val highAddress = LookupTree(alignedType, List(
     LB -> 0.U,
     LH -> 1.U,
@@ -494,17 +494,17 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     exceptionVec := 0.U.asTypeOf(exceptionVec.cloneType)
   }
 
-  io.splitLoadReq.valid := req_valid && (bufferState === s_req || bufferState === s_comb_wakeup_rep && needWakeUpReqsWire && !req.isvec)
+  io.splitLoadReq.valid := req_valid && (bufferState === s_req || bufferState === s_comb_wakeup_rep && needWakeUpReqsWire && !req.isVector)
   io.splitLoadReq.bits  := splitLoadReqs(curPtr)
-  io.splitLoadReq.bits.isvec  := req.isvec
+  io.splitLoadReq.bits.isVector  := req.isVector
   io.splitLoadReq.bits.misalignNeedWakeUp  := needWakeUpReqsWire
   io.splitLoadReq.bits.isFinalSplit        := curPtr(0) && !needWakeUpReqsWire
   // Restore the information of H extension load
   // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
   val reqIsHlv  = LSUOpType.isHlv(req.uop.fuOpType)
   val reqIsHlvx = LSUOpType.isHlvx(req.uop.fuOpType)
-  io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
-  io.splitLoadReq.bits.alignedType  := Mux(req.isvec, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
+  io.splitLoadReq.bits.uop.fuOpType := Mux(req.isVector, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
+  io.splitLoadReq.bits.alignType  := Mux(req.isVector, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignType)
 
   when (io.splitLoadResp.valid) {
     val resp = io.splitLoadResp.bits
@@ -517,7 +517,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     } .elsewhen (hasException) {
       unSentLoads := 0.U
       LduCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
-    } .elsewhen (!io.splitLoadResp.bits.rep_info.need_rep) {
+    } .elsewhen (!io.splitLoadResp.bits.needReplay) {
       unSentLoads := unSentLoads & ~UIntToOH(curPtr)
       curPtr := curPtr + 1.U
       exceptionVec := 0.U.asTypeOf(ExceptionVec())
@@ -541,11 +541,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
         }
       }
     }
-    combinedData := Mux(req.isvec, rdataVecHelper(req.alignedType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
+    combinedData := Mux(req.isVector, rdataVecHelper(req.alignType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
 
   }
 
-  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) && !io.loadOutValid && !req.isvec
+  io.writeBack.valid := req_valid && (bufferState === s_wb) && (io.splitLoadResp.valid && io.splitLoadResp.bits.misalignNeedWakeUp || globalUncache || globalException) && !io.loadOutValid && !req.isVector
   io.writeBack.bits.uop := req.uop
   io.writeBack.bits.uop.exceptionVec := DontCare
   LduCfg.exceptionOut.map(no => io.writeBack.bits.uop.exceptionVec(no) := (globalUncache || globalException) && exceptionVec(no))
@@ -565,18 +565,18 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
 
   // vector output
-  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isvec
+  io.vecWriteBack.valid := req_valid && (bufferState === s_wb) && !io.loadVecOutValid && req.isVector
 
-  io.vecWriteBack.bits.alignedType          := req.alignedType
+  io.vecWriteBack.bits.alignedType          := req.alignType
   io.vecWriteBack.bits.vecFeedback          := true.B
   io.vecWriteBack.bits.vecdata.get          := combinedData
-  io.vecWriteBack.bits.isvec                := req.isvec
+  io.vecWriteBack.bits.isvec                := req.isVector
   io.vecWriteBack.bits.elemIdx              := req.elemIdx
   io.vecWriteBack.bits.elemIdxInsideVd.get  := req.elemIdxInsideVd
   io.vecWriteBack.bits.mask                 := req.mask
   io.vecWriteBack.bits.reg_offset.get       := 0.U
   io.vecWriteBack.bits.usSecondInv          := req.usSecondInv
-  io.vecWriteBack.bits.mBIndex              := req.mbIndex
+  io.vecWriteBack.bits.mBIndex              := req.mbIdx
   io.vecWriteBack.bits.hit                  := true.B
   io.vecWriteBack.bits.sourceType           := RSFeedbackType.lrqFull
   io.vecWriteBack.bits.trigger              := TriggerAction.None

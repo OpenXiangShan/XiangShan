@@ -26,10 +26,11 @@ import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput}
 import xiangshan.backend.rob.RobPtr
-import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
+import scala.collection.mutable
 import math._
 
 object genWmask {
@@ -94,6 +95,85 @@ object shiftMaskToHigh {
   def apply(addr: UInt, mask: UInt): UInt = {
     Mux(addr(3), (mask << 8).asUInt, mask)
   }
+}
+
+object ReplayCauseNO {
+  private val causes: mutable.Set[(Int, String)] = mutable.Set()
+
+  private var initVal = 0
+
+  private def addCause(name: String): Int = {
+    val causeNo = initVal
+    causes += (initVal -> name)
+    initVal += 1
+    causeNo
+  }
+
+  // priority: highest to lowest
+  val C_MA   = addCause(name = "memory ambiguous")
+  val C_TM   = addCause(name = "tlb miss")
+  val C_FF   = addCause(name = "forward fail")
+  val C_DR   = addCause(name = "dcache replay")
+  val C_DM   = addCause(name = "dcache miss")
+  val C_WPF  = addCause(name = "way predict fail")
+  val C_BC   = addCause(name = "bank conflict")
+  val C_RARF = addCause(name = "loadQueueRAR full")
+  val C_RAWF = addCause(name = "loadQueueRAW full")
+  val C_NK   = addCause(name = "nuke")
+  val C_MF   = addCause(name = "misalign buffer full")
+
+  val numCauses: Int = causes.size
+
+  def apply() = Vec(numCauses, Bool())
+
+  def apply(init: Bool) = VecInit(Seq.fill(numCauses)(init))
+
+  def hasMA(cause: Vec[Bool]): Bool = cause(C_MA)
+
+  def hasTM(cause: Vec[Bool]): Bool = cause(C_TM)
+
+  def hasFF(cause: Vec[Bool]): Bool = cause(C_FF)
+
+  def hasDR(cause: Vec[Bool]): Bool = cause(C_DR)
+
+  def hasDM(cause: Vec[Bool]): Bool = cause(C_DM)
+
+  def hasWPF(cause: Vec[Bool]): Bool = cause(C_WPF)
+
+  def hasBC(cause: Vec[Bool]): Bool = cause(C_BC)
+
+  def hasRARF(cause: Vec[Bool]): Bool = cause(C_RARF)
+
+  def hasRAWF(cause: Vec[Bool]): Bool = cause(C_RAWF)
+
+  def hasNK(cause: Vec[Bool]): Bool = cause(C_NK)
+
+  def hasMF(cause: Vec[Bool]): Bool = cause(C_MF)
+
+  def getHigherCauseThan(cause: Int): Seq[Int] = {
+    val priorities = causes.map(_._1).toSeq
+    val idx = priorities.indexOf(cause, 0)
+    require(idx != -1, s"The $cause does not exists in IntPriority Seq")
+    priorities.slice(0, idx)
+  }
+
+  def slice(seq: Seq[Bool], lower: Int, upper: Int): Seq[Bool] = {
+    seq.zipWithIndex.filter(x => x._2 >= lower && x._2 < upper).map(_._1)
+  }
+
+  def staCauses(): Seq[Int] = Seq(C_TM)
+
+  def lduCauses(): Seq[Int] = causes.map(_._1).toSeq
+
+  def hyuCauses(): Seq[Int] = (staCauses() ++ lduCauses()).distinct
+
+  def highestSelect(cause: UInt): Vec[Bool] = {
+    VecInit(PriorityEncoderOH(cause.asUInt).asBools)
+  }
+
+  def highestSelect(cause: Vec[Bool]): Vec[Bool] = highestSelect(cause.asUInt)
+
+  def needReplay(cause: Vec[Bool]): Bool = cause.asUInt.orR
 }
 
 object AddPipelineReg {

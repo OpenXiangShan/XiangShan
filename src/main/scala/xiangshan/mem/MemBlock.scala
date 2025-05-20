@@ -459,7 +459,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       for (i <- 0 until LduCnt) {
         val source = loadUnits(i).io.prefetch_train_l1
         l1Prefetcher.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
-          source.bits.miss || isFromStride(source.bits.meta_prefetch)
+          source.bits.miss || isFromStride(source.bits.metaPrefetch)
         )
         l1Prefetcher.stride_train(i).bits := source.bits
         val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
@@ -472,7 +472,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       for (i <- 0 until HyuCnt) {
         val source = hybridUnits(i).io.prefetch_train_l1
         l1Prefetcher.stride_train.drop(LduCnt)(i).valid := source.valid && source.bits.isFirstIssue && (
-          source.bits.miss || isFromStride(source.bits.meta_prefetch)
+          source.bits.miss || isFromStride(source.bits.metaPrefetch)
         )
         l1Prefetcher.stride_train.drop(LduCnt)(i).bits := source.bits
         l1Prefetcher.stride_train.drop(LduCnt)(i).bits.uop.pc := Mux(
@@ -819,7 +819,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val misalign_allow_spec = RegInit(true.B)
   val ldu_rollback_with_misalign_nack = loadUnits.map(ldu =>
-    ldu.io.lsq.ldin.bits.isFrmMisAlignBuf && ldu.io.lsq.ldin.bits.rep_info.rar_nack && ldu.io.rollback.valid
+    ldu.io.lsq.ldin.bits.isMisAlignBuf && ReplayCauseNO.hasRARF(ldu.io.lsq.ldin.bits.cause) && ldu.io.rollback.valid
   ).reduce(_ || _)
   when (ldu_rollback_with_misalign_nack) {
     misalign_allow_spec := false.B
