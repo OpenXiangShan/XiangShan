@@ -25,12 +25,18 @@ NO_XSDEV_IMAGE := $(if $(HAVE_XSDEV_IMAGE),,1)
 # check if fd0 refers to tty
 HAVE_TTY = $(shell [ -t 0 ] && echo y)
 
+# helper to escape MAKEOVERRIDES
+space_escape := _-_SPACE_-_
+define escape_overrides
+$(subst $(space_escape),\ ,$(addprefix -e ,$(subst \ ,$(space_escape),$(MAKEOVERRIDES))))
+endef
+
 # command for docker run
 MILL_WORK_DIR := /work
 MILL_OUTPUT_DIR := .docker-mill-out
 DOCKER_RUN = docker run --init --rm -i $(if $(HAVE_TTY),-t) -e IN_XSDEV_DOCKER=y \
 			-e NOOP_HOME=$(MILL_WORK_DIR) \
-			$(addprefix -e ,$(MAKEOVERRIDES)) \
+			$(escape_overrides) \
 			-v .:$(MILL_WORK_DIR):ro \
 			-v ./$(MILL_OUTPUT_DIR):$(MILL_WORK_DIR)/out:rw \
 			-v $(BUILD_DIR):$(MILL_WORK_DIR)/$(BUILD_DIR):rw \
