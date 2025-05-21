@@ -406,7 +406,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // It does not affect how interrupts are serviced. Note that WFI is noSpecExec and it does not trigger interrupts.
   val hasWFI = RegInit(false.B)
   val wfiSafe = io.wfi.safeFromMem && io.wfi.safeFromFrontend
-  io.wfi.wfiReq   := hasWFI
+  io.wfi.wfiReq := hasWFI
   io.cpu_halt := hasWFI && wfiSafe
   // WFI Timeout: 2^20 = 1M cycles
   val wfi_cycles = RegInit(0.U(20.W))
