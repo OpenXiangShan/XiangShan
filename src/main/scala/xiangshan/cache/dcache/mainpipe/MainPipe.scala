@@ -396,8 +396,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_tag_match && s1_has_permission
-  val s1_store_or_amo = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO && s1_req.cmd =/= M_XSC)
-  val s1_pregen_can_go_to_mq = s1_store_or_amo && !s1_hit
+  val s1_isStore = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isStore
+  val s1_isAMO = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isAMO && s1_req.cmd =/= M_XSC
+  val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO) && !s1_hit
   val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
   // s2: select data, return resp if this is a store miss
@@ -828,10 +829,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
   io.wbq_conflict_check.bits := s2_req.addr
 
-  io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay || s2_grow_perm_fail) && s2_req.isStore
+  /**
+    * `s2_req.isStore` includes miss requests from Sbuffer sent from MissQueue,
+    * while `s2_isStore`` only requests from sbuffer.
+    * In the case of `BtoT` fail, only requests from sbuffer are allowed to return replay response.
+    */
+  val s2_isStore = RegEnable(s1_isStore, s1_fire)
+  io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore)
   io.store_replay_resp.bits.data := DontCare
-  io.store_replay_resp.bits.miss := true.B
-  io.store_replay_resp.bits.replay := true.B
+  io.store_replay_resp.bits.miss := true.B // s2_can_go_to_mq && replay
+  io.store_replay_resp.bits.replay := true.B // s2_grow_perm_fail
   io.store_replay_resp.bits.id := s2_req.id
 
   io.store_hit_resp.valid := s3_valid && (s3_store_can_go || (s3_miss_can_go && s3_req.isStore))
