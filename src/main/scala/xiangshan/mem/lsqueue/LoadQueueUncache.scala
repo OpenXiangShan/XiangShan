@@ -188,21 +188,6 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   }
 
   /* uncahce writeback */
-  val selUop = req.uop
-  val func = selUop.fuOpType
-  val raddr = req.paddr
-  val rdataSel = LookupTree(raddr(2, 0), List(
-      "b000".U -> uncacheData(63,  0),
-      "b001".U -> uncacheData(63,  8),
-      "b010".U -> uncacheData(63, 16),
-      "b011".U -> uncacheData(63, 24),
-      "b100".U -> uncacheData(63, 32),
-      "b101".U -> uncacheData(63, 40),
-      "b110".U -> uncacheData(63, 48),
-      "b111".U -> uncacheData(63, 56)
-    ))
-  val rdataPartialLoad = rdataHelper(selUop, rdataSel)
-
   io.mmioOut.valid := false.B
   io.mmioOut.bits := DontCare
   io.mmioRawData := DontCare
@@ -212,10 +197,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   when(req.nc){
     io.ncOut.valid := (uncacheState === s_wait) && !needFlush
     io.ncOut.bits := DontCare
-    io.ncOut.bits.uop := selUop
+    io.ncOut.bits.uop := req.uop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
     io.ncOut.bits.uop.exceptionVec(hardwareError) := nderr
-    io.ncOut.bits.data := rdataPartialLoad
+    io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
     io.ncOut.bits.vaddr := req.vaddr
     io.ncOut.bits.nc := true.B
@@ -227,12 +212,12 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   }.otherwise{
     io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
     io.mmioOut.bits := DontCare
-    io.mmioOut.bits.uop := selUop
+    io.mmioOut.bits.uop := req.uop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
     io.mmioOut.bits.uop.exceptionVec(hardwareError) := nderr
-    io.mmioOut.bits.data := rdataPartialLoad
+    io.mmioOut.bits.data := uncacheData
     io.mmioOut.bits.debug.isMMIO := true.B
-    io.mmioOut.bits.debug.isNC := false.B
+    io.mmioOut.bits.debug.isNCIO := false.B
     io.mmioOut.bits.debug.paddr := req.paddr
     io.mmioOut.bits.debug.vaddr := req.vaddr
     io.mmioRawData.lqData := uncacheData

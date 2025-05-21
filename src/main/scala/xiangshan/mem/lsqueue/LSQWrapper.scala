@@ -132,6 +132,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssued = Input(Bool())
+
+    val generateFromSBuffer = Input(new GenerateInfoFromSBuffer)
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -197,6 +199,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.cmoOpResp    <> io.cmoOpResp
   storeQueue.io.flushSbuffer <> io.flushSbuffer
   storeQueue.io.maControl    <> io.maControl
+  storeQueue.io.generateFromSBuffer := io.generateFromSBuffer
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

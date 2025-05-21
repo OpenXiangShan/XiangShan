@@ -105,6 +105,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with VirtualSupervisorLevel
   with Unprivileged
   with CSRAIA
+  with CSRIND
   with HasExternalInterruptBundle
   with HasNonMaskableIRPBundle
   with CSREvents
@@ -317,6 +318,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     debugCSRMap ++
     aiaCSRMap ++
     customCSRMap ++
+    indCSRMap ++
     pmpCSRMap ++
     pmaCSRMap
 
@@ -328,6 +330,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     unprivilegedCSRMods ++
     debugCSRMods ++
     aiaCSRMods ++
+    indCSRMods ++
     customCSRMods ++
     pmpCSRMods ++
     pmaCSRMods
@@ -340,6 +343,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     unprivilegedCSROutMap ++
     debugCSROutMap ++
     aiaCSROutMap ++
+    indCSROutMap ++
     customCSROutMap ++
     pmpCSROutMap ++
     pmaCSROutMap
@@ -488,7 +492,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.xcounteren.scounteren := scounteren.rdata
 
   permitMod.io.in.xstateen.mstateen0 := mstateen0.rdata
+  permitMod.io.in.xstateen.mstateen1 := mstateen1.rdata
+  permitMod.io.in.xstateen.mstateen2 := mstateen2.rdata
+  permitMod.io.in.xstateen.mstateen3 := mstateen3.rdata
   permitMod.io.in.xstateen.hstateen0 := hstateen0.rdata
+  permitMod.io.in.xstateen.hstateen1 := hstateen1.rdata
+  permitMod.io.in.xstateen.hstateen2 := hstateen2.rdata
+  permitMod.io.in.xstateen.hstateen3 := hstateen3.rdata
   permitMod.io.in.xstateen.sstateen0 := sstateen0.rdata
 
   permitMod.io.in.xenvcfg.menvcfg := menvcfg.rdata
@@ -499,9 +509,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.vsstatusFSOff := vsstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.vsstatusVSOff := vsstatus.regOut.VS === ContextStatus.Off
 
-  permitMod.io.in.aia.miselectIsIllegal  := miselect.isIllegal
-  permitMod.io.in.aia.siselectIsIllegal  := siselect.isIllegal
-  permitMod.io.in.aia.vsiselectIsIllegal := vsiselect.isIllegal
+  permitMod.io.in.aia.miselect := miselect.rdata
   permitMod.io.in.aia.siselect := siselect.rdata
   permitMod.io.in.aia.vsiselect := vsiselect.rdata
   permitMod.io.in.aia.mvienSEIE := mvien.regOut.SEIE.asBool
@@ -750,8 +758,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
-      case m: HasStateen0Bundle =>
+      case m: HasStateenBundle =>
         m.fromMstateen0 := mstateen0.regOut
+        m.fromMstateen1 := mstateen1.regOut
+        m.fromMstateen2 := mstateen2.regOut
+        m.fromMstateen3 := mstateen3.regOut
         m.fromHstateen0 := hstateen0.regOut
         m.privState     := privState
       case _ =>
@@ -1205,6 +1216,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.status.frontendTrigger := debugMod.io.out.frontendTrigger
   io.status.memTrigger      := debugMod.io.out.memTrigger
+
+  mcontext.fromHcontext <> hcontext.toMcontext
+  hcontext.fromMcontext <> mcontext.toHcontext
   /**
    * debug_end
    */

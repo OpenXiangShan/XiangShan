@@ -185,6 +185,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // debug info
   val globalMMIO = RegInit(false.B)
   val globalNC   = RegInit(false.B)
+  val globalMemBackTypeMM = RegInit(false.B)
 
   val hasException = io.splitLoadResp.bits.vecActive &&
     ExceptionNO.selectByFu(io.splitLoadResp.bits.uop.exceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(io.splitLoadResp.bits.uop.trigger)
@@ -218,6 +219,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
           globalUncache := isUncache
           globalMMIO := io.splitLoadResp.bits.mmio
           globalNC   := io.splitLoadResp.bits.nc
+          globalMemBackTypeMM := io.splitLoadResp.bits.memBackTypeMM
         } .elsewhen(io.splitLoadResp.bits.rep_info.need_rep || (unSentLoads & ~clearOh).orR) {
           // need replay or still has unsent requests
           bufferState := s_req
@@ -256,6 +258,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
           globalMMIO := false.B
           globalNC   := false.B
+          globalMemBackTypeMM := false.B
         }
 
       } .otherwise {
@@ -270,6 +273,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
           globalMMIO := false.B
           globalNC   := false.B
+          globalMemBackTypeMM := false.B
         }
       }
 
@@ -558,7 +562,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   // Misaligned accesses to uncache space trigger exceptions, so theoretically these signals won't do anything practical.
   // But let's get them assigned correctly.
   io.writeBack.bits.debug.isMMIO := globalMMIO
-  io.writeBack.bits.debug.isNC := globalNC
+  io.writeBack.bits.debug.isNCIO := globalNC && !globalMemBackTypeMM
   io.writeBack.bits.debug.isPerfCnt := false.B
   io.writeBack.bits.debug.paddr := req.paddr
   io.writeBack.bits.debug.vaddr := req.vaddr
@@ -605,6 +609,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
 
     globalMMIO := false.B
     globalNC   := false.B
+    globalMemBackTypeMM := false.B
   }
 
   // NOTE: spectial case (unaligned load cross page, page fault happens in next page)

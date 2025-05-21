@@ -30,6 +30,7 @@ MILL_WORK_DIR := /work
 MILL_OUTPUT_DIR := .docker-mill-out
 DOCKER_RUN = docker run --init --rm -i $(if $(HAVE_TTY),-t) -e IN_XSDEV_DOCKER=y \
 			-e NOOP_HOME=$(MILL_WORK_DIR) \
+			$(addprefix -e ,$(MAKEOVERRIDES)) \
 			-v .:$(MILL_WORK_DIR):ro \
 			-v ./$(MILL_OUTPUT_DIR):$(MILL_WORK_DIR)/out:rw \
 			-v $(BUILD_DIR):$(MILL_WORK_DIR)/$(BUILD_DIR):rw \
