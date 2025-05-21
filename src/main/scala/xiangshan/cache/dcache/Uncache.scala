@@ -175,6 +175,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = Flipped(new UncacheWordIO)
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   val wfi = Flipped(new WfiReqBundle)
+  val busError = Output(new L1BusErrorUnitInfo())
 }
 
 // convert DCacheIO to TileLink
@@ -467,6 +468,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       }
     )
   }
+  io.busError.ecc_error.valid := mem_grant.fire && isStore(entries(mem_grant.bits.source)) &&
+    (mem_grant.bits.denied || mem_grant.bits.corrupt)
+  io.busError.ecc_error.bits := entries(mem_grant.bits.source).addr >> blockOffBits << blockOffBits
 
   io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
   /******************************************************************
