@@ -187,7 +187,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     dontTouch(io)
 
     /*
-     SoC control the sequence of power on/off with isolation/reset/clock
+     SoC Control the sequence of power on/off with isolation/reset/clock
      */
     val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
     val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)

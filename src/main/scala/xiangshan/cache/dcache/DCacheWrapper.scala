@@ -822,6 +822,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
+  val wfi = Flipped(new WfiReqBundle)
 }
 
 private object ArbiterCtrl {
@@ -1026,6 +1027,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
+  io.wfi <> missQueue.io.wfi
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {
@@ -1561,7 +1563,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-
   wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
   // wb.io.release_wakeup := refillPipe.io.release_wakeup

@@ -294,6 +294,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val req_chanA = DecoupledIO(new TLBundleA(edge.bundle))
     val resp_chanD = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val resp_to_lsq = DecoupledIO(new CMOResp)
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
@@ -301,6 +302,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val state_next = WireInit(state)
   val req = RegEnable(io.req.bits, io.req.fire)
   val nderr = RegInit(false.B)
+  val no_pending = RegInit(true.B)
 
   state := state_next
 
@@ -314,12 +316,14 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     is(s_sreq) {
       when (io.req_chanA.fire) {
         state_next := s_wresp
+        no_pending := false.B
       }
     }
     is(s_wresp) {
       when (io.resp_chanD.fire) {
         state_next := s_lsq_resp
         nderr := io.resp_chanD.bits.denied || io.resp_chanD.bits.corrupt
+        no_pending := true.B
       }
     }
     is(s_lsq_resp) {
@@ -331,7 +335,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.req.ready := state === s_idle
 
-  io.req_chanA.valid := state === s_sreq
+  io.req_chanA.valid := state === s_sreq && !io.wfi.wfiReq
   io.req_chanA.bits := edge.CacheBlockOperation(
     fromSource = (cfg.nMissEntries + 1).U,
     toAddress = req.address,
@@ -340,6 +344,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   )._2
 
   io.resp_chanD.ready := state === s_wresp
+  io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   io.resp_to_lsq.valid := state === s_lsq_resp
   io.resp_to_lsq.bits.address := req.address
@@ -439,6 +444,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
     val l1Miss = Output(Bool())
+
+    val wfi = Flipped(new WfiReqBundle)
   })
 
   assert(!RegNext(io.primary_valid && !io.primary_ready))
@@ -465,6 +472,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val w_mainpipe_resp = RegInit(true.B)
   val w_refill_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
+
+  val no_pending = RegInit(true.B)
 
   val mainpipe_req_fired = RegInit(true.B)
 
@@ -539,6 +548,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     w_l2hint := false.B
     mainpipe_req_fired := false.B
 
+    no_pending := !io.acquire_fired_by_pipe_reg
+
     when(miss_req_pipe_reg_bits.isFromStore) {
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
@@ -599,6 +610,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   when (io.mem_acquire.fire) {
     s_acquire := true.B
+    no_pending := false.B
   }
 
   // merge data refilled by l2 and store data, update miss queue entry, gen refill_req
@@ -618,6 +630,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val hasData = RegInit(true.B)
   val isDirty = RegInit(false.B)
+  io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
   when (io.mem_grant.fire) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
@@ -638,6 +651,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         }
       }
       w_grantlast := w_grantlast || refill_done
+      no_pending := no_pending || refill_done
       hasData := true.B
     }.otherwise {
       // Grant
@@ -646,6 +660,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         refill_and_store_data(i) := new_data(i)
       }
       w_grantlast := true.B
+      no_pending := true.B
       hasData := false.B
     }
 
@@ -787,7 +802,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // if the entry has a pending merge req, wait for it
   // Note: now, only wait for store, because store may acquire T
-  io.mem_acquire.valid := !s_acquire && !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore)
+  io.mem_acquire.valid := !s_acquire &&
+    !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) &&
+    !io.wfi.wfiReq
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
     fromSource = io.id,
@@ -998,6 +1015,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       }
     }
 
+    val wfi = Flipped(new WfiReqBundle)
+
     val debugTopDown = new DCacheTopDownIO
     val l1Miss = Output(Bool())
   })
@@ -1164,8 +1183,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         e.io.l2_hint.valid := false.B
         e.io.l2_hint.bits := DontCare
       }
+
+      e.io.wfi.wfiReq := io.wfi.wfiReq
   }
 
+  cmo_unit.io.wfi.wfiReq := io.wfi.wfiReq
   cmo_unit.io.req <> io.cmo_req
   io.cmo_resp <> cmo_unit.io.resp_to_lsq
   when (io.mem_grant.valid && io.mem_grant.bits.opcode === TLMessages.CBOAck) {
@@ -1174,6 +1196,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     cmo_unit.io.resp_chanD.valid := false.B
     cmo_unit.io.resp_chanD.bits := DontCare
   }
+  io.wfi.wfiSafe := (Seq(cmo_unit.io.wfi.wfiSafe) ++ entries.map(_.io.wfi.wfiSafe)).reduce(_&&_)
 
   io.req.ready := accept
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
@@ -1182,7 +1205,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_info.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_info.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info.bits })
 
-  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
+  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits) && !io.wfi.wfiReq
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
 
   XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)

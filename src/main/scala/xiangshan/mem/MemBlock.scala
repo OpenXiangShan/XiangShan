@@ -361,6 +361,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val toL2Top     = new TraceCoreInterface
     }
 
+    val wfi = Flipped(new WfiReqBundle)
+
     val topDownInfo = new Bundle {
       val fromL2Top = Input(new TopDownFromL2Top)
       val toBackend = Flipped(new TopDownInfo)
@@ -612,6 +614,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   atomicsUnit.io.hartId := io.hartId
 
   dcache.io.lqEmpty := lsq.io.lqEmpty
+  dcache.io.wfi.wfiReq := io.wfi.wfiReq
+  lsq.io.wfi.wfiReq := io.wfi.wfiReq
 
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
@@ -658,6 +662,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
+  ptw.io.wfi.wfiReq := io.wfi.wfiReq
+
+  io.wfi.wfiSafe := dcache.io.wfi.wfiSafe && uncache.io.wfi.wfiSafe && lsq.io.wfi.wfiSafe && ptw.io.wfi.wfiSafe
 
   val perfEventsPTW = if (!coreParams.softPTW) {
     ptw.getPerfEvents
@@ -1375,6 +1382,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Uncache
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
+  uncache.io.wfi.wfiReq := io.wfi.wfiReq
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
@@ -2062,7 +2070,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       traceFromBackend.toEncoder.groups(i).valid
     ) << instOffsetBits)
   }
-
 
   io.mem_to_ooo.storeDebugInfo := DontCare
   // store event difftest information

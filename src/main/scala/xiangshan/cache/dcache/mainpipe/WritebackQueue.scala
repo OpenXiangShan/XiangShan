@@ -262,6 +262,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     assert(!req.dirty || req.hasData)
   }
 
+  val (_, _, release_done, release_count) = edge.count(io.mem_release)
+
   io.mem_release.valid := busy
   io.mem_release.bits  := Mux(req.voluntary,
     Mux(req.hasData, voluntaryReleaseData, voluntaryRelease),
@@ -269,8 +271,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
 
   when (io.mem_release.fire) {remain_clr := PriorityEncoderOH(remain_dup_1)}
-
-  val (_, _, release_done, _) = edge.count(io.mem_release)
 
   when(state === s_release_req && release_done){
     state := Mux(req.voluntary, s_release_resp, s_invalid)
@@ -411,3 +411,4 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   generatePerfEvent()
 
 }
+
