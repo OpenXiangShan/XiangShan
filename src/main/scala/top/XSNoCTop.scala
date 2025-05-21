@@ -59,12 +59,12 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
   private val hasSramCtl = socParams.tiles.head.hasSramCtl
   private val hasDFT = hasMbist || hasSramCtl
 
-  val io = IO(new Bundle {
-    val chi = new PortIO
-    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
-    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-    val lp = Option.when(socParams.EnablePowerDown) (new LowPowerIO)
-  })
+  val io = new Bundle {
+    val chi = IO(new PortIO)
+    val dft = Option.when(hasDFT)(IO(Input(new SramBroadcastBundle)))
+    val dft_reset = Option.when(hasMbist)(IO(Input(new DFTResetSignals())))
+    val lp = Option.when(socParams.EnablePowerDown)(IO(new LowPowerIO))
+  }
 
   /*
    SoC Control the sequence of power on/off with isolation/reset/clock
@@ -78,9 +78,6 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    */
   val cpuReset = reset.asBool || !soc_rst_n
   val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(2, io.dft_reset))
-
-  // input
-  dontTouch(io)
 }
 
 trait HasAsyncClockImp { this: BaseXSSocImp =>
@@ -222,7 +219,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
     val hartIsInReset = Output(Bool())
     val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
-  }).suggestName("tileio")
+  }).suggestName("io")
 
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
