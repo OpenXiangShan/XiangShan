@@ -741,9 +741,7 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
     XSDebug(cond, p"[taken_mask] ${Binary(br_taken_mask.asUInt)} [hit] $hit\n")
 }
 
-class SpeculativeInfo(implicit p: Parameters) extends XSBundle
-    with HasBPUConst with BPUUtils {
-  val histPtr = new CGHPtr
+class RasSpeculativeInfo(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils {
   val ssp     = UInt(log2Up(RasSize).W)
   val sctr    = UInt(RasCtrSize.W)
   val TOSW    = new RasPtr
@@ -752,7 +750,6 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val topAddr = PrunedAddr(VAddrBits)
 }
 
-//
 class BranchPredictionBundle(val isNotS3: Boolean)(implicit p: Parameters) extends XSBundle
     with HasBPUConst with BPUUtils {
   val pc          = PrunedAddr(VAddrBits)
@@ -786,12 +783,9 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s2 = new BranchPredictionBundle(isNotS3 = true)
   val s3 = new BranchPredictionBundle(isNotS3 = false)
 
-  val s1_uftbHit         = Bool()
-  val s1_uftbHasIndirect = Bool()
-  val s1_ftbCloseReq     = Bool()
-
-  val last_stage_spec_info = new FtqRedirectSramEntry
-  val last_stage_ftb_entry = new FTBEntry
+  val s3_specInfo = new FtqRedirectSramEntry
+  val s3_ftbEntry = new FTBEntry
+  val s3_meta     = new PredictorMeta
 
   val topdown_info = new FrontendTopDownBundle
 
@@ -817,8 +811,8 @@ class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = PrunedAddr(VAddrBits)
-  val spec_info = new SpeculativeInfo
-  val ftb_entry = new FTBEntry()
+  val spec_info = new FtqRedirectSramEntry
+  val ftb_entry = new FTBEntry
 
   val cfi_idx           = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val br_taken_mask     = Vec(numBr, Bool())
