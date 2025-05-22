@@ -31,7 +31,7 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   val WIDTH_BYTES = 128
   val WIDTH_CACHE_BLOCKS = WIDTH_BYTES / dcacheParameters.blockBytes
 
-  val L2_DEPTH_RATIO = 2
+  val L2_DEPTH_RATIO = 3
   val L2_WIDTH_BYTES = WIDTH_BYTES * 2
   val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
 
