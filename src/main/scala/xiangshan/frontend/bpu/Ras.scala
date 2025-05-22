@@ -25,13 +25,12 @@
 * (https://crad.ict.ac.cn/en/article/doi/10.7544/issn1000-1239.202111274)" Journal of Computer Research and Development
 * (CRAD) 60.6: 1337-1345. 2023.
 ***************************************************************************************/
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan._
 import xiangshan.frontend._
 

@@ -14,15 +14,42 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.frontend
+package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
-import ftq.FtqToBpuIO
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
-import utility._
-import xiangshan._
+import utility.DelayN
+import utility.GTimer
+import utility.HasCircularQueuePtrHelper
+import utility.HasPerfEvents
+import utility.LowerMask
+import utility.ParallelXOR
+import utility.PhyPriorityMuxGenerator
+import utility.RegNextWithEnable
+import utility.SegmentedAddrNext
+import utility.XSDebug
+import utility.XSError
+import utility.XSPerfAccumulate
+import utility.XSWarn
+import xiangshan.HasXSParameter
+import xiangshan.TopDownCounters
+import xiangshan.XSBundle
+import xiangshan.XSModule
+import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.BpuToFtqBundle
+import xiangshan.frontend.BranchPredictionBundle
+import xiangshan.frontend.BranchPredictionRedirect
+import xiangshan.frontend.BranchPredictionResp
+import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.CGHPtr
+import xiangshan.frontend.FrontendTopDownBundle
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.ftq.FtqToBpuIO
+import xiangshan.frontend.selectByTaken
 
 trait HasBPUConst extends HasXSParameter {
   val MaxMetaBaseLength = if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length

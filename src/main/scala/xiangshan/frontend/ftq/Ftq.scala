@@ -41,19 +41,21 @@ import xiangshan.TopDownCounters
 import xiangshan.ValidUndirectioned
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.CtrlToFtqIO
-import xiangshan.frontend.BpuToFtqIO
-import xiangshan.frontend.BPUUtils
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FrontendTopDownBundle
-import xiangshan.frontend.FTBEntry
-import xiangshan.frontend.FTBEntry_FtqMem
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
-import xiangshan.frontend.HasBPUConst
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BpuToFtqIO
+import xiangshan.frontend.bpu.BPUUtils
+import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.FTBEntry_FtqMem
+import xiangshan.frontend.bpu.HasBPUConst
+import xiangshan.frontend.icache._
 import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.ifu._
 import xiangshan.frontend.mmioCommitRead
 
 class Ftq(implicit p: Parameters) extends FtqModule
