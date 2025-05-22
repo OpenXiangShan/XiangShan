@@ -17,9 +17,9 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.FTBEntry
-import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.HasBPUParameter
 
 class FtbEntryGen(implicit p: Parameters) extends FtqModule with HasBPUParameter {
   val io = IO(new Bundle {
