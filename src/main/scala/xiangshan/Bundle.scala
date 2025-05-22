@@ -30,10 +30,11 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr}
+import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, CGHPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqToCtrlIO}
-import xiangshan.frontend.{HasBPUParameter, IfuToBackendIO, PreDecodeInfo}
+import xiangshan.frontend.{IfuToBackendIO, PreDecodeInfo}
 import xiangshan.frontend.ftq.FtqRedirectSramEntry
+import xiangshan.frontend.bpu.{HasBPUParameter, BPUCtrl, RasPtr}
 import xiangshan.cache.HasDCacheParameters
 import utility._
 

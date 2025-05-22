@@ -22,17 +22,17 @@ import utility.ParallelPriorityEncoder
 import utility.ParallelPriorityMux
 import xiangshan.ValidUndirectioned
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.BPUUtils
 import xiangshan.frontend.BranchPredictionBundle
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.BranchPredictionUpdate
-import xiangshan.frontend.FTBEntry
-import xiangshan.frontend.HasBPUConst
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
-import xiangshan.frontend.PredictorMeta
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.SpeculativeInfo
+import xiangshan.frontend.bpu.BPUUtils
+import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.HasBPUConst
+import xiangshan.frontend.bpu.PredictorMeta
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
