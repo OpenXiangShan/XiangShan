@@ -13,6 +13,7 @@ import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
 import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
+import xiangshan.backend.fu.FuConfig
 
 case class IssueBlockParams(
   // top down
@@ -207,6 +208,8 @@ case class IssueBlockParams(
   def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
+
+  def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
 
   /**
     * Get the regfile type that this issue queue need to read

@@ -799,7 +799,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
   val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg
+  val allowOnlyOneCommit = true.B // VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   io.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(io.commits.commitValid)))
 

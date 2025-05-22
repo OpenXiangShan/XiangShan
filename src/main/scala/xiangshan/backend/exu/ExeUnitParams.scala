@@ -10,6 +10,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
 import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
 import scala.collection.mutable
 
@@ -150,6 +151,7 @@ case class ExeUnitParams(
     * Check if this exu has certain latency
     */
   def latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _)
+  def latencyCertainFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.latency.latencyVal.nonEmpty)
   def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def fpLatencyCertain: Boolean = writeFpFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
@@ -169,8 +171,10 @@ case class ExeUnitParams(
       if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
       fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
-    else
-      Map()
+    else {
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigs")
+      latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (latencyCertain)
@@ -178,7 +182,7 @@ case class ExeUnitParams(
     else if (hasUncertainLatencyVal)
       fuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.uncertainLatencyVal.get)).toMap
     else
-      Map()
+      latencyCertainFuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.latencyVal.get)).toMap
   }
 
   /**
@@ -316,6 +320,8 @@ case class ExeUnitParams(
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
 
+  def needUncertainWakeup: Boolean = fuConfigs.map(x => needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
+
   def bindBackendParam(param: BackendParams): Unit = {
     backendParam = param
   }
@@ -323,9 +329,6 @@ case class ExeUnitParams(
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
-    if (this.isIQWakeUpSource) {
-      require(!this.hasUncertainLatency || hasLoadFu || hasHyldaFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
-    }
     val loadWakeUpSourcePairs = cfgs.filter(x => x.source.getExuParam(backendParam.allExuParams).hasLoadFu || x.source.getExuParam(backendParam.allExuParams).hasHyldaFu)
     val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
     val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet
