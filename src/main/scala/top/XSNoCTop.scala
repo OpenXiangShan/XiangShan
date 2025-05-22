@@ -41,10 +41,87 @@ import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 import difftest.common.DifftestWiring
 import difftest.util.Profile
 
+abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper)
+{
+  def socParams = wrapper.asInstanceOf[HasSoCParameter]
+  def soc = socParams.soc
+
+  soc.XSTopPrefix.foreach { prefix =>
+    val mod = this.toNamed
+    annotate(new ChiselAnnotation {
+      def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
+    })
+  }
+
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(AsyncReset()))
+
+  private val hasMbist = socParams.tiles.head.hasMbist
+  private val hasSramCtl = socParams.tiles.head.hasSramCtl
+  private val hasDFT = hasMbist || hasSramCtl
+
+  val io = IO(new Bundle {
+    val hartId = Input(UInt(p(MaxHartIdBits).W))
+    val riscv_halt = Output(Bool())
+    val riscv_critical_error = Output(Bool())
+    val hartResetReq = Input(Bool())
+    val hartIsInReset = Output(Bool())
+    val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
+    val chi = new PortIO
+    val nodeID = Input(UInt(soc.NodeIDWidthList(socParams.issue).W))
+    val clintTime = Input(ValidIO(UInt(64.W)))
+    val traceCoreInterface = new Bundle {
+      val fromEncoder = Input(new Bundle {
+        val enable = Bool()
+        val stall  = Bool()
+      })
+      val toEncoder   = Output(new Bundle {
+        val cause     = UInt(socParams.TraceCauseWidth.W)
+        val tval      = UInt(socParams.TraceTvalWidth.W)
+        val priv      = UInt(socParams.TracePrivWidth.W)
+        val iaddr     = UInt((socParams.TraceTraceGroupNum * socParams.TraceIaddrWidth).W)
+        val itype     = UInt((socParams.TraceTraceGroupNum * socParams.TraceItypeWidth).W)
+        val iretire   = UInt((socParams.TraceTraceGroupNum * socParams.TraceIretireWidthCompressed).W)
+        val ilastsize = UInt((socParams.TraceTraceGroupNum * socParams.TraceIlastsizeWidth).W)
+      })
+    }
+    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
+    val lp = Option.when(socParams.EnablePowerDown) (new LowPowerIO)
+  })
+
+  /*
+   SoC Control the sequence of power on/off with isolation/reset/clock
+   */
+  val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
+  val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
+
+  /* Core+L2 reset when:
+   1. normal reset from SoC
+   2. SoC initialize reset during Power on/off flow
+   */
+  val cpuReset = reset.asBool || !soc_rst_n
+  val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(2, io.dft_reset))
+
+  // input
+  dontTouch(io)
+}
+
+trait HasAsyncClockImp { this: BaseXSSocImp =>
+  val noc_clock = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(Clock())))
+  val noc_reset = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
+  val soc_clock = IO(Input(Clock()))
+  val soc_reset = IO(Input(AsyncReset()))
+
+  val noc_reset_sync = socParams.EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) {
+    ResetGen(2, io.dft_reset)
+  })
+  val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
+}
+
 trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
 
   def core = wrapper.asInstanceOf[L].core_with_l2.module
-  def socParams = wrapper.asInstanceOf[HasSoCParameter]
 
   /* connect core lp io */
   core.io.iso_en.foreach { _ := io.lp.map(_.i_cpu_iso_en).getOrElse(false.B) }
@@ -192,55 +269,11 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   val core_rst_node = BundleBridgeSource(() => Reset())
   core_with_l2.tile.core_reset_sink := core_rst_node
 
-  class XSNoCTopImp(wrapper: XSNoCTop) extends LazyRawModuleImp(wrapper)
+  class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
+    with HasAsyncClockImp
     with HasCoreLowPowerImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
-    soc.XSTopPrefix.foreach { prefix =>
-      val mod = this.toNamed
-      annotate(new ChiselAnnotation {
-        def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
-      })
-    }
-
-    val clock = IO(Input(Clock()))
-    val reset = IO(Input(AsyncReset()))
-    val noc_clock = EnableCHIAsyncBridge.map(_ => IO(Input(Clock())))
-    val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
-    val soc_clock = IO(Input(Clock()))
-    val soc_reset = IO(Input(AsyncReset()))
-    private val hasMbist = tiles.head.hasMbist
-    private val hasSramCtl = tiles.head.hasSramCtl
-    private val hasDFT = hasMbist || hasSramCtl
-    val io = IO(new Bundle {
-      val hartId = Input(UInt(p(MaxHartIdBits).W))
-      val riscv_halt = Output(Bool())
-      val riscv_critical_error = Output(Bool())
-      val hartResetReq = Input(Bool())
-      val hartIsInReset = Output(Bool())
-      val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
-      val chi = new PortIO
-      val nodeID = Input(UInt(soc.NodeIDWidthList(issue).W))
-      val clintTime = Input(ValidIO(UInt(64.W)))
-      val traceCoreInterface = new Bundle {
-        val fromEncoder = Input(new Bundle {
-          val enable = Bool()
-          val stall  = Bool()
-        })
-        val toEncoder   = Output(new Bundle {
-          val cause     = UInt(TraceCauseWidth.W)
-          val tval      = UInt(TraceTvalWidth.W)
-          val priv      = UInt(TracePrivWidth.W)
-          val iaddr     = UInt((TraceTraceGroupNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceTraceGroupNum * TraceItypeWidth).W)
-          val iretire   = UInt((TraceTraceGroupNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
-        })
-      }
-      val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
-      val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-      val lp = Option.when(EnablePowerDown) (new LowPowerIO)
-    })
     // imsic axi4 io
     val imsic_axi4 = wrapper.u_imsic_bus_top.axi4.map(x => IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
     // imsic tl io
@@ -249,8 +282,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     // imsic bare io
     val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
-    val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
     wrapper.core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
     wrapper.core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
     // device clock and reset
@@ -265,21 +296,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     // imsic bare io connection
     wrapper.u_imsic_bus_top.module.msi.foreach(_ <> imsic.get)
 
-    // input
-    dontTouch(io)
-
-    /*
-     SoC Control the sequence of power on/off with isolation/reset/clock
-     */
-    val soc_rst_n = io.lp.map(_.i_cpu_sw_rst_n).getOrElse(true.B)
-    val soc_iso_en = io.lp.map(_.i_cpu_iso_en).getOrElse(false.B)
-
-    /* Core+L2 reset when:
-     1. normal reset from SoC
-     2. SoC initialize reset during Power on/off flow
-     */
-    val cpuReset = reset.asBool || !soc_rst_n
-    val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(2, io.dft_reset))
     //Interrupt sources collect
     val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
     val mtip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(1), 3, 0)}
