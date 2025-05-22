@@ -53,6 +53,11 @@ class ExuBlockImp(
 //    }
     XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
+  io.uncertainWakeupOut.foreach{ x =>
+    println(s"io.uncertainWakeupOut.get.length: ${io.uncertainWakeupOut.get.length}")
+    println(s"exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get).length: ${exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get).length}")
+    x := exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)
+  }
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
   }
@@ -74,6 +79,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val in: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(params.genExuInputCopySrcBundle)
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
+  val uncertainWakeupOut = Option.when(params.issueBlockParams.map(_.needUncertainWakeupFromExu).reduce(_ ||_))(params.genExuWakeUpOutValidBundle)
 
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrin = Option.when(params.hasCSR)(new CSRInput)

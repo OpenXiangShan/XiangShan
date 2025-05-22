@@ -268,6 +268,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.allocPregs := a
   }}
   rcTagTable.io.allocPregs.zip(allocPregs(0)).map(x => x._1 := x._2)
+  println(s"rcTagTable.io.wakeupFromIQ.length: ${rcTagTable.io.wakeupFromIQ.length}")
+  println(s"io.wakeUpAll.wakeUpInt.length: ${io.wakeUpAll.wakeUpInt.length}")
+  println(s"io.wakeUpAll.wakeUpMem.length: ${io.wakeUpAll.wakeUpMem.length}")
   rcTagTable.io.wakeupFromIQ := io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpMem
   rcTagTable.io.og0Cancel := io.og0Cancel
   rcTagTable.io.ldCancel := io.ldCancel

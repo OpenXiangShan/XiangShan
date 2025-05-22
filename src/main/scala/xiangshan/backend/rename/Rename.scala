@@ -189,9 +189,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   dontTouch(crossFtqNumVec)
   dontTouch(oddFtqVec)
-  compressUnit.io.in.zip(io.in).zip(io.validVec).foreach{ case((sink, source), valid) =>
+  val isFusionPair = ((isFusionVec.asUInt << 1).asUInt | isFusionVec.asUInt)(RenameWidth-1, 0).asBools
+  compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
     sink.valid := valid && !io.singleStep
     sink.bits := source.bits
+    sink.bits.canRobCompress := source.bits.canRobCompress && isFusion
   }
   compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags

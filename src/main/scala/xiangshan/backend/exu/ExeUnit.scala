@@ -22,19 +22,21 @@ import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
-import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
+import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
 import xiangshan.{AddrTransType, FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
-import xiangshan.backend.datapath.WbConfig.{PregWB, _}
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
+import xiangshan.backend.issue.WakeupQueue
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(params, hasCopySrc = true)))
   val out = DecoupledIO(new ExuOutput(params))
+  val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(Valid(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
@@ -124,23 +126,6 @@ class ExeUnitImp(
     }
   }
 
-  val busy = RegInit(false.B)
-  if (exuParams.latencyCertain){
-    busy := false.B
-  }
-  else {
-    val robIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
-    when(io.in.fire && io.in.bits.robIdx.needFlush(io.flush)) {
-      busy := false.B
-    }.elsewhen(busy && robIdx.needFlush(io.flush)) {
-      busy := false.B
-    }.elsewhen(io.out.fire) {
-      busy := false.B
-    }.elsewhen(io.in.fire) {
-      busy := true.B
-    }
-  }
-
   exuParams.wbPortConfigs.map{
     x => x match {
       case IntWB(port, priority) => assert(priority >= 0 && priority <= 2,
@@ -151,60 +136,6 @@ class ExeUnitImp(
         s"${exuParams.name}: WbPort must priority=0 or priority=1")
       case _ =>
     }
-  }
-  val intWbPort = exuParams.getIntWBPort
-  if (intWbPort.isDefined){
-    val sameIntPortExuParam = backendParams.allExuParams.filter(_.getIntWBPort.isDefined)
-      .filter(_.getIntWBPort.get.port == intWbPort.get.port)
-    val samePortOneCertainOneUncertain = sameIntPortExuParam.map(_.latencyCertain).contains(true) && sameIntPortExuParam.map(_.latencyCertain).contains(false)
-    if (samePortOneCertainOneUncertain) sameIntPortExuParam.map(samePort =>
-      samePort.wbPortConfigs.map(
-        x => x match {
-          case IntWB(port, priority) => {
-            if (!samePort.latencyCertain) assert(priority == sameIntPortExuParam.size - 1,
-              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameIntPortExuParam.size - 1})")
-            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
-          }
-          case _ =>
-        }
-      )
-    )
-  }
-  val fpWbPort = exuParams.getFpWBPort
-  if (fpWbPort.isDefined) {
-    val sameFpPortExuParam = backendParams.allExuParams.filter(_.getFpWBPort.isDefined)
-      .filter(_.getFpWBPort.get.port == fpWbPort.get.port)
-    val samePortOneCertainOneUncertain = sameFpPortExuParam.map(_.latencyCertain).contains(true) && sameFpPortExuParam.map(_.latencyCertain).contains(false)
-    if (samePortOneCertainOneUncertain) sameFpPortExuParam.map(samePort =>
-      samePort.wbPortConfigs.map(
-        x => x match {
-          case FpWB(port, priority) => {
-            if (!samePort.latencyCertain) assert(priority == sameFpPortExuParam.size - 1,
-              s"${samePort.name}: FpWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameFpPortExuParam.size - 1})")
-            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
-          }
-          case _ =>
-        }
-      )
-    )
-  }
-  val vfWbPort = exuParams.getVfWBPort
-  if (vfWbPort.isDefined) {
-    val sameVfPortExuParam = backendParams.allExuParams.filter(_.getVfWBPort.isDefined)
-      .filter(_.getVfWBPort.get.port == vfWbPort.get.port)
-    val samePortOneCertainOneUncertain = sameVfPortExuParam.map(_.latencyCertain).contains(true) && sameVfPortExuParam.map(_.latencyCertain).contains(false)
-    if (samePortOneCertainOneUncertain)  sameVfPortExuParam.map(samePort =>
-      samePort.wbPortConfigs.map(
-        x => x match {
-          case VfWB(port, priority) => {
-            if (!samePort.latencyCertain) assert(priority == sameVfPortExuParam.size - 1,
-              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameVfPortExuParam.size - 1})")
-            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
-          }
-          case _ =>
-        }
-      )
-    )
   }
   if(backendParams.debugEn) {
     dontTouch(io.out.ready)
@@ -221,9 +152,9 @@ class ExeUnitImp(
   val in1ToN = Module(new Dispatcher(new ExuInput(exuParams), funcUnits.length, acceptCond))
 
   // ExeUnit.in <---> Dispatcher.in
-  in1ToN.io.in.valid := io.in.valid && !busy
+  in1ToN.io.in.valid := io.in.valid
   in1ToN.io.in.bits := io.in.bits
-  io.in.ready := !busy && in1ToN.io.in.ready
+  io.in.ready := in1ToN.io.in.ready
 
   def pipelineReg(init: ExuInput, valid: Bool, latency: Int, flush: ValidIO[Redirect]): (Seq[ExuInput], Seq[Bool]) = {
     val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
@@ -319,8 +250,19 @@ class ExeUnitImp(
   }
   OutresVecs.foreach(vec => vec.foreach(res =>dontTouch(res)))
 
-  private val fuOutValidOH = funcUnits.map(_.io.out.valid)
-  XSError(PopCount(fuOutValidOH) > 1.U, p"fuOutValidOH ${Binary(VecInit(fuOutValidOH).asUInt)} should be one-hot)\n")
+  private val fuOutValidOH = Wire(Vec(funcUnits.length, Bool()))
+  fuOutValidOH := funcUnits.map{ case fu => {
+    if (needUncertainWakeupFuConfigs.contains(fu.cfg)){
+      println(p"${exuParams.name}: ${fu.cfg.name} is needUncertainWakeupFuConfig")
+      !funcUnits.filterNot(x => needUncertainWakeupFuConfigs.contains(x.cfg)).map(y => y.io.out.valid).fold(false.B)(_ || _) && fu.io.out.valid
+    }
+    else {
+      fu.io.out.valid
+    }
+  }
+  }
+  dontTouch(fuOutValidOH)
+  XSError(PopCount(fuOutValidOH) > 1.U, p"fuOutValidOH ${Binary(fuOutValidOH.asUInt)} should be one-hot)\n")
   private val fuOutBitsVec = funcUnits.map(_.io.out.bits)
   private val fuOutresVec = OutresVecs.map(_.last)
   private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = fuOutresVec.map(_.redirect)
@@ -365,8 +307,50 @@ class ExeUnitImp(
   generateCriticalErrors()
 
   io.out.valid := Cat(fuOutValidOH).orR
-  funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
-
+  funcUnits.foreach{ case fu => {
+    if (needUncertainWakeupFuConfigs.contains(fu.cfg)) {
+      println(p"${exuParams.name}: ${fu.cfg.name} ready need change")
+      fu.io.out.ready := !funcUnits.filterNot(x => needUncertainWakeupFuConfigs.contains(x.cfg)).map(y => y.io.out.valid).fold(false.B)(_ || _) && fu.io.out.valid
+    }
+    else {
+      fu.io.out.ready := io.out.ready
+    }
+    fu.io.out.ready := true.B
+  }
+  }
+  io.uncertainWakeupOut.foreach{ out => {
+    val uncertainFus = funcUnits.filter(x => needUncertainWakeupFuConfigs.contains(x.cfg))
+    if (uncertainFus.length == 1) {
+      val fu = uncertainFus(0)
+      out.valid := fu.io.outValidAhead3Cycle.get
+      out.bits := 0.U.asTypeOf(out.bits)
+      // div
+      fu.io.out.bits.ctrl.rfWen.foreach(x => out.bits.rfWen := x)
+      fu.io.out.bits.ctrl.fpWen.foreach(x => out.bits.fpWen := x)
+      fu.io.out.bits.ctrl.vecWen.foreach(x => out.bits.vecWen := x)
+      fu.io.out.bits.ctrl.v0Wen.foreach(x => out.bits.v0Wen := x)
+      fu.io.out.bits.ctrl.vlWen.foreach(x => out.bits.vlWen := x)
+      out.bits.pdest := fu.io.out.bits.ctrl.pdest
+      // csr
+      if (fu.cfg.isCsr) {
+        out.bits.rfWen := fu.io.outRFWenAhead3Cycle.get
+        out.bits.pdest := fu.io.outPdestAhead3Cycle.get
+      }
+    }
+    else {
+      val outOH = VecInit(uncertainFus.map(_.io.outValidAhead3Cycle.get))
+      val outBits = uncertainFus.map(_.io.out.bits)
+      out.valid := outOH.asUInt.orR
+      out.bits := 0.U.asTypeOf(out.bits)
+      outBits(0).ctrl.rfWen.foreach(x =>  out.bits.rfWen  := Mux1H(outOH, outBits.map(_.ctrl.rfWen .get)))
+      outBits(0).ctrl.fpWen.foreach(x =>  out.bits.fpWen  := Mux1H(outOH, outBits.map(_.ctrl.fpWen .get)))
+      outBits(0).ctrl.vecWen.foreach(x => out.bits.vecWen := Mux1H(outOH, outBits.map(_.ctrl.vecWen.get)))
+      outBits(0).ctrl.v0Wen.foreach(x =>  out.bits.v0Wen  := Mux1H(outOH, outBits.map(_.ctrl.v0Wen .get)))
+      outBits(0).ctrl.vlWen.foreach(x =>  out.bits.vlWen  := Mux1H(outOH, outBits.map(_.ctrl.vlWen .get)))
+      out.bits.pdest := Mux1H(outOH, outBits.map(_.ctrl.pdest))
+    }
+  }
+  }
   // select one fu's result
   io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
