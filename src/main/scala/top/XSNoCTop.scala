@@ -171,13 +171,19 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
   }
 }
 
-trait HasXSTile { this: BaseXSSoc =>
+trait HasXSTile extends HasLazyModuleBuilder { this: BaseXSSoc =>
+
+  protected def buildCoreWithL2(params: Parameters): BaseXSTileWrap = {
+      buildLazyModuleWithName("core_with_l2")(
+        (ps: Parameters) => new XSTileWrap()(ps)
+      )(params)
+  }
 
   // xstile
-  val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
+  val core_with_l2: BaseXSTileWrap = buildCoreWithL2(p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
-  })))
+  }))
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
