@@ -44,12 +44,14 @@ class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCP
 class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
   val icache = new L1BusErrorUnitInfo
   val dcache = new L1BusErrorUnitInfo
+  val uncache = new L1BusErrorUnitInfo
   val l2 = new L1BusErrorUnitInfo
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
     List(
       Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
       Some(dcache.ecc_error, "D_ECC", "Dcache ecc error"),
+      Some(uncache.ecc_error, "U_ECC", "Uncache ecc error"),
       Some(l2.ecc_error, "L2_ECC", "L2Cache ecc error")
     )
 }
@@ -235,6 +237,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     beu.module.io.errors.icache := io.beu_errors.icache
     beu.module.io.errors.dcache := io.beu_errors.dcache
+    beu.module.io.errors.uncache := io.beu_errors.uncache
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile

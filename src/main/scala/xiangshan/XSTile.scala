@@ -150,6 +150,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
+    l2top.module.io.beu_errors.uncache <> core.module.io.beu_errors.uncache
 
     l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
