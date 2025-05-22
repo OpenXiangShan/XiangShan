@@ -164,6 +164,9 @@ case class FuConfig (
     Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
+  def needUncertainWakeup: Boolean = {
+    FuConfig.needUncertainWakeupFuConfigs.contains(this)
+  }
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
   def isMul: Boolean = fuType == FuType.mul
@@ -845,6 +848,10 @@ object FuConfig {
 
   def VecArithFuConfigs = Seq(
     VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
+  )
+
+  def needUncertainWakeupFuConfigs = Seq(
+    CsrCfg, DivCfg, FdivCfg, VidivCfg, VfdivCfg
   )
 }
 

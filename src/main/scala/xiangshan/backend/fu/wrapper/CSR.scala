@@ -283,15 +283,17 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
-  io.out.valid := csrModOutValid
-  io.out.bits.ctrl.exceptionVec.get := exceptionVec
-  io.out.bits.ctrl.flushPipe.get := flushPipe
-  io.out.bits.res.data := csrMod.io.out.bits.rData
+  io.outValidAhead3Cycle.get := csrModOutValid
+  val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
+  io.out.valid := DelayN(csrModOutValid, 3) && !isXRetReg || csrModOutValid && isXRetReg
+  io.out.bits.ctrl.exceptionVec.get := Mux(isXRetReg, exceptionVec, DelayNWithValid(exceptionVec, csrModOutValid, 3)._2)
+  io.out.bits.ctrl.flushPipe.get := Mux(isXRetReg, flushPipe, DelayNWithValid(flushPipe, csrModOutValid, 3)._2)
+  io.out.bits.res.data := DelayNWithValid(csrMod.io.out.bits.rData, csrModOutValid, 3)._2
 
   /** initialize NewCSR's io_out_ready from wrapper's io */
   csrMod.io.out.ready := io.out.ready
 
-  io.out.bits.res.redirect.get.valid := io.out.valid && RegEnable(isXRet, false.B, io.in.fire)
+  io.out.bits.res.redirect.get.valid := io.out.valid && isXRetReg
   val redirect = io.out.bits.res.redirect.get.bits
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
@@ -307,7 +309,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Only mispred will send redirect to frontend
   redirect.cfiUpdate.isMisPred := true.B
 
-  connectNonPipedCtrlSingal
+  val rfWenReg = RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire)
+  val pdestReg = RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
+  io.outRFWenAhead3Cycle.get := rfWenReg
+  io.outPdestAhead3Cycle.get := pdestReg
+  io.out.bits.ctrl.robIdx := Mux(isXRetReg, robIdxReg, DelayNWithValid(robIdxReg, csrModOutValid, 3)._2)
+  io.out.bits.ctrl.pdest := DelayNWithValid(RegEnable(io.in.bits.ctrl.pdest, io.in.fire), csrModOutValid, 3)._2
+  io.out.bits.ctrl.rfWen.foreach(_ := DelayNWithValid(RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire), csrModOutValid, 3)._2)
+  val preDecodeReg = RegEnable(io.in.bits.ctrl.preDecode.get, io.in.fire)
+  io.out.bits.ctrl.preDecode.foreach(_ := Mux(isXRetReg, preDecodeReg, DelayNWithValid(preDecodeReg, csrModOutValid, 3)._2))
+  val perfDebugInfoReg = RegEnable(io.in.bits.perfDebugInfo, io.in.fire)
+  io.out.bits.perfDebugInfo := Mux(isXRetReg, perfDebugInfoReg, DelayNWithValid(perfDebugInfoReg, csrModOutValid, 3)._2)
+  val debug_seqNumReg = RegEnable(io.in.bits.debug_seqNum, io.in.fire)
+  io.out.bits.debug_seqNum := Mux(isXRetReg, debug_seqNumReg, DelayNWithValid(debug_seqNumReg, csrModOutValid, 3)._2)
 
   override val criticalErrors = csrMod.getCriticalErrors
   generateCriticalErrors()

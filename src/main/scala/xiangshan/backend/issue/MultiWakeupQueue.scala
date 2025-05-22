@@ -23,6 +23,7 @@ class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
 }
 
 class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
+  val exuParam  : ExeUnitParams,
   val gen       : ExuInput,
   val lastGen   : ExuInput,
   val flushGen  : TFlush,
@@ -31,6 +32,9 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   modificationFunc: ExuInput => ExuInput = { x: ExuInput => x },
   lastConnectFunc: (ExuInput, ExuInput) => ExuInput,
 ) extends Module {
+  println("[MultiWakeupQueue]:")
+  println(exuParam)
+  println(latencySet)
   require(latencySet.min >= 0)
 
   val io = IO(new MultiWakeupQueueIO(gen, lastGen, flushGen, log2Up(latencySet.max) + 1))

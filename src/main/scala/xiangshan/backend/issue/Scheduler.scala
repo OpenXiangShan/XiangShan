@@ -106,6 +106,15 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpOutValidBundle
   }
 
+  val fromIntExuBlock = if (params.isIntSchd) Some(new Bundle {
+    val uncertainWakeupIn = Option.when(params.isIntSchd)(Flipped(params.genExuWakeUpOutValidBundle))
+  }) else None
+  val fromFpExuBlock = if (params.isFpSchd) Some(new Bundle {
+    val uncertainWakeupIn = Option.when(params.isFpSchd)(Flipped(params.genExuWakeUpOutValidBundle))
+  }) else None
+  val fromVecExuBlock = if (params.isVfSchd) Some(new Bundle {
+    val uncertainWakeupIn = Option.when(params.isVfSchd)(Flipped(params.genExuWakeUpOutValidBundle))
+  }) else None
   val fromDataPath = new Bundle {
     val resp: MixedVec[MixedVec[OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
     val og0Cancel = Input(ExuVec())
@@ -304,7 +313,26 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       }
     }
   }
-
+  if (params.issueBlockParams.map(_.needUncertainWakeupFromExu).fold(false)(_ || _)) {
+    if (params.isIntSchd){
+      issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromIntExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
+        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
+        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+      }
+    }
+    else if (params.isFpSchd){
+      issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromFpExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
+        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
+        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+      }
+    }
+    else if (params.isVfSchd){
+      issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromVecExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
+        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
+        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+      }
+    }
+  }
   // Connect each replace RCIdx to IQ
   if (params.needWriteRegCache) {
     val iqReplaceRCIdxVec = issueQueues.filter(_.params.needWriteRegCache).flatMap{ iq =>

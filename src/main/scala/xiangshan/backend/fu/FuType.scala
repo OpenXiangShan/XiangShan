@@ -176,6 +176,8 @@ object FuType extends OHEnumeration {
 
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
+  def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
+
   def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)

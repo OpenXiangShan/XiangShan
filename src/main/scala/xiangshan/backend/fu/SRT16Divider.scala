@@ -45,6 +45,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     val out_validNext = Output(Bool())
     val out_data = Output(UInt(len.W))
     val out_ready = Input(Bool())
+    val outValidAhead3Cycle = Output(Bool())
   })
 
   // consts
@@ -84,7 +85,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
 //  val dNormAbsReg = RegEnable(dNormAbs, newReq | state(s_pre_0) | state(s_post_0))
   val quotIterReg = RegEnable(quotIter, state(s_pre_1) | state(s_iter) | state(s_post_0))
   val quotM1IterReg = RegEnable(quotM1Iter, state(s_pre_1) | state(s_iter) | state(s_post_0))
-  val specialReg = RegEnable(special, state(s_pre_1))
+  val specialReg = RegEnable(Mux(state(s_finish), false.B, special), state(s_pre_1) | state(s_finish))
   val aReg = RegEnable(a, in_fire)
 
   when(kill_r) {
@@ -101,7 +102,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     state := UIntToOH(s_post_1, 7)
   } .elsewhen(state(s_post_1)) {
     state := UIntToOH(s_finish, 7)
-  } .elsewhen(state(s_finish) && io.out_ready) {
+  } .elsewhen(state(s_finish) && !specialReg) {
     state := UIntToOH(s_idle, 7)
   } .otherwise {
     state := state
@@ -398,7 +399,10 @@ class SRT16DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state(s_idle)
-  io.out_valid := state(s_finish)
+  // when special is true, out valid delay 1 cycle
+  io.out_valid := state(s_finish) && !specialReg
+  // when flush finalIter maybe always true
+  io.outValidAhead3Cycle := finalIter && state(s_iter) || special && state(s_pre_1)
   io.out_validNext := state(s_post_1)
 }
 

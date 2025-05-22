@@ -223,6 +223,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class CommonIQWakeupBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val srcWakeupByIQ                             = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
+    val srcWakeupByIQIsUncertain                  = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
     val srcWakeupByIQWithoutCancel                = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
     val srcWakeupByIQButCancel                    = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
     val wakeupLoadDependencyByIQVec               = Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -241,9 +242,28 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       else
         bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
     }.toSeq.transpose
+    println(params.exuBlockParams.map(_.name))
+    val wakeupUncertainVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map { (bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
+      dontTouch(bundle.bits.is0Lat)
+      val hasUncertain = params.backendParam.allExuParams(bundle.bits.exuIdx).needUncertainWakeup
+      println(s"${params.backendParam.allExuParams(bundle.bits.exuIdx).name}: hasUncertain: $hasUncertain")
+      val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+      (VecInit(
+        if (params.numRegSrc == 5) {
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+
+          bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+
+          bundle.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
+        }
+        else {
+          bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
+        }
+      ).asUInt & Fill(params.numRegSrc, hasUncertain.B & !bundle.bits.is0Lat)).asBools
+    }.toSeq.transpose
     val cancelSel = params.wakeUpSourceExuIdx.zip(commonIn.wakeUpFromIQ).map { case (x, y) => commonIn.og0Cancel(x) && y.bits.is0Lat }
 
     hasIQWakeupGet.srcWakeupByIQ                    := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
+    hasIQWakeupGet.srcWakeupByIQIsUncertain         := wakeupUncertainVec.map(VecInit(_))
+    dontTouch(hasIQWakeupGet.srcWakeupByIQIsUncertain)
     hasIQWakeupGet.srcWakeupByIQButCancel           := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     hasIQWakeupGet.srcWakeupByIQWithoutCancel       := wakeupVec.map(x => VecInit(x))
     hasIQWakeupGet.wakeupLoadDependencyByIQVec      := commonIn.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
@@ -396,6 +416,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.robIdx                                  := status.robIdx
     commonOut.dataSources.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
       val wakeupByIQWithoutCancel = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR
+      val wakeupByIQIsUncertain = hasIQWakeupGet.srcWakeupByIQIsUncertain(srcIdx).asUInt.orR
       val wakeupByIQWithoutCancelOH = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
       val isWakeupByMemIQ = wakeupByIQWithoutCancelOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
       val useRegCache = status.srcStatus(srcIdx).useRegCache.getOrElse(false.B) && status.srcStatus(srcIdx).dataSources.readReg
