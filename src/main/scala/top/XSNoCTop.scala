@@ -254,8 +254,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 
 
     /* during power down sequence, SoC reset will gate clock */
-//    val pwrdownGateClock = withClockAndReset(clock, cpuReset_sync.asAsyncReset) {RegInit(false.B)}
-    pwrdownGateClock := cpuReset_sync
+    val pwrdownGateClock := cpuReset_sync
     /*
      physical power off handshake:
      i_cpu_pwrdown_req_n
