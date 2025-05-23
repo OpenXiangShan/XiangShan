@@ -26,6 +26,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.Constantin
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.XSCoreParamsKey
 
 class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
@@ -250,14 +251,28 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.resp.bits.data     := respDataReg.asUInt
   io.resp.bits.corrupt  := corruptReg
 
-  /**
-    ******************************************************************************
-    * performance counter
-    ******************************************************************************
-    */
-  // Duplicate requests will be excluded.
+  /* *****************************************************************************
+   * perf
+   * ***************************************************************************** */
+  // Total requests, duplicate requests will be excluded.
   XSPerfAccumulate("enq_fetch_req", fetchDemux.io.in.fire)
   XSPerfAccumulate("enq_prefetch_req", prefetchDemux.io.in.fire)
+
+  // Mshr occupancy
+  XSPerfHistogram(
+    "fetchMshrReadyCnt",
+    PopCount(fetchDemux.io.out.map(_.ready)),
+    true.B,
+    0,
+    nFetchMshr
+  )
+  XSPerfHistogram(
+    "prefetchMshrReadyCnt",
+    PopCount(prefetchDemux.io.out.map(_.ready)),
+    true.B,
+    0,
+    nPrefetchMshr
+  )
 
   /**
     ******************************************************************************
