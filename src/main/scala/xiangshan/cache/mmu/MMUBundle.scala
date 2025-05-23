@@ -392,7 +392,6 @@ object TlbCmd {
   def isWrite(a: UInt) = a(1,0)===write
   def isExec(a: UInt) = a(1,0)===exec
 
-  def isAtom(a: UInt) = a(2)
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
