@@ -317,6 +317,11 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
 }
 
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
-  val icacheMiss: Bool = Output(Bool())
-  val itlbMiss:   Bool = Output(Bool())
+  val iCacheMissBubble: Bool = Output(Bool())
+  val itlbMissBubble:   Bool = Output(Bool())
+}
+
+class ICachePerfEventsInfo(implicit p: Parameters) extends ICacheBundle {
+  val miss:       Bool = Output(Bool())
+  val missBubble: Bool = Output(Bool())
 }

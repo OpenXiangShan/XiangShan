@@ -131,8 +131,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   require(numOfStage > 1, "Ifu numOfStage must be greater than 1")
   private val topdownStages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
   // bubble events in IFU, only happen in stage 1
-  private val icacheMissBubble = io.fromICache.topdown.icacheMiss
-  private val itlbMissBubble   = io.fromICache.topdown.itlbMiss
+  private val icacheMissBubble = io.fromICache.topdown.iCacheMissBubble
+  private val itlbMissBubble   = io.fromICache.topdown.itlbMissBubble
 
   // only driven by clock, not valid-ready
   topdownStages(0) := fromFtq.req.bits.topdown_info
