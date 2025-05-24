@@ -19,7 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.ClientMetadata
+import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate, HasPerfEvents}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
@@ -73,6 +73,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val replace_access = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
+
+    // BtoT grow check
+    val occupy_set = Output(UInt())
+    val occupy_fail = Input(Bool())
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
@@ -298,8 +302,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.bloom_filter_query.query.bits.addr := io.bloom_filter_query.query.bits.get_addr(s1_paddr_dup_dcache)
 
   // get s1_will_send_miss_req in lpad_s1
-  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
-  val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
+  val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
 
@@ -315,6 +318,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // check ecc error
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
+
+  // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
+  io.occupy_set := addr_to_dcache_set(s1_vaddr)
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -372,8 +378,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
-  val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
+  val s2_has_permission = RegEnable(s1_has_permission, s1_fire)
+  val s2_shrink_perm = RegEnable(s1_shrink_perm, s1_fire)
+  val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_fire)
+  val s2_grow_perm_btot = s2_shrink_perm === TLPermissions.BtoT && !s2_has_permission && s2_hit_dup_lsu
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -384,7 +392,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack_wbq_conflict = s2_miss_req_valid_dup && io.wbq_block_miss_req
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
-  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict
+  // BtoT occupy fail
+  val s2_btot_occupy_fail = io.occupy_fail && s2_grow_perm_btot
+  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict || s2_btot_occupy_fail
   // s2 miss merged
   val s2_miss_merged = s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.merged
 
@@ -417,7 +427,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.pseudo_error.ready := false.B
 
   // send load miss to miss queue
-  io.miss_req.valid := s2_miss_req_valid
+  io.miss_req.valid := s2_miss_req_valid && !s2_btot_occupy_fail
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
@@ -428,6 +438,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
+  io.miss_req.bits.isBtoT := s2_grow_perm_btot
+  io.miss_req.bits.occupy_way := s2_tag_match_way
 
   //send load miss to wbq
   io.wbq_conflict_check.valid := s2_miss_req_valid_dup
@@ -511,7 +523,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req || s2_btot_occupy_fail))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------
