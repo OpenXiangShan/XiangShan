@@ -75,14 +75,36 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
   }
 }
 
-class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
+class MicroFtbMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
   val pred_way = if (!env.FPGAPlatform) Some(UInt(log2Ceil(numWays).W)) else None
   val hit      = Bool()
 }
 
-class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
-  val resp_meta             = Wire(new FauFTBMeta)
-  override val is_fast_pred = true
+class MicroFtbToFtbBundle(implicit p: Parameters) extends XSBundle {
+  val fauftb_entry     = new FTBEntry
+  val fauftb_entry_hit = Bool()
+}
+
+class MicroFtbInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonSignals {}
+
+class MicroFtbOutput(implicit p: Parameters) extends XSBundle {
+  val toFtb       = new MicroFtbToFtbBundle
+  val s1_fullPred = new FullBranchPrediction(isNotS3 = true)
+  val s3_meta     = new MicroFtbMeta
+}
+
+class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with BPUUtils with HasPerfEvents {
+  val io = IO(new Bundle {
+    val in  = Input(new MicroFtbInput)
+    val out = Output(new MicroFtbOutput)
+  })
+
+  val s0_fire = io.in.s0_fire
+  val s1_fire = io.in.s1_fire
+  val s2_fire = io.in.s2_fire
+  val update  = io.in.update
+
+  val s1_pc = RegEnable(io.in.s0_pc, s0_fire)
 
   val ways = Seq.tabulate(numWays)(w => Module(new FauFTBWay))
   // numWays * numBr
@@ -111,29 +133,27 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_full_pred   = Mux1H(s1_hit_oh, s1_possible_full_preds)
   val s1_hit_fauftbentry = Mux1H(s1_hit_oh, s1_all_entries)
   XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
-  val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
-  io.out.s1.full_pred     := s1_hit_full_pred
-  io.out.s1.full_pred.hit := s1_hit && fauftb_enable
-  io.fauftb_entry_out     := s1_hit_fauftbentry
-  io.fauftb_entry_hit_out := s1_hit && fauftb_enable
+  val fauftb_enable = RegNext(io.in.ctrl.ubtb_enable)
+  io.out.s1_fullPred            := s1_hit_full_pred
+  io.out.s1_fullPred.hit        := s1_hit && fauftb_enable
+  io.out.toFtb.fauftb_entry     := s1_hit_fauftbentry
+  io.out.toFtb.fauftb_entry_hit := s1_hit && fauftb_enable
 
   // Illegal check for FTB entry reading
   val s1_pc_startLower             = Cat(0.U(1.W), s1_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits))
   val uftb_entry_endLowerwithCarry = Cat(s1_hit_fauftbentry.carry, s1_hit_fauftbentry.pftAddr)
   val fallThroughErr               = s1_pc_startLower + PredictWidth.U >= uftb_entry_endLowerwithCarry
-  when(io.s1_fire && s1_hit) {
+  when(s1_fire && s1_hit) {
     assert(fallThroughErr, s"FauFTB read entry fallThrough address error!")
   }
 
   // assign metas
-  io.meta.uftbMeta := resp_meta
-  resp_meta.hit    := RegEnable(RegEnable(s1_hit, io.s1_fire), io.s2_fire)
-  if (resp_meta.pred_way.isDefined) {
-    resp_meta.pred_way.get := RegEnable(RegEnable(s1_hit_way, io.s1_fire), io.s2_fire)
+  io.out.s3_meta.hit := RegEnable(RegEnable(s1_hit, s1_fire), s2_fire)
+  if (io.out.s3_meta.pred_way.isDefined) {
+    io.out.s3_meta.pred_way.get := RegEnable(RegEnable(s1_hit_way, s1_fire), s2_fire)
   }
 
   // pred update replacer state
-  val s1_fire = io.s1_fire
   replacer_touch_ways(0).valid := RegNext(s1_fire && s1_hit)
   replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire && s1_hit)
 
@@ -142,14 +162,14 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   // s1: alloc_way and write
 
   // s0
-  val u_valid = RegNext(io.update.valid, init = false.B)
-  val u_bits  = RegEnable(io.update.bits, io.update.valid)
+  val u_valid = RegNext(update.valid, init = false.B)
+  val u_bits  = RegEnable(update.bits, update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
-  val u_pc = io.update.bits.pc
+  val u_pc = update.bits.pc
 
-  val u_meta   = u_bits.meta.asTypeOf(new FauFTBMeta)
+  val u_meta   = u_bits.meta.asTypeOf(new MicroFtbMeta)
   val u_s0_tag = getTag(u_pc)
   ways.foreach(_.io.update_req_tag := u_s0_tag)
   val u_s0_hit_oh = VecInit(ways.map(_.io.update_hit)).asUInt
@@ -206,7 +226,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   replacer.access(replacer_touch_ways)
 
   /********************** perf counters **********************/
-  val s0_fire_next_cycle = RegNext(io.s0_fire)
+  val s0_fire_next_cycle = RegNext(s0_fire)
   val u_pred_hit_way_map = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hit_way === w.U)
   XSPerfAccumulate("uftb_read_hits", s0_fire_next_cycle && s1_hit)
   XSPerfAccumulate("uftb_read_misses", s0_fire_next_cycle && !s1_hit)
@@ -225,7 +245,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     }
   }
 
-  override val perfEvents = Seq(
+  val perfEvents = Seq(
     ("fauftb_commit_hit       ", u_valid && u_meta.hit),
     ("fauftb_commit_miss      ", u_valid && !u_meta.hit)
   )

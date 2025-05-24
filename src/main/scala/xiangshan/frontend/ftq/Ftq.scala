@@ -213,17 +213,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
     hasRen = true
   ))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid
-  ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_spec_info
+  ftq_redirect_mem.io.wen(0)   := io.fromBpu.resp.bits.s3.valid
+  ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.s3.ftq_idx.value
+  ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.s3_specInfo
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.lastStage.valid
-  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.meta
-  ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.last_stage_ftb_entry
+  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.s3.valid
+  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.s3.ftq_idx.value
+  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.resp.bits.s3_meta
+  ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.s3_ftbEntry
   if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
     ftq_meta_1r_sram.io.wdata.paddingBit.get := 0.U
   }
@@ -235,9 +235,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     1,
     hasRen = true
   ))
-  ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.lastStage.valid
-  ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
-  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
+  ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.s3.valid
+  ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.s3.ftq_idx.value
+  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.s3_ftbEntry
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
 
   // multi-write
@@ -1131,7 +1131,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)
-  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc, from_bpu.last_stage_ftb_entry)
+  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc, from_bpu.s3_ftbEntry)
   XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid, 0, PredictWidth + 1, 1)
 
   XSPerfHistogram("ftq_has_entry", validEntries, true.B, 0, FtqSize + 1, 1)
