@@ -991,6 +991,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val evict_set = Input(UInt())
     val btot_ways_for_set = Output(UInt(nWays.W))
 
+    // occupy set check
+    val occupy_set = Input(Vec(LoadPipelineWidth, UInt()))
+    val occupy_fail = Output(Vec(LoadPipelineWidth, Bool()))
+
     // req blocked by wbq
     val wbq_block_miss_req = Input(Bool())
 
@@ -1227,6 +1231,17 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.btot_ways_for_set := btot_evict_set_hit.zip(btot_occupy_ways).map {
     case (hit, way) => Fill(nWays, hit) & way
   }.reduce(_|_)
+
+  // LoadPipe occupy check
+  for (i <- 0 until LoadPipelineWidth) {
+    val occupy_set_hits = entries.map(
+      e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.occupy_set(i)
+    ) ++ Seq(miss_req_pipe_reg.evict_set_match(io.occupy_set(i)))
+    val occupy_ways = occupy_set_hits.zip(btot_occupy_ways).map {
+      case (hit, way) => Fill(nWays, hit) & way
+    }.reduce(_|_)
+    io.occupy_fail(i) := GatedValidRegNext(PopCount(occupy_ways) > (nWays-2).U)
+  }
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
