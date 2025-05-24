@@ -27,7 +27,7 @@ import freechips.rocketchip.regmapper.RegReadFn
 import freechips.rocketchip.regmapper.RegWriteFn
 import freechips.rocketchip.tilelink.TLRegisterNode
 import org.chipsalliance.cde.config.Parameters
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan.frontend.PrunedAddrInit
 
 // currently for ECC control only
@@ -61,7 +61,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     // eccCtrl.ierror: inject error code
     private def nInjError: Int = 8
-    private object EccCtrlInjError extends NamedUInt(log2Up(nInjError)) {
+    private object EccCtrlInjError extends EnumUInt(nInjError) {
       def NotEnabled:    UInt = 0.U(width.W) // try to inject when ECC check is not enabled
       def TargetInvalid: UInt = 1.U(width.W) // try to inject to invalid(rsvd) eccCtrl.itarget
       def NotFound:      UInt = 2.U(width.W) // try to inject to eccIAddr.pAddr does not exist in ICache
@@ -78,7 +78,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     }
     // eccCtrl.istatus: inject status
     private def nInjStatus: Int = 8
-    private object EccCtrlInjStatus extends NamedUInt(log2Up(nInjStatus)) {
+    private object EccCtrlInjStatus extends EnumUInt(nInjStatus) {
       def Idle:     UInt = 0.U(width.W)
       def Working:  UInt = 1.U(width.W)
       def Injected: UInt = 2.U(width.W)
@@ -94,7 +94,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
     }
     // eccCtrl.itarget: inject target
     private def nInjTarget: Int = 4
-    private object EccCtrlInjTarget extends NamedUInt(log2Up(nInjTarget)) {
+    private object EccCtrlInjTarget extends EnumUInt(nInjTarget) {
       def MetaArray: UInt = 0.U(width.W)
       def DataArray: UInt = 2.U(width.W)
       @unused
@@ -151,7 +151,7 @@ class ICacheCtrlUnit(params: ICacheCtrlUnitParameters)(implicit p: Parameters) e
 
     // inject FSM
     private def nInjectFsmState: Int = 5
-    private object InjectFsmState extends NamedUInt(log2Up(nInjectFsmState)) {
+    private object InjectFsmState extends EnumUInt(nInjectFsmState) {
       // scala ask identifier that begins with uppercase cannot be used in pattern matching like `X :: Nil = Enum()`
       // but we want UpperCamelCase for constants for better readability, so we dont use Enum() here
       def Idle:         UInt = 0.U(width.W)

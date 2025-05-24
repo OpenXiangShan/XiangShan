@@ -22,13 +22,12 @@ import utility.DataHoldBypass
 import utility.PriorityMuxDefault
 import utility.ValidHold
 import utility.XSPerfAccumulate
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.ftq.BpuFlushInfo
 
@@ -117,7 +116,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
 
   private def nS1FsmState: Int = 5
-  private object S1FsmState extends NamedUInt(log2Up(nS1FsmState)) {
+  private object S1FsmState extends EnumUInt(nS1FsmState) {
     def Idle:       UInt = 0.U(width.W)
     def ItlbResend: UInt = 1.U(width.W)
     def MetaResend: UInt = 2.U(width.W)
@@ -185,7 +184,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     Mux(tlbValidPulse(i), s1_pAddrWire(i), s1_pAddrReg(i))
   })
   private val s1_itlbExceptionRaw = VecInit((0 until PortNumber).map { i =>
-    DataHoldBypass(ExceptionType.fromTlbResp(fromItlb(i).bits), 0.U(ExceptionType.width.W), tlbValidPulse(i))
+    DataHoldBypass(ExceptionType.fromTlbResp(fromItlb(i).bits), ExceptionType.None, tlbValidPulse(i))
   })
   private val s1_itlbPbmt = VecInit((0 until PortNumber).map { i =>
     DataHoldBypass(fromItlb(i).bits.pbmt(0), 0.U.asTypeOf(fromItlb(i).bits.pbmt(0)), tlbValidPulse(i))
@@ -207,10 +206,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // merge backend exception and itlb exception
   // for area concern, we don't have 64 bits vaddr in frontend, but spec asks page fault when high bits are not all 0/1
   // this check is finished in backend, and passed to frontend with redirect, we see it as a part of itlb exception
-  private val s1_itlbException = ExceptionType.merge(
-    s1_backendException,
-    s1_itlbExceptionRaw
-  )
+  private val s1_itlbException = VecInit((s1_backendException zip s1_itlbExceptionRaw).map { case (b, i) => b || i })
   // debug
   dontTouch(s1_itlbExceptionRaw)
   dontTouch(s1_itlbException)
@@ -221,7 +217,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
    *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
    */
-  private val s1_itlbExceptionIsGpf = VecInit(s1_itlbException.map(_ === ExceptionType.gpf))
+  private val s1_itlbExceptionIsGpf = VecInit(s1_itlbException.map(_.isGpf))
   private val s1_gpAddr = PriorityMuxDefault(
     s1_itlbExceptionIsGpf zip (0 until PortNumber).map(i => s1_gpAddrRaw(i) - (i << blockOffBits).U),
     0.U.asTypeOf(s1_gpAddrRaw(0))
@@ -326,7 +322,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     toWayLookup.bits.itlbException(i) := Mux(
       excpValid,
       s1_itlbException(i), // includes backend exception
-      ExceptionType.none
+      ExceptionType.None
     )
     toWayLookup.bits.itlbPbmt(i) := Mux(excpValid, s1_itlbPbmt(i), Pbmt.pma)
   }
@@ -359,15 +355,12 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     p.bits.size := 3.U
     p.bits.cmd  := TlbCmd.exec
   }
-  private val s1_pmpException = VecInit(fromPmp.map(ExceptionType.fromPMPResp))
+  private val s1_pmpException = VecInit(fromPmp.map(ExceptionType.fromPmpResp))
   private val s1_pmpMmio      = VecInit(fromPmp.map(_.mmio))
 
   // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next
-  // for timing consideration, meta_corrupt is not merged, and it will NOT cancel prefetch
-  private val s1_exceptionOut = ExceptionType.merge(
-    s1_itlbException, // includes backend exception
-    s1_pmpException
-  )
+  // here, itlb exception includes backend exception
+  private val s1_exceptionOut = VecInit((s1_itlbException zip s1_pmpException).map { case (i, p) => i || p })
 
   // merge pmp mmio and itlb pbmt
   private val s1_isMmio = VecInit((s1_pmpMmio zip s1_itlbPbmt).map { case (mmio, pbmt) =>
@@ -503,7 +496,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
    */
   private val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i == 0) true.B else s2_doubleline) &&
-    !ExceptionType.hasException(s2_exception.take(i + 1)) &&
+    s2_exception.take(i + 1).map(_.isNone).reduce(_ && _) &&
     s2_isMmio.take(i + 1).map(!_).reduce(_ && _)
   })
 

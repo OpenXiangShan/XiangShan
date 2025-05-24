@@ -33,12 +33,12 @@ object PreDecodeInst {
 
   val brTable = Array(
     // C_JAL     -> List(BrType.jal),
-    C_EBREAK  -> List(BrType.notCFI), // c.ebreak should not be decoded as jalr, higher priority than c.jalr
-    C_J       -> List(BrType.jal),
-    C_JALR    -> List(BrType.jalr),
-    C_BRANCH  -> List(BrType.branch),
-    JAL       -> List(BrType.jal),
-    JALR      -> List(BrType.jalr),
-    BRANCH    -> List(BrType.branch)
+    C_EBREAK  -> List(BrType.NotCfi), // c.ebreak should not be decoded as jalr, higher priority than c.jalr
+    C_J       -> List(BrType.Jal),
+    C_JALR    -> List(BrType.Jalr),
+    C_BRANCH  -> List(BrType.Branch),
+    JAL       -> List(BrType.Jal),
+    JALR      -> List(BrType.Jalr),
+    BRANCH    -> List(BrType.Branch)
   )
 }

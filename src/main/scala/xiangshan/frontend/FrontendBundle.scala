@@ -24,7 +24,7 @@ import ftq.FtqRedirectSramEntry
 import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils.NamedUInt
+import utils.EnumUInt
 import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
@@ -88,7 +88,7 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
 
 class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
   val req:              FtqICacheInfo = new FtqICacheInfo
-  val backendException: UInt          = ExceptionType()
+  val backendException: ExceptionType = new ExceptionType
 }
 
 class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -152,138 +152,94 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioLastCommit = Input(Bool())
 }
 
-object ExceptionType extends NamedUInt(2) {
-  def none: UInt = "b00".U(width.W)
-  def pf:   UInt = "b01".U(width.W) // instruction page fault
-  def gpf:  UInt = "b10".U(width.W) // instruction guest page fault
-  def af:   UInt = "b11".U(width.W) // instruction access fault
+class ExceptionType extends Bundle {
+  val value: UInt = ExceptionType.Value()
 
-  def hasException(e: UInt):             Bool = e =/= none
-  def hasException(e: Vec[UInt]):        Bool = e.map(_ =/= none).reduce(_ || _)
-  def hasException(e: IndexedSeq[UInt]): Bool = hasException(VecInit(e))
+  def isNone: Bool = value === ExceptionType.Value.None
+  def isPf:   Bool = value === ExceptionType.Value.Pf
+  def isGpf:  Bool = value === ExceptionType.Value.Gpf
+  def isAf:   Bool = value === ExceptionType.Value.Af
 
-  def fromOH(has_pf: Bool, has_gpf: Bool, has_af: Bool): UInt = {
+  def hasException: Bool = value =/= ExceptionType.Value.None
+
+  /** merge exception from multiple sources, the leftmost one has higher priority
+   * @example {{{
+   *   val itlbException = ExceptionType(io.itlb.resp.bits)
+   *   val pmpException = ExceptionType(io.pmp.resp)
+   *
+   *   // itlb has higher priority than pmp, as when itlb has exception, pAddr is not valid
+   *   val exception = itlbException || pmpException
+   * }}}
+   */
+  def ||(that: ExceptionType): ExceptionType =
+    Mux(this.hasException, this, that)
+}
+
+object ExceptionType {
+  private object Value extends EnumUInt(4) {
+    def None: UInt = 0.U(width.W)
+    def Pf:   UInt = 1.U(width.W) // instruction page fault
+    def Gpf:  UInt = 2.U(width.W) // instruction guest page fault
+    def Af:   UInt = 3.U(width.W) // instruction access fault
+  }
+
+  def apply(that: UInt): ExceptionType = {
+    Value.assertLegal(that)
+    val e = Wire(new ExceptionType)
+    e.value := that
+    e
+  }
+
+  def None: ExceptionType = apply(Value.None)
+  def Pf:   ExceptionType = apply(Value.Pf)
+  def Gpf:  ExceptionType = apply(Value.Gpf)
+  def Af:   ExceptionType = apply(Value.Af)
+
+  def apply(hasPf: Bool, hasGpf: Bool, hasAf: Bool): ExceptionType = {
     assert(
-      PopCount(VecInit(has_pf, has_gpf, has_af)) <= 1.U,
-      "ExceptionType.fromOH receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
-      has_pf,
-      has_gpf,
-      has_af
+      PopCount(VecInit(hasPf, hasGpf, hasAf)) <= 1.U,
+      "ExceptionType receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
+      hasPf,
+      hasGpf,
+      hasAf
     )
     // input is at-most-one-hot encoded, so we don't worry about priority here.
     MuxCase(
-      none,
+      None,
       Seq(
-        has_pf  -> pf,
-        has_gpf -> gpf,
-        has_af  -> af
+        hasPf  -> Pf,
+        hasGpf -> Gpf,
+        hasAf  -> Af
       )
     )
   }
 
+  // only af is used most frequently (pmp / ecc / tilelink), so we define a shortcut
+  // we cannot use default parameter in apply(), as it is overloaded and scala won't allow
+  def apply(hasAf: Bool): ExceptionType =
+    apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf)
+
   // raise pf/gpf/af according to itlb response
-  def fromTlbResp(resp: TlbResp, useDup: Int = 0): UInt = {
+  def fromTlbResp(resp: TlbResp, useDup: Int = 0): ExceptionType = {
     require(useDup >= 0 && useDup < resp.excp.length)
     // itlb is guaranteed to respond at most one exception
-    fromOH(
-      resp.excp(useDup).pf.instr,
-      resp.excp(useDup).gpf.instr,
-      resp.excp(useDup).af.instr
+    apply(
+      hasPf = resp.excp(useDup).pf.instr,
+      hasGpf = resp.excp(useDup).gpf.instr,
+      hasAf = resp.excp(useDup).af.instr
     )
   }
 
   // raise af if pmp check failed
-  def fromPMPResp(resp: PMPRespBundle): UInt =
-    Mux(resp.instr, af, none)
-
-  // raise af if meta/data array ecc check failed or l2 cache respond with tilelink corrupt
-  /* FIXME: RISC-V Machine ISA v1.13 (draft) introduced a "hardware error" exception, described as:
-   * > A Hardware Error exception is a synchronous exception triggered when corrupted or
-   * > uncorrectable data is accessed explicitly or implicitly by an instruction. In this context,
-   * > "data" encompasses all types of information used within a RISC-V hart. Upon a hardware
-   * > error exception, the xepc register is set to the address of the instruction that attempted to
-   * > access corrupted data, while the xtval register is set either to 0 or to the virtual address
-   * > of an instruction fetch, load, or store that attempted to access corrupted data. The priority
-   * > of Hardware Error exception is implementation-defined, but any given occurrence is
-   * > generally expected to be recognized at the point in the overall priority order at which the
-   * > hardware error is discovered.
-   * Maybe it's better to raise hardware error instead of access fault when ECC check failed.
-   * But it's draft and XiangShan backend does not implement this exception code yet, so we still raise af here.
-   */
-  def fromECC(enable: Bool, corrupt: Bool): UInt =
-    Mux(enable && corrupt, af, none)
-
-  def fromTilelink(corrupt: Bool): UInt =
-    Mux(corrupt, af, none)
-
-  /**Generates exception mux tree
-   *
-   * Exceptions that are further to the left in the parameter list have higher priority
-   * @example
-   * {{{
-   *   val itlb_exception = ExceptionType.fromTlbResp(io.itlb.resp.bits)
-   *   // so as pmp_exception, meta_corrupt
-   *   // ExceptionType.merge(itlb_exception, pmp_exception, meta_corrupt) is equivalent to:
-   *   Mux(
-   *     itlb_exception =/= none,
-   *     itlb_exception,
-   *     Mux(pmp_exception =/= none, pmp_exception, meta_corrupt)
-   *   )
-   * }}}
-   */
-  def merge(exceptions: UInt*): UInt = {
-//    // recursively generate mux tree
-//    if (exceptions.length == 1) {
-//      require(exceptions.head.getWidth == width)
-//      exceptions.head
-//    } else {
-//      Mux(exceptions.head =/= none, exceptions.head, merge(exceptions.tail: _*))
-//    }
-    // use MuxCase with default
-    exceptions.foreach(e => require(e.getWidth == width))
-    val mapping = exceptions.init.map(e => (e =/= none) -> e)
-    val default = exceptions.last
-    MuxCase(default, mapping)
-  }
-
-  /**Generates exception mux tree for multi-port exception vectors
-   *
-   * Exceptions that are further to the left in the parameter list have higher priority
-   * @example
-   * {{{
-   *   val itlb_exception = VecInit((0 until PortNumber).map(i => ExceptionType.fromTlbResp(io.itlb(i).resp.bits)))
-   *   // so as pmp_exception, meta_corrupt
-   *   // ExceptionType.merge(itlb_exception, pmp_exception, meta_corrupt) is equivalent to:
-   *   VecInit((0 until PortNumber).map(i => Mux(
-   *     itlb_exception(i) =/= none,
-   *     itlb_exception(i),
-   *     Mux(pmp_exception(i) =/= none, pmp_exception(i), meta_corrupt(i))
-   *   ))
-   * }}}
-   */
-  def merge(exceptionVecs: Vec[UInt]*): Vec[UInt] = {
-//    // recursively generate mux tree
-//    if (exceptionVecs.length == 1) {
-//      exceptionVecs.head.foreach(e => require(e.getWidth == width))
-//      exceptionVecs.head
-//    } else {
-//      require(exceptionVecs.head.length == exceptionVecs.last.length)
-//      VecInit((exceptionVecs.head zip merge(exceptionVecs.tail: _*)).map{ case (high, low) =>
-//        Mux(high =/= none, high, low)
-//      })
-//    }
-    // merge port-by-port
-    val length = exceptionVecs.head.length
-    exceptionVecs.tail.foreach(vec => require(vec.length == length))
-    VecInit((0 until length).map(i => merge(exceptionVecs.map(_(i)): _*)))
-  }
+  def fromPmpResp(resp: PMPRespBundle): ExceptionType =
+    apply(hasAf = resp.instr)
 }
 
-object BrType extends NamedUInt(2) {
-  def notCFI: UInt = "b00".U(width.W)
-  def branch: UInt = "b01".U(width.W)
-  def jal:    UInt = "b10".U(width.W)
-  def jalr:   UInt = "b11".U(width.W)
+object BrType extends EnumUInt(4) {
+  def NotCfi: UInt = 0.U(width.W)
+  def Branch: UInt = 1.U(width.W)
+  def Jal:    UInt = 2.U(width.W)
+  def Jalr:   UInt = 3.U(width.W)
 }
 
 class PreDecodeInfo extends Bundle { // 8 bit
@@ -293,10 +249,10 @@ class PreDecodeInfo extends Bundle { // 8 bit
   val isCall = Bool()
   val isRet  = Bool()
   // val excType = UInt(3.W)
-  def isBr   = brType === BrType.branch
-  def isJal  = brType === BrType.jal
-  def isJalr = brType === BrType.jalr
-  def notCFI = brType === BrType.notCFI
+  def isBr   = brType === BrType.Branch
+  def isJal  = brType === BrType.Jal
+  def isJalr = brType === BrType.Jalr
+  def notCFI = brType === BrType.NotCfi
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
@@ -307,7 +263,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, ExceptionType())
+  val exceptionType    = Vec(PredictWidth, new ExceptionType)
   val crossPageIPFFix  = Vec(PredictWidth, Bool())
   val illegalInstr     = Vec(PredictWidth, Bool())
   val triggered        = Vec(PredictWidth, TriggerAction())
