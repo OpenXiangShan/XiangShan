@@ -161,14 +161,14 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val doubleline:         Bool            = Bool()
-  val vAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
-  val data:               UInt            = UInt(blockBits.W)
-  val pAddr:              Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(PAddrBits))
-  val exception:          Vec[UInt]       = Vec(PortNumber, ExceptionType())
-  val pmpMmio:            Vec[Bool]       = Vec(PortNumber, Bool())
-  val itlbPbmt:           Vec[UInt]       = Vec(PortNumber, UInt(Pbmt.width.W))
-  val isBackendException: Bool            = Bool()
+  val doubleline:         Bool               = Bool()
+  val vAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val data:               UInt               = UInt(blockBits.W)
+  val pAddr:              Vec[PrunedAddr]    = Vec(PortNumber, PrunedAddr(PAddrBits))
+  val exception:          Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+  val pmpMmio:            Vec[Bool]          = Vec(PortNumber, Bool())
+  val itlbPbmt:           Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
+  val isBackendException: Bool               = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpAddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpAddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpAddr,
@@ -181,11 +181,11 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** PrefetchPipe ***** */
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startAddr:        PrunedAddr = PrunedAddr(VAddrBits)
-  val nextlineStart:    PrunedAddr = PrunedAddr(VAddrBits)
-  val ftqIdx:           FtqPtr     = new FtqPtr
-  val isSoftPrefetch:   Bool       = Bool()
-  val backendException: UInt       = ExceptionType()
+  val startAddr:        PrunedAddr    = PrunedAddr(VAddrBits)
+  val nextlineStart:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val ftqIdx:           FtqPtr        = new FtqPtr
+  val isSoftPrefetch:   Bool          = Bool()
+  val backendException: ExceptionType = new ExceptionType
 
   def crossCacheline: Bool = startAddr(blockOffBits - 1) === 1.U
 
@@ -214,12 +214,12 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  *      to save area, we separate those signals from WayLookupEntry and store only once.
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx:       Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val waymask:       Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
-  val pTag:          Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
-  val itlbException: Vec[UInt] = Vec(PortNumber, ExceptionType())
-  val itlbPbmt:      Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
-  val metaCodes:     Vec[UInt] = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
+  val vSetIdx:       Vec[UInt]          = Vec(PortNumber, UInt(idxBits.W))
+  val waymask:       Vec[UInt]          = Vec(PortNumber, UInt(nWays.W))
+  val pTag:          Vec[UInt]          = Vec(PortNumber, UInt(tagBits.W))
+  val itlbException: Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+  val itlbPbmt:      Vec[UInt]          = Vec(PortNumber, UInt(Pbmt.width.W))
+  val metaCodes:     Vec[UInt]          = Vec(PortNumber, UInt(ICacheMetaCodeBits.W))
 }
 
 class WayLookupGpfEntry(implicit p: Parameters) extends ICacheBundle {
@@ -233,14 +233,14 @@ class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGpfEntry
 
   // for compatibility
-  def vSetIdx:           Vec[UInt]  = entry.vSetIdx
-  def waymask:           Vec[UInt]  = entry.waymask
-  def pTag:              Vec[UInt]  = entry.pTag
-  def itlbException:     Vec[UInt]  = entry.itlbException
-  def itlbPbmt:          Vec[UInt]  = entry.itlbPbmt
-  def metaCodes:         Vec[UInt]  = entry.metaCodes
-  def gpAddr:            PrunedAddr = gpf.gpAddr
-  def isForVSnonLeafPTE: Bool       = gpf.isForVSnonLeafPTE
+  def vSetIdx:           Vec[UInt]          = entry.vSetIdx
+  def waymask:           Vec[UInt]          = entry.waymask
+  def pTag:              Vec[UInt]          = entry.pTag
+  def itlbException:     Vec[ExceptionType] = entry.itlbException
+  def itlbPbmt:          Vec[UInt]          = entry.itlbPbmt
+  def metaCodes:         Vec[UInt]          = entry.metaCodes
+  def gpAddr:            PrunedAddr         = gpf.gpAddr
+  def isForVSnonLeafPTE: Bool               = gpf.isForVSnonLeafPTE
 }
 
 /* ***** Miss ***** */
