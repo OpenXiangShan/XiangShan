@@ -217,6 +217,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
      */
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sWAITQ :: sQREQ :: sPOFFREQ :: Nil = Enum(7)
     val lpState = withClockAndReset(clock, cpuReset_sync) {RegInit(sIDLE)}
+    val cpu_no_op = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val l2_flush_en = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg(core_with_l2.module.io.l2_flush_en.getOrElse(false.B), 3, 0)
     }
@@ -231,7 +232,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
-    io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
+    cpu_no_op := lpState === sPOFFREQ
+    io.lp.foreach { lp => lp.o_cpu_no_op := cpu_no_op } // inform SoC core+l2 want to power off
 
     /*WFI clock Gating state
      1. works only when lpState is IDLE means Core+L2 works in normal state
@@ -251,11 +253,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
       wfiGateClock := false.B
     }
 
-
-
-    /* during power down sequence, SoC reset will gate clock */
-    val pwrdownGateClock = withClockAndReset(clock, cpuReset_sync.asAsyncReset) {RegInit(false.B)}
-    pwrdownGateClock := cpuReset && lpState === sPOFFREQ
     /*
      physical power off handshake:
      i_cpu_pwrdown_req_n
@@ -266,14 +263,13 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 
 
     /* Core+L2 hardware initial clock gating as:
-     1. Gate clock when SoC reset CPU with < io.i_cpu_sw_rst_n > valid
+     1. Gate clock when SoC reset CPU with cpuReset_sync
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool) | io.chi.rx.snp.flitpend
 
     dontTouch(wfiGateClock)
-    dontTouch(pwrdownGateClock)
     dontTouch(cpuClockEn)
 
     core_with_l2.module.clock := ClockGate(false.B, cpuClockEn, clock)
