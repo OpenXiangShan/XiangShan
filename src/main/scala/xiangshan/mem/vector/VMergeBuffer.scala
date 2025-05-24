@@ -185,7 +185,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       io.fromPipeline(j).valid
 
     mergePortMatrix(i)(j)        := mergePortValid
-    mergePortMatrixHasExcp(i)(j) := mergePortValid && io.fromPipeline(j).bits.hasException
+    mergePortMatrixHasExcp(i)(j) := mergePortValid && (io.fromPipeline(j).bits.hasException || TriggerAction.isDmode(io.fromPipeline(j).bits.trigger))
   }}
   (0 until pipeWidth).map{case i =>
     mergedByPrevPortVec(i) := (i != 0).B && Cat((0 until i).map(j =>
@@ -253,7 +253,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entry               = entries(pipeWbMbIndex)
     val entryVeew           = entry.uop.vpu.veew
     val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
-    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR
+    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR || TriggerAction.isDmode(entry.uop.trigger)
     val entryExcp           = entryHasException && entry.mask.orR
     val entryVaddr          = entry.vaddr
     val entryVstart         = entry.vstart
@@ -277,12 +277,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
     // select oldest port to raise exception
     when((((entryElemIdx >= selElemIdx) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewbvalid && !mergedByPrevPortVecWrap(i)) {
-      entry.uop.trigger     := selPort(0).trigger
       entry.elemIdx         := selElemIdx
       when(!entry.fof || vstart === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entry.vstart       := vstart
         entry.exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
+        entry.uop.trigger     := selPort(0).trigger
         entry.vaddr        := vaddr
         entry.vaNeedExt    := selPort(0).vaNeedExt
         entry.gpaddr       := selPort(0).gpaddr
