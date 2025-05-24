@@ -39,7 +39,7 @@ class Mstateen0Bundle extends Hstateen0Bundle {
 
 class SstateenNonZeroBundle extends CSRBundle {  // for sstateen[1|2|3]
   override val len = 32
-  val ALL = RO(31, 0).withReset(0.U)
+  val ALL = RO(31, 0)
 }
 
 class HstateenNonZeroBundle extends CSRBundle {  // for hstateen[1|2|3]
