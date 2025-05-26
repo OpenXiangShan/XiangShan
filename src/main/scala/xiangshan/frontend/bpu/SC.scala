@@ -1,29 +1,27 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-*
-*
-* Acknowledgement
-*
-* This implementation is inspired by several key papers:
-* [1] André Seznec. "[Tage-sc-l branch predictors.](https://inria.hal.science/hal-01086920)" The Journal of
-* Instruction-Level Parallelism (JILP) 4th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
-* Branch Prediction (CBP). 2014.
-* [2] André Seznec. "[Tage-sc-l branch predictors again.](https://inria.hal.science/hal-01354253)" The Journal of
-* Instruction-Level Parallelism (JILP) 5th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
-* Branch Prediction (CBP). 2016.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+//
+// Acknowledgement
+//
+// This implementation is inspired by several key papers:
+// [1] André Seznec. "[Tage-sc-l branch predictors.](https://inria.hal.science/hal-01086920)" The Journal of
+// Instruction-Level Parallelism (JILP) 4th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
+// Branch Prediction (CBP). 2014.
+// [2] André Seznec. "[Tage-sc-l branch predictors again.](https://inria.hal.science/hal-01354253)" The Journal of
+// Instruction-Level Parallelism (JILP) 5th JILP Workshop on Computer Architecture Competitions (JWAC): Championship
+// Branch Prediction (CBP). 2016.
 
 package xiangshan.frontend.bpu
 
@@ -31,11 +29,14 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
-import utility._
+import utility.HasPerfEvents
+import utility.ParallelSingedExpandingAdd
+import utility.XSDebug
+import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.SRAMConflictBehavior
 import utility.sram.SRAMTemplate
-import xiangshan._
+import xiangshan.XSBundle
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.WrBypass

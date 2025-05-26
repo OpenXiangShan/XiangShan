@@ -1,30 +1,28 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-*
-*
-* Acknowledgement
-*
-* This implementation is inspired by several key papers:
-* [1] Pierre Michaud. "[A PPM-like, tag-based branch predictor.](https://inria.hal.science/hal-03406188)" The Journal
-* of Instruction-Level Parallelism (JILP) 7: 10. 2005.
-* [2] André Seznec, and Pierre Michaud. "[A case for (partially) tagged geometric history length branch prediction.]
-* (https://inria.hal.science/hal-03408381)" The Journal of Instruction-Level Parallelism (JILP) 8: 23. 2006.
-* [3] André Seznec. "[A 256 kbits l-tage branch predictor.](http://www.irisa.fr/caps/people/seznec/L-TAGE.pdf)" The
-* Journal of Instruction-Level Parallelism (JILP) Special Issue: The Second Championship Branch Prediction Competition
-* (CBP) 9: 1-6. 2007.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+//
+// Acknowledgement
+//
+// This implementation is inspired by several key papers:
+// [1] Pierre Michaud. "[A PPM-like, tag-based branch predictor.](https://inria.hal.science/hal-03406188)" The Journal
+// of Instruction-Level Parallelism (JILP) 7: 10. 2005.
+// [2] André Seznec, and Pierre Michaud. "[A case for (partially) tagged geometric history length branch prediction.]
+// (https://inria.hal.science/hal-03408381)" The Journal of Instruction-Level Parallelism (JILP) 8: 23. 2006.
+// [3] André Seznec. "[A 256 kbits l-tage branch predictor.](http://www.irisa.fr/caps/people/seznec/L-TAGE.pdf)" The
+// Journal of Instruction-Level Parallelism (JILP) Special Issue: The Second Championship Branch Prediction Competition
+// (CBP) 9: 1-6. 2007.
 
 package xiangshan.frontend.bpu
 
@@ -32,12 +30,25 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
-import utility._
+import utility.GTimer
+import utility.LowerMask
+import utility.ParallelPriorityMux
+import utility.ParallelXOR
+import utility.XSDebug
+import utility.XSError
+import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
 import utility.sram.SRAMConflictBehavior
-import xiangshan._
-import xiangshan.frontend._
+import xiangshan.HasXSParameter
+import xiangshan.ValidUndirectioned
+import xiangshan.XSBundle
+import xiangshan.XSModule
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.TableAddr
+import xiangshan.frontend.WrBypass
 
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)
