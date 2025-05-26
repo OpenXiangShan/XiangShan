@@ -254,8 +254,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 
 
     /* during power down sequence, SoC reset will gate clock */
-    val pwrdownGateClock = withClockAndReset(clock, cpuReset_sync.asAsyncReset) {RegInit(false.B)}
-    pwrdownGateClock := cpuReset && lpState === sPOFFREQ
+    val pwrdownGateClock = cpuReset_sync
+
     /*
      physical power off handshake:
      i_cpu_pwrdown_req_n
@@ -270,7 +270,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !(pwrdownGateClock.asBool) | io.chi.rx.snp.flitpend
 
     dontTouch(wfiGateClock)
     dontTouch(pwrdownGateClock)
