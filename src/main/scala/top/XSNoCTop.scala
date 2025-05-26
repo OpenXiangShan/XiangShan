@@ -267,7 +267,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool) | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool)
 
     dontTouch(wfiGateClock)
     dontTouch(cpuClockEn)
