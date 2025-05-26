@@ -353,9 +353,7 @@ case class XSCoreParameters
   softTLB: Boolean = false, // dpi-c l1tlb debug only
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
-  hasMbist: Boolean = false,
   wfiResume: Boolean = true,
-  hasSramCtl: Boolean = false,
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -565,6 +563,14 @@ case class DebugOptions
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
   EnableRollingDB: Boolean = false
+)
+
+case object DFTOptionsKey extends Field[DFTOptions]
+
+case class DFTOptions
+(
+  EnableMbist: Boolean = true, // enable mbist default
+  EnableSramCtl: Boolean = false,
 )
 
 trait HasXSParameter {
@@ -907,9 +913,8 @@ trait HasXSParameter {
   def IretireWidthCompressed = log2Up(RenameWidth * CommitWidth * 2 + 1)
   def IlastsizeWidth         = coreParams.traceParams.IlastsizeWidth
 
-  def hasMbist               = coreParams.hasMbist
-
   def wfiResume              = coreParams.wfiResume
-  def hasSramCtl             = coreParams.hasSramCtl
-  def hasDFT            = hasMbist || hasSramCtl
+  def hasMbist               = p(DFTOptionsKey).EnableMbist
+  def hasSramCtl             = p(DFTOptionsKey).EnableSramCtl
+  def hasDFT                 = hasMbist || hasSramCtl
 }
