@@ -62,7 +62,6 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
 
   val io = new Bundle {
     val chi = IO(new PortIO)
-    val clintTime = IO(Input(ValidIO(UInt(64.W))))
     val dft = Option.when(hasDFT)(IO(Input(new SramBroadcastBundle)))
     val dft_reset = Option.when(hasMbist)(IO(Input(new DFTResetSignals())))
     val lp = Option.when(socParams.EnablePowerDown)(IO(new LowPowerIO))
@@ -373,6 +372,23 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
   }
 }
 
+trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp
+                                                            with HasXSTileImp[L] =>
+    val io_clintTime  = IO(Input(ValidIO(UInt(64.W))))
+
+    socParams.EnableClintAsyncBridge match {
+      case Some(param) =>
+        withClockAndReset(soc_clock, soc_reset_sync) {
+          val source = Module(new AsyncQueueSource(UInt(64.W), param))
+          source.io.enq.valid := io_clintTime.valid
+          source.io.enq.bits := io_clintTime.bits
+          core_with_l2.module.io.clintTime <> source.io.async
+        }
+      case None =>
+        core_with_l2.module.io.clintTime <> io_clintTime
+    }
+}
+
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   with HasXSTile
   with HasSeperatedTLBusOpt
@@ -386,6 +402,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasXSTileImp[XSNoCTop]
     with HasSeperatedTLBusImpOpt[XSNoCTop]
     with HasCoreLowPowerImp[XSNoCTop]
+    with HasClintTimeImp[XSNoCTop]
     with HasIMSICImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
@@ -393,18 +410,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
     core_with_l2.module.reset := cpuReset.asAsyncReset
-
-    EnableClintAsyncBridge match {
-      case Some(param) =>
-        withClockAndReset(soc_clock, soc_reset_sync) {
-          val source = Module(new AsyncQueueSource(UInt(64.W), param))
-          source.io.enq.valid := io.clintTime.valid
-          source.io.enq.bits := io.clintTime.bits
-          core_with_l2.module.io.clintTime <> source.io.async
-        }
-      case None =>
-        core_with_l2.module.io.clintTime <> io.clintTime
-    }
 
     EnableCHIAsyncBridge match {
       case Some(param) =>
