@@ -101,9 +101,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
-    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(2, io.dft_reset))
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(2, io.dft_reset)))
-    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(2, io.dft_reset))
+    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
+    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
+    val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(io.dft_reset))
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
