@@ -1066,11 +1066,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
                                          ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
   }
 
-  val errors = ldu.map(_.io.error) ++ // load error
-    Seq(mainPipe.io.error) // store / misc error
+  val errors = Seq(mainPipe.io.error) ++ // store / misc error
+        ldu.map(_.io.error)// load error
   val error_valid = errors.map(e => e.valid).reduce(_|_)
   io.error.bits <> RegEnable(
-    ParallelMux(errors.map(e => RegNext(e.valid) -> RegEnable(e.bits, e.valid))),
+    ParallelPriorityMux(errors.map(e => RegNext(e.valid) -> RegEnable(e.bits, e.valid))),
     RegNext(error_valid))
   io.error.valid := RegNext(RegNext(error_valid, init = false.B), init = false.B)
 
