@@ -2,7 +2,7 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import fudian.SignExt
+import utility.{SignExt, ZeroExt}
 import xiangshan.RedirectLevel
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -15,7 +15,10 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   // associated with AddrData's position of JmpCfg.srcData
   private val src = io.in.bits.data.src(0)
-  private val pc = SignExt(io.in.bits.data.pc.get, cfg.destDataBits)
+  private val pc = Mux(io.instrAddrTransType.get.shouldBeSext,
+    SignExt(io.in.bits.data.pc.get, cfg.destDataBits),
+    ZeroExt(io.in.bits.data.pc.get, cfg.destDataBits)
+  )
   private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
   private val isRVC = io.in.bits.ctrl.preDecode.get.isRVC
