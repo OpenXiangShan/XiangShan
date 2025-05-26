@@ -63,21 +63,6 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
   val io = new Bundle {
     val chi = IO(new PortIO)
     val clintTime = IO(Input(ValidIO(UInt(64.W))))
-    val traceCoreInterface = IO(new Bundle {
-      val fromEncoder = Input(new Bundle {
-        val enable = Bool()
-        val stall  = Bool()
-      })
-      val toEncoder   = Output(new Bundle {
-        val cause     = UInt(socParams.TraceCauseWidth.W)
-        val tval      = UInt(socParams.TraceTvalWidth.W)
-        val priv      = UInt(socParams.TracePrivWidth.W)
-        val iaddr     = UInt((socParams.TraceTraceGroupNum * socParams.TraceIaddrWidth).W)
-        val itype     = UInt((socParams.TraceTraceGroupNum * socParams.TraceItypeWidth).W)
-        val iretire   = UInt((socParams.TraceTraceGroupNum * socParams.TraceIretireWidthCompressed).W)
-        val ilastsize = UInt((socParams.TraceTraceGroupNum * socParams.TraceIlastsizeWidth).W)
-      })
-    })
     val dft = Option.when(hasDFT)(IO(Input(new SramBroadcastBundle)))
     val dft_reset = Option.when(hasMbist)(IO(Input(new DFTResetSignals())))
     val lp = Option.when(socParams.EnablePowerDown)(IO(new LowPowerIO))
@@ -355,10 +340,44 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
   u_imsic_bus_top.module.msiio.vld_ack := core_with_l2.module.io.msiAck
 }
 
+trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
+  InModuleBody {
+    val io = new Bundle {
+      val traceCoreInterface = IO(new Bundle {
+        val fromEncoder = Input(new Bundle {
+          val enable = Bool()
+          val stall  = Bool()
+        })
+        val toEncoder   = Output(new Bundle {
+          val cause     = UInt(TraceCauseWidth.W)
+          val tval      = UInt(TraceTvalWidth.W)
+          val priv      = UInt(TracePrivWidth.W)
+          val iaddr     = UInt((TraceTraceGroupNum * TraceIaddrWidth).W)
+          val itype     = UInt((TraceTraceGroupNum * TraceItypeWidth).W)
+          val iretire   = UInt((TraceTraceGroupNum * TraceIretireWidthCompressed).W)
+          val ilastsize = UInt((TraceTraceGroupNum * TraceIlastsizeWidth).W)
+        })
+      })
+    }
+
+    // trace Interface
+    val traceInterface = core_with_l2.module.io.traceCoreInterface
+    traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
+    io.traceCoreInterface.toEncoder.priv := traceInterface.toEncoder.priv
+    io.traceCoreInterface.toEncoder.cause := traceInterface.toEncoder.trap.cause
+    io.traceCoreInterface.toEncoder.tval := traceInterface.toEncoder.trap.tval
+    io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
+    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+    io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
+    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+  }
+}
+
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   with HasXSTile
   with HasSeperatedTLBusOpt
   with HasIMSIC
+  with HasTraceIO
 {
   override lazy val desiredName: String = "XSTop"
 
@@ -374,16 +393,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
     core_with_l2.module.reset := cpuReset.asAsyncReset
-    // trace Interface
-    val traceInterface = core_with_l2.module.io.traceCoreInterface
-    traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
-    io.traceCoreInterface.toEncoder.priv := traceInterface.toEncoder.priv
-    io.traceCoreInterface.toEncoder.cause := traceInterface.toEncoder.trap.cause
-    io.traceCoreInterface.toEncoder.tval := traceInterface.toEncoder.trap.tval
-    io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
-    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
-    io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
-    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
 
     EnableClintAsyncBridge match {
       case Some(param) =>
