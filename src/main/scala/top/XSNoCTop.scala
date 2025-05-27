@@ -107,9 +107,13 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
 }
 
-trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
+trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp[L] =>
 
-  def core = wrapper.asInstanceOf[L].core_with_l2.module
+  def core = core_with_l2.module
+
+  /* connect core lp io */
+  core.io.iso_en.foreach { _ := io.lp.map(_.i_cpu_iso_en).getOrElse(false.B) }
+  core.io.pwrdown_req_n.foreach { _ := io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B) }
 
   def buildLowPower(clock: Clock, cpuReset_sync: Reset): Clock = {
     /*
@@ -146,6 +150,7 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
     val isNormal = lpState === sIDLE
     val wfiGateClock = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val flitpend = io.chi.rx.snp.flitpend | io.chi.rx.rsp.flitpend | io.chi.rx.dat.flitpend
+    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, debugIntr, msi_info_vld)
     wfiState := withClockAndReset(clock, cpuReset_sync){WfiStateNext(wfiState, isWFI, isNormal, flitpend, intSrc)}
 
     if (socParams.WFIClockGate) {
@@ -236,6 +241,17 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
   }).suggestName("io")
 
+  // Interrupt sources collect
+  val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
+  val mtip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(1), 3, 0)}
+  val meip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.head(0), 3, 0)}
+  val seip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.last(0), 3, 0)}
+  val nmi_31 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(0), 3, 0)}
+  val nmi_43 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(1), 3, 0)}
+  val debugIntr = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(debug.head(0), 3, 0)}
+  val msi_info_vld = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(core_with_l2.module.io.msiInfo.valid, 3, 0)}
+
+  // core IO connection
   core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
   core_with_l2.module.soc_reset := soc_reset
 
@@ -324,23 +340,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     // imsic bare io connection
     wrapper.u_imsic_bus_top.module.msi.foreach(_ <> imsic.get)
 
-    //Interrupt sources collect
-    val msip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(0), 3, 0)}
-    val mtip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(clint.head(1), 3, 0)}
-    val meip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.head(0), 3, 0)}
-    val seip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.last(0), 3, 0)}
-    val nmi_31 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(0), 3, 0)}
-    val nmi_43 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(1), 3, 0)}
-    val debugIntr = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(debug.head(0), 3, 0)}
-    val msi_info_vld = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(core_with_l2.module.io.msiInfo.valid, 3, 0)}
-    val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, debugIntr, msi_info_vld)
-
     /* CPU Low Power State */
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
     core_with_l2.module.reset := cpuReset.asAsyncReset
-    core_with_l2.module.io.iso_en.foreach { _ := io.lp.map(_.i_cpu_iso_en).getOrElse(false.B) }
-    core_with_l2.module.io.pwrdown_req_n.foreach { _ := io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B) }
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
     traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
