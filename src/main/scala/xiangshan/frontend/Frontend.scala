@@ -47,7 +47,7 @@ import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
-import xiangshan.frontend.bpu.Predictor
+import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
 import xiangshan.frontend.instruncache.InstrUncache
@@ -109,7 +109,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu          = Module(new Predictor)
+  val bpu          = Module(new Bpu)
   val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
@@ -187,8 +187,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   ftq.io.toIfu.req.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
 
   ftq.io.fromIfu <> ifu.io.toFtq
-  bpu.io.ftq_to_bpu <> ftq.io.toBpu
-  ftq.io.fromBpu <> bpu.io.bpu_to_ftq
+  bpu.io.fromFtq <> ftq.io.toBpu
+  ftq.io.fromBpu <> bpu.io.toFtq
 
   ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
 
