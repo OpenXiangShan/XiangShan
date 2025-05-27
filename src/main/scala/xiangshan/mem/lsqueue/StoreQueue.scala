@@ -1359,7 +1359,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr = rdataPtrExt(i).value
-    val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) && dataBuffer.io.enq(i).fire
+    val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
+                            dataBuffer.io.enq(i).fire && !firstSplit
     vecLastFlowCommit
   }.reduce(_ || _)
 
