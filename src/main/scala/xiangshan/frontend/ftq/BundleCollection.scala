@@ -21,14 +21,16 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityEncoder
 import utility.ParallelPriorityMux
 import xiangshan.ValidUndirectioned
+import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.BranchPredictionBundle
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PredecodeWritebackBundle
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.SpeculativeInfo
+import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
@@ -117,8 +119,10 @@ class PrefetchPtrDb(implicit p: Parameters) extends Bundle {
   val fromIfuPtr = UInt(log2Up(p(XSCoreParamsKey).FtqSize).W)
 }
 
-class FtqRedirectSramEntry(implicit p: Parameters) extends SpeculativeInfo {
+class FtqRedirectSramEntry(implicit p: Parameters) extends XSBundle {
+  val histPtr     = new CGHPtr
   val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+  val rasSpecInfo = new RasSpeculativeInfo
 }
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends FtqBundle with HasBPUConst {

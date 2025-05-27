@@ -24,6 +24,7 @@ import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
 import xiangshan._
 import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.FullBranchPrediction
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.TableAddr
@@ -430,39 +431,21 @@ class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams wi
   }
 }
 
-class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
+class FtbMeta(implicit p: Parameters) extends XSBundle with FTBParams {
   val writeWay   = UInt(log2Ceil(numWays).W)
   val hit        = Bool()
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 }
 
-object FTBMeta {
-  def apply(writeWay: UInt, hit: Bool, pred_cycle: UInt)(implicit p: Parameters): FTBMeta = {
-    val e = Wire(new FTBMeta)
+object FtbMeta {
+  def apply(writeWay: UInt, hit: Bool, pred_cycle: UInt)(implicit p: Parameters): FtbMeta = {
+    val e = Wire(new FtbMeta)
     e.writeWay := writeWay
     e.hit      := hit
     e.pred_cycle.map(_ := pred_cycle)
     e
   }
 }
-
-// class UpdateQueueEntry(implicit p: Parameters) extends XSBundle with FTBParams {
-//   val pc = PrunedAddr(VAddrBits)
-//   val ftb_entry = new FTBEntry
-//   val hit = Bool()
-//   val hit_way = UInt(log2Ceil(numWays).W)
-// }
-//
-// object UpdateQueueEntry {
-//   def apply(pc: UInt, fe: FTBEntry, hit: Bool, hit_way: UInt)(implicit p: Parameters): UpdateQueueEntry = {
-//     val e = Wire(new UpdateQueueEntry)
-//     e.pc := pc
-//     e.ftb_entry := fe
-//     e.hit := hit
-//     e.hit_way := hit_way
-//     e
-//   }
-// }
 
 class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implicit p: Parameters) extends XSBundle {
   val addr = new TableAddr(idxBits, banks)
@@ -471,8 +454,56 @@ class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implic
   def getTag(x: PrunedAddr): UInt = addr.getTag(x)
 }
 
-class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
-    with HasCircularQueuePtrHelper with HasPerfEvents {
+class FtbToIttageBundle(implicit p: Parameters) extends XSBundle {
+  val s1_uftbHit         = Bool()
+  val s1_uftbHasIndirect = Bool()
+  val s1_ftbCloseReq     = Bool()
+  val s2_isJalr          = Bool()
+}
+
+class FtbToRasBundle(implicit p: Parameters) extends XSBundle {
+  val s3_isRet                = Bool()
+  val s3_hit_taken_on_call    = Bool()
+  val s3_hit_taken_on_ret     = Bool()
+  val s3_last_may_be_rvi_call = Bool()
+  val s3_fallThroughErr       = Bool()
+  val s3_fallThroughAddr      = PrunedAddr(VAddrBits)
+}
+
+class FtbInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonSignals {
+  val fromFauFtb        = new MicroFtbToFtbBundle
+  val fromTage          = new TageToFtbBundle
+  val isRedirectFromIfu = Bool()
+}
+
+class FtbOutput(implicit p: Parameters) extends XSBundle {
+  val s1_ready    = Bool()
+  val s2_fullPred = new FullBranchPrediction(isNotS3 = true)
+  val s3_fullPred = new FullBranchPrediction(isNotS3 = false)
+  val toIttage    = new FtbToIttageBundle
+  val toRas       = new FtbToRasBundle
+  val s3_ftbEntry = new FTBEntry
+  val s3_meta     = new FtbMeta
+}
+
+class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEvents {
+  val io = IO(new Bundle {
+    val in  = Input(new FtbInput)
+    val out = Output(new FtbOutput)
+  })
+
+  val s0_pc          = io.in.s0_pc
+  val s0_fire        = io.in.s0_fire
+  val s1_fire        = io.in.s1_fire
+  val s2_fire        = io.in.s2_fire
+  val s3_fire        = io.in.s3_fire
+  val fauFtbEntry    = io.in.fromFauFtb.fauftb_entry
+  val fauFtbEntryHit = io.in.fromFauFtb.fauftb_entry_hit
+
+  val s1_pc = RegEnable(s0_pc, s0_fire)
+  val s2_pc = RegEnable(s1_pc, s1_fire)
+  val s3_pc = RegEnable(s2_pc, s2_fire)
+
   val ftbAddr = new FTBTableAddr(log2Up(numSets), 1, 3)
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
@@ -669,18 +700,18 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   // FTB switch register & temporary storage of fauftb prediction results
   val s0_close_ftb_req        = RegInit(false.B)
-  val s1_close_ftb_req        = RegEnable(s0_close_ftb_req, false.B, io.s0_fire)
-  val s2_close_ftb_req        = RegEnable(s1_close_ftb_req, false.B, io.s1_fire)
-  val s2_fauftb_ftb_entry     = RegEnable(io.fauftb_entry_in, io.s1_fire)
-  val s2_fauftb_ftb_entry_hit = RegEnable(io.fauftb_entry_hit_in, io.s1_fire)
+  val s1_close_ftb_req        = RegEnable(s0_close_ftb_req, false.B, s0_fire)
+  val s2_close_ftb_req        = RegEnable(s1_close_ftb_req, false.B, s1_fire)
+  val s2_fauftb_ftb_entry     = RegEnable(fauFtbEntry, s1_fire)
+  val s2_fauftb_ftb_entry_hit = RegEnable(fauFtbEntryHit, s1_fire)
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
 
   // for close ftb read_req
-  ftbBank.io.req_pc.valid := io.s0_fire && !s0_close_ftb_req
+  ftbBank.io.req_pc.valid := s0_fire && !s0_close_ftb_req
   ftbBank.io.req_pc.bits  := s0_pc
 
-  val s2_multi_hit        = ftbBank.io.read_multi_hits.valid && io.s2_fire
+  val s2_multi_hit        = ftbBank.io.read_multi_hits.valid && s2_fire
   val s2_multi_hit_way    = ftbBank.io.read_multi_hits.bits
   val s2_multi_hit_entry  = ftbBank.io.read_multi_entry
   val s2_multi_hit_enable = s2_multi_hit && !s2_close_ftb_req
@@ -688,10 +719,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_s2_multi_hit_enable", s2_multi_hit_enable)
 
   // After closing ftb, the entry output from s2 is the entry of FauFTB cached in s1
-  val s1_read_resp   = Mux(s1_close_ftb_req, io.fauftb_entry_in, ftbBank.io.read_resp)
-  val s2_ftbBankResp = RegEnable(ftbBank.io.read_resp, io.s1_fire)
+  val s1_read_resp   = Mux(s1_close_ftb_req, fauFtbEntry, ftbBank.io.read_resp)
+  val s2_ftbBankResp = RegEnable(ftbBank.io.read_resp, s1_fire)
   val s2_ftb_entry   = Mux(s2_close_ftb_req, s2_fauftb_ftb_entry, s2_ftbBankResp)
-  val s3_ftb_entry   = RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_entry, s2_ftb_entry), io.s2_fire)
+  val s3_ftb_entry   = RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_entry, s2_ftb_entry), s2_fire)
 
   val real_s2_ftb_entry         = Mux(s2_multi_hit_enable, s2_multi_hit_entry, s2_ftb_entry)
   val real_s2_pc                = s2_pc
@@ -699,52 +730,52 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val real_s2_endLowerwithCarry = Cat(real_s2_ftb_entry.carry, real_s2_ftb_entry.pftAddr)
   val real_s2_fallThroughErr =
     real_s2_startLower >= real_s2_endLowerwithCarry || real_s2_endLowerwithCarry > (real_s2_startLower + PredictWidth.U)
-  val real_s3_fallThroughErr = RegEnable(real_s2_fallThroughErr, io.s2_fire)
+  val real_s3_fallThroughErr = RegEnable(real_s2_fallThroughErr, s2_fire)
 
   // After closing ftb, the hit output from s2 is the hit of FauFTB cached in s1.
   // s1_hit is the ftbBank hit.
-  val s1_hit            = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid && io.ctrl.btb_enable)
-  val s2_ftb_hit        = RegEnable(s1_hit, 0.B, io.s1_fire)
+  val s1_hit            = Mux(s1_close_ftb_req, false.B, ftbBank.io.read_hits.valid && io.in.ctrl.btb_enable)
+  val s2_ftb_hit        = RegEnable(s1_hit, 0.B, s1_fire)
   val s2_hit            = Mux(s2_close_ftb_req, s2_fauftb_ftb_entry_hit, s2_ftb_hit)
-  val s3_hit            = RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit, s2_hit), 0.B, io.s2_fire)
-  val s3_multi_hit      = RegEnable(s2_multi_hit_enable, io.s2_fire)
+  val s3_hit            = RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit, s2_hit), 0.B, s2_fire)
+  val s3_multi_hit      = RegEnable(s2_multi_hit_enable, s2_fire)
   val writeWay          = Mux(s1_close_ftb_req, 0.U, ftbBank.io.read_hits.bits)
-  val s2_ftb_meta       = RegEnable(FTBMeta(writeWay.asUInt, s1_hit, GTimer()).asUInt, io.s1_fire)
-  val s2_multi_hit_meta = FTBMeta(s2_multi_hit_way.asUInt, s2_multi_hit, GTimer()).asUInt
+  val s2_ftb_meta       = RegEnable(FtbMeta(writeWay.asUInt, s1_hit, GTimer()).asUInt, s1_fire)
+  val s2_multi_hit_meta = FtbMeta(s2_multi_hit_way.asUInt, s2_multi_hit, GTimer()).asUInt
 
   // Consistent count of entries for fauftb and ftb
   val fauftb_ftb_entry_consistent_counter = RegInit(0.U(FTBCLOSE_THRESHOLD_SZ.W))
   val fauftb_ftb_entry_consistent         = s2_fauftb_ftb_entry.entryConsistent(s2_ftbBankResp)
 
   // if close ftb_req, the counter need keep
-  when(io.s2_fire && s2_fauftb_ftb_entry_hit && s2_ftb_hit) {
+  when(s2_fire && s2_fauftb_ftb_entry_hit && s2_ftb_hit) {
     fauftb_ftb_entry_consistent_counter := Mux(
       fauftb_ftb_entry_consistent,
       fauftb_ftb_entry_consistent_counter + 1.U,
       0.U
     )
-  }.elsewhen(io.s2_fire && !s2_fauftb_ftb_entry_hit && s2_ftb_hit) {
+  }.elsewhen(s2_fire && !s2_fauftb_ftb_entry_hit && s2_ftb_hit) {
     fauftb_ftb_entry_consistent_counter := 0.U
   }
 
-  when((fauftb_ftb_entry_consistent_counter >= FTBCLOSE_THRESHOLD) && io.s0_fire) {
+  when((fauftb_ftb_entry_consistent_counter >= FTBCLOSE_THRESHOLD) && s0_fire) {
     s0_close_ftb_req := true.B
   }
 
-  val update_valid = RegNext(io.update.valid, init = false.B)
+  val update_valid = RegNext(io.in.update.valid, init = false.B)
   val update       = Wire(new BranchPredictionUpdate)
-  update := RegEnable(io.update.bits, io.update.valid)
+  update := RegEnable(io.in.update.bits, io.in.update.valid)
 
   // The pc register has been moved outside of predictor, pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
-  val update_pc = io.update.bits.pc
+  val update_pc = io.in.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  update.meta.ftbMeta := RegEnable(io.update.bits.meta.ftbMeta, io.update.valid && !io.update.bits.old_entry)
+  update.meta.ftbMeta := RegEnable(io.in.update.bits.meta.ftbMeta, io.in.update.valid && !io.in.update.bits.old_entry)
 
   // Clear counter during false_hit or ifuRedirect
   val ftb_false_hit = WireInit(false.B)
-  val needReopen    = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
+  val needReopen    = s0_close_ftb_req && (ftb_false_hit || io.in.isRedirectFromIfu)
   ftb_false_hit := update_valid && update.false_hit
   when(needReopen) {
     fauftb_ftb_entry_consistent_counter := 0.U
@@ -754,60 +785,55 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s2_close_consistent     = s2_fauftb_ftb_entry.entryConsistent(s2_ftb_entry)
   val s2_not_close_consistent = s2_ftbBankResp.entryConsistent(s2_ftb_entry)
 
-  when(s2_close_ftb_req && io.s2_fire) {
+  when(s2_close_ftb_req && s2_fire) {
     assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
-  }.elsewhen(!s2_close_ftb_req && io.s2_fire) {
+  }.elsewhen(!s2_close_ftb_req && s2_fire) {
     assert(s2_not_close_consistent, s"Entry inconsistency after ftb req is not closed!")
   }
 
-  val reopenCounter         = !s1_close_ftb_req && s2_close_ftb_req && io.s2_fire
+  val reopenCounter         = !s1_close_ftb_req && s2_close_ftb_req && s2_fire
   val falseHitReopenCounter = ftb_false_hit && s1_close_ftb_req
   XSPerfAccumulate("ftb_req_reopen_counter", reopenCounter)
   XSPerfAccumulate("false_hit_reopen_Counter", falseHitReopenCounter)
-  XSPerfAccumulate("ifuRedirec_needReopen", s1_close_ftb_req && io.redirectFromIFU)
-  XSPerfAccumulate("this_cycle_is_close", s2_close_ftb_req && io.s2_fire)
-  XSPerfAccumulate("this_cycle_is_open", !s2_close_ftb_req && io.s2_fire)
+  XSPerfAccumulate("ifuRedirec_needReopen", s1_close_ftb_req && io.in.isRedirectFromIfu)
+  XSPerfAccumulate("this_cycle_is_close", s2_close_ftb_req && s2_fire)
+  XSPerfAccumulate("this_cycle_is_open", !s2_close_ftb_req && s2_fire)
 
-  // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
-  io.out := io.in.bits.resp_in(0)
+  val s2_fullPred = Wire(new FullBranchPrediction(isNotS3 = true))
+  io.out.s2_fullPred   := s2_fullPred
+  s2_fullPred.hit      := s2_hit
+  s2_fullPred.multiHit := false.B
+  s2_fullPred.fromFtbEntry(s2_ftb_entry, s2_pc, Some(s1_pc, s1_fire), Some(s1_read_resp, s1_fire))
 
-  io.out.s2.full_pred.multiHit := false.B
-
-  io.out.s2.full_pred.hit := s2_hit
-
-  io.out.s2.full_pred.fromFtbEntry(
-    s2_ftb_entry,
-    s2_pc,
-    Some(s1_pc, io.s1_fire),
-    Some(s1_read_resp, io.s1_fire)
-  )
-
-  io.out.s3.full_pred.hit      := s3_hit
-  io.out.s3.full_pred.multiHit := s3_multi_hit
-
-  io.out.s3.full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, io.s2_fire)))
-
+  val s3_fullPred = Wire(new FullBranchPrediction(isNotS3 = false))
+  io.out.s3_fullPred   := s3_fullPred
+  s3_fullPred.hit      := s3_hit
+  s3_fullPred.multiHit := s3_multi_hit
+  s3_fullPred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, s2_fire)))
   // Overwrite the fallThroughErr value
-  io.out.s3.full_pred.fallThroughErr := real_s3_fallThroughErr
+  s3_fullPred.fallThroughErr := real_s3_fallThroughErr
 
-  io.out.last_stage_ftb_entry := s3_ftb_entry
-  io.meta.ftbMeta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire).asTypeOf(
-    new FTBMeta
-  )
-  io.out.s1_ftbCloseReq := s1_close_ftb_req
-  io.out.s1_uftbHit     := io.fauftb_entry_hit_in
-  val s1_uftbHasIndirect = io.fauftb_entry_in.jmpValid &&
-    io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.isRet // uFTB determines that it's real JALR, RET and JAL are excluded
-  io.out.s1_uftbHasIndirect := s1_uftbHasIndirect
+  io.out.s3_ftbEntry := s3_ftb_entry
+
+  io.out.s3_meta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), s2_fire).asTypeOf(new FtbMeta)
+
+  io.out.toIttage.s1_ftbCloseReq := s1_close_ftb_req
+  io.out.toIttage.s1_uftbHit     := fauFtbEntryHit
+  // uFTB determines that it's real JALR, RET and JAL are excluded
+  io.out.toIttage.s1_uftbHasIndirect := fauFtbEntry.jmpValid && fauFtbEntry.isJalr && !fauFtbEntry.isRet
+  io.out.toIttage.s2_isJalr          := s2_ftb_entry.tailSlot.valid && s2_ftb_entry.isJalr
+
+  io.out.toRas.s3_isRet                := s3_fullPred.is_ret
+  io.out.toRas.s3_hit_taken_on_call    := s3_fullPred.hit_taken_on_call
+  io.out.toRas.s3_hit_taken_on_ret     := s3_fullPred.hit_taken_on_ret
+  io.out.toRas.s3_last_may_be_rvi_call := s3_fullPred.last_may_be_rvi_call
+  io.out.toRas.s3_fallThroughErr       := s3_fullPred.fallThroughErr
+  io.out.toRas.s3_fallThroughAddr      := s3_fullPred.fallThroughAddr
 
   // always taken logic
   for (i <- 0 until numBr) {
-    io.out.s2.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s2.full_pred.br_taken_mask(
-      i
-    ) || s2_hit && s2_ftb_entry.strong_bias(i)
-    io.out.s3.full_pred.br_taken_mask(i) := io.in.bits.resp_in(0).s3.full_pred.br_taken_mask(
-      i
-    ) || s3_hit && s3_ftb_entry.strong_bias(i)
+    s2_fullPred.br_taken_mask(i) := io.in.fromTage.s2_branchTakenMask(i) || s2_hit && s2_ftb_entry.strong_bias(i)
+    s3_fullPred.br_taken_mask(i) := io.in.fromTage.s3_branchTakenMask(i) || s3_hit && s3_ftb_entry.strong_bias(i)
   }
 
   val s3_pc_diff       = s3_pc
@@ -816,7 +842,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val fallThroughErr =
     s3_pc_startLower >= s3_ftb_entry_endLowerwithCarry || s3_ftb_entry_endLowerwithCarry > (s3_pc_startLower + PredictWidth.U)
   XSError(
-    s3_ftb_entry.valid && s3_hit && io.s3_fire && fallThroughErr,
+    s3_ftb_entry.valid && s3_hit && s3_fire && fallThroughErr,
     "FTB read sram entry in s3 fallThrough address error!"
   )
 
@@ -830,7 +856,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val update_now       = u_valid && u_meta.hit
   val update_need_read = u_valid && !u_meta.hit
   // stall one more cycle because we use a whole cycle to do update read tag hit
-  io.s1_ready := ftbBank.io.req_pc.ready && !update_need_read && !RegNext(update_need_read)
+  io.out.s1_ready := ftbBank.io.req_pc.ready && !update_need_read && !RegNext(update_need_read)
 
   ftbBank.io.u_req_pc.valid := update_need_read
   ftbBank.io.u_req_pc.bits  := update_pc
@@ -856,7 +882,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     RegNext(!ftbBank.io.update_hits.valid)
   ) // use it one cycle later
   ftbBank.io.update_access := u_valid && !u_meta.hit
-  ftbBank.io.s1_fire       := io.s1_fire
+  ftbBank.io.s1_fire       := s1_fire
 
   val ftb_write_fallThrough = ftb_write.entry.getFallThrough(write_pc)
   when(write_valid) {
@@ -865,22 +891,22 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   XSDebug(
     "req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n",
-    io.s0_fire,
+    s0_fire,
     s0_pc.toUInt,
     ftbBank.io.req_pc.ready
   )
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit(0), writeWay.asUInt)
   XSDebug(
     "s2_br_taken_mask=%b, s2_real_taken_mask=%b\n",
-    io.in.bits.resp_in(0).s2.full_pred.br_taken_mask.asUInt,
-    io.out.s2.full_pred.real_slot_taken_mask().asUInt
+    io.in.fromTage.s2_branchTakenMask.asUInt,
+    s2_fullPred.real_slot_taken_mask().asUInt
   )
-  XSDebug("s2_target=%x\n", io.out.s2.getTarget.toUInt)
+  XSDebug("s2_target=%x\n", s2_fullPred.target(s2_pc).toUInt)
 
   s2_ftb_entry.display(true.B)
 
-  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
-  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+  XSPerfAccumulate("ftb_read_hits", RegNext(s0_fire && s1_hit))
+  XSPerfAccumulate("ftb_read_misses", RegNext(s0_fire && !s1_hit))
 
   XSPerfAccumulate("ftb_commit_hits", update_valid && u_meta.hit)
   XSPerfAccumulate("ftb_commit_misses", update_valid && !u_meta.hit)
@@ -890,7 +916,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_updated", u_valid)
   XSPerfAccumulate("ftb_closing_update_counter", s0_close_ftb_req && u_valid)
 
-  override val perfEvents = Seq(
+  val perfEvents = Seq(
     ("ftb_commit_hits            ", update_valid && u_meta.hit),
     ("ftb_commit_misses          ", update_valid && !u_meta.hit)
   )

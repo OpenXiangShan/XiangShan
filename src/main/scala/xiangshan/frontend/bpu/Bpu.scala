@@ -41,7 +41,6 @@ import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.BpuToFtqBundle
 import xiangshan.frontend.BranchPredictionBundle
-import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.BranchPredictionResp
 import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.CGHPtr
@@ -148,198 +147,77 @@ trait BPUUtils extends HasXSParameter {
 }
 
 class PredictorMeta(implicit p: Parameters) extends XSBundle {
-  val uftbMeta   = new FauFTBMeta
-  val ftbMeta    = new FTBMeta
+  val uftbMeta   = new MicroFtbMeta
+  val ftbMeta    = new FtbMeta
   val tageMeta   = new TageMeta
-  val ittageMeta = new ITTageMeta
+  val ittageMeta = new IttageMeta
   val rasMeta    = new RasMeta
 }
 
-class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  def nInputs = 1
-
+trait HasPredictorCommonSignals extends HasXSParameter {
   val s0_pc = PrunedAddr(VAddrBits)
 
-  val folded_hist    = new AllFoldedHistories(foldedGHistInfos)
-  val s1_folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val ghist          = UInt(HistoryLength.W)
+  val s0_fire = Bool()
+  val s1_fire = Bool()
+  val s2_fire = Bool()
+  val s3_fire = Bool()
 
-  val resp_in = Vec(nInputs, new BranchPredictionResp)
-
-  // val final_preds = Vec(numBpStages, new)
-  // val toFtq_fire = Bool()
-
-  // val s0_all_ready = Bool()
-}
-
-class BasePredictorOutput(implicit p: Parameters) extends BranchPredictionResp {}
-
-class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val reset_vector = Input(PrunedAddr(PAddrBits))
-  val in           = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
-  // val out = DecoupledIO(new BasePredictorOutput)
-  val out = Output(new BasePredictorOutput)
-  // val flush_out = Valid(PrunedAddr(VAddrBits))
-
-  val fauftb_entry_in      = Input(new FTBEntry)
-  val fauftb_entry_hit_in  = Input(Bool())
-  val fauftb_entry_out     = Output(new FTBEntry)
-  val fauftb_entry_hit_out = Output(Bool())
-
-  val ctrl = Input(new BPUCtrl)
-
-  val s0_fire = Input(Bool())
-  val s1_fire = Input(Bool())
-  val s2_fire = Input(Bool())
-  val s3_fire = Input(Bool())
-
-  val s1_ready = Output(Bool())
-  val s2_ready = Output(Bool())
-  val s3_ready = Output(Bool())
-
-  val meta = Output(new PredictorMeta)
-
-  val update          = Flipped(Valid(new BranchPredictionUpdate))
-  val redirect        = Flipped(Valid(new BranchPredictionRedirect))
-  val redirectFromIFU = Input(Bool())
-}
-
-abstract class BasePredictor(implicit p: Parameters) extends XSModule
-    with HasBPUConst with BPUUtils with HasPerfEvents {
-  val is_fast_pred = false
-  val io           = IO(new BasePredictorIO())
-
-  val modified_reset = RegInit(true.B)
-  when(modified_reset)(modified_reset := false.B)
-
-  io.out := io.in.bits.resp_in(0)
-
-  io.fauftb_entry_out     := io.fauftb_entry_in
-  io.fauftb_entry_hit_out := io.fauftb_entry_hit_in
-
-  io.meta := 0.U.asTypeOf(new PredictorMeta)
-
-  io.in.ready := !io.redirect.valid
-
-  io.s1_ready := true.B
-  io.s2_ready := true.B
-  io.s3_ready := true.B
-
-//  val s0_pc_dup = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
-//  val s1_pc_dup = s0_pc_dup.zip(io.s0_fire).map { case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire) }
-////  FIXME: Potential problems here. Ideally, we should modify SegmentedAddrNext to support PrunedAddr.
-////   However, we are not doing this now because SegmentedAddrNext is in submodule.
-////   This should be fixed after PrunedAddr is merged to master.
-//// TODO: Check the generated Verilog whether this works or not
-//  val s2_pc_dup = s1_pc_dup.zip(io.s1_fire).map { case (s1_pc, s1_fire) =>
-//    PrunedAddrInit(SegmentedAddrNext(s1_pc.toUInt, pcSegments, s1_fire, Some("s2_pc")).getAddr())
-//  }
-//  val s3_pc_dup = s2_pc_dup.zip(io.s2_fire).map { case (s2_pc, s2_fire) =>
-//    PrunedAddrInit(SegmentedAddrNext(s2_pc.toUInt, pcSegments, s2_fire, Some("s3_pc")).getAddr())
-//  }
-
-  val s0_pc = io.in.bits.s0_pc
-  val s1_pc = RegEnable(s0_pc, io.s0_fire)
-  val s2_pc = RegEnable(s1_pc, io.s1_fire)
-  val s3_pc = RegEnable(s2_pc, io.s2_fire)
-
-  when(modified_reset) {
-    s1_pc := io.reset_vector
-  }
-
-  io.out.s1.pc := s1_pc
-  io.out.s2.pc := s2_pc
-  io.out.s3.pc := s3_pc
-
-  val perfEvents: Seq[(String, UInt)] = Seq()
-
-  def getFoldedHistoryInfo: Option[Set[FoldedHistoryInfo]] = None
-}
-
-class FakePredictor(implicit p: Parameters) extends BasePredictor {
-  io.in.ready := true.B
-  io.meta     := 0.U.asTypeOf(new PredictorMeta)
-  io.out      := io.in.bits.resp_in(0)
+  val ctrl   = new BPUCtrl
+  val update = Valid(new BranchPredictionUpdate)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val resp = DecoupledIO(new BpuToFtqBundle())
-  val meta = Output(new PredictorMeta)
+  val resp = DecoupledIO(new BpuToFtqBundle)
 }
 
-class PredictorIO(implicit p: Parameters) extends XSBundle {
-  val bpu_to_ftq   = new BpuToFtqIO()
-  val ftq_to_bpu   = Flipped(new FtqToBpuIO)
+class BpuIO(implicit p: Parameters) extends XSBundle {
+  val toFtq        = new BpuToFtqIO
+  val fromFtq      = Flipped(new FtqToBpuIO)
   val ctrl         = Input(new BPUCtrl)
   val reset_vector = Input(PrunedAddr(PAddrBits))
 }
 
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
-    with HasCircularQueuePtrHelper {
-  val io = IO(new PredictorIO)
+class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCircularQueuePtrHelper with HasPerfEvents {
+  val io = IO(new BpuIO)
 
   val modified_reset = RegInit(true.B)
   when(modified_reset)(modified_reset := false.B)
 
-  val ctrl       = DelayN(io.ctrl, 1)
-  val predictors = Module(if (useBPD) new Composer else new FakePredictor)
+  val uftb   = Module(new MicroFtb)
+  val ftb    = Module(new Ftb)
+  val tage   = Module(new Tage_SC)
+  val ittage = Module(new Ittage)
+  val ras    = Module(new Ras)
 
-  val totalMetaSize = (new PredictorMeta).getWidth
-  println(s"total meta size: $totalMetaSize\n")
-
-  def numOfStage = 3
-  require(numOfStage > 1, "BPU numOfStage must be greater than 1")
-  val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
-
-  // following can only happen on s1
-  val controlRedirectBubble = Wire(Bool())
-  val ControlBTBMissBubble  = Wire(Bool())
-  val TAGEMissBubble        = Wire(Bool())
-  val SCMissBubble          = Wire(Bool())
-  val ITTAGEMissBubble      = Wire(Bool())
-  val RASMissBubble         = Wire(Bool())
-
-  val memVioRedirectBubble = Wire(Bool())
-  val otherRedirectBubble  = Wire(Bool())
-  val btbMissBubble        = Wire(Bool())
-  otherRedirectBubble  := false.B
-  memVioRedirectBubble := false.B
-
-  // override can happen between s1-s2 and s2-s3
-  val overrideBubble = Wire(Vec(numOfStage - 1, Bool()))
-  def overrideStage  = 1
-  // ftq update block can happen on s1, s2 and s3
-  val ftqUpdateBubble = Wire(Vec(numOfStage, Bool()))
-  def ftqUpdateStage  = 0
-  // ftq full stall only happens on s3 (last stage)
-  val ftqFullStall = Wire(Bool())
-
-  // by default, no bubble event
-  topdown_stages(0) := 0.U.asTypeOf(new FrontendTopDownBundle)
-  // event movement driven by clock only
-  for (i <- 0 until numOfStage - 1) {
-    topdown_stages(i + 1) := topdown_stages(i)
-  }
-
-  // ctrl signal
-  predictors.io.ctrl         := ctrl
-  predictors.io.reset_vector := io.reset_vector
+  ftb.io.in.fromFauFtb        := uftb.io.out.toFtb
+  ftb.io.in.fromTage          := tage.io.out.toFtb
+  ftb.io.in.isRedirectFromIfu := RegNext(io.fromFtq.redirctFromIFU, init = false.B)
+  ittage.io.in.fromFtb        := ftb.io.out.toIttage
+  ras.io.in.fromFtb           := ftb.io.out.toRas
 
   val s0_stall = Wire(Bool()) // For some reason s0 stalled, usually FTQ Full
 
-  val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
+  val s0_fire = Wire(Bool())
+  val s1_fire = Wire(Bool())
+  val s2_fire = Wire(Bool())
+  val s3_fire = Wire(Bool())
 
-  val s1_valid, s2_valid, s3_valid = RegInit(false.B)
+  val s1_ready = Wire(Bool())
+  val s2_ready = Wire(Bool())
+  val s3_ready = Wire(Bool())
 
-  val s1_ready, s2_ready, s3_ready = Wire(Bool())
+  val s1_flush = Wire(Bool())
+  val s2_flush = Wire(Bool())
+  val s3_flush = Wire(Bool())
 
-  val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
+  val s1_valid = RegInit(false.B)
+  val s2_valid = RegInit(false.B)
+  val s3_valid = RegInit(false.B)
 
-  val s1_flush, s2_flush, s3_flush = Wire(Bool())
+  val s2_override = WireDefault(false.B)
+  val s3_override = WireDefault(false.B)
 
-  val s2_redirect, s3_redirect = Wire(Bool())
-
-  val s0_pc     = WireInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  val s0_pc     = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   val s0_pc_reg = RegEnable(s0_pc, !s0_stall)
   when(modified_reset) {
     s0_pc_reg := io.reset_vector
@@ -348,6 +226,25 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_pc = RegEnable(s0_pc, s0_fire)
   val s2_pc = RegEnable(s1_pc, s1_fire)
   val s3_pc = RegEnable(s2_pc, s2_fire)
+
+  val predictorsIn = Seq(uftb.io.in, tage.io.in, ftb.io.in, ittage.io.in, ras.io.in)
+  predictorsIn.foreach { in =>
+    in.ctrl := DelayN(io.ctrl, 2)
+    // TODO: duplicate pc and fire to solve high fan-out issue
+    in.s0_pc   := s0_pc
+    in.s0_fire := s0_fire
+    in.s1_fire := s1_fire
+    in.s2_fire := s2_fire
+    in.s3_fire := s3_fire
+    in.update  := io.fromFtq.update
+    // low power: gate pc higher bits
+    in.update.bits.pc := PrunedAddrInit(SegmentedAddrNext(
+      io.fromFtq.update.bits.pc.toUInt,
+      pcSegments,
+      io.fromFtq.update.valid,
+      Some("predictors_io_update_pc")
+    ).getAddr())
+  }
 
   val s0_folded_gh     = Wire(new AllFoldedHistories(foldedGHistInfos))
   val s0_folded_gh_reg = RegEnable(s0_folded_gh, 0.U.asTypeOf(s0_folded_gh), !s0_stall)
@@ -398,46 +295,33 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   def getHist(ptr: CGHPtr): UInt = (Cat(ghv_wire.asUInt, ghv_wire.asUInt) >> (ptr.value + 1.U))(HistoryLength - 1, 0)
   s0_ghist := getHist(s0_ghist_ptr)
 
-  val resp = predictors.io.out
+  predictorsIn.foreach(_.update.bits.ghist := getHist(io.fromFtq.update.bits.spec_info.histPtr))
 
-  predictors.io.in.valid               := s0_fire
-  predictors.io.in.bits.s0_pc          := s0_pc
-  predictors.io.in.bits.ghist          := s0_ghist
-  predictors.io.in.bits.folded_hist    := s0_folded_gh
-  predictors.io.in.bits.s1_folded_hist := s1_folded_gh
-  predictors.io.in.bits.resp_in(0)     := 0.U.asTypeOf(new BranchPredictionResp)
-  predictors.io.fauftb_entry_in        := 0.U.asTypeOf(new FTBEntry)
-  predictors.io.fauftb_entry_hit_in    := false.B
-  predictors.io.redirectFromIFU        := RegNext(io.ftq_to_bpu.redirctFromIFU, init = false.B)
+  tage.io.in.ghist            := s0_ghist
+  tage.io.in.folded_hist      := s0_folded_gh
+  ittage.io.in.ghist          := s0_ghist
+  ittage.io.in.folded_hist    := s0_folded_gh
+  ittage.io.in.s1_folded_hist := s1_folded_gh
 
-  val redirect_req = io.ftq_to_bpu.redirect
-  val do_redirect  = RegNextWithEnable(redirect_req)
+  val redirect_req = io.fromFtq.redirect
+  val do_redirect  = RegNextWithEnable(redirect_req) // TODO: reduce one cycle delay
 
-  // Pipeline logic
-  s2_redirect := false.B
-  s3_redirect := false.B
+  ras.io.in.redirect := do_redirect
 
   s3_flush := redirect_req.valid // flush when redirect comes
-  s2_flush := s3_flush || s3_redirect
-  s1_flush := s2_flush || s2_redirect
-
-  s1_components_ready := predictors.io.s1_ready
-  s2_components_ready := predictors.io.s2_ready
-  s3_components_ready := predictors.io.s3_ready
+  s2_flush := s3_flush || s3_override
+  s1_flush := s2_flush || s2_override
 
   s1_ready := s1_fire || !s1_valid
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
-  s0_fire := s1_components_ready && s1_ready
-  s1_fire := s1_valid && s2_components_ready && s2_ready && io.bpu_to_ftq.resp.ready
-  s2_fire := s2_valid && s3_components_ready && s3_ready
-  s3_fire := s3_valid
+  val s1_predictorsReady = ftb.io.out.s1_ready && tage.io.out.s1_ready && ittage.io.out.s1_ready
 
-  predictors.io.s0_fire := s0_fire
-  predictors.io.s1_fire := s1_fire
-  predictors.io.s2_fire := s2_fire
-  predictors.io.s3_fire := s3_fire
+  s0_fire := s1_predictorsReady && s1_ready
+  s1_fire := s1_valid && s2_ready && io.toFtq.resp.ready
+  s2_fire := s2_valid && s3_ready
+  s3_fire := s3_valid
 
   when(redirect_req.valid)(s1_valid := false.B)
     .elsewhen(s0_fire)(s1_valid := true.B)
@@ -452,15 +336,65 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     .elsewhen(s2_fire)(s3_valid := !s2_flush)
     .elsewhen(s3_fire)(s3_valid := false.B)
 
-  io.bpu_to_ftq.resp.valid := s1_valid && s2_components_ready && s2_ready ||
-    s2_fire && s2_redirect ||
-    s3_fire && s3_redirect
-  io.bpu_to_ftq.resp.bits                              := predictors.io.out
-  io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr := s3_ghist_ptr
-  io.bpu_to_ftq.meta                                   := predictors.io.meta
+  val s2_ftq_idx = RegEnable(io.fromFtq.enq_ptr, s1_fire)
+  val s3_ftq_idx = RegEnable(s2_ftq_idx, s2_fire)
+
+  val bpuResp = Wire(new BranchPredictionResp)
+
+  bpuResp.s1.valid       := s1_fire && !s1_flush
+  bpuResp.s1.pc          := s1_pc
+  bpuResp.s1.hasRedirect := false.B
+  bpuResp.s1.ftq_idx     := DontCare
+  bpuResp.s1.full_pred   := uftb.io.out.s1_fullPred
+
+  bpuResp.s2.valid       := s2_fire && !s2_flush
+  bpuResp.s2.pc          := s2_pc
+  bpuResp.s2.hasRedirect := s2_override
+  bpuResp.s2.ftq_idx     := s2_ftq_idx
+  bpuResp.s2.full_pred   := ftb.io.out.s2_fullPred
+
+  bpuResp.s3.valid       := s3_fire && !s3_flush
+  bpuResp.s3.pc          := s3_pc
+  bpuResp.s3.hasRedirect := s3_override
+  bpuResp.s3.ftq_idx     := s3_ftq_idx
+  bpuResp.s3.full_pred   := ftb.io.out.s3_fullPred
+
+  // jalr target selection
+  bpuResp.s3.full_pred.targets.last := MuxCase(
+    ftb.io.out.s3_fullPred.targets.last, // default
+    Seq(
+      ras.io.out.predictionValid    -> ras.io.out.s3_returnAddress,
+      ittage.io.out.predictionValid -> ittage.io.out.s3_jalrTarget
+    )
+  )
+
+  // assign pred cycle for profiling
+  if (bpuResp.s1.full_pred.predCycle.isDefined) bpuResp.s1.full_pred.predCycle.get := GTimer()
+  if (bpuResp.s2.full_pred.predCycle.isDefined) bpuResp.s2.full_pred.predCycle.get := GTimer()
+  if (bpuResp.s3.full_pred.predCycle.isDefined) bpuResp.s3.full_pred.predCycle.get := GTimer()
+
+  bpuResp.s3_ftbEntry := ftb.io.out.s3_ftbEntry
+
+  bpuResp.s3_specInfo.histPtr     := s3_ghist_ptr
+  bpuResp.s3_specInfo.rasSpecInfo := ras.io.out.s3_rasSpecInfo
+  if (bpuResp.s3_specInfo.sc_disagree.isDefined && tage.io.out.sc_disagree.isDefined) {
+    bpuResp.s3_specInfo.sc_disagree.get := tage.io.out.sc_disagree.get
+  }
+
+  bpuResp.s3_meta.uftbMeta   := uftb.io.out.s3_meta
+  bpuResp.s3_meta.tageMeta   := tage.io.out.s3_meta
+  bpuResp.s3_meta.ftbMeta    := ftb.io.out.s3_meta
+  bpuResp.s3_meta.ittageMeta := ittage.io.out.s3_meta
+  bpuResp.s3_meta.rasMeta    := ras.io.out.s3_meta
+
+  val totalMetaSize = (new PredictorMeta).getWidth
+  println(s"total meta size: $totalMetaSize\n")
+
+  io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
+  io.toFtq.resp.bits  := bpuResp
 
   // s0_stall should be exclusive with any other PC source
-  s0_stall := !(s1_valid || s2_redirect || s3_redirect || do_redirect.valid)
+  s0_stall := !(s1_valid || s2_override || s3_override || do_redirect.valid)
 
   // Power-on reset
   val powerOnResetState = RegInit(true.B)
@@ -479,22 +413,17 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   lastBrNumOHGen.register(true.B, s0_last_br_num_oh_reg, Some("stallBrNumOH"), 0)
   aheadFhObGen.register(true.B, s0_ahead_fh_oldest_bits_reg, Some("stallAFHOB"), 0)
 
-  // assign pred cycle for profiling
-  io.bpu_to_ftq.resp.bits.s1.full_pred.predCycle.map(_ := GTimer())
-  io.bpu_to_ftq.resp.bits.s2.full_pred.predCycle.map(_ := GTimer())
-  io.bpu_to_ftq.resp.bits.s3.full_pred.predCycle.map(_ := GTimer())
-
   // History manage
   // s1
   val s1_possible_predicted_ghist_ptrs = (0 to numBr).map(s1_ghist_ptr - _.U)
 
-  val s1_predicted_ghist_ptr = Mux1H(resp.s1.lastBrPosOH, s1_possible_predicted_ghist_ptrs)
+  val s1_predicted_ghist_ptr = Mux1H(bpuResp.s1.lastBrPosOH, s1_possible_predicted_ghist_ptrs)
 
   val s1_possible_predicted_fhs = (0 to numBr).map(i =>
-    s1_folded_gh.update(s1_ahead_fh_oldest_bits, s1_last_br_num_oh, i, resp.s1.brTaken & resp.s1.lastBrPosOH(i))
+    s1_folded_gh.update(s1_ahead_fh_oldest_bits, s1_last_br_num_oh, i, bpuResp.s1.brTaken & bpuResp.s1.lastBrPosOH(i))
   )
 
-  val s1_predicted_fh = Mux1H(resp.s1.lastBrPosOH, s1_possible_predicted_fhs)
+  val s1_predicted_fh = Mux1H(bpuResp.s1.lastBrPosOH, s1_possible_predicted_fhs)
 
   val s1_ahead_fh_ob_src = Wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s1_ahead_fh_ob_src.read(ghv, s1_ghist_ptr)
@@ -502,8 +431,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s1_predicted_ghist = WireInit(getHist(s1_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when(resp.s1.shouldShiftVec(i)) {
-        s1_predicted_ghist(i) := resp.s1.brTaken && (i == 0).B
+      when(bpuResp.s1.shouldShiftVec(i)) {
+        s1_predicted_ghist(i) := bpuResp.s1.brTaken && (i == 0).B
       }
     }
     when(s1_valid) {
@@ -514,24 +443,24 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
       s1_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value &&
-        resp.s1.shouldShiftVec(b) && s1_valid
+        bpuResp.s1.shouldShiftVec(b) && s1_valid
     )
   )
   val s1_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b =>
         (
-          s1_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && resp.s1.shouldShiftVec(b),
-          resp.s1.brTaken && resp.s1.lastBrPosOH(b + 1)
+          s1_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && bpuResp.s1.shouldShiftVec(b),
+          bpuResp.s1.brTaken && bpuResp.s1.lastBrPosOH(b + 1)
         )
       )
     )
   )
 
-  npcGen.register(s1_valid, resp.s1.getTarget, Some("s1_target"), 4)
+  npcGen.register(s1_valid, bpuResp.s1.getTarget, Some("s1_target"), 4)
   foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
   ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 4)
-  lastBrNumOHGen.register(s1_valid, resp.s1.lastBrPosOH.asUInt, Some("s1_BrNumOH"), 4)
+  lastBrNumOHGen.register(s1_valid, bpuResp.s1.lastBrPosOH.asUInt, Some("s1_BrNumOH"), 4)
   aheadFhObGen.register(s1_valid, s1_ahead_fh_ob_src, Some("s1_AFHOB"), 4)
 
   ghvBitWriteGens.zip(s1_ghv_wens).zipWithIndex.map { case ((b, w), i) =>
@@ -569,18 +498,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // s2
   val s2_possible_predicted_ghist_ptrs = (0 to numBr).map(s2_ghist_ptr - _.U)
-  val s2_predicted_ghist_ptr           = Mux1H(resp.s2.lastBrPosOH, s2_possible_predicted_ghist_ptrs)
+  val s2_predicted_ghist_ptr           = Mux1H(bpuResp.s2.lastBrPosOH, s2_possible_predicted_ghist_ptrs)
 
   val s2_possible_predicted_fhs = (0 to numBr).map(i =>
     s2_folded_gh.update(
       s2_ahead_fh_oldest_bits,
       s2_last_br_num_oh,
       i,
-      if (i > 0) resp.s2.full_pred.br_taken_mask(i - 1) else false.B
+      if (i > 0) bpuResp.s2.full_pred.br_taken_mask(i - 1) else false.B
     )
   )
 
-  val s2_predicted_fh = Mux1H(resp.s2.lastBrPosOH, s2_possible_predicted_fhs)
+  val s2_predicted_fh = Mux1H(bpuResp.s2.lastBrPosOH, s2_possible_predicted_fhs)
 
   val s2_ahead_fh_ob_src = Wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s2_ahead_fh_ob_src.read(ghv, s2_ghist_ptr)
@@ -588,11 +517,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s2_predicted_ghist = WireInit(getHist(s2_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when(resp.s2.shouldShiftVec(i)) {
-        s2_predicted_ghist(i) := resp.s2.brTaken && (i == 0).B
+      when(bpuResp.s2.shouldShiftVec(i)) {
+        s2_predicted_ghist(i) := bpuResp.s2.brTaken && (i == 0).B
       }
     }
-    when(s2_redirect) {
+    when(s2_override) {
       s0_ghist := s2_predicted_ghist.asUInt
     }
   }
@@ -600,39 +529,39 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s2_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
       s2_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value &&
-        resp.s2.shouldShiftVec(b) && s2_redirect
+        bpuResp.s2.shouldShiftVec(b) && s2_override
     )
   )
   val s2_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b =>
         (
-          s2_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && resp.s2.shouldShiftVec(b),
-          resp.s2.full_pred.real_br_taken_mask()(b)
+          s2_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && bpuResp.s2.shouldShiftVec(b),
+          bpuResp.s2.full_pred.real_br_taken_mask()(b)
         )
       )
     )
   )
 
   val s1_pred_info = Wire(new PreviousPredInfo)
-  s1_pred_info.hit         := resp.s1.full_pred.hit
-  s1_pred_info.target      := resp.s1.getTarget
-  s1_pred_info.lastBrPosOH := resp.s1.lastBrPosOH
-  s1_pred_info.taken       := resp.s1.taken
-  s1_pred_info.takenMask   := resp.s1.full_pred.taken_mask_on_slot
-  s1_pred_info.cfiIndex    := resp.s1.cfiIndex.bits
+  s1_pred_info.hit         := bpuResp.s1.full_pred.hit
+  s1_pred_info.target      := bpuResp.s1.getTarget
+  s1_pred_info.lastBrPosOH := bpuResp.s1.lastBrPosOH
+  s1_pred_info.taken       := bpuResp.s1.taken
+  s1_pred_info.takenMask   := bpuResp.s1.full_pred.taken_mask_on_slot
+  s1_pred_info.cfiIndex    := bpuResp.s1.cfiIndex.bits
 
   val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(new PreviousPredInfo), s1_fire)
 
-  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred_info, resp.s2)
+  val s2_redirect_s1_last_pred_vec = preds_needs_redirect_vec(previous_s1_pred_info, bpuResp.s2)
 
-  s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_ || _)
+  s2_override := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_ || _)
 
-  npcGen.register(s2_redirect, resp.s2.getTarget, Some("s2_target"), 5)
-  foldedGhGen.register(s2_redirect, s2_predicted_fh, Some("s2_FGH"), 5)
-  ghistPtrGen.register(s2_redirect, s2_predicted_ghist_ptr, Some("s2_GHPtr"), 5)
-  lastBrNumOHGen.register(s2_redirect, resp.s2.lastBrPosOH.asUInt, Some("s2_BrNumOH"), 5)
-  aheadFhObGen.register(s2_redirect, s2_ahead_fh_ob_src, Some("s2_AFHOB"), 5)
+  npcGen.register(s2_override, bpuResp.s2.getTarget, Some("s2_target"), 5)
+  foldedGhGen.register(s2_override, s2_predicted_fh, Some("s2_FGH"), 5)
+  ghistPtrGen.register(s2_override, s2_predicted_ghist_ptr, Some("s2_GHPtr"), 5)
+  lastBrNumOHGen.register(s2_override, bpuResp.s2.lastBrPosOH.asUInt, Some("s2_BrNumOH"), 5)
+  aheadFhObGen.register(s2_override, s2_ahead_fh_ob_src, Some("s2_AFHOB"), 5)
 
   ghvBitWriteGens.zip(s2_ghv_wens).zipWithIndex.map { case ((b, w), i) =>
     b.register(w.reduce(_ || _), s2_ghv_wdatas(i), Some(s"s2_new_bit_$i"), 5)
@@ -644,26 +573,26 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSPerfAccumulate("s2_redirect_because_cfi_idx_diff", s2_fire && s2_redirect_s1_last_pred_vec(3))
   // XSPerfAccumulate("s2_redirect_because_shouldShiftVec_diff", s2_fire && s2_redirect_s1_last_pred_vec(4))
   // XSPerfAccumulate("s2_redirect_because_brTaken_diff", s2_fire && s2_redirect_s1_last_pred_vec(5))
-  XSPerfAccumulate("s2_redirect_because_fallThroughError", s2_fire && resp.s2.fallThruError)
+  XSPerfAccumulate("s2_redirect_because_fallThroughError", s2_fire && bpuResp.s2.fallThruError)
 
-  XSPerfAccumulate("s2_redirect_when_taken", s2_redirect && resp.s2.taken && resp.s2.full_pred.hit)
-  XSPerfAccumulate("s2_redirect_when_not_taken", s2_redirect && !resp.s2.taken && resp.s2.full_pred.hit)
-  XSPerfAccumulate("s2_redirect_when_not_hit", s2_redirect && !resp.s2.full_pred.hit)
+  XSPerfAccumulate("s2_redirect_when_taken", s2_override && bpuResp.s2.taken && bpuResp.s2.full_pred.hit)
+  XSPerfAccumulate("s2_redirect_when_not_taken", s2_override && !bpuResp.s2.taken && bpuResp.s2.full_pred.hit)
+  XSPerfAccumulate("s2_redirect_when_not_hit", s2_override && !bpuResp.s2.full_pred.hit)
 
   // s3
   val s3_possible_predicted_ghist_ptrs = (0 to numBr).map(s3_ghist_ptr - _.U)
-  val s3_predicted_ghist_ptr           = Mux1H(resp.s3.lastBrPosOH, s3_possible_predicted_ghist_ptrs)
+  val s3_predicted_ghist_ptr           = Mux1H(bpuResp.s3.lastBrPosOH, s3_possible_predicted_ghist_ptrs)
 
   val s3_possible_predicted_fhs = (0 to numBr).map(i =>
     s3_folded_gh.update(
       s3_ahead_fh_oldest_bits,
       s3_last_br_num_oh,
       i,
-      if (i > 0) resp.s3.full_pred.br_taken_mask(i - 1) else false.B
+      if (i > 0) bpuResp.s3.full_pred.br_taken_mask(i - 1) else false.B
     )
   )
 
-  val s3_predicted_fh = Mux1H(resp.s3.lastBrPosOH, s3_possible_predicted_fhs)
+  val s3_predicted_fh = Mux1H(bpuResp.s3.lastBrPosOH, s3_possible_predicted_fhs)
 
   val s3_ahead_fh_ob_src = Wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   s3_ahead_fh_ob_src.read(ghv, s3_ghist_ptr)
@@ -671,26 +600,26 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   if (EnableGHistDiff) {
     val s3_predicted_ghist = WireInit(getHist(s3_predicted_ghist_ptr).asTypeOf(Vec(HistoryLength, Bool())))
     for (i <- 0 until numBr) {
-      when(resp.s3.shouldShiftVec(i)) {
-        s3_predicted_ghist(i) := resp.s3.brTaken && (i == 0).B
+      when(bpuResp.s3.shouldShiftVec(i)) {
+        s3_predicted_ghist(i) := bpuResp.s3.brTaken && (i == 0).B
       }
     }
-    when(s3_redirect) {
+    when(s3_override) {
       s0_ghist := s3_predicted_ghist.asUInt
     }
   }
 
   val s3_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
-      s3_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && resp.s3.shouldShiftVec(b) && s3_redirect
+      s3_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && bpuResp.s3.shouldShiftVec(b) && s3_override
     )
   )
   val s3_ghv_wdatas = (0 until HistoryLength).map(n =>
     Mux1H(
       (0 until numBr).map(b =>
         (
-          s3_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && resp.s3.shouldShiftVec(b),
-          resp.s3.full_pred.real_br_taken_mask()(b)
+          s3_ghist_ptr.value === (CGHPtr(false.B, n.U) + b.U).value && bpuResp.s3.shouldShiftVec(b),
+          bpuResp.s3.full_pred.real_br_taken_mask()(b)
         )
       )
     )
@@ -698,57 +627,57 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   // To optimize Clock Gating Efficiency of previous_s2_*
   val previous_s2_pred = Wire(new BranchPredictionBundle(isNotS3 = true))
-  previous_s2_pred.pc := RegEnable(resp.s2.pc, 0.U.asTypeOf(resp.s2.pc), s2_fire).suggestName(
+  previous_s2_pred.pc := RegEnable(bpuResp.s2.pc, 0.U.asTypeOf(bpuResp.s2.pc), s2_fire).suggestName(
     s"previous_s2_pred_pc"
   )
-  previous_s2_pred.valid := RegEnable(resp.s2.valid, 0.U.asTypeOf(resp.s2.valid), s2_fire).suggestName(
+  previous_s2_pred.valid := RegEnable(bpuResp.s2.valid, 0.U.asTypeOf(bpuResp.s2.valid), s2_fire).suggestName(
     s"previous_s2_pred_valid"
   )
   previous_s2_pred.hasRedirect := RegEnable(
-    resp.s2.hasRedirect,
-    0.U.asTypeOf(resp.s2.hasRedirect),
+    bpuResp.s2.hasRedirect,
+    0.U.asTypeOf(bpuResp.s2.hasRedirect),
     s2_fire
   ).suggestName(s"previous_s2_pred_hasRedirect")
-  previous_s2_pred.ftq_idx := RegEnable(resp.s2.ftq_idx, 0.U.asTypeOf(resp.s2.ftq_idx), s2_fire).suggestName(
+  previous_s2_pred.ftq_idx := RegEnable(bpuResp.s2.ftq_idx, 0.U.asTypeOf(bpuResp.s2.ftq_idx), s2_fire).suggestName(
     s"previous_s2_pred_ftq_idx"
   )
   previous_s2_pred.full_pred := RegEnable(
-    resp.s2.full_pred,
-    0.U.asTypeOf(resp.s2.full_pred),
+    bpuResp.s2.full_pred,
+    0.U.asTypeOf(bpuResp.s2.full_pred),
     s2_fire
   ).suggestName(s"previous_s2_pred_full_pred")
 
-  previous_s2_pred.full_pred.targets.zip(resp.s2.full_pred.taken_mask_on_slot.zipWithIndex).map {
+  previous_s2_pred.full_pred.targets.zip(bpuResp.s2.full_pred.taken_mask_on_slot.zipWithIndex).map {
     case (target, (taken_mask, slotIdx)) =>
       // This enable signal can better improve CGE, but it may lead to timing violations:
       //    s2_fire_dup(0) && !new_fp.taken_mask_on_slot.take(slotIdx).fold(false.B)(_||_) && taken_mask && new_fp.hit
       target := RegEnable(
-        resp.s2.full_pred.targets(slotIdx),
-        0.U.asTypeOf(resp.s2.full_pred.targets(slotIdx)),
+        bpuResp.s2.full_pred.targets(slotIdx),
+        0.U.asTypeOf(bpuResp.s2.full_pred.targets(slotIdx)),
         s2_fire && taken_mask
       )
   }
   // This enable signal can better improve CGE, but it may lead to timing violations:
   //    s2_fire_dup(0) && new_fp.hit && !new_fp.taken_mask_on_slot.reduce(_||_)
   previous_s2_pred.full_pred.fallThroughAddr := RegEnable(
-    resp.s2.full_pred.fallThroughAddr,
-    0.U.asTypeOf(resp.s2.full_pred.fallThroughAddr),
-    s2_fire && resp.s2.full_pred.hit && !resp.s2.full_pred.taken_mask_on_slot(0)
+    bpuResp.s2.full_pred.fallThroughAddr,
+    0.U.asTypeOf(bpuResp.s2.full_pred.fallThroughAddr),
+    s2_fire && bpuResp.s2.full_pred.hit && !bpuResp.s2.full_pred.taken_mask_on_slot(0)
   )
 
   val s3_redirect_on_br_taken =
-    resp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt
+    bpuResp.s3.full_pred.real_br_taken_mask().asUInt =/= previous_s2_pred.full_pred.real_br_taken_mask().asUInt
 
   val s3_both_first_taken =
-    resp.s3.full_pred.real_br_taken_mask()(0) && previous_s2_pred.full_pred.real_br_taken_mask()(0)
-  val s3_redirect_on_target = resp.s3.getTarget =/= previous_s2_pred.getTarget
+    bpuResp.s3.full_pred.real_br_taken_mask()(0) && previous_s2_pred.full_pred.real_br_taken_mask()(0)
+  val s3_redirect_on_target = bpuResp.s3.getTarget =/= previous_s2_pred.getTarget
   val s3_redirect_on_jalr_target =
-    resp.s3.full_pred.hit_taken_on_jalr && resp.s3.full_pred.jalr_target =/= previous_s2_pred.full_pred.jalr_target
+    bpuResp.s3.full_pred.hit_taken_on_jalr && bpuResp.s3.full_pred.jalr_target =/= previous_s2_pred.full_pred.jalr_target
 
-  val s3_redirect_on_fall_thru_error = resp.s3.fallThruError
-  val s3_redirect_on_ftb_multi_hit   = resp.s3.ftbMultiHit
+  val s3_redirect_on_fall_thru_error = bpuResp.s3.fallThruError
+  val s3_redirect_on_ftb_multi_hit   = bpuResp.s3.ftbMultiHit
 
-  s3_redirect := s3_fire && (
+  s3_override := s3_fire && (
     (s3_redirect_on_br_taken && !s3_both_first_taken) ||
       s3_redirect_on_target || s3_redirect_on_fall_thru_error || s3_redirect_on_ftb_multi_hit
   )
@@ -757,47 +686,20 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSPerfAccumulate(f"s3_redirect_on_jalr_target", s3_fire && s3_redirect_on_jalr_target)
   XSPerfAccumulate(
     f"s3_redirect_on_others",
-    s3_redirect && !(s3_redirect_on_br_taken || s3_redirect_on_jalr_target)
+    s3_override && !(s3_redirect_on_br_taken || s3_redirect_on_jalr_target)
   )
 
-  npcGen.register(s3_redirect, resp.s3.getTarget, Some("s3_target"), 3)
-  foldedGhGen.register(s3_redirect, s3_predicted_fh, Some("s3_FGH"), 3)
-  ghistPtrGen.register(s3_redirect, s3_predicted_ghist_ptr, Some("s3_GHPtr"), 3)
-  lastBrNumOHGen.register(s3_redirect, resp.s3.lastBrPosOH.asUInt, Some("s3_BrNumOH"), 3)
-  aheadFhObGen.register(s3_redirect, s3_ahead_fh_ob_src, Some("s3_AFHOB"), 3)
+  npcGen.register(s3_override, bpuResp.s3.getTarget, Some("s3_target"), 3)
+  foldedGhGen.register(s3_override, s3_predicted_fh, Some("s3_FGH"), 3)
+  ghistPtrGen.register(s3_override, s3_predicted_ghist_ptr, Some("s3_GHPtr"), 3)
+  lastBrNumOHGen.register(s3_override, bpuResp.s3.lastBrPosOH.asUInt, Some("s3_BrNumOH"), 3)
+  aheadFhObGen.register(s3_override, s3_ahead_fh_ob_src, Some("s3_AFHOB"), 3)
 
   ghvBitWriteGens.zip(s3_ghv_wens).zipWithIndex.map { case ((b, w), i) =>
     b.register(w.reduce(_ || _), s3_ghv_wdatas(i), Some(s"s3_new_bit_$i"), 3)
   }
 
-  // Send signal tell Ftq override
-  val s2_ftq_idx = RegEnable(io.ftq_to_bpu.enq_ptr, s1_fire)
-  val s3_ftq_idx = RegEnable(s2_ftq_idx, s2_fire)
-
-  io.bpu_to_ftq.resp.bits.s1.valid       := s1_fire && !s1_flush
-  io.bpu_to_ftq.resp.bits.s1.hasRedirect := false.B
-  io.bpu_to_ftq.resp.bits.s1.ftq_idx     := DontCare
-
-  io.bpu_to_ftq.resp.bits.s2.valid       := s2_fire && !s2_flush
-  io.bpu_to_ftq.resp.bits.s2.hasRedirect := s2_redirect
-  io.bpu_to_ftq.resp.bits.s2.ftq_idx     := s2_ftq_idx
-
-  io.bpu_to_ftq.resp.bits.s3.valid       := s3_fire && !s3_flush
-  io.bpu_to_ftq.resp.bits.s3.hasRedirect := s3_redirect
-  io.bpu_to_ftq.resp.bits.s3.ftq_idx     := s3_ftq_idx
-
-  predictors.io.update            := io.ftq_to_bpu.update
-  predictors.io.update.bits.ghist := getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr)
-  // Move the update pc registers out of predictors.
-  predictors.io.update.bits.pc := PrunedAddrInit(SegmentedAddrNext(
-    io.ftq_to_bpu.update.bits.pc.toUInt,
-    pcSegments,
-    io.ftq_to_bpu.update.valid,
-    Some("predictors_io_update_pc")
-  ).getAddr())
-
   val redirectBits = do_redirect.bits
-  predictors.io.redirect := do_redirect
 
   // Redirect logic
   val shift       = redirectBits.cfiUpdate.shift
@@ -864,13 +766,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     def getCommitHist(ptr: CGHPtr): UInt =
       (Cat(commitGHist.asUInt, commitGHist.asUInt) >> (ptr.value + 1.U))(HistoryLength - 1, 0)
 
-    val updateValid:         Bool      = io.ftq_to_bpu.update.valid
-    val branchValidMask:     UInt      = io.ftq_to_bpu.update.bits.ftb_entry.brValids.asUInt
-    val branchCommittedMask: Vec[Bool] = io.ftq_to_bpu.update.bits.br_committed
-    val misPredictMask:      UInt      = io.ftq_to_bpu.update.bits.mispred_mask.asUInt
-    val takenMask: UInt =
-      io.ftq_to_bpu.update.bits.br_taken_mask.asUInt |
-        io.ftq_to_bpu.update.bits.ftb_entry.strong_bias.asUInt // Always taken branch is recorded in history
+    val updateValid:         Bool      = io.fromFtq.update.valid
+    val branchValidMask:     UInt      = io.fromFtq.update.bits.ftb_entry.brValids.asUInt
+    val branchCommittedMask: Vec[Bool] = io.fromFtq.update.bits.br_committed
+    val misPredictMask:      UInt      = io.fromFtq.update.bits.mispred_mask.asUInt
+    val takenMask: UInt = io.fromFtq.update.bits.br_taken_mask.asUInt |
+      io.fromFtq.update.bits.ftb_entry.strong_bias.asUInt // Always taken branch is recorded in history
     val takenIdx:      UInt = (PriorityEncoder(takenMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val misPredictIdx: UInt = (PriorityEncoder(misPredictMask) + 1.U((log2Ceil(numBr) + 1).W)).asUInt
     val shouldShiftMask: UInt = Mux(takenMask.orR, LowerMask(takenIdx).asUInt, ((1 << numBr) - 1).asUInt) &
@@ -895,7 +796,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     TageTableInfos.map {
       case (nRows, histLen, _) => {
         val nRowsPerBr      = nRows / numBr
-        val predictGHistPtr = io.ftq_to_bpu.update.bits.spec_info.histPtr
+        val predictGHistPtr = io.fromFtq.update.bits.spec_info.histPtr
         val commitTrueHist: UInt = computeFoldedHist(getCommitHist(commitGHistPtr), log2Ceil(nRowsPerBr))(histLen)
         val predictFHist:   UInt = computeFoldedHist(getHist(predictGHistPtr), log2Ceil(nRowsPerBr))(histLen)
         XSWarn(
@@ -938,6 +839,41 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     }
   }
 
+  // ========================= Topdown ========================= //
+  def numOfStage = 3
+  require(numOfStage > 1, "BPU numOfStage must be greater than 1")
+  val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
+
+  // following can only happen on s1
+  val controlRedirectBubble = Wire(Bool())
+  val ControlBTBMissBubble  = Wire(Bool())
+  val TAGEMissBubble        = Wire(Bool())
+  val SCMissBubble          = Wire(Bool())
+  val ITTAGEMissBubble      = Wire(Bool())
+  val RASMissBubble         = Wire(Bool())
+
+  val memVioRedirectBubble = Wire(Bool())
+  val otherRedirectBubble  = Wire(Bool())
+  val btbMissBubble        = Wire(Bool())
+  otherRedirectBubble  := false.B
+  memVioRedirectBubble := false.B
+
+  // override can happen between s1-s2 and s2-s3
+  val overrideBubble = Wire(Vec(numOfStage - 1, Bool()))
+  def overrideStage  = 1
+  // ftq update block can happen on s1, s2 and s3
+  val ftqUpdateBubble = Wire(Vec(numOfStage, Bool()))
+  def ftqUpdateStage  = 0
+  // ftq full stall only happens on s3 (last stage)
+  val ftqFullStall = Wire(Bool())
+
+  // by default, no bubble event
+  topdown_stages(0) := 0.U.asTypeOf(new FrontendTopDownBundle)
+  // event movement driven by clock only
+  for (i <- 0 until numOfStage - 1) {
+    topdown_stages(i + 1) := topdown_stages(i)
+  }
+
   // TODO: signals for memVio and other Redirects
   controlRedirectBubble := do_redirect.valid && do_redirect.bits.ControlRedirectBubble
   ControlBTBMissBubble  := do_redirect.bits.ControlBTBMissBubble
@@ -946,60 +882,60 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   ITTAGEMissBubble      := do_redirect.bits.ITTAGEMissBubble
   RASMissBubble         := do_redirect.bits.RASMissBubble
 
-  memVioRedirectBubble                 := do_redirect.valid && do_redirect.bits.MemVioRedirectBubble
-  otherRedirectBubble                  := do_redirect.valid && do_redirect.bits.OtherRedirectBubble
-  btbMissBubble                        := do_redirect.valid && do_redirect.bits.BTBMissBubble
-  overrideBubble(0)                    := s2_redirect
-  overrideBubble(1)                    := s3_redirect
-  ftqUpdateBubble(0)                   := !s1_components_ready
-  ftqUpdateBubble(1)                   := !s2_components_ready
-  ftqUpdateBubble(2)                   := !s3_components_ready
-  ftqFullStall                         := !io.bpu_to_ftq.resp.ready
-  io.bpu_to_ftq.resp.bits.topdown_info := topdown_stages(numOfStage - 1)
+  memVioRedirectBubble := do_redirect.valid && do_redirect.bits.MemVioRedirectBubble
+  otherRedirectBubble  := do_redirect.valid && do_redirect.bits.OtherRedirectBubble
+  btbMissBubble        := do_redirect.valid && do_redirect.bits.BTBMissBubble
+  overrideBubble(0)    := s2_override
+  overrideBubble(1)    := s3_override
+  ftqUpdateBubble(0)   := !s1_predictorsReady
+  ftqUpdateBubble(1)   := false.B
+  ftqUpdateBubble(2)   := false.B
+  ftqFullStall         := !io.toFtq.resp.ready
+  bpuResp.topdown_info := topdown_stages(numOfStage - 1)
 
   // topdown handling logic here
   when(controlRedirectBubble) {
     /*
     for (i <- 0 until numOfStage)
       topdown_stages(i).reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
-    io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
+    bpuResp.topdown_info.reasons(TopDownCounters.ControlRedirectBubble.id) := true.B
      */
     when(ControlBTBMissBubble) {
       for (i <- 0 until numOfStage)
-        topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id)                  := true.B
-      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+        topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id)  := true.B
+      bpuResp.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
     }.elsewhen(TAGEMissBubble) {
       for (i <- 0 until numOfStage)
-        topdown_stages(i).reasons(TopDownCounters.TAGEMissBubble.id)                  := true.B
-      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+        topdown_stages(i).reasons(TopDownCounters.TAGEMissBubble.id)  := true.B
+      bpuResp.topdown_info.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
     }.elsewhen(SCMissBubble) {
       for (i <- 0 until numOfStage)
-        topdown_stages(i).reasons(TopDownCounters.SCMissBubble.id)                  := true.B
-      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
+        topdown_stages(i).reasons(TopDownCounters.SCMissBubble.id)  := true.B
+      bpuResp.topdown_info.reasons(TopDownCounters.SCMissBubble.id) := true.B
     }.elsewhen(ITTAGEMissBubble) {
       for (i <- 0 until numOfStage)
-        topdown_stages(i).reasons(TopDownCounters.ITTAGEMissBubble.id)                  := true.B
-      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+        topdown_stages(i).reasons(TopDownCounters.ITTAGEMissBubble.id)  := true.B
+      bpuResp.topdown_info.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
     }.elsewhen(RASMissBubble) {
       for (i <- 0 until numOfStage)
-        topdown_stages(i).reasons(TopDownCounters.RASMissBubble.id)                  := true.B
-      io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
+        topdown_stages(i).reasons(TopDownCounters.RASMissBubble.id)  := true.B
+      bpuResp.topdown_info.reasons(TopDownCounters.RASMissBubble.id) := true.B
     }
   }
   when(memVioRedirectBubble) {
     for (i <- 0 until numOfStage)
-      topdown_stages(i).reasons(TopDownCounters.MemVioRedirectBubble.id)                  := true.B
-    io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+      topdown_stages(i).reasons(TopDownCounters.MemVioRedirectBubble.id)  := true.B
+    bpuResp.topdown_info.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
   }
   when(otherRedirectBubble) {
     for (i <- 0 until numOfStage)
-      topdown_stages(i).reasons(TopDownCounters.OtherRedirectBubble.id)                  := true.B
-    io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+      topdown_stages(i).reasons(TopDownCounters.OtherRedirectBubble.id)  := true.B
+    bpuResp.topdown_info.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
   }
   when(btbMissBubble) {
     for (i <- 0 until numOfStage)
-      topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id)                  := true.B
-    io.bpu_to_ftq.resp.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      topdown_stages(i).reasons(TopDownCounters.BTBMissBubble.id)  := true.B
+    bpuResp.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
   }
 
   for (i <- 0 until numOfStage) {
@@ -1019,6 +955,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     topdown_stages(0).reasons(TopDownCounters.FtqFullStall.id) := true.B
   }
 
+  // ========================== Debug ========================= //
   XSError(
     isBefore(redirectBits.cfiUpdate.histPtr, s3_ghist_ptr) && do_redirect.valid,
     p"s3_ghist_ptr ${s3_ghist_ptr} exceeds redirect histPtr ${redirectBits.cfiUpdate.histPtr}\n"
@@ -1033,15 +970,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   )
 
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
-  XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")
-  XSDebug(io.ftq_to_bpu.redirect.valid, p"Redirect from ftq\n")
+  XSDebug(io.fromFtq.update.valid, p"Update from ftq\n")
+  XSDebug(io.fromFtq.redirect.valid, p"Redirect from ftq\n")
 
   XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire, s0_pc.toUInt)
   XSDebug(
     "[BP1] v=%d r=%d cr=%d fire=%d             flush=%d pc=%x\n",
     s1_valid,
     s1_ready,
-    s1_components_ready,
+    s1_predictorsReady,
     s1_fire,
     s1_flush,
     s1_pc.toUInt
@@ -1050,9 +987,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     "[BP2] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
     s2_valid,
     s2_ready,
-    s2_components_ready,
+    true.B,
     s2_fire,
-    s2_redirect,
+    s2_override,
     s2_flush,
     s2_pc.toUInt
   )
@@ -1060,15 +997,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     "[BP3] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
     s3_valid,
     s3_ready,
-    s3_components_ready,
+    true.B,
     s3_fire,
-    s3_redirect,
+    s3_override,
     s3_flush,
     s3_pc.toUInt
   )
-  XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
-  XSDebug("resp.s1.target=%x\n", resp.s1.getTarget.toUInt)
-  XSDebug("resp.s2.target=%x\n", resp.s2.getTarget.toUInt)
+  XSDebug("[FTQ] ready=%d\n", io.toFtq.resp.ready)
+  XSDebug("resp.s1.target=%x\n", bpuResp.s1.getTarget.toUInt)
+  XSDebug("resp.s2.target=%x\n", bpuResp.s2.getTarget.toUInt)
   // XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
   // XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
   // XSDebug("s2_ghist: %b\n", s2_ghist.predHist)
@@ -1078,13 +1015,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSDebug(p"s2_ghist_ptr: $s2_ghist_ptr\n")
   XSDebug(p"s3_ghist_ptr: $s3_ghist_ptr\n")
 
-  io.ftq_to_bpu.update.bits.display(io.ftq_to_bpu.update.valid)
-  io.ftq_to_bpu.redirect.bits.display(io.ftq_to_bpu.redirect.valid)
+  io.fromFtq.update.bits.display(io.fromFtq.update.valid)
+  io.fromFtq.redirect.bits.display(io.fromFtq.redirect.valid)
 
-  XSPerfAccumulate("s2_redirect", s2_redirect)
-  XSPerfAccumulate("s3_redirect", s3_redirect)
+  XSPerfAccumulate("s2_redirect", s2_override)
+  XSPerfAccumulate("s3_redirect", s3_override)
   XSPerfAccumulate("s1_not_valid", !s1_valid)
 
-  val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
+  // ========================= Performance Counter ========================= //
+  val perfEvents = uftb.getPerfEvents ++ ftb.getPerfEvents ++ tage.getPerfEvents
   generatePerfEvent()
 }
