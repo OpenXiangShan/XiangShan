@@ -61,7 +61,6 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
   private val hasDFT = hasMbist || hasSramCtl
 
   val io = new Bundle {
-    val chi = IO(new PortIO)
     val dft = Option.when(hasDFT)(IO(Input(new SramBroadcastBundle)))
     val dft_reset = Option.when(hasMbist)(IO(Input(new DFTResetSignals())))
     val lp = Option.when(socParams.EnablePowerDown)(IO(new LowPowerIO))
@@ -91,8 +90,7 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
 }
 
-trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp[L] =>
-
+trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] =>
   def core = core_with_l2.module
 
   /* connect core lp io */
@@ -118,7 +116,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp
       AsyncResetSynchronizerShiftReg(core.io.cpu_halt, 3, 0)
     }
     val exitco = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg((!io.chi.syscoreq & !io.chi.syscoack),3, 0)}
+      AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !io_chi.syscoack),3, 0)}
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
@@ -133,7 +131,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp
     val wfiState = withClockAndReset(clock, cpuReset_sync) {RegInit(sNORMAL)}
     val isNormal = lpState === sIDLE
     val wfiGateClock = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
-    val flitpend = io.chi.rx.snp.flitpend | io.chi.rx.rsp.flitpend | io.chi.rx.dat.flitpend
+    val flitpend = io_chi.rx.snp.flitpend | io_chi.rx.rsp.flitpend | io_chi.rx.dat.flitpend
     val intSrc = Cat(msip, mtip, meip, seip, nmi_31, nmi_43, debugIntr, msi_info_vld)
     wfiState := withClockAndReset(clock, cpuReset_sync){WfiStateNext(wfiState, isWFI, isNormal, flitpend, intSrc)}
 
@@ -162,7 +160,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io_chi.rx.snp.flitpend
 
     dontTouch(wfiGateClock)
     dontTouch(pwrdownGateClock)
@@ -173,8 +171,6 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileImp
 }
 
 trait HasXSTile { this: BaseXSSoc =>
-
-  require(enableCHI)
 
   // xstile
   val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
@@ -253,6 +249,25 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 
   core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
   core_with_l2.module.io.l3Miss := false.B
+}
+
+trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
+  this: BaseXSSocImp with HasAsyncClockImp =>
+
+  val io_chi = IO(new PortIO)
+
+  require(socParams.enableCHI)
+
+  socParams.EnableCHIAsyncBridge match {
+    case Some(param) =>
+      withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+        val sink = Module(new CHIAsyncBridgeSink(param))
+        sink.io.async <> core_with_l2.module.io.chi
+        io_chi <> sink.io.deq
+      }
+    case None =>
+      io_chi <> core_with_l2.module.io.chi
+  }
 }
 
 trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
@@ -399,7 +414,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
     with HasAsyncClockImp
-    with HasXSTileImp[XSNoCTop]
+    with HasXSTileCHIImp[XSNoCTop]
     with HasSeperatedTLBusImpOpt[XSNoCTop]
     with HasCoreLowPowerImp[XSNoCTop]
     with HasClintTimeImp[XSNoCTop]
@@ -410,17 +425,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
     core_with_l2.module.reset := cpuReset.asAsyncReset
-
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-          val sink = Module(new CHIAsyncBridgeSink(param))
-          sink.io.async <> core_with_l2.module.io.chi
-          io.chi <> sink.io.deq
-        }
-      case None =>
-        io.chi <> core_with_l2.module.io.chi
-    }
   }
 
   lazy val module = new XSNoCTopImp(this)
