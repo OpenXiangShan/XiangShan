@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
 import chisel3.experimental.noPrefix
+import scala.util.Try
 import xiangshan._
 import utils._
 import utility._
@@ -271,37 +272,43 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
 }
 
 trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
-  // asynchronous bridge sink node
-  val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
-    LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
-  )
-  tlAsyncSinkOpt.foreach(_.node := core_with_l2.tlAsyncSourceOpt.get.node)
-  // synchronous sink node
-  val tlSyncSinkOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
-  tlSyncSinkOpt.foreach(_ := core_with_l2.tlSyncSourceOpt.get)
+  def tlBus = Try(core_with_l2.asInstanceOf[xiangshan.HasSeperateTLBus]).toOption
 
-  // The Manager Node is only used to make IO
-  val tl = Option.when(SeperateTLBus)(TLManagerNode(Seq(
-    TLSlavePortParameters.v1(
-      managers = SeperateTLBusRanges map { address =>
-        TLSlaveParameters.v1(
-          address = Seq(address),
-          regionType = RegionType.UNCACHED,
-          executable = true,
-          supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
-          supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
-          supportsPutFull = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
-          fifoId = Some(0)
-        )
+  val tlAsyncBridgeOpt = Option.when(tlBus.nonEmpty && EnableSeperateTLAsync) {
+      LazyModule(new TLAsyncCrossingSink(SeperateTLAsyncBridge.get))
+  }
 
-      },
-      beatBytes = 8
-    )
-  )))
-  val tlXbar = Option.when(SeperateTLBus)(TLXbar())
-  tlAsyncSinkOpt.foreach(sink => tlXbar.get := sink.node)
-  tlSyncSinkOpt.foreach(sink => tlXbar.get := sink)
-  tl.foreach(_ := tlXbar.get)
+  val tl = Option.when(SeperateTLBus) {
+    val tlXbar = TLXbar()
+
+    EnableSeperateTLAsync match {
+      case true  => tlXbar := tlAsyncBridgeOpt.get.node := tlBus.get.tlAsyncSourceOpt.get.node
+      case false => tlXbar := tlBus.get.tlSyncSourceOpt.get
+    }
+
+    // The Manager Node is only used to make IO
+    val tl = TLManagerNode(Seq(
+      TLSlavePortParameters.v1(
+        managers = SeperateTLBusRanges map { address =>
+          TLSlaveParameters.v1(
+            address = Seq(address),
+            regionType = RegionType.UNCACHED,
+            executable = true,
+            supportsGet = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+            supportsPutPartial = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+            supportsPutFull = TransferSizes(1, p(SoCParamsKey).L3BlockSize),
+            fifoId = Some(0)
+          )
+
+        },
+        beatBytes = 8
+      )
+    ))
+    tl := tlXbar
+
+    tl
+  }
+
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 }
@@ -309,12 +316,11 @@ trait HasSeperatedTLBusOpt { this: BaseXSSoc with HasXSTile =>
 trait HasSeperatedTLBusImpOpt[+L <: HasSeperatedTLBusOpt] {
   this: BaseXSSocImp with HasAsyncClockImp =>
 
-  def tlAsyncSinkOpt = wrapper.asInstanceOf[L].tlAsyncSinkOpt
-
-  // Seperate DebugModule TL Async Queue Sink
-  if (socParams.SeperateTLBus && socParams.EnableSeperateTLAsync) {
-    tlAsyncSinkOpt.get.module.clock := soc_clock
-    tlAsyncSinkOpt.get.module.reset := soc_reset_sync
+  def tlAsyncBridgeOpt = wrapper.asInstanceOf[L].tlAsyncBridgeOpt
+  tlAsyncBridgeOpt.foreach { bridge =>
+    // Seperate DebugModule TL Async Queue Sink
+    bridge.module.clock := soc_clock
+    bridge.module.reset := soc_reset_sync
   }
 }
 
