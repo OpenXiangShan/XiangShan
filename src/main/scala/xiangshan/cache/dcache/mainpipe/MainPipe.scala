@@ -350,7 +350,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_ecc_eq_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
   val s1_tag_ecc_match_way = wayMap((w: Int) => s1_tag_ecc_eq_way(w) && s1_meta_valids(w)).asUInt
-  val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
+  val s1_refill_with_tag_error = s1_req.miss && s1_req.miss_tag_error
+  val s1_tag_match = ParallelORR(s1_tag_ecc_match_way) && !s1_refill_with_tag_error
   val s1_real_tag_eq_way = wayMap((w: Int) => io.tag_resp(w)(tagBits - 1, 0) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt
   val s1_has_real_tag_eq_way = ParallelORR(s1_real_tag_eq_way)
   val s1_real_tag_match_way = PriorityEncoderOH(s1_real_tag_eq_way)
