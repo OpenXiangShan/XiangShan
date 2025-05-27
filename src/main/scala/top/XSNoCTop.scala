@@ -56,6 +56,7 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
      */
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sWAITQ :: sQREQ :: sPOFFREQ :: Nil = Enum(7)
     val lpState = withClockAndReset(clock, cpuReset_sync) {RegInit(sIDLE)}
+    val cpu_no_op = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
     val l2_flush_en = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg(core.io.l2_flush_en.getOrElse(false.B), 3, 0)
     }
@@ -69,8 +70,9 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
       AsyncResetSynchronizerShiftReg((!io.chi.syscoreq & !io.chi.syscoack),3, 0)}
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
+    cpu_no_op := lpState === sPOFFREQ
     lpState := lpStateNext(lpState, l2_flush_en, l2_flush_done, isWFI, exitco, QACTIVE, QACCEPTn)
-    io.lp.foreach { lp => lp.o_cpu_no_op := lpState === sPOFFREQ } // inform SoC core+l2 want to power off
+    io.lp.foreach { lp => lp.o_cpu_no_op := cpu_no_op} // inform SoC core+l2 want to power off
 
     /*WFI clock Gating state
      1. works only when lpState is IDLE means Core+L2 works in normal state
@@ -109,7 +111,7 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !pwrdownGateClock | io.chi.rx.snp.flitpend
+    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool)
 
     dontTouch(wfiGateClock)
     dontTouch(pwrdownGateClock)
