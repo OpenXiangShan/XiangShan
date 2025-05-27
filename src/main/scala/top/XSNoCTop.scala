@@ -45,9 +45,8 @@ import difftest.util.Profile
 abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper)
 {
   def socParams = wrapper.asInstanceOf[HasSoCParameter]
-  def soc = socParams.soc
 
-  soc.XSTopPrefix.foreach { prefix =>
+  socParams.soc.XSTopPrefix.foreach { prefix =>
     val mod = this.toNamed
     annotate(new ChiselAnnotation {
       def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
@@ -61,17 +60,10 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
   private val hasSramCtl = p(DFTOptionsKey).EnableSramCtl
   private val hasDFT = hasMbist || hasSramCtl
 
-  val io = IO(new Bundle {
-    val hartId = Input(UInt(p(MaxHartIdBits).W))
-    val riscv_halt = Output(Bool())
-    val riscv_critical_error = Output(Bool())
-    val hartResetReq = Input(Bool())
-    val hartIsInReset = Output(Bool())
-    val riscv_rst_vec = Input(UInt(soc.PAddrBits.W))
-    val chi = new PortIO
-    val nodeID = Input(UInt(soc.NodeIDWidthList(socParams.issue).W))
-    val clintTime = Input(ValidIO(UInt(64.W)))
-    val traceCoreInterface = new Bundle {
+  val io = new Bundle {
+    val chi = IO(new PortIO)
+    val clintTime = IO(Input(ValidIO(UInt(64.W))))
+    val traceCoreInterface = IO(new Bundle {
       val fromEncoder = Input(new Bundle {
         val enable = Bool()
         val stall  = Bool()
@@ -85,11 +77,11 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
         val iretire   = UInt((socParams.TraceTraceGroupNum * socParams.TraceIretireWidthCompressed).W)
         val ilastsize = UInt((socParams.TraceTraceGroupNum * socParams.TraceIlastsizeWidth).W)
       })
-    }
-    val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
-    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-    val lp = Option.when(socParams.EnablePowerDown) (new LowPowerIO)
-  })
+    })
+    val dft = Option.when(hasDFT)(IO(Input(new SramBroadcastBundle)))
+    val dft_reset = Option.when(hasMbist)(IO(Input(new DFTResetSignals())))
+    val lp = Option.when(socParams.EnablePowerDown)(IO(new LowPowerIO))
+  }
 
   /*
    SoC Control the sequence of power on/off with isolation/reset/clock
@@ -103,9 +95,6 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    */
   val cpuReset = reset.asBool || !soc_rst_n
   val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(io.dft_reset))
-
-  // input
-  dontTouch(io)
 }
 
 trait HasAsyncClockImp { this: BaseXSSocImp =>
@@ -194,9 +183,7 @@ trait HasCoreLowPowerImp[+L <: XSNoCTop] { this: XSNoCTop#XSNoCTopImp =>
   }
 }
 
-class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
-{
-  override lazy val desiredName: String = "XSTop"
+trait HasXSTile { this: BaseXSSoc =>
 
   require(enableCHI)
 
@@ -225,6 +212,56 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
+
+  // reset nodes
+  val core_rst_node = BundleBridgeSource(() => Reset())
+  core_with_l2.tile.core_reset_sink := core_rst_node
+}
+
+trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =>
+  def core_with_l2 = wrapper.asInstanceOf[L].core_with_l2
+  def core_rst_node = wrapper.asInstanceOf[L].core_rst_node
+  def clint = wrapper.asInstanceOf[L].clint
+  def plic = wrapper.asInstanceOf[L].plic
+  def nmi = wrapper.asInstanceOf[L].nmi
+  def debug = wrapper.asInstanceOf[L].debug
+
+  val tileio = IO(new Bundle {
+    val hartId = Input(UInt(p(MaxHartIdBits).W))
+    val riscv_halt = Output(Bool())
+    val riscv_critical_error = Output(Bool())
+    val hartResetReq = Input(Bool())
+    val hartIsInReset = Output(Bool())
+    val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
+    val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
+  }).suggestName("io")
+
+  core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
+  core_with_l2.module.soc_reset := soc_reset
+
+  tileio.riscv_halt := core_with_l2.module.io.cpu_halt
+  tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
+  core_with_l2.module.io.hartResetReq := tileio.hartResetReq
+  tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
+  core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
+  core_with_l2.module.io.hartId := tileio.hartId
+  core_with_l2.module.io.nodeID.get := tileio.nodeID
+
+  /* dft */
+  core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
+  core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
+
+  // tie off core soft reset
+  core_rst_node.out.head._1 := false.B.asAsyncReset
+
+  core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
+  core_with_l2.module.io.l3Miss := false.B
+}
+
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
+  with HasXSTile
+{
+  override lazy val desiredName: String = "XSTop"
 
   // asynchronous bridge sink node
   val tlAsyncSinkOpt = Option.when(SeperateTLBus && EnableSeperateTLAsync)(
@@ -260,12 +297,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   // seperate TL io
   val io_tl = tl.map(x => InModuleBody(x.makeIOs()))
 
-  // reset nodes
-  val core_rst_node = BundleBridgeSource(() => Reset())
-  core_with_l2.tile.core_reset_sink := core_rst_node
 
   class XSNoCTopImp(wrapper: XSNoCTop) extends BaseXSSocImp(wrapper)
     with HasAsyncClockImp
+    with HasXSTileImp[XSNoCTop]
     with HasCoreLowPowerImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
   {
@@ -277,8 +312,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     // imsic bare io
     val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
-    wrapper.core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }
-    wrapper.core_with_l2.module.io.dft_reset.zip(io.dft_reset).foreach { case (a, b) => a := b }
     // device clock and reset
     wrapper.u_imsic_bus_top.module.clock := soc_clock
     wrapper.u_imsic_bus_top.module.reset := soc_reset_sync
@@ -306,15 +339,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     val cpuGatedClock = noPrefix { buildLowPower(clock, cpuReset_sync) }
     core_with_l2.module.clock := cpuGatedClock
     core_with_l2.module.reset := cpuReset.asAsyncReset
-    core_with_l2.module.noc_reset.foreach(_ := noc_reset.get)
-    core_with_l2.module.soc_reset := soc_reset
-    core_with_l2.module.io.hartId := io.hartId
-    core_with_l2.module.io.nodeID.get := io.nodeID
-    io.riscv_halt := core_with_l2.module.io.cpu_halt
-    io.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
-    core_with_l2.module.io.hartResetReq := io.hartResetReq
-    io.hartIsInReset := core_with_l2.module.io.hartIsInReset
-    core_with_l2.module.io.reset_vector := io.riscv_rst_vec
     core_with_l2.module.io.iso_en.foreach { _ := io.lp.map(_.i_cpu_iso_en).getOrElse(false.B) }
     core_with_l2.module.io.pwrdown_req_n.foreach { _ := io.lp.map(_.i_cpu_pwrdown_req_n).getOrElse(true.B) }
     // trace Interface
@@ -360,11 +384,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.msiio.vld_req
     core_with_l2.module.io.msiInfo.bits := wrapper.u_imsic_bus_top.module.msiio.data
     wrapper.u_imsic_bus_top.module.msiio.vld_ack := core_with_l2.module.io.msiAck
-    // tie off core soft reset
-    core_rst_node.out.head._1 := false.B.asAsyncReset
-
-    core_with_l2.module.io.debugTopDown.l3MissMatch := false.B
-    core_with_l2.module.io.l3Miss := false.B
   }
 
   lazy val module = new XSNoCTopImp(this)
