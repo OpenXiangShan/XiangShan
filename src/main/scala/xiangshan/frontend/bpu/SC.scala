@@ -244,9 +244,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       case (nRows, ctrBits, histLen) => {
         val t   = Module(new SCTable(nRows / TageBanks, ctrBits, histLen))
         val req = t.io.req
-        req.valid            := io.s0_fire
+        req.valid            := s0_fire
         req.bits.pc          := s0_pc
-        req.bits.folded_hist := io.in.bits.folded_hist
+        req.bits.folded_hist := io.in.folded_hist
         req.bits.ghist       := DontCare
         if (!EnableSC) { t.io.update := DontCare }
         t
@@ -293,7 +293,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     // for tage ctrs, (2*(ctr-4)+1)*8
     def getPvdrCentered(ctr: UInt): SInt = Cat(ctr ^ (1 << (TageCtrBits - 1)).U, 1.U(1.W), 0.U(3.W)).asSInt
 
-    val scMeta = resp_meta.scMeta.get
+    val scMeta = tageMeta.scMeta.get
     scMeta := DontCare
     for (w <- 0 until TageBanks) {
       // do summation in s2
@@ -302,29 +302,29 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
           ParallelSingedExpandingAdd(s1_scResps map (r => getCentered(r.ctrs(w)(i)))) // TODO: rewrite with wallace tree
         }
       )
-      val s2_scTableSums         = RegEnable(s1_scTableSums, io.s1_fire)
-      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, io.s1_fire))
+      val s2_scTableSums         = RegEnable(s1_scTableSums, s1_fire)
+      val s2_tagePrvdCtrCentered = getPvdrCentered(RegEnable(s1_providerResps(w).ctr, s1_fire))
       val s2_totalSums           = s2_scTableSums.map(_ +& s2_tagePrvdCtrCentered)
       val s2_sumAboveThresholds =
         VecInit((0 to 1).map(i => aboveThreshold(s2_scTableSums(i), s2_tagePrvdCtrCentered, useThresholds(w))))
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
-      val s2_scResps   = VecInit(RegEnable(s1_scResps, io.s1_fire).map(_.ctrs(w)))
+      val s2_scResps   = VecInit(RegEnable(s1_scResps, s1_fire).map(_.ctrs(w)))
       val s2_scCtrs    = VecInit(s2_scResps.map(_(s2_tageTakens(w).asUInt)))
       val s2_chooseBit = s2_tageTakens(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens(w))
 
-      val s3_disagree = RegEnable(s2_disagree, io.s2_fire)
-      io.out.last_stage_spec_info.sc_disagree.map(_ := s3_disagree)
+      val s3_disagree = RegEnable(s2_disagree, s2_fire)
+      if (io.out.sc_disagree.isDefined) {
+        io.out.sc_disagree.get := s3_disagree
+      }
 
-      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire)
-      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, io.s2_fire)
+      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), s2_fire)
+      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, s2_fire)
 
       val pred = s2_scPreds(s2_chooseBit)
-      // FIXME: This looks strange. Maybe we don't need this anymore.
-      val debug_pc = Cat(debug_pc_s2.toUInt, w.U, 0.U(instOffsetBits.W))
       when(s2_provideds(w)) {
         s2_sc_used(w) := true.B
         s2_unconf(w)  := !s2_sumAboveThresholds(s2_chooseBit)
@@ -338,14 +338,12 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         }
       }
       XSDebug(s2_provideds(w), p"---------tage_bank_${w} provided so that sc used---------\n")
-      XSDebug(
-        s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
-        p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n"
-      )
 
-      val s3_pred = RegEnable(s2_pred, io.s2_fire)
-      when(RegNext(io.ctrl.sc_enable)) {
-        io.out.s3.full_pred.br_taken_mask(w) := s3_pred
+      val s3_pred = RegEnable(s2_pred, s2_fire)
+      when(RegNext(io.in.ctrl.sc_enable)) {
+        io.out.toFtb.s3_branchTakenMask(w) := s3_pred
+      }.otherwise {
+        io.out.toFtb.s3_branchTakenMask(w) := false.B
       }
 
       val updateTageMeta    = updateMeta
@@ -436,7 +434,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
 
   override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
 
-  override val perfEvents = Seq(
+  val perfEvents = Seq(
     ("tage_tht_hit                  ", PopCount(updateMeta.providers.map(_.valid))),
     ("sc_update_on_mispred          ", PopCount(update_on_mispred)),
     ("sc_update_on_unconf           ", PopCount(update_on_unconf))

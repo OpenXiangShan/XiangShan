@@ -103,7 +103,7 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val old_target_offset = new ITTageOffset()
 }
 
-class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams {
+class IttageMeta(implicit p: Parameters) extends XSBundle with ITTageParams {
   val provider          = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
   val altProvider       = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
   val altDiffers        = Bool()
@@ -409,23 +409,40 @@ class ITTageTable(
 
 }
 
-abstract class BaseITTage(implicit p: Parameters) extends BasePredictor with ITTageParams with BPUUtils {}
-
-class FakeITTage(implicit p: Parameters) extends BaseITTage {
-  io.out <> 0.U.asTypeOf(DecoupledIO(new BasePredictorOutput))
-
-  io.s1_ready := true.B
-  io.s2_ready := true.B
+class IttageInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonSignals {
+  val ghist          = UInt(HistoryLength.W)
+  val folded_hist    = new AllFoldedHistories(foldedGHistInfos)
+  val s1_folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val fromFtb        = new FtbToIttageBundle
 }
 
-class ITTage(implicit p: Parameters) extends BaseITTage {
+class IttageOutput(implicit p: Parameters) extends XSBundle {
+  val predictionValid = Bool()
+  val s3_jalrTarget   = PrunedAddr(VAddrBits)
+  val s3_meta         = new IttageMeta
+  val s1_ready        = Bool()
+}
+
+class Ittage(implicit p: Parameters) extends XSModule with ITTageParams with BPUUtils {
+  val io = IO(new Bundle {
+    val in  = Input(new IttageInput)
+    val out = Output(new IttageOutput)
+  })
+
+  val s0_pc   = io.in.s0_pc
+  val s0_fire = io.in.s0_fire
+  val s1_fire = io.in.s1_fire
+  val s2_fire = io.in.s2_fire
+
+  val s1_pc = RegEnable(s0_pc, s0_fire)
+  val s2_pc = RegEnable(s1_pc, s1_fire)
 
   val tables = ITTageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) =>
       val t = Module(new ITTageTable(nRows, histLen, tagLen, i))
       t
   }
-  override def getFoldedHistoryInfo: Option[Set[(Int, Int)]] = Some(tables.map(_.getFoldedHistoryInfo).reduce(_ ++ _))
+  def getFoldedHistoryInfo: Option[Set[(Int, Int)]] = Some(tables.map(_.getFoldedHistoryInfo).reduce(_ ++ _))
 
   val useAltOnNa = RegInit((1 << (UAONA_bits - 1)).U(UAONA_bits.W))
   val tickCtr    = RegInit(0.U(TickWidth.W))
@@ -433,18 +450,15 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val rTable = Module(new RegionWays)
 
   // uftb miss or hasIndirect
-  val s1_uftbHit         = io.in.bits.resp_in(0).s1_uftbHit
-  val s1_uftbHasIndirect = io.in.bits.resp_in(0).s1_uftbHasIndirect
-  val s1_isIndirect      = (!s1_uftbHit && !io.in.bits.resp_in(0).s1_ftbCloseReq) || s1_uftbHasIndirect
+  val s1_uftbHit         = io.in.fromFtb.s1_uftbHit
+  val s1_uftbHasIndirect = io.in.fromFtb.s1_uftbHasIndirect
+  val s1_isIndirect      = (!s1_uftbHit && !io.in.fromFtb.s1_ftbCloseReq) || s1_uftbHasIndirect
 
   // Keep the table responses to process in s2
 
   val s2_resps = VecInit(tables.map(t => t.io.resp))
 
-  val debug_pc_s1 = RegEnable(s0_pc, io.s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire)
-
-  val s2_tageTarget        = Wire(PrunedAddr(VAddrBits))
+  val s2_ittageTarget      = Wire(PrunedAddr(VAddrBits))
   val s2_providerTarget    = Wire(PrunedAddr(VAddrBits))
   val s2_altProviderTarget = Wire(PrunedAddr(VAddrBits))
   val s2_provided          = Wire(Bool())
@@ -455,64 +469,66 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_providerCtr       = Wire(UInt(ITTageCtrBits.W))
   val s2_altProviderCtr    = Wire(UInt(ITTageCtrBits.W))
 
-  val s3_tageTarget        = RegEnable(s2_tageTarget, io.s2_fire)
-  val s3_providerTarget    = RegEnable(s2_providerTarget, io.s2_fire)
-  val s3_altProviderTarget = RegEnable(s2_altProviderTarget, io.s2_fire)
-  val s3_provided          = RegEnable(s2_provided, io.s2_fire)
-  val s3_provider          = RegEnable(s2_provider, io.s2_fire)
-  val s3_altProvided       = RegEnable(s2_altProvided, io.s2_fire)
-  val s3_altProvider       = RegEnable(s2_altProvider, io.s2_fire)
-  val s3_providerU         = RegEnable(s2_providerU, io.s2_fire)
-  val s3_providerCtr       = RegEnable(s2_providerCtr, io.s2_fire)
-  val s3_altProviderCtr    = RegEnable(s2_altProviderCtr, io.s2_fire)
+  val s3_ittageTarget      = RegEnable(s2_ittageTarget, s2_fire)
+  val s3_providerTarget    = RegEnable(s2_providerTarget, s2_fire)
+  val s3_altProviderTarget = RegEnable(s2_altProviderTarget, s2_fire)
+  val s3_provided          = RegEnable(s2_provided, s2_fire)
+  val s3_provider          = RegEnable(s2_provider, s2_fire)
+  val s3_altProvided       = RegEnable(s2_altProvided, s2_fire)
+  val s3_altProvider       = RegEnable(s2_altProvider, s2_fire)
+  val s3_providerU         = RegEnable(s2_providerU, s2_fire)
+  val s3_providerCtr       = RegEnable(s2_providerCtr, s2_fire)
+  val s3_altProviderCtr    = RegEnable(s2_altProviderCtr, s2_fire)
 
-  val resp_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
-
-  io.meta.ittageMeta := resp_meta
+  val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
+  io.out.s3_meta := ittageMeta
 
   // Update logic
-  val u_valid = RegNext(io.update.valid, init = false.B)
+  val u_valid = RegNext(io.in.update.valid, init = false.B)
 
   val update = Wire(new BranchPredictionUpdate)
-  update := RegEnable(io.update.bits, io.update.valid)
+  update := RegEnable(io.in.update.bits, io.in.update.valid)
 
-  val updateMeta = Wire(new ITTageMeta)
+  val updateMeta = Wire(new IttageMeta)
   update.meta.ittageMeta := updateMeta
 
   // The pc register has been moved outside of predictor
   // pc field of update bundle and other update data are not in the same stage
   // so io.update.bits.pc is used directly here
-  val update_pc = io.update.bits.pc
+  val update_pc = io.in.update.bits.pc
 
   // To improve Clock Gating Efficiency
-  val u_meta = io.update.bits.meta.ittageMeta
-  updateMeta := RegEnable(u_meta, io.update.valid)
+  val u_meta = io.in.update.bits.meta.ittageMeta
+  updateMeta := RegEnable(u_meta, io.in.update.valid)
   updateMeta.provider.bits := RegEnable(
     u_meta.provider.bits,
-    io.update.valid && u_meta.provider.valid
+    io.in.update.valid && u_meta.provider.valid
   )
   updateMeta.providerTarget := RegEnable(
     u_meta.providerTarget,
-    io.update.valid && u_meta.provider.valid
+    io.in.update.valid && u_meta.provider.valid
   )
   updateMeta.allocate.bits := RegEnable(
     u_meta.allocate.bits,
-    io.update.valid && u_meta.allocate.valid
+    io.in.update.valid && u_meta.allocate.valid
   )
   updateMeta.altProvider.bits := RegEnable(
     u_meta.altProvider.bits,
-    io.update.valid && u_meta.altProvider.valid
+    io.in.update.valid && u_meta.altProvider.valid
   )
   updateMeta.altProviderTarget := RegEnable(
     u_meta.altProviderTarget,
-    io.update.valid && u_meta.provider.valid && u_meta.altProvider.valid && u_meta.providerCtr === 0.U
+    io.in.update.valid && u_meta.provider.valid && u_meta.altProvider.valid && u_meta.providerCtr === 0.U
   )
   update.full_target := RegEnable(
-    io.update.bits.full_target,
-    io.update.valid // not using mispred_mask, because mispred_mask timing is bad
+    io.in.update.bits.full_target,
+    io.in.update.valid // not using mispred_mask, because mispred_mask timing is bad
   )
-  update.cfi_idx.bits := RegEnable(io.update.bits.cfi_idx.bits, io.update.valid && io.update.bits.cfi_idx.valid)
-  update.ghist        := RegEnable(io.update.bits.ghist, io.update.valid) // TODO: CGE
+  update.cfi_idx.bits := RegEnable(
+    io.in.update.bits.cfi_idx.bits,
+    io.in.update.valid && io.in.update.bits.cfi_idx.valid
+  )
+  update.ghist := RegEnable(io.in.update.bits.ghist, io.in.update.valid) // TODO: CGE
 
   val updateValid = update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
     update.jmp_taken && update.cfi_idx.valid &&
@@ -538,9 +554,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Predict
   tables.map { t =>
-    t.io.req.valid            := io.s1_fire && s1_isIndirect
+    t.io.req.valid            := s1_fire && s1_isIndirect
     t.io.req.bits.pc          := s1_pc
-    t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist
+    t.io.req.bits.folded_hist := io.in.s1_folded_hist
   }
 
   // access tag tables and output meta info
@@ -569,7 +585,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val altProviderInfo = selectedInfo.second
   val providerNull    = providerInfo.ctr === 0.U
 
-  val baseTarget             = io.in.bits.resp_in(0).s2.full_pred.jalr_target // use ftb pred as base target
   val region_r_target_offset = VecInit(s2_resps.map(r => r.bits.target_offset))
 
   rTable.io.req_pointer.zipWithIndex.map { case (req_pointer, i) =>
@@ -593,11 +608,20 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     case (mask, i) => mask & region_targets(i).toUInt
   }.reduce(_ | _))
 
-  s2_tageTarget := Mux1H(Seq(
-    (provided && !(providerNull && altProvided), providerCatTarget),
-    (altProvided && providerNull, altproviderCatTarget),
-    (!provided, baseTarget)
-  ))
+  s2_ittageTarget := MuxCase(
+    0.U.asTypeOf(PrunedAddr(VAddrBits)),
+    Seq(
+      (provided && !(providerNull && altProvided)) -> providerCatTarget,
+      (providerNull && altProvided)                -> altproviderCatTarget
+    )
+  )
+
+  val s2_predictionValid = io.in.fromFtb.s2_isJalr &&
+    (provided && !(providerNull && altProvided)) || (providerNull && altProvided)
+
+  io.out.predictionValid := RegEnable(s2_predictionValid, s2_fire)
+  io.out.s3_jalrTarget   := s3_ittageTarget
+
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
   s2_altProvided       := altProvided
@@ -608,21 +632,19 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_providerTarget    := providerCatTarget
   s2_altProviderTarget := altproviderCatTarget
 
-  XSDebug(io.s2_fire, p"hit_taken_jalr:")
+  XSDebug(s2_fire, p"hit_taken_jalr:")
 
-  io.out.s3.full_pred.jalr_target := s3_tageTarget
-
-  resp_meta.provider.valid    := s3_provided
-  resp_meta.provider.bits     := s3_provider
-  resp_meta.altProvider.valid := s3_altProvided
-  resp_meta.altProvider.bits  := s3_altProvider
-  resp_meta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
-  resp_meta.providerU         := s3_providerU
-  resp_meta.providerCtr       := s3_providerCtr
-  resp_meta.altProviderCtr    := s3_altProviderCtr
-  resp_meta.providerTarget    := s3_providerTarget
-  resp_meta.altProviderTarget := s3_altProviderTarget
-  resp_meta.pred_cycle.foreach(_ := GTimer())
+  ittageMeta.provider.valid    := s3_provided
+  ittageMeta.provider.bits     := s3_provider
+  ittageMeta.altProvider.valid := s3_altProvided
+  ittageMeta.altProvider.bits  := s3_altProvider
+  ittageMeta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
+  ittageMeta.providerU         := s3_providerU
+  ittageMeta.providerCtr       := s3_providerCtr
+  ittageMeta.altProviderCtr    := s3_altProviderCtr
+  ittageMeta.providerTarget    := s3_providerTarget
+  ittageMeta.altProviderTarget := s3_altProviderTarget
+  ittageMeta.pred_cycle.foreach(_ := GTimer())
   // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
@@ -632,8 +654,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
   val s2_maskedEntry = PriorityEncoder(s2_allocatableSlots & s2_allocLFSR)
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
-  resp_meta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, io.s2_fire)
-  resp_meta.allocate.bits  := RegEnable(s2_allocEntry, io.s2_fire)
+  ittageMeta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, s2_fire)
+  ittageMeta.allocate.bits  := RegEnable(s2_allocEntry, s2_fire)
 
   // Update in loop
   val updateRealTarget       = update.full_target
@@ -744,15 +766,15 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }
 
   // all should be ready for req
-  io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _)
+  io.out.s1_ready := tables.map(_.io.req.ready).reduce(_ && _)
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
-  XSPerfAccumulate("ittage_used", io.s1_fire(0) && s1_isIndirect)
-  XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
+  XSPerfAccumulate("ittage_used", s1_fire && s1_isIndirect)
+  XSPerfAccumulate("ittage_closed_due_to_uftb_info", s1_fire && !s1_isIndirect)
   XSPerfAccumulate("ittage_allocate", updateAlloc.reduce(_ || _))
 
-  private def pred_perf(name:   String, cond: Bool) = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)
+  private def pred_perf(name:   String, cond: Bool) = XSPerfAccumulate(s"${name}_at_pred", cond && s2_fire)
   private def commit_perf(name: String, cond: Bool) = XSPerfAccumulate(s"${name}_at_commit", cond && updateValid)
   private def ittage_perf(name: String, pred_cond: Bool, commit_cond: Bool) = {
     pred_perf(s"ittage_${name}", pred_cond)
@@ -806,13 +828,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("updated", updateValid)
 
   if (debug) {
-    val s2_resps_regs = RegEnable(s2_resps, io.s2_fire)
-    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc.toUInt)
-    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1.toUInt)
+    val s2_resps_regs = RegEnable(s2_resps, s2_fire)
+    XSDebug("req: v=%d, pc=0x%x\n", s0_fire, s0_pc.toUInt)
+    XSDebug("s1_fire:%d, resp: pc=%x\n", s1_fire, s1_pc.toUInt)
     XSDebug(
-      "s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n",
-      debug_pc_s2.toUInt,
-      io.out.s2.getTarget.toUInt,
+      "s2_fireOnLastCycle: resp: pc=%x, hit=%b\n",
+      s2_pc.toUInt,
       s2_provided
     )
     for (i <- 0 until ITTageNTables) {
@@ -829,6 +850,4 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSDebug(updateValid, p"pc: ${Hexadecimal(update_pc.toUInt)}, target: ${Hexadecimal(update.full_target.toUInt)}\n")
   XSDebug(updateValid, updateMeta.toPrintable + p"\n")
   XSDebug(updateValid, p"correct(${!updateMisPred})\n")
-
-  generatePerfEvent()
 }
