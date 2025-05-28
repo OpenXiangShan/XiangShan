@@ -830,10 +830,12 @@ class Ftb(implicit p: Parameters) extends XSModule with FTBParams with HasPerfEv
   io.out.toRas.s3_fallThroughErr       := s3_fullPred.fallThroughErr
   io.out.toRas.s3_fallThroughAddr      := s3_fullPred.fallThroughAddr
 
+  val s3_branchTakenMask = RegEnable(io.in.fromTage.s2_branchTakenMask, s2_fire)
+
   // always taken logic
   for (i <- 0 until numBr) {
     s2_fullPred.br_taken_mask(i) := io.in.fromTage.s2_branchTakenMask(i) || s2_hit && s2_ftb_entry.strong_bias(i)
-    s3_fullPred.br_taken_mask(i) := io.in.fromTage.s3_branchTakenMask(i) || s3_hit && s3_ftb_entry.strong_bias(i)
+    s3_fullPred.br_taken_mask(i) := s3_branchTakenMask(i) || s3_hit && s3_ftb_entry.strong_bias(i)
   }
 
   val s3_pc_diff       = s3_pc
