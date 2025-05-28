@@ -23,7 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U, Imm_Z}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
@@ -494,8 +494,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       (if(i < RenameWidth -1) Mux(isFusionVec(i), iLastSizeVec(i+1), iLastSizeVec(i)) else iLastSizeVec(i))
     )
 
-    // itype
-    uops(i).traceBlockInPipe.itype := Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+    // CSR systemop instruction excluding ebreak & ecall
+    val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
+    val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
+    uops(i).traceBlockInPipe.itype := Mux(
+      isXret,
+      Itype.ExpIntReturn,
+      Itype.jumpTypeGen(inVec(i).preDecodeInfo.brType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf((new OpRegType)))
+    )
   }
   /**
    * trace end
