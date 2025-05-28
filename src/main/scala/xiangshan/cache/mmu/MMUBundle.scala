@@ -1169,7 +1169,6 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid)
     val vmid_hit = Mux(s2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
 
-    val addr_low_hit = valididx(vpn(sectortlbwidth - 1, 0))
     val tag_match = Wire(Vec(Level + 1, Bool()))
     tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
       entry.tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth),
@@ -1185,6 +1184,9 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
       1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
       0.U -> (tag_match(3) && tag_match(2) && tag_match(1) && tag_match(0)))
     )
+
+    val isSuperPage = entry.level.getOrElse(0.U) =/= 0.U || entry.n.getOrElse(0.U) =/= 0.U
+    val addr_low_hit = Mux(isSuperPage, true.B, valididx(vpn(sectortlbwidth - 1, 0)))
 
     asid_hit && vmid_hit && level_match && addr_low_hit
   }
