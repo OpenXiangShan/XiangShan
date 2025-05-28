@@ -932,6 +932,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
+  ) || 
+  ren && (
+    (addr === CSRs.vstopi.U) ||
+    (addr === CSRs.stopi.U) || 
+    (addr === CSRs.mtopi.U)
   )
 
   val resetSatp = WireInit(false.B)
