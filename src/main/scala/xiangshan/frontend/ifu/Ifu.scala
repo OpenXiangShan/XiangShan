@@ -131,8 +131,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   require(numOfStage > 1, "Ifu numOfStage must be greater than 1")
   private val topdownStages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
   // bubble events in IFU, only happen in stage 1
-  private val icacheMissBubble = io.fromICache.topdown.icacheMiss
-  private val itlbMissBubble   = io.fromICache.topdown.itlbMiss
+  private val icacheMissBubble = io.fromICache.topdown.iCacheMissBubble
+  private val itlbMissBubble   = io.fromICache.topdown.itlbMissBubble
 
   // only driven by clock, not valid-ready
   topdownStages(0) := fromFtq.req.bits.topdown_info
@@ -1072,44 +1072,39 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /* *** Perf *** */
   private val s3_perfInfo = RegEnable(s2_perfInfo, s2_fire)
-  private val s3_req0     = io.toIBuffer.fire
-  private val s3_req1     = io.toIBuffer.fire && s3_doubleline
-  private val s3_hit0     = io.toIBuffer.fire && s3_perfInfo.bankHit(0)
-  private val s3_hit1     = io.toIBuffer.fire && s3_doubleline & s3_perfInfo.bankHit(1)
-  private val s3_hit      = s3_perfInfo.hit
   val perfEvents: Seq[(String, Bool)] = Seq(
     ("frontendFlush                ", wbRedirect),
     ("ifu_req                      ", io.toIBuffer.fire),
     ("ifu_miss                     ", io.toIBuffer.fire && !s3_perfInfo.hit),
-    ("ifu_req_cacheline_0          ", s3_req0),
-    ("ifu_req_cacheline_1          ", s3_req1),
-    ("ifu_req_cacheline_0_hit      ", s3_hit1),
-    ("ifu_req_cacheline_1_hit      ", s3_hit1),
-    ("only_0_hit                   ", s3_perfInfo.only0Hit && io.toIBuffer.fire),
-    ("only_0_miss                  ", s3_perfInfo.only0Miss && io.toIBuffer.fire),
-    ("hit_0_hit_1                  ", s3_perfInfo.hit0Hit1 && io.toIBuffer.fire),
-    ("hit_0_miss_1                 ", s3_perfInfo.hit0Miss1 && io.toIBuffer.fire),
-    ("miss_0_hit_1                 ", s3_perfInfo.miss0Hit1 && io.toIBuffer.fire),
-    ("miss_0_miss_1                ", s3_perfInfo.miss0Miss1 && io.toIBuffer.fire)
+    ("ifu_req_cacheline_0          ", io.toIBuffer.fire),
+    ("ifu_req_cacheline_1          ", io.toIBuffer.fire && s3_perfInfo.isDoubleLine),
+    ("ifu_req_cacheline_0_hit      ", io.toIBuffer.fire && s3_perfInfo.hit0),
+    ("ifu_req_cacheline_1_hit      ", io.toIBuffer.fire && s3_perfInfo.hit1),
+    ("only_0_hit                   ", io.toIBuffer.fire && s3_perfInfo.hit0NoReq1),
+    ("only_0_miss                  ", io.toIBuffer.fire && s3_perfInfo.miss0NoReq1),
+    ("hit_0_hit_1                  ", io.toIBuffer.fire && s3_perfInfo.hit0Hit1),
+    ("hit_0_miss_1                 ", io.toIBuffer.fire && s3_perfInfo.hit0Miss1),
+    ("miss_0_hit_1                 ", io.toIBuffer.fire && s3_perfInfo.miss0Hit1),
+    ("miss_0_miss_1                ", io.toIBuffer.fire && s3_perfInfo.miss0Miss1)
   )
   generatePerfEvent()
 
-  XSPerfAccumulate("ifu_req", io.toIBuffer.fire)
-  XSPerfAccumulate("ifu_miss", io.toIBuffer.fire && !s3_hit)
-  XSPerfAccumulate("ifu_req_cacheline_0", s3_req0)
-  XSPerfAccumulate("ifu_req_cacheline_1", s3_req1)
-  XSPerfAccumulate("ifu_req_cacheline_0_hit", s3_hit0)
-  XSPerfAccumulate("ifu_req_cacheline_1_hit", s3_hit1)
   XSPerfAccumulate("frontendFlush", wbRedirect)
-  XSPerfAccumulate("only_0_hit", s3_perfInfo.only0Hit && io.toIBuffer.fire)
-  XSPerfAccumulate("only_0_miss", s3_perfInfo.only0Miss && io.toIBuffer.fire)
-  XSPerfAccumulate("hit_0_hit_1", s3_perfInfo.hit0Hit1 && io.toIBuffer.fire)
-  XSPerfAccumulate("hit_0_miss_1", s3_perfInfo.hit0Miss1 && io.toIBuffer.fire)
-  XSPerfAccumulate("miss_0_hit_1", s3_perfInfo.miss0Hit1 && io.toIBuffer.fire)
-  XSPerfAccumulate("miss_0_miss_1", s3_perfInfo.miss0Miss1 && io.toIBuffer.fire)
-  XSPerfAccumulate("hit_0_except_1", s3_perfInfo.hit0Except1 && io.toIBuffer.fire)
-  XSPerfAccumulate("miss_0_except_1", s3_perfInfo.miss0Except1 && io.toIBuffer.fire)
-  XSPerfAccumulate("except_0", s3_perfInfo.except0 && io.toIBuffer.fire)
+  XSPerfAccumulate("ifu_req", io.toIBuffer.fire)
+  XSPerfAccumulate("ifu_miss", io.toIBuffer.fire && !s3_perfInfo.hit)
+  XSPerfAccumulate("ifu_req_cacheline_0", io.toIBuffer.fire)
+  XSPerfAccumulate("ifu_req_cacheline_1", io.toIBuffer.fire && s3_perfInfo.isDoubleLine)
+  XSPerfAccumulate("ifu_req_cacheline_0_hit", io.toIBuffer.fire && s3_perfInfo.hit0)
+  XSPerfAccumulate("ifu_req_cacheline_1_hit", io.toIBuffer.fire && s3_perfInfo.hit1)
+  XSPerfAccumulate("only_0_hit", io.toIBuffer.fire && s3_perfInfo.hit0NoReq1)
+  XSPerfAccumulate("only_0_miss", io.toIBuffer.fire && s3_perfInfo.miss0NoReq1)
+  XSPerfAccumulate("hit_0_hit_1", io.toIBuffer.fire && s3_perfInfo.hit0Hit1)
+  XSPerfAccumulate("hit_0_miss_1", io.toIBuffer.fire && s3_perfInfo.hit0Miss1)
+  XSPerfAccumulate("miss_0_hit_1", io.toIBuffer.fire && s3_perfInfo.miss0Hit1)
+  XSPerfAccumulate("miss_0_miss_1", io.toIBuffer.fire && s3_perfInfo.miss0Miss1)
+  XSPerfAccumulate("except_0", io.toIBuffer.fire && s3_perfInfo.except0)
+  XSPerfAccumulate("hit_0_except_1", io.toIBuffer.fire && s3_perfInfo.hit0Except1)
+  XSPerfAccumulate("miss_0_except_1", io.toIBuffer.fire && s3_perfInfo.miss0Except1)
   XSPerfHistogram(
     "ifu2ibuffer_validCnt",
     PopCount(io.toIBuffer.bits.valid & io.toIBuffer.bits.enqEnable),
@@ -1129,11 +1124,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
   fetchIBufferDumpData.startAddr  := s3_ftqReq.startAddr.toUInt
   fetchIBufferDumpData.instrCount := PopCount(io.toIBuffer.bits.enqEnable)
-  fetchIBufferDumpData.exception :=
-    (s3_perfInfo.except0 && io.toIBuffer.fire) ||
-      (s3_perfInfo.hit0Except1 && io.toIBuffer.fire) ||
-      (s3_perfInfo.miss0Except1 && io.toIBuffer.fire)
-  fetchIBufferDumpData.isCacheHit := s3_hit
+  fetchIBufferDumpData.exception  := io.toIBuffer.fire && s3_perfInfo.except
+  fetchIBufferDumpData.isCacheHit := io.toIBuffer.fire && s3_perfInfo.hit
 
   private val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)
   ifuWbToFtqDumpData.startAddr         := wbFtqReq.startAddr.toUInt
