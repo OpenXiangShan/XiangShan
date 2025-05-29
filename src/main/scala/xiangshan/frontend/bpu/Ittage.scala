@@ -1,27 +1,24 @@
-/***************************************************************************************
- * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
- * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
- * Copyright (c) 2020-2021 Peng Cheng Laboratory
- *
- * XiangShan is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- * http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- *
- * See the Mulan PSL v2 for more details.
- *
- *
- * Acknowledgement
- *
- * This implementation is inspired by several key papers:
- * [1] André Seznec. "[A 64-Kbytes ITTAGE indirect branch predictor.](https://inria.hal.science/hal-00639041)" The
- * Journal of Instruction-Level Parallelism (JILP) 2nd JILP Workshop on Computer Architecture Competitions (JWAC):
- * Championship Branch Prediction (CBP). 2011.
- ***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+//
+// Acknowledgement
+//
+// This implementation is inspired by several key papers:
+// [1] André Seznec. "[A 64-Kbytes ITTAGE indirect branch predictor.](https://inria.hal.science/hal-00639041)" The
+// Journal of Instruction-Level Parallelism (JILP) 2nd JILP Workshop on Computer Architecture Competitions (JWAC):
+// Championship Branch Prediction (CBP). 2011.
 
 package xiangshan.frontend.bpu
 
@@ -30,11 +27,25 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqBoolBitwiseOps
 import org.chipsalliance.cde.config.Parameters
 import scala.math.min
-import utility._
+import utility.GTimer
+import utility.LowerMask
+import utility.ParallelSelectTwo
+import utility.ReplacementPolicy
+import utility.SelectTwoInterRes
+import utility.XSDebug
+import utility.XSError
+import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
-import xiangshan._
-import xiangshan.frontend._
+import xiangshan.HasXSParameter
+import xiangshan.ValidUndirectioned
+import xiangshan.XSBundle
+import xiangshan.XSModule
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.BranchPredictionUpdate
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.WrBypass
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 

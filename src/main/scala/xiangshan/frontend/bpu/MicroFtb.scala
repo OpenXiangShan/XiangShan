@@ -1,18 +1,17 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.bpu
 
@@ -20,8 +19,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import scala.{Tuple2 => &}
-import utility._
-import xiangshan._
+import utility.HasPerfEvents
+import utility.ReplacementPolicy
+import utility.XSError
+import utility.XSPerfAccumulate
+import xiangshan.HasXSParameter
+import xiangshan.XSBundle
+import xiangshan.XSModule
 import xiangshan.frontend.FullBranchPrediction
 import xiangshan.frontend.PrunedAddr
 
@@ -116,10 +120,10 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
   ways.foreach(_.io.req_tag := getTag(s1_pc))
 
   // pred resp
-  val s1_hit_oh              = VecInit(ways.map(_.io.resp_hit)).asUInt
-  val s1_hit                 = s1_hit_oh.orR
-  val s1_hit_way             = OHToUInt(s1_hit_oh)
-  val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction(isNotS3 = true)))
+  private val s1_hitOH               = VecInit(ways.map(_.io.resp_hit)).asUInt
+  private val s1_hit                 = s1_hitOH.orR
+  private val s1_hitWay              = OHToUInt(s1_hitOH)
+  private val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction(isNotS3 = true)))
 
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
@@ -130,9 +134,9 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
       fp.br_taken_mask(i) := c(i)(1) || e.strong_bias(i)
     }
   }
-  val s1_hit_full_pred   = Mux1H(s1_hit_oh, s1_possible_full_preds)
-  val s1_hit_fauftbentry = Mux1H(s1_hit_oh, s1_all_entries)
-  XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
+  val s1_hit_full_pred   = Mux1H(s1_hitOH, s1_possible_full_preds)
+  val s1_hit_fauftbentry = Mux1H(s1_hitOH, s1_all_entries)
+  XSError(PopCount(s1_hitOH) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable = RegNext(io.in.ctrl.ubtb_enable)
   io.out.s1_fullPred            := s1_hit_full_pred
   io.out.s1_fullPred.hit        := s1_hit && fauftb_enable
@@ -150,12 +154,12 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
   // assign metas
   io.out.s3_meta.hit := RegEnable(RegEnable(s1_hit, s1_fire), s2_fire)
   if (io.out.s3_meta.pred_way.isDefined) {
-    io.out.s3_meta.pred_way.get := RegEnable(RegEnable(s1_hit_way, s1_fire), s2_fire)
+    io.out.s3_meta.pred_way.get := RegEnable(RegEnable(s1_hitWay, s1_fire), s2_fire)
   }
 
   // pred update replacer state
   replacer_touch_ways(0).valid := RegNext(s1_fire && s1_hit)
-  replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire && s1_hit)
+  replacer_touch_ways(0).bits  := RegEnable(s1_hitWay, s1_fire && s1_hit)
 
   /********************** update ***********************/
   // s0: update_valid, read and tag comparison
@@ -227,7 +231,7 @@ class MicroFtb(implicit p: Parameters) extends XSModule with FauFTBParams with B
 
   /********************** perf counters **********************/
   val s0_fire_next_cycle = RegNext(s0_fire)
-  val u_pred_hit_way_map = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hit_way === w.U)
+  val u_pred_hit_way_map = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hitWay === w.U)
   XSPerfAccumulate("uftb_read_hits", s0_fire_next_cycle && s1_hit)
   XSPerfAccumulate("uftb_read_misses", s0_fire_next_cycle && !s1_hit)
   XSPerfAccumulate("uftb_commit_hits", u_valid && u_meta.hit)
