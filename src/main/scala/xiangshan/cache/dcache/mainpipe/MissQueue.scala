@@ -86,6 +86,9 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // 2. pmp check failed
   val cancel = Bool() // cancel is slow to generate, it will cancel missreq.valid
 
+  // MissReq caused by tag ecc error
+  val tag_error = Bool()
+
   // Req source decode
   // Note that req source is NOT cmd type
   // For instance, a req which isFromPrefetch may have R or W cmd
@@ -871,6 +874,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.access := access
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
+  io.main_pipe_req.bits.miss_tag_error := req.tag_error
 
   io.block_addr.valid := req_valid && w_grantlast
   io.block_addr.bits := req.addr

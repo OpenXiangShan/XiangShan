@@ -36,6 +36,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_dirty = Bool()
   val occupy_way = UInt(nWays.W)
   val miss_fail_cause_evict_btot = Bool()
+  val miss_tag_error = Bool()
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -349,7 +350,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_ecc_eq_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
   val s1_tag_ecc_match_way = wayMap((w: Int) => s1_tag_ecc_eq_way(w) && s1_meta_valids(w)).asUInt
-  val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
+  val s1_refill_with_tag_error = s1_req.miss && s1_req.miss_tag_error
+  val s1_tag_match = ParallelORR(s1_tag_ecc_match_way) && !s1_refill_with_tag_error
   val s1_real_tag_eq_way = wayMap((w: Int) => io.tag_resp(w)(tagBits - 1, 0) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt
   val s1_has_real_tag_eq_way = ParallelORR(s1_real_tag_eq_way)
   val s1_real_tag_match_way = PriorityEncoderOH(s1_real_tag_eq_way)
@@ -405,8 +407,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_refill_with_tag_error = s2_req.miss && s2_req.miss_tag_error
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
-  val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
+  val s2_tag_match = RegEnable(s1_tag_match, s1_fire) && !s2_refill_with_tag_error
   val s2_has_real_tag_eq_way = RegEnable(s1_has_real_tag_eq_way, s1_fire)
   val s2_tag_ecc_match_way = RegEnable(s1_tag_ecc_match_way, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
@@ -438,8 +441,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
-
-  val s2_hit = (s2_tag_match || s2_refill_tag_eq_way) && s2_has_permission
+ 
+  val s2_hit = (s2_tag_match || s2_refill_tag_eq_way) && s2_has_permission && !s2_refill_with_tag_error
   val s2_sc = s2_req.cmd === M_XSC
   val s2_lr = s2_req.cmd === M_XLR
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
@@ -832,6 +835,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way
+  miss_req.tag_error := s2_tag_error
 
   io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
   io.wbq_conflict_check.bits := s2_req.addr
