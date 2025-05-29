@@ -120,8 +120,8 @@ class PrefetchPtrDb(implicit p: Parameters) extends Bundle {
 }
 
 class FtqRedirectSramEntry(implicit p: Parameters) extends XSBundle {
-  val histPtr     = new CGHPtr
-  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+  val histPtr = new CGHPtr
+//  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
   val rasSpecInfo = new RasSpeculativeInfo
 }
 
