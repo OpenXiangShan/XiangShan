@@ -862,7 +862,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
         if (EnableDataEcc) {
           val ecc_data = bank_result(div_index)(bank_index)(way_index).asECCData()
-          val ecc_data_delayed = RegEnable(ecc_data, io.readline_can_resp | mbist_ack)
+          val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
           bank_result(div_index)(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
           read_bank_error_delayed(div_index)(bank_index)(way_index) := bank_result(div_index)(bank_index)(way_index).error_delayed
         } else {
@@ -915,7 +915,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       bank_result(readline_r_div_addr)(i)(readline_r_way_addr),
       RegEnable(readline_resp(i), io.readline_stall | mbist_ack)
     )
-    readline_error_delayed(i) := bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
+    val readline_can_resp = RegNext(io.readline_can_resp | mbist_ack)
+    readline_error_delayed(i) := Mux(
+      readline_can_resp,
+      bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed,
+      RegNext(readline_error_delayed(i))
+    )
   })
   io.readline_resp := RegEnable(readline_resp, io.readline_can_resp | mbist_ack)
   io.readline_error_delayed := readline_error_delayed.asUInt.orR
