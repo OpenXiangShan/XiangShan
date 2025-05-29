@@ -291,20 +291,37 @@ class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** Perf ***** */
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
-  val only0Hit:     Bool      = Bool()
-  val only0Miss:    Bool      = Bool()
-  val hit0Hit1:     Bool      = Bool()
-  val hit0Miss1:    Bool      = Bool()
-  val miss0Hit1:    Bool      = Bool()
-  val miss0Miss1:   Bool      = Bool()
-  val hit0Except1:  Bool      = Bool()
-  val miss0Except1: Bool      = Bool()
-  val except0:      Bool      = Bool()
-  val bankHit:      Vec[Bool] = Vec(PortNumber, Bool())
-  val hit:          Bool      = Bool()
+  val hits:         Vec[Bool]          = Vec(PortNumber, Bool())
+  val isDoubleLine: Bool               = Bool()
+  val exception:    Vec[ExceptionType] = Vec(PortNumber, new ExceptionType)
+
+  // single line request, port 0 is hit/miss
+  def hit0NoReq1:  Bool = hits(0) && !isDoubleLine
+  def miss0NoReq1: Bool = !hits(0) && !isDoubleLine
+  // double line request, port 0/1 is hit/miss
+  def hit0Hit1:   Bool = hits(0) && hits(1) && isDoubleLine
+  def hit0Miss1:  Bool = hits(0) && !hits(1) && isDoubleLine
+  def miss0Hit1:  Bool = !hits(0) && hits(1) && isDoubleLine
+  def miss0Miss1: Bool = !hits(0) && !hits(1) && isDoubleLine
+  // has exception
+  def except0:      Bool = exception(0).hasException
+  def hit0Except1:  Bool = hits(0) && exception(1).hasException && isDoubleLine
+  def miss0Except1: Bool = !hits(0) && exception(1).hasException && isDoubleLine
+
+  def hit0: Bool = hits(0)
+  def hit1: Bool = hits(1) && isDoubleLine
+
+  def hit: Bool = hits(0) && (!isDoubleLine || hits(1))
+
+  def except: Bool = exception(0).hasException || (isDoubleLine && exception(1).hasException)
 }
 
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
-  val icacheMiss: Bool = Output(Bool())
-  val itlbMiss:   Bool = Output(Bool())
+  val iCacheMissBubble: Bool = Output(Bool())
+  val itlbMissBubble:   Bool = Output(Bool())
+}
+
+class ICachePerfEventsInfo(implicit p: Parameters) extends ICacheBundle {
+  val miss:       Bool = Output(Bool())
+  val missBubble: Bool = Output(Bool())
 }
