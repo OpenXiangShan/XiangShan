@@ -903,10 +903,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
-  val readline_r_way_addr = RegEnable(Mux(mbist_ack, mbist_r_way, OHToUInt(io.readline.bits.way_en)), io.readline.valid | mbist_ack)
-  val readline_rr_way_addr = RegEnable(readline_r_way_addr, io.readline_can_resp | mbist_ack)
-  val readline_r_div_addr = RegEnable(Mux(mbist_ack, mbist_r_div, line_div_addr), io.readline.valid | mbist_ack)
-  val readline_rr_div_addr = RegEnable(readline_r_div_addr, io.readline_can_resp | mbist_ack)
+  val readline_r_way_addr = RegEnable(Mux(mbist_ack, mbist_r_way, OHToUInt(io.readline.bits.way_en)), io.readline.fire | mbist_ack)
+  val readline_r_div_addr = RegEnable(Mux(mbist_ack, mbist_r_div, line_div_addr), io.readline.fire | mbist_ack)
   val readline_resp = Wire(io.readline_resp.cloneType)
   (0 until DCacheBanks).foreach(i => {
     mbistSramPorts.foreach(_.foreach(_(i).foreach(_.rdata := Cat(io.readline_resp(i).ecc, io.readline_resp(i).raw_data))))
@@ -915,12 +913,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       bank_result(readline_r_div_addr)(i)(readline_r_way_addr),
       RegEnable(readline_resp(i), io.readline_stall | mbist_ack)
     )
-    val readline_can_resp = RegNext(io.readline_can_resp | mbist_ack)
-    readline_error_delayed(i) := Mux(
-      readline_can_resp,
-      bank_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed,
-      RegNext(readline_error_delayed(i))
-    )
+
+    if (EnableDataEcc) {
+      val ecc_data_delayed = io.readline_resp(i).asECCData()
+      readline_error_delayed(i) := dcacheParameters.dataCode.decode(ecc_data_delayed).error
+    } else {
+      readline_error_delayed(i) := false.B
+    }
   })
   io.readline_resp := RegEnable(readline_resp, io.readline_can_resp | mbist_ack)
   io.readline_error_delayed := readline_error_delayed.asUInt.orR
