@@ -50,13 +50,11 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
   def tile = wrapper.asInstanceOf[L].tile
 
   tile.module.io.hartId := io.hartId
-  tile.module.io.msiInfo := io.msiInfo
   tile.module.io.reset_vector := io.reset_vector
   tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
   tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
   io.cpu_halt := tile.module.io.cpu_halt
   io.cpu_crtical_error := tile.module.io.cpu_crtical_error
-  io.msiAck := tile.module.io.msiAck
   io.hartIsInReset := tile.module.io.hartIsInReset
   io.traceCoreInterface <> tile.module.io.traceCoreInterface
   io.debugTopDown <> tile.module.io.debugTopDown
@@ -97,6 +95,11 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
 
   dontTouch(io.hartId)
   dontTouch(io.msiInfo)
+}
+
+trait HasMSIPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
+  tile.module.io.msiInfo := io.msiInfo
+  io.msiAck := tile.module.io.msiAck
 }
 
 trait HasSeperateTLBus { this: BaseXSTileWrap =>
@@ -196,7 +199,8 @@ class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
 {
   class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
                                            with HasXSTileImp[XSTileWrap]
-                                           with HasSeperateTLBusImp[XSTileWrap] {
+                                           with HasSeperateTLBusImp[XSTileWrap]
+                                           with HasMSIPortImp {
   }
   override lazy val module : BaseXSTileWrapImp = new XSTileWrapImp(this)
 }
