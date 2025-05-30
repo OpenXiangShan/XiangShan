@@ -1352,9 +1352,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   )
   val onlyCommit0 = dataBuffer.io.enq(0).fire && !dataBuffer.io.enq(1).fire
 
+  /**
+   * If rdataPtr(0) is misaligned and Cross16Byte, this store request will fill two ports of rdataBuffer,
+   * Therefore, the judgement of vecCommitLastFlow should't to use rdataPtr(1)
+   * */
+  val firstSplit = canDeqMisaligned && firstWithMisalign && firstWithCross16Byte
   val vecCommitLastFlow =
     // robidx equal => check if 1 is last flow
-    robidxEQ && vecCommitHasExceptionLastFlow(1) ||
+    robidxEQ && vecCommitHasExceptionLastFlow(1) && !firstSplit ||
     // robidx not equal => 0 must be the last flow, just check if 1 is last flow when 1 has exception
     robidxNE && (vecCommitHasExceptionValid(1) && vecCommitHasExceptionLastFlow(1) || !vecCommitHasExceptionValid(1)) ||
     onlyCommit0 && vecCommitHasExceptionLastFlow(0)
@@ -1362,7 +1367,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val vecExceptionFlagCancel  = (0 until EnsbufferWidth).map{ i =>
     val ptr = rdataPtrExt(i).value
-    val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) && dataBuffer.io.enq(i).fire
+    val vecLastFlowCommit = vecLastFlow(ptr) && (uop(ptr).robIdx === vecExceptionFlag.bits.robIdx) &&
+                            dataBuffer.io.enq(i).fire && !firstSplit
     vecLastFlowCommit
   }.reduce(_ || _)
 
