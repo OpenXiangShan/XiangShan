@@ -441,7 +441,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
- 
+
   val s2_hit = (s2_tag_match || s2_refill_tag_eq_way) && s2_has_permission && !s2_refill_with_tag_error
   val s2_sc = s2_req.cmd === M_XSC
   val s2_lr = s2_req.cmd === M_XLR
@@ -574,11 +574,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // report ecc error
   val s3_tag_error = RegEnable(s2_tag_error, false.B, s2_fire_to_s3)
   // data_error will be reported by data array 1 cycle after data read resp
-  val s3_data_error = Wire(Bool())
-  s3_data_error := Mux(GatedValidRegNextN(s1_fire, 2), // ecc check result is generated 2 cycle after read req
-    io.readline_error_delayed && RegNext(s2_may_report_data_error),
-    RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
-  )
+  val s3_data_error = io.readline_error_delayed && RegEnable(s2_may_report_data_error, false.B, s2_fire_to_s3)
   val s3_l2_error = RegEnable(s2_l2_error, false.B, s2_fire_to_s3)
   val s3_flag_error = RegEnable(s2_flag_error, false.B, s2_fire_to_s3)
   // error signal for amo inst
@@ -1039,10 +1035,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   // report error, update error csr
-  io.error.valid := s3_error && GatedValidRegNext(s2_fire && !s2_should_not_report_ecc_error)
+  io.error.valid := s3_error && GatedValidRegNext(s2_fire_to_s3 && !s2_should_not_report_ecc_error)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
-  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && RegNext(s2_fire)
+  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && RegNext(s2_fire_to_s3)
   io.error.bits.paddr := s3_error_paddr
   io.error.bits.source.tag := s3_tag_error
   io.error.bits.source.data := s3_data_error
