@@ -142,6 +142,15 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   val merged = Bool()
 }
 
+class MissQueueBlockReqBundle(implicit p: Parameters) extends XSBundle {
+  val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+}
+
+class MissQueueBlockIO(implicit p: Parameters) extends XSBundle {
+  val req = ValidIO(new MissQueueBlockReqBundle)
+  val block = Input(Bool())
+}
 
 /**
   * miss queue enq logic: enq is now splited into 2 cycles
@@ -282,8 +291,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire
   }
 
-  def block_match(release_addr: UInt): Bool = {
-    reg_valid() && get_block(req.addr) === get_block(release_addr)
+  def block_match(releaseReq: MissQueueBlockReqBundle): Bool = {
+    reg_valid() && get_block(req.addr) === get_block(releaseReq.addr) && is_alias_match(req.vaddr, releaseReq.vaddr)
   }
 
   def evict_set_match(evict_set: UInt): Bool = {
@@ -403,8 +412,13 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
-    val block_addr = ValidIO(UInt(PAddrBits.W))
     val occupy_way = Output(UInt(nWays.W))
+
+    // block probe
+    val probe = Flipped(new MissQueueBlockIO)
+
+    // block replace when release an addr valid in mshr
+    val replace = Flipped(new MissQueueBlockIO)
 
     val req_addr = ValidIO(UInt(PAddrBits.W))
     val req_vaddr = ValidIO(UInt(VAddrBits.W))
@@ -876,8 +890,13 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
   io.main_pipe_req.bits.miss_tag_error := req.tag_error
 
-  io.block_addr.valid := req_valid && w_grantlast
-  io.block_addr.bits := req.addr
+  io.probe.block := req_valid && w_grantlast &&
+    get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
+    is_alias_match(req.vaddr, io.probe.req.bits.vaddr)
+
+  io.replace.block := req_valid &&
+    get_block_addr(req.addr) === get_block_addr(io.replace.req.bits.addr) &&
+    is_alias_match(req.vaddr, io.replace.req.bits.vaddr)
 
   io.req_addr.valid := req_valid
   io.req_addr.bits:= req.addr
@@ -984,12 +1003,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
-    val probe_addr = Input(UInt(PAddrBits.W))
-    val probe_block = Output(Bool())
+    val probe = Flipped(new MissQueueBlockIO)
 
     // block replace when release an addr valid in mshr
-    val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
-    val replace_block = Output(Bool())
+    val replace = Flipped(new MissQueueBlockIO)
 
     // block all way for set to BtoT
     val evict_set = Input(UInt())
@@ -1040,7 +1057,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val secondary_ready_vec = entries.map(_.io.secondary_ready)
   val secondary_reject_vec = entries.map(_.io.secondary_reject)
-  val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
+  val probe_block_vec = entries.map {
+    case e =>
+      e.io.probe.req <> io.probe.req
+      e.io.probe.block
+  }
 
   val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
@@ -1226,9 +1247,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // amo's main pipe req out
   fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
-  io.probe_block := Cat(probe_block_vec).orR
+  io.probe.block := Cat(probe_block_vec).orR
+  io.replace.block := Cat(entries.map {
+    case e =>
+      e.io.replace.req <> io.replace.req
+      e.io.replace.block
+  } :+ miss_req_pipe_reg.block_match(io.replace.req.bits)).orR
 
-  io.replace_block := Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.replace_addr.bits))).orR
   val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
     Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
   val btot_occupy_ways = entries.map(e => e.io.occupy_way) ++ Seq(miss_req_pipe_reg.req.occupy_way)
@@ -1287,7 +1312,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
-  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
+  XSPerfAccumulate("probe_blocked_by_miss", io.probe.block)
   XSPerfAccumulate("prefetch_primary_fire", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("prefetch_secondary_fire", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
