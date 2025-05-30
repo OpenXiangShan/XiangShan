@@ -1244,7 +1244,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val occupy_ways = occupy_set_hits.zip(btot_occupy_ways).map {
       case (hit, way) => Fill(nWays, hit) & way
     }.reduce(_|_)
-    io.occupy_fail(i) := GatedValidRegNext(PopCount(occupy_ways) > (nWays-2).U)
+    io.occupy_fail(i) := PopCount(occupy_ways) > (nWays-2).U
   }
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR

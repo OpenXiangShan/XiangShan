@@ -319,9 +319,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // check ecc error
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
 
-  // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
-  io.occupy_set := addr_to_dcache_set(s1_vaddr)
-
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
@@ -341,6 +338,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_pred_way_en = RegEnable(s1_pred_tag_match_way_dup_dc, s1_fire)
   val s2_dm_way_num = RegEnable(s1_direct_map_way_num, s1_fire)
   val s2_wpu_pred_fail_and_real_hit = RegEnable(s1_wpu_pred_fail_and_real_hit, s1_fire)
+
+  // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
+  io.occupy_set := addr_to_dcache_set(s2_vaddr)
 
   s2_ready := true.B
 
@@ -364,13 +364,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
 
-  val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
-  val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
-
-  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
-  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
-  val s2_miss_req_fire      = s2_miss_req_valid_dup && io.miss_req.ready
-
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
 
@@ -379,9 +372,21 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
   val s2_has_permission = RegEnable(s1_has_permission, s1_fire)
-  val s2_shrink_perm = RegEnable(s1_shrink_perm, s1_fire)
   val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_fire)
-  val s2_grow_perm_btot = s2_shrink_perm === TLPermissions.BtoT && !s2_has_permission && s2_hit_dup_lsu
+  val s2_grow_perm_btot = RegEnable(
+    s1_shrink_perm === TLPermissions.BtoT && !s1_has_permission && s1_tag_match_dup_lsu && !s2_wpu_pred_fail,
+    s1_fire
+  )
+  // BtoT occupy fail
+  val s2_btot_occupy_fail = io.occupy_fail && s2_grow_perm_btot
+
+  //
+  val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
+  val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
+
+  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
+  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
+  val s2_miss_req_fire      = s2_miss_req_valid_dup && io.miss_req.ready
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -392,9 +397,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack_wbq_conflict = s2_miss_req_valid_dup && io.wbq_block_miss_req
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
-  // BtoT occupy fail
-  val s2_btot_occupy_fail = io.occupy_fail && s2_grow_perm_btot
-  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict || s2_btot_occupy_fail
+  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict
   // s2 miss merged
   val s2_miss_merged = s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.merged
 
@@ -427,7 +430,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.pseudo_error.ready := false.B
 
   // send load miss to miss queue
-  io.miss_req.valid := s2_miss_req_valid && !s2_btot_occupy_fail
+  io.miss_req.valid := s2_miss_req_valid
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
@@ -435,7 +438,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
   io.miss_req.bits.req_coh := s2_hit_coh
-  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
+  io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_btot_occupy_fail
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
@@ -464,8 +467,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.data := s2_resp_data
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
-  resp.bits.replay := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
-  resp.bits.replayCarry.valid := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
+  resp.bits.replay := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
+  resp.bits.replayCarry.valid := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
@@ -523,7 +526,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req || s2_btot_occupy_fail))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req ) || s2_btot_occupy_fail)
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------
