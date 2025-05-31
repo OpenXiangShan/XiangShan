@@ -1211,8 +1211,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // soft prefetch will not trigger any exception (but ecc error interrupt may
   // be triggered)
-  val s2_tlb_unrelated_exceps = s2_in.uop.exceptionVec(loadAddrMisaligned) ||
-                                s2_in.uop.exceptionVec(breakPoint)
+  val s2_tlb_unrelated_exceps = s2_in.uop.exceptionVec(breakPoint)
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss && !s2_tlb_unrelated_exceps)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
     s2_isMisalign := false.B
