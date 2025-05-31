@@ -965,7 +965,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // RegNext(io.sbuffer(i).fire) is used to alignment timing
   val isCboZeroToSbVec = (0 until EnsbufferWidth).map{ i =>
-    RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid) && uop(deqPtrExt(i).value).fuOpType === LSUOpType.cbo_zero && allocated(deqPtrExt(i).value)
+    RegNext(io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline) && allocated(deqPtrExt(i).value)
   }
   val cboZeroToSb        = isCboZeroToSbVec.reduce(_ || _)
   val cboZeroFlushSb     = GatedRegNext(cboZeroToSb)
