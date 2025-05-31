@@ -153,7 +153,8 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
 
   val reqRedirect = reqSelBits.uop.robIdx.needFlush(io.redirect)
 
-  val canEnq = !req_valid && !reqRedirect && reqSelValid
+  val canEnq = WireInit(false.B)
+  canEnq := !req_valid && !reqRedirect && reqSelValid
   val robMatch = req_valid && io.rob.pendingst && (io.rob.pendingPtr === req.uop.robIdx)
 
   val s2_canEnq = GatedRegNext(canEnq)
@@ -178,6 +179,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       req.portIndex := reqSelPort
       cross4KBPageEnq := true.B
       needFlushPipe   := true.B
+      canEnq := true.B
     } .otherwise {
       req := req
       cross4KBPageEnq := false.B
@@ -645,7 +647,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   when (flush || s2_needRevoke) {
     bufferState := s_idle
     req_valid := Mux(
-      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect,
+      cross4KBPageEnq && cross4KBPageBoundary && !reqRedirect && !s2_needRevoke,
       req_valid, // when s2_needRevoke is true, previous request is valid, so req_valid = true
       false.B
     )
