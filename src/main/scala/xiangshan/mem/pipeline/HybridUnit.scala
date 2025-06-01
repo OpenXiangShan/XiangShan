@@ -1166,15 +1166,17 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsq.ldin.bits.dcacheRequireReplay  := s3_dcache_rep
 
   val s3_vp_match_fail = RegNext(io.ldu_io.lsq.forward.matchInvalid || io.ldu_io.sbuffer.matchInvalid || io.ldu_io.ubuffer.matchInvalid) && s3_troublem
+  /*
   val s3_ldld_rep_inst =
       io.ldu_io.lsq.ldld_nuke_query.resp.valid &&
       io.ldu_io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
+  */
 
   val s3_rep_info = WireInit(s3_in.rep_info)
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail
-  val s3_flushPipe = s3_ldld_rep_inst
+  // val s3_flushPipe = s3_ldld_rep_inst
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
                          !s3_in.uop.exceptionVec(loadAddrMisaligned) &&
@@ -1206,7 +1208,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s3_out.bits.uop.exceptionVec := 0.U.asTypeOf(s3_in.uop.exceptionVec.cloneType)
   }
 
-  io.ldu_io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception && s3_ld_flow
+  io.ldu_io.rollback.valid := s3_valid && (s3_rep_frm_fetch) && !s3_exception && s3_ld_flow
   io.ldu_io.rollback.bits             := DontCare
   io.ldu_io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
   io.ldu_io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx

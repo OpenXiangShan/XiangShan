@@ -419,9 +419,9 @@ class Sbuffer(implicit p: Parameters)
     Mux(io.in(0).fire && io.in(0).bits.vecValid && !canMerge(0), 1.U, 0.U)
     +& Mux(io.in(1).fire && io.in(1).bits.vecValid && !canMerge(1) && !sameTag, 1.U, 0.U)
   )
-  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || sameTag)
-  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || canMerge(0))
-  assert(!(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || tsoMergeLast(0))
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || sameTag)
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || canMerge(0))
+  assert(!tsoActive || !(io.in(1).fire && io.in(1).bits.vecValid && canMerge(1)) || tsoMergeLast(0))
   tsoTail := tsoTail + tsoTailInc
 
   // Some TSO assertions
