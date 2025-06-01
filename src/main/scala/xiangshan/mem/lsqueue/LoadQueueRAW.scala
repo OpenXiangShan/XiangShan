@@ -167,10 +167,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     XSError(needEnqueue(w) && enq.ready && allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
   }
 
+  /*
   for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
     query.valid := RegNext(io.query(w).req.valid)
     query.bits.rep_frm_fetch := RegNext(false.B)
   }
+  */
 
   //  LoadQueueRAW deallocate
   val freeMaskVec = Wire(Vec(LoadQueueRAWSize, Bool()))

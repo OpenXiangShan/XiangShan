@@ -75,6 +75,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
+        val ldld_checkLqIdx = Valid(new LqPtr)
         val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
@@ -92,7 +93,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
-    val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
+    val stld_nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
+    val ldld_nuke_rollback = Vec(1, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncahce
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))
@@ -220,7 +222,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.ld_raw_data         <> io.ld_raw_data
   loadQueue.io.ncOut               <> io.ncOut
   loadQueue.io.rob                 <> io.rob
-  loadQueue.io.nuke_rollback       <> io.nuke_rollback
+  loadQueue.io.stld_nuke_rollback  <> io.stld_nuke_rollback
+  loadQueue.io.ldld_nuke_rollback  <> io.ldld_nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
  // loadQueue.io.refill              <> io.refill
