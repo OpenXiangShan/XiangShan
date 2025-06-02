@@ -219,7 +219,6 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
     val hartId = Input(UInt(p(MaxHartIdBits).W))
     val riscv_halt = Output(Bool())
     val riscv_critical_error = Output(Bool())
-    val hartResetReq = Input(Bool())
     val hartIsInReset = Output(Bool())
     val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
@@ -243,11 +242,16 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 
   tileio.riscv_halt := core_with_l2.module.io.cpu_halt
   tileio.riscv_critical_error := core_with_l2.module.io.cpu_crtical_error
-  core_with_l2.module.io.hartResetReq := tileio.hartResetReq
   tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
   core_with_l2.module.io.hartId := tileio.hartId
   core_with_l2.module.io.nodeID.get := tileio.nodeID
+
+  /* optional debug port */
+  Try(core_with_l2.module.asInstanceOf[xiangshan.HasDebugPortImp]).toOption.foreach { x =>
+    val io_hartResetReq = IO(Input(Bool()))
+    x.io_hartResetReq := io_hartResetReq
+  }
 
   /* dft */
   core_with_l2.module.io.dft.zip(io.dft).foreach { case (a, b) => a := b }

@@ -100,6 +100,11 @@ trait HasDebugIntPort { this: BaseXSTileWrap =>
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
 }
 
+trait HasDebugPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
+  val io_hartResetReq = IO(Input(Bool()))
+  hartResetReq := io_hartResetReq
+}
+
 trait HasMSIPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
   tile.module.io.msiInfo := io.msiInfo
   io.msiAck := tile.module.io.msiAck
@@ -146,7 +151,6 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
-      val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
       val debugTopDown = new Bundle {
@@ -172,7 +176,8 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
-    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
+    val hartResetReq = WireDefault(Bool(), false.B)
+    val reset_sync = withClockAndReset(clock, (reset.asBool || hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
     val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(io.dft_reset))
 
@@ -204,6 +209,7 @@ class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
   class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
                                            with HasXSTileImp[XSTileWrap]
                                            with HasSeperateTLBusImp[XSTileWrap]
+                                           with HasDebugPortImp
                                            with HasMSIPortImp {
   }
   override lazy val module : BaseXSTileWrapImp = new XSTileWrapImp(this)
