@@ -181,20 +181,26 @@ trait HasXSTile { this: BaseXSSoc =>
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
-  val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
   core_with_l2.clintIntNode := clintIntNode
-  core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
   core_with_l2.nmiIntNode := nmiIntNode
   beuIntNode := core_with_l2.beuIntNode
   val clint = InModuleBody(clintIntNode.makeIOs())
-  val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
   val beu = InModuleBody(beuIntNode.makeIOs())
+
+  // optional debug interrupt port
+  def coreDebugIntPort = Try(core_with_l2.asInstanceOf[xiangshan.HasDebugIntPort]).toOption
+  val debug = coreDebugIntPort.map { x =>
+    // optional debug interrupt port
+    val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
+    x.debugIntNode := debugIntNode
+    InModuleBody(debugIntNode.makeIOs())
+  }
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
@@ -226,7 +232,9 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   val seip  = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(plic.last(0), 3, 0)}
   val nmi_31 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(0), 3, 0)}
   val nmi_43 = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(nmi.head(1), 3, 0)}
-  val debugIntr = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(debug.head(0), 3, 0)}
+  val debugIntr = withClockAndReset(clock, cpuReset_sync) {
+    debug.map { x => AsyncResetSynchronizerShiftReg(x.head(0), 3, 0) }
+  }.getOrElse(false.B)
   val msi_info_vld = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(core_with_l2.module.io.msiInfo.valid, 3, 0)}
 
   // core IO connection

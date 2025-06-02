@@ -35,12 +35,10 @@ trait HasXSTile { this: BaseXSTileWrap =>
 
   // interrupts sync
   val clintIntNode = IntIdentityNode()
-  val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
-  tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
@@ -95,6 +93,11 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
 
   dontTouch(io.hartId)
   dontTouch(io.msiInfo)
+}
+
+trait HasDebugIntPort { this: BaseXSTileWrap =>
+  val debugIntNode = IntIdentityNode()
+  tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
 }
 
 trait HasMSIPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
@@ -195,6 +198,7 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
 // voltage domain. Everything in this module should be in the core clock domain
 // and higher voltage domain.
 class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
+  with HasDebugIntPort
   with HasSeperateTLBus
 {
   class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
