@@ -862,6 +862,7 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
+    def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
     def EX_VI     = virtualInstr

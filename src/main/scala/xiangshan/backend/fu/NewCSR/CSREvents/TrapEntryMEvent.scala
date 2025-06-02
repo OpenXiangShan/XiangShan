@@ -57,8 +57,10 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val fetchIsVirt = iMode.isVirtual
   private val memIsVirt   = dMode.isVirtual
 
-  private val isFetchExcp    = isException && ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _)
-  private val isMemExcp      = isException && (ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isFromFetchHWE = ExceptionNO.EX_HWE.U === highPrioTrapNO && in.isFromFetchHWE
+  private val isFromMemHWE   = ExceptionNO.EX_HWE.U === highPrioTrapNO && !in.isFromFetchHWE
+  private val isFetchExcp    = isException && (ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _) || isFromFetchHWE)
+  private val isMemExcp      = isException && ((ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _) || isFromMemHWE)
   private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
   private val isFetchBkpt = isBpExcp && in.isFetchBkpt
   private val isMemBkpt = isBpExcp && !in.isFetchBkpt
