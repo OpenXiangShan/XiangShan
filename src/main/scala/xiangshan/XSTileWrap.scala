@@ -24,7 +24,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
+import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, CHIAsyncBridgeSink, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
@@ -95,6 +95,41 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
   dontTouch(io.msiInfo)
 }
 
+trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
+  this: BaseXSTileWrap#BaseXSTileWrapImp =>
+
+  val io_chi = IO(socParams.EnableCHIAsyncBridge match {
+    case Some(param) => new AsyncPortIO(param)
+    case None => new PortIO
+  }).suggestName("io_chi")
+
+  // CHI Async Queue Source
+  socParams.EnableCHIAsyncBridge match {
+    case Some(param) =>
+      val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
+      source.io.enq <> tile.module.io.chi.get
+      io_chi <> source.io.async
+    case None =>
+      require(socParams.enableCHI)
+      io_chi <> tile.module.io.chi.get
+  }
+
+  override def makeIOs()(implicit valName: ValName): Bundle = {
+    val ios = IO(new PortIO).suggestName(valName.name)
+
+    socParams.EnableCHIAsyncBridge match {
+      case None        => io_chi <> ios
+      case Some(param) => {
+        val sink = Module(new CHIAsyncBridgeSink(param))
+        io_chi <> sink.io.async
+        sink.io.deq <> ios
+      }
+    }
+
+    ios
+  }
+}
+
 trait HasDebugIntPort { this: BaseXSTileWrap =>
   val debugIntNode = IntIdentityNode()
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
@@ -158,10 +193,6 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
-        case Some(param) => new AsyncPortIO(param)
-        case None => new PortIO
-      }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = EnableClintAsyncBridge match {
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
@@ -176,6 +207,8 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
+    def makeIOs()(implicit valName: ValName): Bundle = { IO(new Bundle {}) }
+
     val hartResetReq = WireDefault(Bool(), false.B)
     val reset_sync = withClockAndReset(clock, (reset.asBool || hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
@@ -184,17 +217,6 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
     // override LazyRawModuleImp's clock and reset
     childClock := clock
     childReset := reset_sync
-
-    // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
-        source.io.enq <> tile.module.io.chi.get
-        io.chi <> source.io.async
-      case None =>
-        require(enableCHI)
-        io.chi <> tile.module.io.chi.get
-    }
   }
   lazy val module: BaseXSTileWrapImp = new BaseXSTileWrapImp(this)
 }
@@ -207,7 +229,7 @@ class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
   with HasSeperateTLBus
 {
   class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
-                                           with HasXSTileImp[XSTileWrap]
+                                           with HasXSTileCHIImp[XSTileWrap]
                                            with HasSeperateTLBusImp[XSTileWrap]
                                            with HasDebugPortImp
                                            with HasMSIPortImp {

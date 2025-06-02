@@ -33,7 +33,7 @@ import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import coupledL2.tl2chi.{CHIAsyncBridgeSink, PortIO}
+import coupledL2.tl2chi.PortIO
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.{ChiselAnnotation, annotate}
@@ -266,20 +266,9 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 
 trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   this: BaseXSSocImp with HasAsyncClockImp =>
-
-  val io_chi = IO(new PortIO)
-
   require(socParams.enableCHI)
-
-  socParams.EnableCHIAsyncBridge match {
-    case Some(param) =>
-      withClockAndReset(noc_clock.get, noc_reset_sync.get) {
-        val sink = Module(new CHIAsyncBridgeSink(param))
-        sink.io.async <> core_with_l2.module.io.chi
-        io_chi <> sink.io.deq
-      }
-    case None =>
-      io_chi <> core_with_l2.module.io.chi
+  val io_chi = withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+    core_with_l2.module.makeIOs().asInstanceOf[PortIO]
   }
 }
 
