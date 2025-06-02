@@ -99,13 +99,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
   dontTouch(io.msiInfo)
 }
 
-class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
-  with HasXSParameter
-  with HasSoCParameter
-  with HasXSTile
-{
-  override def shouldBeInlined: Boolean = false
-
+trait HasSeperateTLBus { this: BaseXSTileWrap =>
   // seperate TL bus
   println(s"SeperateTLBus = $SeperateTLBus")
   println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
@@ -115,6 +109,22 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
   // synchronous source node
   val tlSyncSourceOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
   tlSyncSourceOpt.foreach(_ := tile.sep_tl_opt.get)
+}
+
+trait HasSeperateTLBusImp[+L <: HasSeperateTLBus] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
+    // Seperate DebugModule TL Async Queue Source
+    wrapper.asInstanceOf[L].tlAsyncSourceOpt.foreach { tl =>
+      tl.module.clock := clock
+      tl.module.reset := soc_reset_sync
+    }
+}
+
+class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasSoCParameter
+  with HasXSTile
+{
+  override def shouldBeInlined: Boolean = false
 
   class BaseXSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     def socParams = wrapper.asInstanceOf[HasSoCParameter]
@@ -174,12 +184,6 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
         require(enableCHI)
         io.chi <> tile.module.io.chi.get
     }
-
-    // Seperate DebugModule TL Async Queue Source
-    if (SeperateTLBus && EnableSeperateTLAsync) {
-      tlAsyncSourceOpt.get.module.clock := clock
-      tlAsyncSourceOpt.get.module.reset := soc_reset_sync
-    }
   }
   lazy val module: BaseXSTileWrapImp = new BaseXSTileWrapImp(this)
 }
@@ -188,6 +192,7 @@ class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
 // voltage domain. Everything in this module should be in the core clock domain
 // and higher voltage domain.
 class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
+  with HasSeperateTLBus
 {
   class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
                                            with HasXSTileImp[XSTileWrap]
