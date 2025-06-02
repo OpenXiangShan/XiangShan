@@ -862,6 +862,7 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
+    def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
     def EX_VI     = virtualInstr
@@ -879,9 +880,9 @@ package object xiangshan {
 
     def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
 
-    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
+    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF, EX_HWE)
 
-    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
+    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF, EX_HWE)
 
     def priorities = Seq(
       doubleTrap,
