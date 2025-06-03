@@ -84,6 +84,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
   private val respDataReg    = RegEnable(io.mmioGrant.bits.data, 0.U(MmioBusWidth.W), io.mmioGrant.fire)
   private val respCorruptReg = RegEnable(io.mmioGrant.bits.corrupt, false.B, io.mmioGrant.fire)
+  private val respDeniedReg  = RegEnable(io.mmioGrant.bits.denied, false.B, io.mmioGrant.fire)
 
   // send response to InstrUncache
   io.resp.valid := state === State.SendResp && !needFlush
@@ -97,6 +98,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
     )
   )
   io.resp.bits.corrupt := respCorruptReg
+  io.resp.bits.denied  := respDeniedReg
 
   // state transfer
   switch(state) {
