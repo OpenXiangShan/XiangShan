@@ -40,13 +40,14 @@ import chisel3.util._
  *        def Done: UInt = 2.U
  *      }
  *    }}}
- * 3. if useOneHot is true, all values are power of 2
+ * 3. if useOneHot is true, all values are power of 2, and not 0
  *    @example {{{
- *      object FsmState extends EnumUInt(4, useOneHot = true) {
- *        def Idle: UInt = 0.U(width.W)
- *        def Work: UInt = 1.U(width.W)
- *        def Done: UInt = 2.U(width.W)
- *        def Error: UInt = 3.U(width.W) // will fail, as Error = 3.U is not a power of 2, Error = 4.U is expected
+ *      object FsmState extends EnumUInt(4, useOneHot = true, /* allowZeroForOneHot = false */) {
+ *        // def None: UInt = 0.U(width.W) // will fail, unless allowZeroForOneHot is true
+ *        def Idle: UInt = 1.U(width.W)
+ *        def Work: UInt = 2.U(width.W)
+ *        def Done: UInt = 4.U(width.W)
+ *        def Error: UInt = 5.U(width.W) // will fail, as Error = 5.U is not a power of 2, Error = 8.U is expected
  *      }
  *    }}}
  * 4. all possible values are defined
@@ -80,10 +81,11 @@ import chisel3.util._
  * }}}
  */
 abstract class EnumUInt(
-    n:              Int,
-    useOneHot:      Boolean = false,
-    allowDuplicate: Boolean = false,
-    fixedWidth:     Option[Int] = None
+    n:                  Int,
+    useOneHot:          Boolean = false,
+    allowZeroForOneHot: Boolean = false, // if true, we can use 0.U as one-hot value
+    allowDuplicate:     Boolean = false,
+    fixedWidth:         Option[Int] = None
 ) extends NamedUInt(
       if (fixedWidth.isDefined) {
         require(
@@ -92,7 +94,7 @@ abstract class EnumUInt(
         )
         fixedWidth.get
       } else if (useOneHot) {
-        n
+        n - (if (allowZeroForOneHot) 1 else 0) // if 0.U is a legal state, only n-1 bits are needed for n states
       } else {
         log2Up(n)
       }
@@ -126,9 +128,15 @@ abstract class EnumUInt(
         allowDuplicate || dupIdx == -1,
         s"EnumUInt ${this.getClass.getName} has duplicate value(${litValue}): ${name} and ${this.names(dupIdx)}."
       )
-      assert( // check3: one-hot values must be power of 2
+      assert( // check3.1: one-hot values must be power of 2
         !useOneHot || isPow2(litValue),
-        s"EnumUInt ${this.getClass.getName} has non one-hot value(${litValue}): ${name}."
+        s"EnumUInt ${this.getClass.getName} using one-hot has non one-hot value(${litValue}): ${name}."
+      )
+      assert( // check3.2: one-hot values must not be 0
+        !useOneHot || !allowZeroForOneHot || litValue != 0,
+        s"EnumUInt ${this.getClass.getName} using one-hot has zero value(0): ${name}. " +
+          s"Please consider using Vec[Bool] if you want to use 0 as 'None' and other values are one-hot. " +
+          s"Or, set allowZeroForOneHot to true if you intentionally want to use 0 as one-hot value for EnumUInt."
       )
     }
 
@@ -186,7 +194,7 @@ abstract class EnumUInt(
    *   // -> val e3 = ExceptionType(0.U) // this is better
    * }}}
    */
-  def assertLegal(that: UInt): Unit = {
+  def assertLegal(that: UInt): Unit =
     if (that.isLit) { // if is literal, check value at compile time (if legal, we don't need to care about width)
       assert(
         this.litValues.contains(that.litValue),
@@ -205,7 +213,6 @@ abstract class EnumUInt(
         that // that is a hardware Wire/Reg, we cannot use litValue
       )
     }
-  }
 
   // call validate() in the constructor
   validate()
