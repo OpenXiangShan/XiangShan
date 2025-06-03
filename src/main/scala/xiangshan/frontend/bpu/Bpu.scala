@@ -184,7 +184,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   val uftb   = Module(new MicroFtb)
   val ftb    = Module(new Ftb)
-  val tage   = Module(new Tage_SC)
+  val tage   = Module(new Tage)
   val ittage = Module(new Ittage)
   val ras    = Module(new Ras)
 
@@ -376,9 +376,9 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   bpuResp.s3_specInfo.histPtr     := s3_ghist_ptr
   bpuResp.s3_specInfo.rasSpecInfo := ras.io.out.s3_rasSpecInfo
-  if (bpuResp.s3_specInfo.sc_disagree.isDefined && tage.io.out.sc_disagree.isDefined) {
-    bpuResp.s3_specInfo.sc_disagree.get := tage.io.out.sc_disagree.get
-  }
+//  if (bpuResp.s3_specInfo.sc_disagree.isDefined && tage.io.out.sc_disagree.isDefined) {
+//    bpuResp.s3_specInfo.sc_disagree.get := tage.io.out.sc_disagree.get
+//  }
 
   bpuResp.s3_meta.uftbMeta   := uftb.io.out.s3_meta
   bpuResp.s3_meta.tageMeta   := tage.io.out.s3_meta
@@ -1022,6 +1022,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   XSPerfAccumulate("s1_not_valid", !s1_valid)
 
   // ========================= Performance Counter ========================= //
-  val perfEvents = uftb.getPerfEvents ++ ftb.getPerfEvents ++ tage.getPerfEvents
+  val perfEvents = uftb.getPerfEvents ++ ftb.getPerfEvents
   generatePerfEvent()
 }
