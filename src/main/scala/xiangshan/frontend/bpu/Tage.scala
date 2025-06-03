@@ -127,16 +127,15 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
   val reset_u = Vec(numBr, Bool())
 }
 
-class TageMeta(implicit p: Parameters)
-    extends TageBundle with HasSCParameter {
+class TageMeta(implicit p: Parameters) extends TageBundle {
   val providers     = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   val providerResps = Vec(numBr, new TageResp_meta)
   // val altProviders = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   // val altProviderResps = Vec(numBr, new TageResp)
-  val altUsed       = Vec(numBr, Bool())
-  val basecnts      = Vec(numBr, UInt(2.W))
-  val allocates     = Vec(numBr, UInt(TageNTables.W))
-  val scMeta        = if (EnableSC) Some(new SCMeta(SCNTables)) else None
+  val altUsed   = Vec(numBr, Bool())
+  val basecnts  = Vec(numBr, UInt(2.W))
+  val allocates = Vec(numBr, UInt(TageNTables.W))
+//  val scMeta        = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle    = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
 
@@ -617,7 +616,7 @@ class TageTable(
 
 class TageToFtbBundle(implicit p: Parameters) extends XSBundle {
   val s2_branchTakenMask = Vec(numBr, Bool())
-  val s3_branchTakenMask = Vec(numBr, Bool()) // from SC
+//  val s3_branchTakenMask = Vec(numBr, Bool()) // from SC
 }
 
 class TageInput(implicit p: Parameters) extends XSBundle with HasPredictorCommonSignals {
@@ -626,10 +625,10 @@ class TageInput(implicit p: Parameters) extends XSBundle with HasPredictorCommon
 }
 
 class TageOutput(implicit p: Parameters) extends XSBundle {
-  val toFtb       = new TageToFtbBundle
-  val s1_ready    = Bool()
-  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
-  val s3_meta     = new TageMeta
+  val toFtb    = new TageToFtbBundle
+  val s1_ready = Bool()
+//  val sc_disagree = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
+  val s3_meta = new TageMeta
 }
 
 class Tage(implicit p: Parameters) extends XSModule with TageParams with BPUUtils {
@@ -725,18 +724,18 @@ class Tage(implicit p: Parameters) extends XSModule with TageParams with BPUUtil
       io.in.update.valid // not using mispred_mask, because mispred_mask timing is bad
     )
   }
-  if (EnableSC) {
-    for (w <- 0 until TageBanks) {
-      updateMeta.scMeta.get.scPreds(w) := RegEnable(
-        u_meta.scMeta.get.scPreds(w),
-        u_valids_for_cge(w) && u_meta.providers(w).valid
-      )
-      updateMeta.scMeta.get.ctrs(w) := RegEnable(
-        u_meta.scMeta.get.ctrs(w),
-        u_valids_for_cge(w) && u_meta.providers(w).valid
-      )
-    }
-  }
+//  if (EnableSC) {
+//    for (w <- 0 until TageBanks) {
+//      updateMeta.scMeta.get.scPreds(w) := RegEnable(
+//        u_meta.scMeta.get.scPreds(w),
+//        u_valids_for_cge(w) && u_meta.providers(w).valid
+//      )
+//      updateMeta.scMeta.get.ctrs(w) := RegEnable(
+//        u_meta.scMeta.get.ctrs(w),
+//        u_valids_for_cge(w) && u_meta.providers(w).valid
+//      )
+//    }
+//  }
   update.ghist := RegEnable(io.in.update.bits.ghist, io.in.update.valid) // TODO: CGE
 
   val updateValids = VecInit((0 until TageBanks).map(w =>
@@ -1074,4 +1073,4 @@ class Tage(implicit p: Parameters) extends XSModule with TageParams with BPUUtil
   // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
 }
 
-class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
+//class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
