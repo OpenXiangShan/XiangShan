@@ -94,11 +94,13 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
   private val respDataReg    = RegInit(VecInit.fill(2)(0.U(16.W))) // FIXME: 2 * rvc, how to avoid magic number?
   private val respCorruptReg = RegInit(false.B)
+  private val respDeniedReg  = RegInit(false.B)
 
   // send response to InstrUncache
   io.resp.valid           := state === State.SendResp && !needFlush
   io.resp.bits.data       := respDataReg.asUInt
   io.resp.bits.corrupt    := respCorruptReg
+  io.resp.bits.denied     := respDeniedReg
   io.resp.bits.incomplete := crossPageBoundary
 
   // state transfer
@@ -149,6 +151,7 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
           respDataReg(1) := shiftedBusData(31, 16)
         }
         respCorruptReg := io.mmioGrant.bits.corrupt
+        respDeniedReg  := io.mmioGrant.bits.denied
       }
     }
 

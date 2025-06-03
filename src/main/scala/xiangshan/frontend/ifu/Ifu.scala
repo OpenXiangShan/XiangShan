@@ -509,7 +509,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_alignExpdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
     Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
-  private val s4_alignIll = VecInit(rvcExpanders.map(_.io.ill))
+  private val s4_alignRvcException = VecInit(rvcExpanders.map { expander: RvcExpander =>
+    ExceptionType.fromRvcExpander(expander.io.ill)
+  })
 
   private val s4_alignPdWire     = RegEnable(s3_alignPd, s3_fire)
   private val s4_alignPds        = WireInit(s4_alignPdWire)
@@ -678,19 +680,23 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // mark the exception only on first instruction
   // TODO: store only the first exception in IBuffer, instead of store in every entry
   io.toIBuffer.bits.exceptionType := (0 until IBufferEnqueueWidth).map {
-    i => Mux(i.U === s4_prevIBufEnqPtr.value(1, 0), s4_icacheMeta(0).exception, ExceptionType.None)
+    i =>
+      Mux(
+        i.U === s4_prevIBufEnqPtr.value(1, 0),
+        s4_icacheMeta(0).exception,
+        ExceptionType.None
+      ) || s4_alignRvcException(i)
   }
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := (0 until IBufferEnqueueWidth).map {
+  io.toIBuffer.bits.isBackendException := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).isBackendException
   }
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
-  io.toIBuffer.bits.crossPageIPFFix := (0 until IBufferEnqueueWidth).map {
+  io.toIBuffer.bits.exceptionCrossPage := (0 until IBufferEnqueueWidth).map {
     i => i.U === s4_prevIBufEnqPtr.value(1, 0) && s4_icacheMeta(0).exception.hasException && s4_prevLastIsHalfRvi
   }
-  io.toIBuffer.bits.illegalInstr  := s4_alignIll
   io.toIBuffer.bits.triggered     := s4_alignTriggered
   io.toIBuffer.bits.identifiedCfi := s4_alignCompactInfo.identifiedCfi
 
@@ -742,6 +748,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   when(s4_reqIsUncache) {
     val inst                    = s4_uncacheData
     val (brType, isCall, isRet) = getBrInfo(inst)
+
+    val uncacheRvcException = ExceptionType.fromRvcExpander(uncacheRvcExpander.io.ill)
+
     io.toIBuffer.bits.instrs(s4_shiftNum) := Mux(
       uncacheRvcExpander.io.ill,
       uncacheRvcExpander.io.in,
@@ -756,11 +765,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(s4_shiftNum).isRet              := isRet
     io.toIBuffer.bits.instrEndOffset(s4_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
 
-    io.toIBuffer.bits.exceptionType(s4_shiftNum) := uncacheException
+    io.toIBuffer.bits.exceptionType(s4_shiftNum) := uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.
-    io.toIBuffer.bits.crossPageIPFFix(s4_shiftNum) := prevUncacheCrossPage && uncacheException.hasException
-    io.toIBuffer.bits.illegalInstr(s4_shiftNum)    := uncacheRvcExpander.io.ill
-    io.toIBuffer.bits.enqEnable                    := s4_alignBlockStartPos.asUInt
+    io.toIBuffer.bits.exceptionCrossPage(s4_shiftNum) := prevUncacheCrossPage && uncacheException.hasException
+
+    io.toIBuffer.bits.enqEnable := s4_alignBlockStartPos.asUInt
 
     uncacheFlushWb.bits.isRVC     := uncacheIsRvc
     uncacheFlushWb.bits.attribute := BranchAttribute(brType, Cat(isCall, isRet))
