@@ -173,6 +173,8 @@ class ExceptionType extends Bundle {
   def isPf:   Bool = value === ExceptionType.Value.Pf
   def isGpf:  Bool = value === ExceptionType.Value.Gpf
   def isAf:   Bool = value === ExceptionType.Value.Af
+  def isIll:  Bool = value === ExceptionType.Value.Ill
+  def isHwe:  Bool = value === ExceptionType.Value.Hwe
 
   def hasException: Bool = value =/= ExceptionType.Value.None
 
@@ -190,11 +192,13 @@ class ExceptionType extends Bundle {
 }
 
 object ExceptionType {
-  private object Value extends EnumUInt(4) {
+  private object Value extends EnumUInt(6) {
     def None: UInt = 0.U(width.W)
     def Pf:   UInt = 1.U(width.W) // instruction page fault
     def Gpf:  UInt = 2.U(width.W) // instruction guest page fault
     def Af:   UInt = 3.U(width.W) // instruction access fault
+    def Ill:  UInt = 4.U(width.W) // illegal instruction
+    def Hwe:  UInt = 5.U(width.W) // hardware error
   }
 
   def apply(that: UInt): ExceptionType = {
@@ -208,14 +212,25 @@ object ExceptionType {
   def Pf:   ExceptionType = apply(Value.Pf)
   def Gpf:  ExceptionType = apply(Value.Gpf)
   def Af:   ExceptionType = apply(Value.Af)
+  def Ill:  ExceptionType = apply(Value.Ill)
+  def Hwe:  ExceptionType = apply(Value.Hwe)
 
-  def apply(hasPf: Bool, hasGpf: Bool, hasAf: Bool): ExceptionType = {
+  def apply(
+      hasPf:     Bool,
+      hasGpf:    Bool,
+      hasAf:     Bool,
+      hasIll:    Bool,
+      hasHwe:    Bool,
+      canAssert: Bool = true.B // prevent assert(x)
+  ): ExceptionType = {
     assert(
-      PopCount(VecInit(hasPf, hasGpf, hasAf)) <= 1.U,
-      "ExceptionType receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
+      !canAssert || PopCount(VecInit(hasPf, hasGpf, hasAf, hasIll, hasHwe)) <= 1.U,
+      "ExceptionType receives input that is not one-hot: pf=%d, gpf=%d, af=%d, ill=%d, hwe=%d",
       hasPf,
       hasGpf,
-      hasAf
+      hasAf,
+      hasIll,
+      hasHwe
     )
     // input is at-most-one-hot encoded, so we don't worry about priority here.
     MuxCase(
@@ -223,38 +238,60 @@ object ExceptionType {
       Seq(
         hasPf  -> Pf,
         hasGpf -> Gpf,
-        hasAf  -> Af
+        hasAf  -> Af,
+        hasIll -> Ill,
+        hasHwe -> Hwe
       )
     )
   }
 
   // only af is used most frequently (pmp / ecc / tilelink), so we define a shortcut
   // we cannot use default parameter in apply(), as it is overloaded and scala won't allow
-  def apply(hasAf: Bool): ExceptionType =
-    apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf)
+  def hasAf(hasAf: Bool, canAssert: Bool = true.B): ExceptionType =
+    apply(false.B, false.B, hasAf, false.B, false.B, canAssert)
 
   // raise pf/gpf/af according to backend redirect request (tlb pre-check)
-  def fromBackend(redirect: Redirect): ExceptionType =
+  def fromBackend(redirect: Redirect, canAssert: Bool = true.B): ExceptionType =
     apply(
-      hasPf = redirect.backendIPF,
-      hasGpf = redirect.backendIGPF,
-      hasAf = redirect.backendIAF
+      redirect.backendIPF,
+      redirect.backendIGPF,
+      redirect.backendIAF,
+      false.B,
+      false.B,
+      canAssert
     )
 
   // raise pf/gpf/af according to itlb response
-  def fromTlbResp(resp: TlbResp, useDup: Int = 0): ExceptionType = {
+  def fromTlbResp(resp: TlbResp, canAssert: Bool = true.B, useDup: Int = 0): ExceptionType = {
     require(useDup >= 0 && useDup < resp.excp.length)
     // itlb is guaranteed to respond at most one exception
     apply(
-      hasPf = resp.excp(useDup).pf.instr,
-      hasGpf = resp.excp(useDup).gpf.instr,
-      hasAf = resp.excp(useDup).af.instr
+      resp.excp(useDup).pf.instr,
+      resp.excp(useDup).gpf.instr,
+      resp.excp(useDup).af.instr,
+      false.B,
+      false.B,
+      canAssert
     )
   }
 
   // raise af if pmp check failed
-  def fromPmpResp(resp: PMPRespBundle): ExceptionType =
-    apply(hasAf = resp.instr)
+  def fromPmpResp(resp: PMPRespBundle, canAssert: Bool = true.B): ExceptionType =
+    hasAf(resp.instr, canAssert)
+
+  // raise af / hwe according to tilelink response
+  def fromTileLink(corrupt: Bool, denied: Bool, canAssert: Bool = true.B): ExceptionType = {
+    //  corrupt && denied -> access fault
+    //  corrupt && !denied -> hardware error
+    //  !corrupt && !denied -> no exception
+    //  !corrupt && denied -> violates tilelink specification, should not happen
+    assert(!canAssert || !(denied && !corrupt), "TileLink response should not be denied but !corrupt")
+    apply(false.B, false.B, denied, false.B, corrupt && !denied, canAssert)
+  }
+
+  // raise ill according to rvc expander
+  def fromRvcExpander(ill: Bool, canAssert: Bool = true.B): ExceptionType =
+    apply(false.B, false.B, false.B, ill, false.B, canAssert)
 }
 
 class PreDecodeInfo extends Bundle { // 8 bit
@@ -287,13 +324,14 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val pd:             Vec[PreDecodeInfo]  = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
   val foldpc:         Vec[UInt]           = Vec(IBufferEnqueueWidth, UInt(MemPredPCWidth.W))
   val instrEndOffset: Vec[InstrEndOffset] = Vec(IBufferEnqueueWidth, new InstrEndOffset)
-  // val ftqPcOffset:      Vec[Valid[FtqPcOffset]] = Vec(IBufferEnqueueWidth, Valid(new FtqPcOffset))
-  val backendException: Bool          = Bool()
-  val exceptionType:    ExceptionType = new ExceptionType
-  val crossPageIPFFix:  Bool          = Bool()
-  val illegalInstr:     Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
-  val triggered:        Vec[UInt]     = Vec(IBufferEnqueueWidth, TriggerAction())
-  val isLastInFtqEntry: Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
+
+  val exceptionType:      ExceptionType = new ExceptionType
+  val isBackendException: Bool          = Bool()
+  val exceptionCrossPage: Bool          = Bool()
+  val exceptionOffset:    UInt          = UInt(log2Ceil(IBufferEnqueueWidth).W)
+
+  val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
+  val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
   val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
