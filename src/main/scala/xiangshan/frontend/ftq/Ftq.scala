@@ -645,7 +645,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   backendRedirectCfi.br_hit := r_ftb_entry.brIsSaved(r_ftqOffset)
   backendRedirectCfi.jr_hit := r_ftb_entry.isJalr && r_ftb_entry.tailSlot.offset === r_ftqOffset
   // FIXME: not portable
-  val sc_disagree = stage3CfiInfo.sc_disagree.getOrElse(VecInit(Seq.fill(numBr)(false.B)))
+//  val sc_disagree = stage3CfiInfo.sc_disagree.getOrElse(VecInit(Seq.fill(numBr)(false.B)))
+  val sc_disagree = WireDefault(VecInit(Seq.fill(numBr)(false.B))) // TODO: remove it when new SC is ready
   backendRedirectCfi.sc_hit := backendRedirectCfi.br_hit && Mux(
     r_ftb_entry.brSlots(0).offset === r_ftqOffset,
     sc_disagree(0),

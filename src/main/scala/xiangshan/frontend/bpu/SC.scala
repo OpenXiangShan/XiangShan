@@ -280,7 +280,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     scUpdateTakens    := DontCare
     scUpdateOldCtrs   := DontCare
 
-    val updateSCMeta = updateMeta.scMeta.get
+//    val updateSCMeta = updateMeta.scMeta.get
+    // TODO: temporary signal, need to be replaced when new SC is ready
+    val updateSCMeta = WireDefault(0.U.asTypeOf(new SCMeta(SCNTables)))
 
     val s2_sc_used, s2_conf, s2_unconf, s2_agree, s2_disagree =
       WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
@@ -294,8 +296,8 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     // for tage ctrs, (2*(ctr-4)+1)*8
     def getPvdrCentered(ctr: UInt): SInt = Cat(ctr ^ (1 << (TageCtrBits - 1)).U, 1.U(1.W), 0.U(3.W)).asSInt
 
-    val scMeta = tageMeta.scMeta.get
-    scMeta := DontCare
+//    val scMeta = tageMeta.scMeta.get
+//    scMeta := DontCare
     for (w <- 0 until TageBanks) {
       // do summation in s2
       val s1_scTableSums = VecInit(
@@ -318,12 +320,12 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit), s2_scPreds(s2_chooseBit), s2_tageTakens(w))
 
       val s3_disagree = RegEnable(s2_disagree, s2_fire)
-      if (io.out.sc_disagree.isDefined) {
-        io.out.sc_disagree.get := s3_disagree
-      }
+//      if (io.out.sc_disagree.isDefined) {
+//        io.out.sc_disagree.get := s3_disagree
+//      }
 
-      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), s2_fire)
-      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, s2_fire)
+//      scMeta.scPreds(w) := RegEnable(s2_scPreds(s2_chooseBit), s2_fire)
+//      scMeta.ctrs(w)    := RegEnable(s2_scCtrs, s2_fire)
 
       val pred = s2_scPreds(s2_chooseBit)
       when(s2_provideds(w)) {
@@ -341,11 +343,11 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       XSDebug(s2_provideds(w), p"---------tage_bank_${w} provided so that sc used---------\n")
 
       val s3_pred = RegEnable(s2_pred, s2_fire)
-      when(RegNext(io.in.ctrl.sc_enable)) {
-        io.out.toFtb.s3_branchTakenMask(w) := s3_pred
-      }.otherwise {
-        io.out.toFtb.s3_branchTakenMask(w) := false.B
-      }
+//      when(RegNext(io.in.ctrl.sc_enable)) {
+//        io.out.toFtb.s3_branchTakenMask(w) := s3_pred
+//      }.otherwise {
+//        io.out.toFtb.s3_branchTakenMask(w) := false.B
+//      }
 
       val updateTageMeta    = updateMeta
       val scPred            = updateSCMeta.scPreds(w)
