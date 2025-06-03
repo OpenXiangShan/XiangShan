@@ -133,7 +133,7 @@ abstract class EnumUInt(
         s"EnumUInt ${this.getClass.getName} using one-hot has non one-hot value(${litValue}): ${name}."
       )
       assert( // check3.2: one-hot values must not be 0
-        !useOneHot || !allowZeroForOneHot || litValue != 0,
+        !useOneHot || allowZeroForOneHot || litValue != 0,
         s"EnumUInt ${this.getClass.getName} using one-hot has zero value(0): ${name}. " +
           s"Please consider using Vec[Bool] if you want to use 0 as 'None' and other values are one-hot. " +
           s"Or, set allowZeroForOneHot to true if you intentionally want to use 0 as one-hot value for EnumUInt."
@@ -148,7 +148,7 @@ abstract class EnumUInt(
       val methodsNotUpperCamelCase = methodsAll.diff(methods)
       methodsNotUpperCamelCase.foreach { method =>
         println(
-          s"[Warn]: EnumUInt ${this.getClass.getName} seems has constants defination '${method.getName}' " +
+          s"[Warn]: EnumUInt ${this.getClass.getName} seems has constants definition '${method.getName}' " +
             s"that is not UpperCamelCase, Do you mean '${method.getName.capitalize}'?"
         )
       }
