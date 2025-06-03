@@ -265,6 +265,7 @@ class MissRespBundle(implicit p: Parameters) extends ICacheBundle {
   val waymask:  UInt = UInt(nWays.W)
   val data:     UInt = UInt(blockBits.W)
   val corrupt:  Bool = Bool()
+  val denied:   Bool = Bool()
 }
 
 /* ***** Mshr ***** */
