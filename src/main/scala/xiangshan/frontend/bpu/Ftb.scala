@@ -1,28 +1,39 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
 
 package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.DelayN
+import utility.DelayNWithValid
+import utility.GTimer
+import utility.HasCircularQueuePtrHelper
+import utility.HasPerfEvents
+import utility.HoldUnless
+import utility.ReplacementPolicy
+import utility.XSDebug
+import utility.XSError
+import utility.XSPerfAccumulate
+import utility.ZeroExt
 import utility.mbist.MbistPipeline
 import utility.sram.SplittedSRAMTemplate
-import xiangshan._
+import xiangshan.HasXSParameter
+import xiangshan.XSBundle
+import xiangshan.XSModule
 import xiangshan.frontend.BranchPredictionUpdate
 import xiangshan.frontend.FullBranchPrediction
 import xiangshan.frontend.PrunedAddr
@@ -58,8 +69,8 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
   if (subOffsetLen.isDefined) {
     require(subOffsetLen.get <= offsetLen)
   }
-  val lower   = UInt(offsetLen.W)
-  val tarStat = UInt(TAR_STAT_SZ.W)
+  val lower:   UInt = UInt(offsetLen.W)
+  val tarStat: UInt = UInt(TAR_STAT_SZ.W)
 
   def setLowerStatByTarget(pc: PrunedAddr, target: PrunedAddr, isShare: Boolean): Unit = {
     def getTargetStatByHigher(pc_higher: UInt, target_higher: UInt) =
@@ -124,9 +135,10 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
       getTarget(offsetLen)(pc, lower, tarStat, last_stage)
     }
   }
-  def fromAnotherSlot(that: FtbSlot) = {
+
+  def fromAnotherSlot(that: FtbSlot): Unit = {
     require(
-      this.offsetLen > that.offsetLen && this.subOffsetLen.map(_ == that.offsetLen).getOrElse(true) ||
+      this.offsetLen > that.offsetLen && this.subOffsetLen.forall(_ == that.offsetLen) ||
         this.offsetLen == that.offsetLen
     )
     this.offset  := that.offset
@@ -136,7 +148,7 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
     this.lower   := ZeroExt(that.lower, this.offsetLen)
   }
 
-  def slotConsistent(that: FtbSlot) =
+  def slotConsistent(that: FtbSlot): Bool =
     VecInit(
       this.offset === that.offset,
       this.lower === that.lower,
