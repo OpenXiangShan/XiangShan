@@ -194,7 +194,7 @@ class Sbuffer(implicit p: Parameters)
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPfFlag)))  //Todo: store logic only support Width == 2 now
-    val vecDifftestInfo = Vec(EnsbufferWidth, Flipped(Decoupled(new DynInst)))
+    val vecDifftestInfo = Vec(EnsbufferWidth, Flipped(Decoupled(new ToSbufferDifftestInfoBundle)))
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
@@ -911,7 +911,12 @@ class Sbuffer(implicit p: Parameters)
     for (i <- 0 until EnsbufferWidth) {
       io.vecDifftestInfo(i).ready := io.in(i).ready
 
-      val uop             = io.vecDifftestInfo(i).bits
+      val uop              = io.vecDifftestInfo(i).bits.uop
+
+      val unaligned_start       = io.vecDifftestInfo(i).bits.start
+      val unaligned_offset      = io.vecDifftestInfo(i).bits.offset
+      val unaligned_start_bits  = (io.vecDifftestInfo(i).bits.start << 3.U).asUInt
+      val unaligned_offset_bits = (io.vecDifftestInfo(i).bits.offset << 3.U).asUInt
 
       val isVse           = isVStore(uop.fuType) && LSUOpType.isUStride(uop.fuOpType)
       val isVsm           = isVStore(uop.fuType) && VstuType.isMasked(uop.fuOpType)
@@ -944,12 +949,17 @@ class Sbuffer(implicit p: Parameters)
       val difftestCommon = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
       diffStoreEventCount += 1
       when (isVSLine) {
-        val splitMask         = UIntSlice(rawMask, EEB - 1.U, 0.U)(7,0)  // Byte
-        val splitData         = UIntSlice(rawData, EEWBits - 1.U, 0.U)(63,0) // Double word
+        val upper             = Mux(unaligned_start === 0.U && unaligned_offset =/= 0.U, unaligned_offset, EEB - 1.U + unaligned_offset) // unit-stride second write request
+        val upperBits         = Mux(unaligned_start === 0.U && unaligned_offset =/= 0.U,
+                                   (unaligned_offset << 3.U).asUInt - 1.U,
+                                   ((EEB + unaligned_offset) << 3.U).asUInt - 1.U)// unit-stride second write request
+        val splitMask         = UIntSlice(rawMask, upper, unaligned_start)(7,0)  // Byte
+        val splitData         = UIntSlice(rawData, upperBits, unaligned_start_bits)(63,0) // Double word
         val storeCommit       = io.in(i).fire && splitMask.orR && io.in(i).bits.vecValid
-        val waddr             = rawAddr
-        val wmask             = splitMask
-        val wdata             = splitData & MaskExpand(splitMask)
+        // align with ref
+        val waddr             = Mux(unaligned_offset =/= 0.U && rawAddr(3), ZeroExt(Cat(rawAddr(PAddrBits - 1, 3), 0.U(3.W)), 64), rawAddr)
+        val wmask             = Mux(unaligned_offset =/= 0.U && rawAddr(3), 0.U, splitMask << unaligned_offset)
+        val wdata             = Mux(unaligned_offset =/= 0.U && rawAddr(3), 0.U, (splitData & MaskExpand(splitMask)) << unaligned_offset_bits)
 
         difftestCommon.coreid := io.hartId
         difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
@@ -957,8 +967,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
-        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
-        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.uop.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.uop.pc
 
       } .elsewhen (!isWline) {
         val storeCommit       = io.in(i).fire
@@ -974,8 +984,8 @@ class Sbuffer(implicit p: Parameters)
         difftestCommon.addr   := waddr
         difftestCommon.data   := wdata
         difftestCommon.mask   := wmask
-        difftestCommon.robidx := io.vecDifftestInfo(i).bits.robIdx.value
-        difftestCommon.pc     := io.vecDifftestInfo(i).bits.pc
+        difftestCommon.robidx := io.vecDifftestInfo(i).bits.uop.robIdx.value
+        difftestCommon.pc     := io.vecDifftestInfo(i).bits.uop.pc
       }
 
       for (index <- 0 until WlineMaxNumber) {
@@ -992,8 +1002,8 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := blockAddr + (index.U << wordOffBits)
           difftest.data   := io.in(i).bits.data
           difftest.mask   := ((1 << wordBytes) - 1).U
-          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
-          difftest.pc     := io.vecDifftestInfo(i).bits.pc
+          difftest.robidx := io.vecDifftestInfo(i).bits.uop.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.uop.pc
 
           assert(!storeCommit || (io.in(i).bits.data === 0.U), "wline only supports whole zero write now")
         }
@@ -1014,12 +1024,12 @@ class Sbuffer(implicit p: Parameters)
           val shiftFlag   = shiftIndex(2,0).orR // Double word Flag
           val shiftBytes  = Mux(shiftFlag, shiftIndex(2,0), 0.U)
           val shiftBits   = shiftBytes << 3.U
-          val splitMask   = UIntSlice(rawMask, (EEB*(index+1).U - 1.U), EEB*index.U)(7,0)  // Byte
-          val splitData   = UIntSlice(rawData, (EEWBits*(index+1).U - 1.U), EEWBits*index.U)(63,0) // Double word
+          val splitMask   = UIntSlice(rawMask, (EEB*(index+1).U - 1.U) + unaligned_offset, EEB*index.U + unaligned_offset)(7,0)  // Byte
+          val splitData   = UIntSlice(rawData, (EEWBits*(index+1).U - 1.U) + unaligned_offset_bits, EEWBits*index.U + unaligned_offset_bits)(63,0) // Double word
           val storeCommit = io.in(i).fire && splitMask.orR  && io.in(i).bits.vecValid
-          val waddr       = Cat(rawAddr(PAddrBits - 1, 4), Cat(shiftIndex(3), 0.U(3.W)))
-          val wmask       = splitMask << shiftBytes
-          val wdata       = (splitData & MaskExpand(splitMask)) << shiftBits
+          val waddr       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), Cat(rawAddr(PAddrBits - 1, 4),  0.U(4.W)),Cat(rawAddr(PAddrBits - 1, 4), Cat(shiftIndex(3), 0.U(3.W))))
+          val wmask       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), 0.U,splitMask << (shiftBytes + unaligned_offset))
+          val wdata       = Mux(unaligned_offset =/= 0.U && shiftIndex(3), 0.U,(splitData & MaskExpand(splitMask)) << (shiftBits.asUInt + unaligned_offset_bits))
 
           difftest.coreid := io.hartId
           difftest.index  := (i*VecMemFLOWMaxNumber+index).U
@@ -1027,8 +1037,8 @@ class Sbuffer(implicit p: Parameters)
           difftest.addr   := waddr
           difftest.data   := wdata
           difftest.mask   := wmask
-          difftest.robidx := io.vecDifftestInfo(i).bits.robIdx.value
-          difftest.pc     := io.vecDifftestInfo(i).bits.pc
+          difftest.robidx := io.vecDifftestInfo(i).bits.uop.robIdx.value
+          difftest.pc     := io.vecDifftestInfo(i).bits.uop.pc
         }
       }
     }
