@@ -477,6 +477,7 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.vdIdx.get        := DontCare
     sink.isFromLoadUnit   := DontCare
     sink.uop.vpu.vstart   := source.vstart
+    sink.vecDebug.get     := DontCare
     sink
   }
 

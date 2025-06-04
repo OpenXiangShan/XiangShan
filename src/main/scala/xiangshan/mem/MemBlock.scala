@@ -1291,6 +1291,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vecDebug.map(_ := DontCare)
         stData(i).ready := true.B
       }
     } else {
@@ -1300,6 +1301,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vecDebug.map(_ := DontCare)
         stData(i).ready := true.B
     }
     lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
@@ -2078,8 +2080,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // store event difftest information
   if (env.EnableDifftest) {
     (0 until EnsbufferWidth).foreach{i =>
-        io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.robIdx
-        sbuffer.io.vecDifftestInfo(i).bits.pc := io.mem_to_ooo.storeDebugInfo(i).pc
+        io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.uop.robIdx
+        sbuffer.io.vecDifftestInfo(i).bits.uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
   }
 

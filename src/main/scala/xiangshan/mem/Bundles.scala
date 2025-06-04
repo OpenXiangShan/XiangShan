@@ -364,3 +364,16 @@ object Bundles {
   }
 
 }
+
+// for vector difftest store event
+class ToSbufferDifftestInfoBundle(implicit p: Parameters) extends XSBundle{
+  val uop        = new DynInst
+  val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
+  val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
+}
+
+
+class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
+  val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
+  val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
+}
