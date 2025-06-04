@@ -380,7 +380,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
       ).reverse)
     ).orR
-    uops(i).debug_sim_trig.foreach(_ := compressMasksVec(i) & io.in(i).bits.instr === XSDebugDecode.SIM_TRIG)
+    uops(i).debug_sim_trig.foreach(_ := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR)
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
