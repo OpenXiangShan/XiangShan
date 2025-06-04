@@ -529,7 +529,7 @@ class MiniMemBlockConfig extends Config((site, here, up) => {
       LoadQueueRARSize = 24,
       LoadQueueRAWSize = 16,
       LoadQueueReplaySize = 24,
-      StoreQueueSize = 20,
+      StoreQueueSize = 16,
       dcacheParametersOpt = Some(DCacheParameters(
         // 8KB
         nSets = 32,
