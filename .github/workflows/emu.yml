@@ -267,8 +267,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --yaml-config $GITHUB_WORKSPACE/src/main/resources/config/Default.yml \
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --config KunminghuV2Config \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 16 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata --trace-fst
       - name: SPEC06 Test - hmmer-Vector
