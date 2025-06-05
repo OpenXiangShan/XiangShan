@@ -1505,7 +1505,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
-  lsq.io.generateFromSBuffer <> sbuffer.io.generateToSQ
   sbuffer.io.in(0).valid := lsq.io.sbuffer(0).valid || vSegmentUnit.io.sbuffer.valid
   sbuffer.io.in(0).bits  := Mux1H(Seq(
     vSegmentUnit.io.sbuffer.valid -> vSegmentUnit.io.sbuffer.bits,
@@ -1516,21 +1515,30 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
-  sbuffer.io.vecDifftestInfo      := DontCare
-  lsq.io.sbufferVecDifftestInfo   := DontCare
+  sbuffer.io.diffStore := DontCare
+  lsq.io.diffStore := DontCare
   vSegmentUnit.io.vecDifftestInfo := DontCare
+  io.mem_to_ooo.storeDebugInfo := DontCare
+  // store event difftest information
   if (env.EnableDifftest) {
-    sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
-      if (index == 0) {
-        val vSegmentDifftestValid = vSegmentUnit.io.vecDifftestInfo.valid
-        sbufferPort.valid := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
-        sbufferPort.bits  := Mux(vSegmentDifftestValid, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
-
-        vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
-        lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready
-      } else {
-         sbufferPort <> lsq.io.sbufferVecDifftestInfo(index)
+    // diffStoreEvent for vSegment, pmaStore and ncStore
+    (0 until EnsbufferWidth).foreach{i =>
+      if(i == 0) {
+        when(vSegmentUnit.io.sbuffer.valid) {
+          sbuffer.io.diffStore.diffInfo(0) := vSegmentUnit.io.vecDifftestInfo.bits
+          sbuffer.io.diffStore.pmaStore(0).valid := vSegmentUnit.io.sbuffer.fire
+          sbuffer.io.diffStore.pmaStore(0).bits := vSegmentUnit.io.sbuffer.bits
+        }.otherwise{
+          sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.diffInfo(0)
+          sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.pmaStore(0)
+        }
+      }else{
+        sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.diffInfo(i)
+        sbuffer.io.diffStore.pmaStore(i) := lsq.io.diffStore.pmaStore(i)
       }
+      sbuffer.io.diffStore.ncStore := lsq.io.diffStore.ncStore
+      io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
+      sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
   }
 
@@ -2074,15 +2082,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       traceFromBackend.toEncoder.groups(i).bits.ftqOffset.getOrElse(0.U),
       traceFromBackend.toEncoder.groups(i).valid
     ) << instOffsetBits)
-  }
-
-  io.mem_to_ooo.storeDebugInfo := DontCare
-  // store event difftest information
-  if (env.EnableDifftest) {
-    (0 until EnsbufferWidth).foreach{i =>
-        io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.vecDifftestInfo(i).bits.uop.robIdx
-        sbuffer.io.vecDifftestInfo(i).bits.uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
-    }
   }
 
   // top-down info

@@ -174,7 +174,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
-    val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new ToSbufferDifftestInfoBundle)) // The vector store difftest needs is, write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
     val cmoOpReq  = DecoupledIO(new CMOReq)
     val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
@@ -201,7 +200,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
     val wfi = Flipped(new WfiReqBundle)
-    val generateFromSBuffer = Input(new GenerateInfoFromSBuffer)
+    val diffStore = Flipped(new DiffStoreIO)
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -233,7 +232,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ))
   vaddrModule.io := DontCare
   val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
-  val difftestBuffer = if (env.EnableDifftest) Some(Module(new DatamoduleResultBuffer(new ToSbufferDifftestInfoBundle))) else None
   val exceptionBuffer = Module(new StoreExceptionBuffer)
   exceptionBuffer.io.redirect := io.brqRedirect
   exceptionBuffer.io.exceptionAddr.isStore := DontCare
@@ -1303,16 +1301,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until EnsbufferWidth) {
     io.sbuffer(i).valid := dataBuffer.io.deq(i).valid
     dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
-    io.sbuffer(i).bits := DontCare
-    io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
-    io.sbuffer(i).bits.vaddr := dataBuffer.io.deq(i).bits.vaddr
-    io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
-    io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
-    io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline && dataBuffer.io.deq(i).bits.vecValid
-    io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
-    io.sbuffer(i).bits.vecValid := dataBuffer.io.deq(i).bits.vecValid
-    io.sbuffer(i).bits.sqNeedDeq := dataBuffer.io.deq(i).bits.sqNeedDeq
+    io.sbuffer(i).bits.fromDataBufferEntry(dataBuffer.io.deq(i).bits, MemoryOpConstants.M_XWR)
     // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
     // forward data. As an workaround, deqPtrExt and allocated flag update
@@ -1390,45 +1379,33 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // If an assert appears and you confirm that it is not a Bug: Increase the timeout or remove the assert.
   TimeOutAssert(vecExceptionFlag.valid, 3000, "vecExceptionFlag timeout, Plase check for bugs or add timeouts.")
 
+  /* difftest */
   // Initialize when unenabled difftest.
-  for (i <- 0 until EnsbufferWidth) {
-    io.sbufferVecDifftestInfo(i) := DontCare
-  }
+  io.diffStore := DontCare
   // Consistent with the logic above.
   // Only the vector store difftest required signal is separated from the rtl code.
   if (env.EnableDifftest) {
-    for (i <- 0 until EnsbufferWidth) {
-      val ptr = dataBuffer.io.enq(i).bits.sqPtr.value
-      difftestBuffer.get.io.enq(i).valid := dataBuffer.io.enq(i).valid
-      difftestBuffer.get.io.enq(i).bits.uop := uop(ptr)
-      difftestBuffer.get.io.enq(i).bits.start  := debug_vec_unaligned_start(ptr)
-      difftestBuffer.get.io.enq(i).bits.offset := debug_vec_unaligned_offset(ptr)
-    }
-    for (i <- 0 until EnsbufferWidth) {
-      io.sbufferVecDifftestInfo(i).valid := difftestBuffer.get.io.deq(i).valid
-      difftestBuffer.get.io.deq(i).ready := io.sbufferVecDifftestInfo(i).ready
-
-      io.sbufferVecDifftestInfo(i).bits := difftestBuffer.get.io.deq(i).bits
-    }
-
     // commit cbo.inval to difftest
     val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
     cmoInvalEvent.coreid := io.hartId
-    cmoInvalEvent.valid  := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
-    cmoInvalEvent.addr   := cboMmioAddr
+    cmoInvalEvent.valid := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
+    cmoInvalEvent.addr := cboMmioAddr
 
-    // the event that nc store to main memory
-    val ncmmStoreEvent = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
-    val dataMask = Cat((0 until DCacheWordBytes).reverse.map(i => Fill(8, ncReq.bits.mask(i))))
-    ncmmStoreEvent.coreid := io.hartId
-    ncmmStoreEvent.index := io.generateFromSBuffer.diffStoreEventCount
-    ncmmStoreEvent.valid := ncReq.fire && ncReq.bits.memBackTypeMM
-    ncmmStoreEvent.addr := Cat(ncReq.bits.addr(PAddrBits-1, DCacheWordOffset), 0.U(DCacheWordOffset.W)) // aligned to 8 bytes
-    ncmmStoreEvent.data := ncReq.bits.data & dataMask // data align
-    ncmmStoreEvent.mask := ncReq.bits.mask
-    ncmmStoreEvent.pc := uop(rptr0).pc
-    ncmmStoreEvent.robidx := uop(rptr0).robIdx.value
+    // DiffStoreEvent happens when rdataPtr moves.
+    // That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
+    (0 until EnsbufferWidth).foreach { i =>
+      // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
+      val ptr = dataBuffer.io.enq(i).bits.sqPtr.value
+      io.diffStore.diffInfo(i).uop := uop(ptr)
+      io.diffStore.diffInfo(i).start := debug_vec_unaligned_start(ptr)
+      io.diffStore.diffInfo(i).offset := debug_vec_unaligned_offset(ptr)
+      io.diffStore.pmaStore(i).valid := dataBuffer.io.enq(i).fire
+      io.diffStore.pmaStore(i).bits.fromDataBufferEntry(dataBuffer.io.enq(i).bits, MemoryOpConstants.M_XWR)
+    }
+    io.diffStore.ncStore.valid := ncReq.fire && ncReq.bits.memBackTypeMM
+    io.diffStore.ncStore.bits := ncReq.bits
   }
+
 
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
   if (coreParams.dcacheParametersOpt.isEmpty) {
