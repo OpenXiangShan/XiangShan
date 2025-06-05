@@ -52,10 +52,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val rollback = Output(Valid(new Redirect))
 
     // Check ptr for current probe
-    val checkLqIdx = Valid(new LqPtr)
+    val check = Valid(new ReleaseCheck)
   })
 
   private val PartialPAddrStride: Int = 6
+  require(PartialPAddrStride >= log2Up(blockBytes))
   private val PartialPAddrBits: Int = 16
   private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2 // avoid overlap
   private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
@@ -220,7 +221,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
 
-  paddrModule.io.releaseViolationMdata(0) := latestRelease.bits.paddr
+  paddrModule.io.releaseViolationMdata(0) := genPartialPAddr(latestRelease.bits.paddr)
   val released = paddrModule.io.releaseViolationMmask(0)
   // What to check?
   val check = allocated.asUInt & Mux(tsoActive, pending.asUInt, released.asUInt & pending.asUInt)
@@ -234,12 +235,13 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val back = PriorityEncoderOH(mask & (-(lastIdx << 1).asUInt).tail(1))
     Mux(back.orR, back, front)
   }
-  val checkLqIdx = Mux1H(findOldest(check), uop.map(_.lqIdx))
-  io.checkLqIdx.bits := checkLqIdx
-  io.checkLqIdx.valid := checkPresent
+  val checkRobIdx = Mux1H(findOldest(check), uop.map(_.robIdx))
+  io.check.bits.older := checkRobIdx
+  io.check.bits.released := latestRelease.bits.paddr
+  io.check.valid := checkPresent
 
   // Find oldest victim
-  val victim = allocated.asUInt & (~pending.asUInt).asUInt & released.asUInt & (VecInit(uop.map(u => isAfter(u.lqIdx, checkLqIdx))).asUInt)
+  val victim = allocated.asUInt & (~pending.asUInt).asUInt & released.asUInt & (VecInit(uop.map(u => isAfter(u.robIdx, checkRobIdx))).asUInt)
   val victimPresent = victim.orR
   val selectedVictim = Mux1H(findOldest(check), uop)
 
