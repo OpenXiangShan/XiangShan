@@ -377,3 +377,9 @@ class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
   val start      = UInt(log2Up(XLEN).W) // indicate first byte position of first unit-stride's element when unaligned
   val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
 }
+
+class DiffStoreIO(implicit p: Parameters) extends XSBundle{
+  val diffInfo = Vec(EnsbufferWidth, Flipped(new ToSbufferDifftestInfoBundle()))
+  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DCacheWordReqWithVaddrAndPfFlag())))
+  val ncStore = Flipped(Valid(new UncacheWordReq()))
+}

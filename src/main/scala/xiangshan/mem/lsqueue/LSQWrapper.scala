@@ -89,7 +89,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
-    val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new ToSbufferDifftestInfoBundle)) // for vector store difftest
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
@@ -133,7 +132,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssued = Input(Bool())
 
-    val generateFromSBuffer = Input(new GenerateInfoFromSBuffer)
+    val diffStore = Flipped(new DiffStoreIO)
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -183,7 +182,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.sbuffer     <> io.sbuffer
-  storeQueue.io.sbufferVecDifftestInfo <> io.sbufferVecDifftestInfo
   storeQueue.io.mmioStout   <> io.mmioStout
   storeQueue.io.cboZeroStout <> io.cboZeroStout
   storeQueue.io.vecmmioStout <> io.vecmmioStout
@@ -199,7 +197,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.cmoOpResp    <> io.cmoOpResp
   storeQueue.io.flushSbuffer <> io.flushSbuffer
   storeQueue.io.maControl    <> io.maControl
-  storeQueue.io.generateFromSBuffer := io.generateFromSBuffer
+  io.diffStore := storeQueue.io.diffStore
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
