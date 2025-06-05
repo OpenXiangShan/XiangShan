@@ -1413,6 +1413,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // rolling
   io.debugRolling.robTrueCommit := ifCommitReg(trueCommitCnt)
 
+  // debug trigger for simulation
+  if (backendParams.debugEn) {
+    val debug_sim_trig = dontTouch(Wire(Bool()))
+    debug_sim_trig := io.commits.isCommit && (io.commits.commitValid zip commitDebugUop map {
+      case (valid, uop) => valid && uop.debug_sim_trig.get
+    }).reduce(_ || _)
+  }
+
   /**
    * DataBase info:
    * log trigger is at writeback valid

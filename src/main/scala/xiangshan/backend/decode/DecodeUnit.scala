@@ -558,10 +558,11 @@ object ZfaDecode extends DecodeConstants {
 }
 
 /**
- * XiangShan Trap Decode constants
+ * XiangShan Debug Decode constants
  */
-object XSTrapDecode extends DecodeConstants {
+object XSDebugDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
+  def SIM_TRIG = BitPat("b11011111101010010010000000010011") // HINT, slti x0, x18, -518
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     TRAP    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, SelImm.IMM_I, xWen = T, xsTrap = T, noSpec = T, blockBack = T)
   )
@@ -807,7 +808,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 //    FDivSqrtDecode.table ++
     BitmanipDecode.table ++
     ScalarCryptoDecode.table ++
-    XSTrapDecode.table ++
+    XSDebugDecode.table ++
     CBODecode.table ++
     SvinvalDecode.table ++
     HypervisorDecode.table ++

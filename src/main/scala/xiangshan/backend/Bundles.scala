@@ -254,7 +254,8 @@ object Bundles {
     // schedule
     val replayInst      = Bool()
 
-    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+    val debug_fuType    = Option.when(backendParams.debugEn)(FuType())
+    val debug_sim_trig  = Option.when(backendParams.debugEn)(Bool())
 
     val numLsElem       = NumLsElem()
 
