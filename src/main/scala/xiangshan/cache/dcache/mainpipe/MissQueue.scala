@@ -291,7 +291,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire
   }
 
-  def block_match(releaseReq: MissQueueBlockReqBundle): Bool = {
+  def block_and_alias_match(releaseReq: MissQueueBlockReqBundle): Bool = {
     reg_valid() && get_block(req.addr) === get_block(releaseReq.addr) && is_alias_match(req.vaddr, releaseReq.vaddr)
   }
 
@@ -1252,7 +1252,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     case e =>
       e.io.replace.req <> io.replace.req
       e.io.replace.block
-  } :+ miss_req_pipe_reg.block_match(io.replace.req.bits)).orR
+  } :+ miss_req_pipe_reg.block_and_alias_match(io.replace.req.bits)).orR
 
   val btot_evict_set_hit = entries.map(e => e.io.req_isBtoT && e.io.req_vaddr.valid && addr_to_dcache_set(e.io.req_vaddr.bits) === io.evict_set) ++
     Seq(miss_req_pipe_reg.evict_set_match(io.evict_set))
