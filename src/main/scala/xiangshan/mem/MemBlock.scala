@@ -939,7 +939,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // ld-ld violation check
     loadUnits(i).io.lsq.ldld_nuke_query <> lsq.io.ldu.ldld_nuke_query(i)
     loadUnits(i).io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(i)
-    loadUnits(i).io.lsq.ldld_checkLqIdx <> lsq.io.ldu.ldld_checkLqIdx
+    loadUnits(i).io.lsq.ldld_check <> lsq.io.ldu.ldld_check
     // loadqueue old ptr
     loadUnits(i).io.lsq.lqDeqPtr := lsq.io.lqDeqPtr
     loadUnits(i).io.csrCtrl       <> csrCtrl

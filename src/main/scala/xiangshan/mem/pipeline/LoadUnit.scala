@@ -95,7 +95,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   // lq -> ldu for misalign
   val lqDeqPtr = Input(new LqPtr)
   // lsq LQRAR -> ldu
-  val ldld_checkLqIdx = Flipped(Valid(new LqPtr))
+  val ldld_check = Flipped(Valid(new ReleaseCheck))
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -673,6 +673,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
+  // TSO stuff
+  val matchReleaseOffset = log2Up(blockBytes)
+  def matchReleaseAddr(paddr: UInt): Bool = {
+    paddr(PAddrBits - 1, matchReleaseOffset) === io.lsq.ldld_check.bits.released
+  }
+
   // set default
   val s0_src_selector = WireInit(s0_src_valid_vec)
   if (!EnableLoadToLoadForward) { s0_src_selector(l2l_fwd_idx) := false.B }
@@ -1007,8 +1013,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                        s1_nuke_paddr_match(w) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
-  // FIXME(meow): check s2 really probed
-  val s1_nuke_ldld = io.lsq.ldld_checkLqIdx.valid && isAfter(s1_in.uop.lqIdx, io.lsq.ldld_checkLqIdx.bits) && !s1_tlb_miss
+  val s1_nuke_ldld = (
+    io.lsq.ldld_check.valid
+    && isAfter(s1_in.uop.robIdx, io.lsq.ldld_check.bits.older)
+    && matchReleaseAddr(s1_paddr_dup_lsu)
+    && !s1_tlb_miss
+  )
   val s1_nuke = s1_nuke_stld || s1_nuke_ldld
 
   s1_out                   := s1_in
@@ -1314,7 +1324,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                           (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                         })).asUInt.orR && !s2_tlb_miss
   // FIXME(meow): check s2 really probed
-  val s2_nuke_ldld = io.lsq.ldld_checkLqIdx.valid && isAfter(s1_in.uop.lqIdx, io.lsq.ldld_checkLqIdx.bits) && !s2_tlb_miss
+  val s2_nuke_ldld = (
+    io.lsq.ldld_check.valid
+    && isAfter(s2_in.uop.robIdx, io.lsq.ldld_check.bits.older)
+    && matchReleaseAddr(s2_in.paddr)
+    && !s2_tlb_miss
+  )
   val s2_nuke = s2_nuke_stld || s2_nuke_ldld || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.dcache.resp.bits.handled

@@ -48,6 +48,14 @@ object LqPtr {
   }
 }
 
+class ReleaseCheck(implicit p: Parameters) extends XSBundle {
+  // The oldest unfinished load
+  val older = new RobPtr()
+
+  // The released address (aligned to cache line)
+  val released = UInt(PAddrBits.W)
+}
+
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
     val fpWen = uop.fpWen
@@ -164,7 +172,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_checkLqIdx = Valid(new LqPtr)
+        val ldld_check = Valid(new ReleaseCheck)
         val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
@@ -225,7 +233,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
-  loadQueueRAR.io.checkLqIdx <> io.ldu.ldld_checkLqIdx
+  loadQueueRAR.io.check <> io.ldu.ldld_check
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
