@@ -198,6 +198,10 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val enqPtrVec = RegInit(VecInit.tabulate(PredictWidth)(_.U.asTypeOf(new IBufPtr)))
   val enqPtr    = enqPtrVec(0)
+  XSError(
+    io.in.valid && io.in.bits.preIBufEnqPtr =/= enqPtr,
+    "The enqueueing behavior of the IBuffer does not match expectations."
+  )
 
   val numTryEnq = WireDefault(0.U)
   val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
@@ -232,20 +236,29 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     numOut := 0.U
   }
   val numBypass = Wire(UInt(log2Ceil(DecodeWidth).W))
-  // when using bypass, bypassed entries do not enqueue
+
+  /** ******************************************************************************************************************
+    * when using bypass, bypassed entries are still treated as enqueued. But it only causes pointer changes;
+    * The actual value is not expected to be written into the IBuffer;
+    *******************************************************************************************************************/
   when(useBypass) {
     when(numFromFetch >= DecodeWidth.U) {
-      numTryEnq := numFromFetch - DecodeWidth.U
       numBypass := DecodeWidth.U
     }.otherwise {
-      numTryEnq := 0.U
       numBypass := numFromFetch
     }
   }.otherwise {
-    numTryEnq := numFromFetch
     numBypass := 0.U
   }
+  numTryEnq := numFromFetch
 
+  when(decodeCanAccept) {
+    numOut := Mux(useBypass, numBypass, Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid))
+  }.elsewhen(outputEntriesIsNotFull) {
+    numOut := Mux(numValid >= DecodeWidth.U - outputEntriesValidNum, DecodeWidth.U - outputEntriesValidNum, numValid)
+  }.otherwise {
+    numOut := 0.U
+  }
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Bypass
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -300,13 +313,13 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       // Select
       val validOH = Range(0, PredictWidth).map {
         i =>
-          val useBypassMatch = enqOffset(i) >= DecodeWidth.U &&
-            enqPtrVec(enqOffset(i) - DecodeWidth.U).value === idx.asUInt
-          val normalMatch = enqPtrVec(enqOffset(i)).value === idx.asUInt
-          val m = Mux(useBypass, useBypassMatch, normalMatch) // when using bypass, bypassed entries do not enqueue
+          val useBypassMatch = useBypass && (enqOffset(i) < DecodeWidth.U)
+          val normalMatch    = enqPtrVec(enqOffset(i)).value === idx.asUInt
 
-          io.in.bits.valid(i) && io.in.bits.enqEnable(i) && m
-      } // Should be OneHot
+          io.in.bits.valid(i) && io.in.bits.enqEnable(
+            i
+          ) && normalMatch && !useBypassMatch // when using bypass, bypassed entries do not enqueue
+      }                                       // Should be OneHot
       val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush
 
       // Write port
