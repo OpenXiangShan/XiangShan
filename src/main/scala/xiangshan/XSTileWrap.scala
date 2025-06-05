@@ -24,35 +24,128 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
+import coupledL2.tl2chi.{AsyncPortIO, CHIAsyncBridgeSource, CHIAsyncBridgeSink, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
 import utils.PowerSwitchBuffer
 
-// This module is used for XSNoCTop for async time domain and divide different
-// voltage domain. Everything in this module should be in the core clock domain
-// and higher voltage domain.
-class XSTileWrap()(implicit p: Parameters) extends LazyModule
-  with HasXSParameter
-  with HasSoCParameter
-{
-  override def shouldBeInlined: Boolean = false
-
+trait HasXSTile { this: BaseXSTileWrap =>
   val tile = LazyModule(new XSTile())
 
   // interrupts sync
   val clintIntNode = IntIdentityNode()
-  val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
   val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
   tile.clint_int_node := IntBuffer(3, cdc = true) := clintIntNode
-  tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
   beuIntNode := IntBuffer() := tile.beu_int_source
+}
 
+trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
+  def tile = wrapper.asInstanceOf[L].tile
+
+  tile.module.io.hartId := io.hartId
+  tile.module.io.reset_vector := io.reset_vector
+  tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
+  tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
+  io.cpu_halt := tile.module.io.cpu_halt
+  io.cpu_crtical_error := tile.module.io.cpu_crtical_error
+  io.hartIsInReset := tile.module.io.hartIsInReset
+  io.traceCoreInterface <> tile.module.io.traceCoreInterface
+  io.debugTopDown <> tile.module.io.debugTopDown
+  tile.module.io.l3Miss := io.l3Miss
+  tile.module.io.nodeID.foreach(_ := io.nodeID.get)
+  io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
+  io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
+
+  // CLINT Async Queue Sink
+  socParams.EnableClintAsyncBridge match {
+    case Some(param) =>
+      val sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
+      sink.io.async <> io.clintTime
+      sink.io.deq.ready := true.B
+      tile.module.io.clintTime.valid := sink.io.deq.valid
+      tile.module.io.clintTime.bits := sink.io.deq.bits
+    case None =>
+      tile.module.io.clintTime := io.clintTime
+  }
+
+  withClockAndReset(clock, reset_sync) {
+    // Modules are reset one by one
+    // reset ----> SYNC --> XSTile
+    val resetChain = Seq(Seq(tile.module))
+    ResetGen(resetChain, reset_sync, !socParams.debugOpts.FPGAPlatform, io.dft_reset)
+  }
+
+  io.pwrdown_ack_n.foreach { _ := DontCare }
+  io.pwrdown_ack_n zip io.pwrdown_req_n foreach { case (ack, req) =>
+    val powerSwitchBuffer = Module(new PowerSwitchBuffer)
+    ack := powerSwitchBuffer.ack
+    powerSwitchBuffer.sleep := req
+  }
+
+  io.pwrdown_req_n.foreach(dontTouch(_))
+  io.pwrdown_ack_n.foreach(dontTouch(_))
+  io.iso_en.foreach(dontTouch(_))
+
+  dontTouch(io.hartId)
+  dontTouch(io.msiInfo)
+}
+
+trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
+  this: BaseXSTileWrap#BaseXSTileWrapImp =>
+
+  val io_chi = IO(socParams.EnableCHIAsyncBridge match {
+    case Some(param) => new AsyncPortIO(param)
+    case None => new PortIO
+  }).suggestName("io_chi")
+
+  // CHI Async Queue Source
+  socParams.EnableCHIAsyncBridge match {
+    case Some(param) =>
+      val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
+      source.io.enq <> tile.module.io.chi.get
+      io_chi <> source.io.async
+    case None =>
+      require(socParams.enableCHI)
+      io_chi <> tile.module.io.chi.get
+  }
+
+  override def makeIOs()(implicit valName: ValName): Bundle = {
+    val ios = IO(new PortIO).suggestName(valName.name)
+
+    socParams.EnableCHIAsyncBridge match {
+      case None        => io_chi <> ios
+      case Some(param) => {
+        val sink = Module(new CHIAsyncBridgeSink(param))
+        io_chi <> sink.io.async
+        sink.io.deq <> ios
+      }
+    }
+
+    ios
+  }
+}
+
+trait HasDebugIntPort { this: BaseXSTileWrap =>
+  val debugIntNode = IntIdentityNode()
+  tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
+}
+
+trait HasDebugPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
+  val io_hartResetReq = IO(Input(Bool()))
+  hartResetReq := io_hartResetReq
+}
+
+trait HasMSIPortImp { this: BaseXSTileWrap#BaseXSTileWrapImp with HasXSTileImp[HasXSTile] =>
+  tile.module.io.msiInfo := io.msiInfo
+  io.msiAck := tile.module.io.msiAck
+}
+
+trait HasSeperateTLBus { this: BaseXSTileWrap =>
   // seperate TL bus
   println(s"SeperateTLBus = $SeperateTLBus")
   println(s"EnableSeperateTLAsync = $EnableSeperateTLAsync")
@@ -62,8 +155,26 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   // synchronous source node
   val tlSyncSourceOpt = Option.when(SeperateTLBus && !EnableSeperateTLAsync)(TLTempNode())
   tlSyncSourceOpt.foreach(_ := tile.sep_tl_opt.get)
+}
 
-  class XSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+trait HasSeperateTLBusImp[+L <: HasSeperateTLBus] { this: BaseXSTileWrap#BaseXSTileWrapImp =>
+    // Seperate DebugModule TL Async Queue Source
+    wrapper.asInstanceOf[L].tlAsyncSourceOpt.foreach { tl =>
+      tl.module.clock := clock
+      tl.module.reset := soc_reset_sync
+    }
+}
+
+class BaseXSTileWrap()(implicit p: Parameters) extends LazyModule
+  with HasXSParameter
+  with HasSoCParameter
+  with HasXSTile
+{
+  override def shouldBeInlined: Boolean = false
+
+  class BaseXSTileWrapImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+    def socParams = wrapper.asInstanceOf[HasSoCParameter]
+
     val clock = IO(Input(Clock()))
     val reset = IO(Input(AsyncReset()))
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
@@ -75,7 +186,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
-      val hartResetReq = Input(Bool())
       val hartIsInReset = Output(Bool())
       val traceCoreInterface = new TraceCoreInterface
       val debugTopDown = new Bundle {
@@ -83,10 +193,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
-        case Some(param) => new AsyncPortIO(param)
-        case None => new PortIO
-      }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = EnableClintAsyncBridge match {
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
@@ -101,76 +207,32 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val iso_en = Option.when(EnablePowerDown) (Input (Bool()))
     })
 
-    val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
+    def makeIOs()(implicit valName: ValName): Bundle = { IO(new Bundle {}) }
+
+    val hartResetReq = WireDefault(Bool(), false.B)
+    val reset_sync = withClockAndReset(clock, (reset.asBool || hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
     val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(io.dft_reset))
 
     // override LazyRawModuleImp's clock and reset
     childClock := clock
     childReset := reset_sync
-
-    tile.module.io.hartId := io.hartId
-    tile.module.io.msiInfo := io.msiInfo
-    tile.module.io.reset_vector := io.reset_vector
-    tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
-    tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
-    io.cpu_halt := tile.module.io.cpu_halt
-    io.cpu_crtical_error := tile.module.io.cpu_crtical_error
-    io.msiAck := tile.module.io.msiAck
-    io.hartIsInReset := tile.module.io.hartIsInReset
-    io.traceCoreInterface <> tile.module.io.traceCoreInterface
-    io.debugTopDown <> tile.module.io.debugTopDown
-    tile.module.io.l3Miss := io.l3Miss
-    tile.module.io.nodeID.foreach(_ := io.nodeID.get)
-    io.l2_flush_en.foreach { _ := tile.module.io.l2_flush_en.getOrElse(false.B) }
-    io.l2_flush_done.foreach { _ := tile.module.io.l2_flush_done.getOrElse(false.B) }
-    io.pwrdown_ack_n.foreach { _ := DontCare }
-    io.pwrdown_ack_n zip io.pwrdown_req_n foreach { case (ack, req) =>
-      val powerSwitchBuffer = Module(new PowerSwitchBuffer)
-      ack := powerSwitchBuffer.ack
-      powerSwitchBuffer.sleep := req
-    }
-
-    // CLINT Async Queue Sink
-    EnableClintAsyncBridge match {
-      case Some(param) =>
-        val sink = withClockAndReset(clock, soc_reset_sync)(Module(new AsyncQueueSink(UInt(64.W), param)))
-        sink.io.async <> io.clintTime
-        sink.io.deq.ready := true.B
-        tile.module.io.clintTime.valid := sink.io.deq.valid
-        tile.module.io.clintTime.bits := sink.io.deq.bits
-      case None =>
-        tile.module.io.clintTime := io.clintTime
-    }
-
-    // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
-        source.io.enq <> tile.module.io.chi.get
-        io.chi <> source.io.async
-      case None =>
-        require(enableCHI)
-        io.chi <> tile.module.io.chi.get
-    }
-
-    // Seperate DebugModule TL Async Queue Source
-    if (SeperateTLBus && EnableSeperateTLAsync) {
-      tlAsyncSourceOpt.get.module.clock := clock
-      tlAsyncSourceOpt.get.module.reset := soc_reset_sync
-    }
-
-    withClockAndReset(clock, reset_sync) {
-      // Modules are reset one by one
-      // reset ----> SYNC --> XSTile
-      val resetChain = Seq(Seq(tile.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform, io.dft_reset)
-    }
-    dontTouch(io.hartId)
-    dontTouch(io.msiInfo)
-    io.pwrdown_req_n.foreach(dontTouch(_))
-    io.pwrdown_ack_n.foreach(dontTouch(_))
-    io.iso_en.foreach(dontTouch(_))
   }
-  lazy val module = new XSTileWrapImp(this)
+  lazy val module: BaseXSTileWrapImp = new BaseXSTileWrapImp(this)
+}
+
+// This module is used for XSNoCTop for async time domain and divide different
+// voltage domain. Everything in this module should be in the core clock domain
+// and higher voltage domain.
+class XSTileWrap()(implicit p: Parameters) extends BaseXSTileWrap
+  with HasDebugIntPort
+  with HasSeperateTLBus
+{
+  class XSTileWrapImp(wrapper: LazyModule) extends BaseXSTileWrapImp(wrapper)
+                                           with HasXSTileCHIImp[XSTileWrap]
+                                           with HasSeperateTLBusImp[XSTileWrap]
+                                           with HasDebugPortImp
+                                           with HasMSIPortImp {
+  }
+  override lazy val module : BaseXSTileWrapImp = new XSTileWrapImp(this)
 }
