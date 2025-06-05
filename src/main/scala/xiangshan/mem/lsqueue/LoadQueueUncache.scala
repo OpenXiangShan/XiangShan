@@ -227,7 +227,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   io.exception.valid := writeback
   io.exception.bits := req
-  io.exception.bits.uop.exceptionVec(loadAccessFault) := nderr
+  io.exception.bits.uop.exceptionVec(hardwareError) := nderr
 
   /* debug log */
   XSDebug(io.uncache.req.fire,
