@@ -107,6 +107,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     val sIDLE :: sL2FLUSH :: sWAITWFI :: sEXITCO :: sWAITQ :: sQREQ :: sPOFFREQ :: Nil = Enum(7)
     val lpState = withClockAndReset(clock, cpuReset_sync) {RegInit(sIDLE)}
     val cpu_no_op = withClockAndReset(clock, cpuReset_sync) {RegInit(false.B)}
+    val sync_chi_syscoack = withClockAndReset(clock, cpuReset_sync) {AsyncResetSynchronizerShiftReg(io_chi.syscoack, 3, 0)}
     val l2_flush_en = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg(core.io.l2_flush_en.getOrElse(false.B), 3, 0)
     }
@@ -117,7 +118,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
       AsyncResetSynchronizerShiftReg(core.io.cpu_halt, 3, 0)
     }
     val exitco = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !io_chi.syscoack),3, 0)}
+      AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !sync_chi_syscoack),3, 0)}
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
     cpu_no_op := lpState === sPOFFREQ
