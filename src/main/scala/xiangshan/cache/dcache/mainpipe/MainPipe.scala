@@ -183,8 +183,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val btot_ways_for_set = Input(UInt(nWays.W))
 
     // writeback addr to be replaced
-    val replace_addr = ValidIO(UInt(PAddrBits.W))
-    val replace_block = Input(Bool())
+    val replace = new MissQueueBlockIO
 
     // sms prefetch
     val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
@@ -466,7 +465,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   )
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
-  val s2_replace_block = io.replace_block && io.replace_addr.valid
+  val s2_replace_block = io.replace.block && io.replace.req.valid
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
   val s2_can_go_to_mq_evict_fail = s2_replace_block // dcache and miss queue both occupy the same set, (BtoT scheme)
@@ -944,8 +943,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
   XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
 
-  io.replace_addr.valid := s2_valid && s2_need_eviction && !s2_refill_tag_eq_way
-  io.replace_addr.bits  := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
+  io.replace.req.valid := s2_valid && s2_need_eviction && !s2_refill_tag_eq_way
+  io.replace.req.bits.addr := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
+  io.replace.req.bits.vaddr := s2_req.vaddr
 
   io.evict_set := addr_to_dcache_set(s2_req.vaddr) // only use set index
 
