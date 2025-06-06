@@ -193,23 +193,28 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   val s0_stall = Wire(Bool()) // For some reason s0 stalled, usually FTQ Full
 
+  // s(n)_fire means stage(n) data can enter stage(n+1)
   val s0_fire = Wire(Bool())
   val s1_fire = Wire(Bool())
   val s2_fire = Wire(Bool())
   val s3_fire = Wire(Bool())
 
+  // s(n)_ready means stage(n) is ready to receive data from stage(n-1)
   val s1_ready = Wire(Bool())
   val s2_ready = Wire(Bool())
   val s3_ready = Wire(Bool())
 
+  // s(n)_flush means stage(n) data should be flushed
   val s1_flush = Wire(Bool())
   val s2_flush = Wire(Bool())
   val s3_flush = Wire(Bool())
 
+  // s(n)_valid means stage(n) data is valid
   val s1_valid = RegInit(false.B)
   val s2_valid = RegInit(false.B)
   val s3_valid = RegInit(false.B)
 
+  // s(n)_override means stage(n) data will override stage(n-1) data
   val s2_override = WireDefault(false.B)
   val s3_override = WireDefault(false.B)
 
@@ -299,16 +304,16 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   ittage.io.in.folded_hist    := s0_folded_gh
   ittage.io.in.s1_folded_hist := s1_folded_gh
 
-  val redirect_req = io.fromFtq.redirect
-  val do_redirect  = RegNextWithEnable(redirect_req) // TODO: reduce one cycle delay
+  val redirect = io.fromFtq.redirect
+  ras.io.in.redirect := redirect
 
-  ras.io.in.redirect := do_redirect
-
-  s3_flush := redirect_req.valid // flush when redirect comes
+  s3_flush := redirect.valid // flush when redirect comes
   s2_flush := s3_flush || s3_override
   s1_flush := s2_flush || s2_override
 
-  s1_ready := s1_fire || !s1_valid
+  // When s1_flush is asserted, s1 data becomes invalid and can be overwritten by new data.
+  // So we can directly assert s1_ready.
+  s1_ready := s1_fire || !s1_valid || s1_flush
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
@@ -319,8 +324,10 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   s2_fire := s2_valid && s3_ready
   s3_fire := s3_valid
 
-  when(redirect_req.valid)(s1_valid := false.B)
-    .elsewhen(s0_fire)(s1_valid := true.B)
+  // When both s0_fire and s1_flush are asserted, we should prioritize s0_fire.
+  // Because when s0_fire is asserted, s1 data will be overwritten by new data,
+  // making explicit s1_valid de-assertion unnecessary.
+  when(s0_fire)(s1_valid := true.B)
     .elsewhen(s1_flush)(s1_valid := false.B)
     .elsewhen(s1_fire)(s1_valid := false.B)
 
@@ -390,7 +397,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   io.toFtq.resp.bits  := bpuResp
 
   // s0_stall should be exclusive with any other PC source
-  s0_stall := !(s1_valid || s2_override || s3_override || do_redirect.valid)
+  s0_stall := !(s1_valid || s2_override || s3_override || redirect.valid)
 
   // Power-on reset
   val powerOnResetState = RegInit(true.B)
@@ -695,7 +702,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     b.register(w.reduce(_ || _), s3_ghv_wdatas(i), Some(s"s3_new_bit_$i"), 3)
   }
 
-  val redirectBits = do_redirect.bits
+  val redirectBits = redirect.bits
 
   // Redirect logic
   val shift       = redirectBits.cfiUpdate.shift
@@ -733,7 +740,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   thisAheadFhOb.read(ghv, oldPtr)
   val redirect_ghv_wens = (0 until HistoryLength).map(n =>
     (0 until numBr).map(b =>
-      oldPtr.value === (CGHPtr(false.B, n.U) + b.U).value && shouldShiftVec(b) && do_redirect.valid
+      oldPtr.value === (CGHPtr(false.B, n.U) + b.U).value && shouldShiftVec(b) && redirect.valid
     )
   )
   val redirect_ghv_wdatas = (0 until HistoryLength).map(n =>
@@ -750,7 +757,7 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
         updated_ghist(i) := taken && addIntoHist && (i == 0).B
       }
     }
-    when(do_redirect.valid) {
+    when(redirect.valid) {
       s0_ghist := updated_ghist.asUInt
     }
   }
@@ -803,11 +810,11 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     }
   }
 
-  npcGen.register(do_redirect.valid, PrunedAddrInit(do_redirect.bits.cfiUpdate.target), Some("redirect_target"), 2)
-  foldedGhGen.register(do_redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
-  ghistPtrGen.register(do_redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
-  lastBrNumOHGen.register(do_redirect.valid, thisBrNumOH, Some("redirect_BrNumOH"), 2)
-  aheadFhObGen.register(do_redirect.valid, thisAheadFhOb, Some("redirect_AFHOB"), 2)
+  npcGen.register(redirect.valid, PrunedAddrInit(redirect.bits.cfiUpdate.target), Some("redirect_target"), 2)
+  foldedGhGen.register(redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
+  ghistPtrGen.register(redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
+  lastBrNumOHGen.register(redirect.valid, thisBrNumOH, Some("redirect_BrNumOH"), 2)
+  aheadFhObGen.register(redirect.valid, thisAheadFhOb, Some("redirect_AFHOB"), 2)
 
   ghvBitWriteGens.zip(redirect_ghv_wens).zipWithIndex.map { case ((b, w), i) =>
     b.register(w.reduce(_ || _), redirect_ghv_wdatas(i), Some(s"redirect_new_bit_$i"), 2)
@@ -871,16 +878,16 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   }
 
   // TODO: signals for memVio and other Redirects
-  controlRedirectBubble := do_redirect.valid && do_redirect.bits.ControlRedirectBubble
-  ControlBTBMissBubble  := do_redirect.bits.ControlBTBMissBubble
-  TAGEMissBubble        := do_redirect.bits.TAGEMissBubble
-  SCMissBubble          := do_redirect.bits.SCMissBubble
-  ITTAGEMissBubble      := do_redirect.bits.ITTAGEMissBubble
-  RASMissBubble         := do_redirect.bits.RASMissBubble
+  controlRedirectBubble := redirect.valid && redirect.bits.ControlRedirectBubble
+  ControlBTBMissBubble  := redirect.bits.ControlBTBMissBubble
+  TAGEMissBubble        := redirect.bits.TAGEMissBubble
+  SCMissBubble          := redirect.bits.SCMissBubble
+  ITTAGEMissBubble      := redirect.bits.ITTAGEMissBubble
+  RASMissBubble         := redirect.bits.RASMissBubble
 
-  memVioRedirectBubble := do_redirect.valid && do_redirect.bits.MemVioRedirectBubble
-  otherRedirectBubble  := do_redirect.valid && do_redirect.bits.OtherRedirectBubble
-  btbMissBubble        := do_redirect.valid && do_redirect.bits.BTBMissBubble
+  memVioRedirectBubble := redirect.valid && redirect.bits.MemVioRedirectBubble
+  otherRedirectBubble  := redirect.valid && redirect.bits.OtherRedirectBubble
+  btbMissBubble        := redirect.valid && redirect.bits.BTBMissBubble
   overrideBubble(0)    := s2_override
   overrideBubble(1)    := s3_override
   ftqUpdateBubble(0)   := !s1_predictorsReady
@@ -953,15 +960,15 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   // ========================== Debug ========================= //
   XSError(
-    isBefore(redirectBits.cfiUpdate.histPtr, s3_ghist_ptr) && do_redirect.valid,
+    isBefore(redirectBits.cfiUpdate.histPtr, s3_ghist_ptr) && redirect.valid,
     p"s3_ghist_ptr ${s3_ghist_ptr} exceeds redirect histPtr ${redirectBits.cfiUpdate.histPtr}\n"
   )
   XSError(
-    isBefore(redirectBits.cfiUpdate.histPtr, s2_ghist_ptr) && do_redirect.valid,
+    isBefore(redirectBits.cfiUpdate.histPtr, s2_ghist_ptr) && redirect.valid,
     p"s2_ghist_ptr ${s2_ghist_ptr} exceeds redirect histPtr ${redirectBits.cfiUpdate.histPtr}\n"
   )
   XSError(
-    isBefore(redirectBits.cfiUpdate.histPtr, s1_ghist_ptr) && do_redirect.valid,
+    isBefore(redirectBits.cfiUpdate.histPtr, s1_ghist_ptr) && redirect.valid,
     p"s1_ghist_ptr ${s1_ghist_ptr} exceeds redirect histPtr ${redirectBits.cfiUpdate.histPtr}\n"
   )
 
