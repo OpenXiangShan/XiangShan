@@ -48,7 +48,7 @@ class FlagMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
   val flag = Bool()
 }
 
-class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = false)(implicit p: Parameters) extends DCacheModule {
+class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, new Meta)))
