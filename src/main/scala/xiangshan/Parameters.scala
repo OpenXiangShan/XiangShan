@@ -579,6 +579,7 @@ trait HasXSParameter {
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
   
   /** prefetch config */
+  def prefetcherSeq = coreParams.prefetcher
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
 

@@ -16,22 +16,23 @@ import xiangshan.mem.trace._
 import freechips.rocketchip.diplomacy.BufferParams.default
 import utility.mbist.{MbistInterface, MbistPipeline}
 
-trait PrefetcherParams
+trait PrefetcherParams {
+  def TRAIN_FILTER_SIZE = 6
+  def PREFETCH_FILTER_SIZE = 16
+}
 
 trait HasPrefetcherParams extends HasXSParameter with PrefetcherParams{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
 
+  val PF_NUM = prefetcherSeq.size
   // TODO: change fixed number to option
-  val PF_NUM = 2
   val StrideIdx = 0
   val SMSIdx = 1
 
-  val L1_PF_SOURCE_NUM = 1
+  // You can set the unified interface to N, and the invalid that you don't need can be set to 0
   val L1_PF_REG_CNT = 1
-  val L2_PF_SOURCE_NUM = 2
   val L2_PF_REG_CNT = 2
-  val L3_PF_SOURCE_NUM = 1
   val L3_PF_REG_CNT = 4
 }
 
@@ -108,13 +109,39 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val s3_storePcVec = (0 until ST_TRAIN_WIDTH).map { i =>
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
+  /* prefetch arbiter */
+  val l1_pf_arb = Module(new RRArbiterInit(new L1PrefetchReq, PF_NUM))
+  val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
+  val l2_pf_arb = Module(new RRArbiterInit(new L2PrefetchReq, PF_NUM))
+  val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
+  val l3_pf_arb = Module(new RRArbiterInit(new L3PrefetchReq, PF_NUM))
+
+  // init
+  io.tlb_req.foreach{ x =>
+    x.req.valid := false.B
+    x.req.bits := DontCare
+    x.resp.ready := true.B
+  }
+  l1_pf_arb.io.in.foreach{ x =>
+    x.valid := false.B
+    x.bits := DontCare
+  }
+  l2_pf_arb.io.in.foreach{ x =>
+    x.valid := false.B
+    x.bits := DontCare
+  }
+  l3_pf_arb.io.in.foreach{ x =>
+    x.valid := false.B
+    x.bits := DontCare
+  }
+
 
   /** Prefetchor
     * L1: Stride
     * L2: Stride, SMS
     * L3: Stride
     */
-  val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher())) else None
+val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
     val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
@@ -126,7 +153,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io_act_stride := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_stride, 2, Some(30.U))
     pf.io_stride_en := false.B
     pf.io_dcache_evict <> io.fromDCache.sms_agt_evict_req
-    pf.io.l1_req.ready := false.B
     val mbistSmsPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeSms", hasMbist)
 
     for (i <- 0 until LD_TRAIN_WIDTH) {
@@ -159,6 +185,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     io.tlb_req(SMSIdx) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(SMSIdx)
+
+    l2_pf_arb.io.in(SMSIdx) <> pf.io.l2_req
+    pf.io.l1_req.ready := false.B
+    pf.io.l3_req.ready := false.B
   })
 
   val strideOpt: Option[L1Prefetcher] = if(hasStreamStride) Some(Module(new L1Prefetcher())) else None
@@ -194,69 +224,30 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     io.tlb_req(StrideIdx) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(StrideIdx)
+
+    l1_pf_arb.io.in(StrideIdx) <> pf.io.l1_req
+    l2_pf_arb.io.in(StrideIdx) <> pf.io.l2_req
+    l3_pf_arb.io.in(StrideIdx) <> pf.io.l3_req
   })
 
   /**
    * load prefetch to l1 Dcache
    * stride
    */
-  val l1_pf_arb = Module(new RRArbiterInit(new L1PrefetchReq, L1_PF_SOURCE_NUM))
-  if(hasStreamStride) {
-    l1_pf_arb.io.in(0) <> strideOpt.get.io.l1_req
-  } else {
-    l1_pf_arb.io.in(0).valid := false.B
-    l1_pf_arb.io.in(0).bits := DontCare
-  }
   io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, pipe = false, name = Some("pf_to_ldu_reg"))
 
   /** load/store prefetch to l2 cache
    *  stride, sms
    */
-  val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
-  val l2_pf_arb = Module(new RRArbiterInit(new L2PrefetchReq, L2_PF_SOURCE_NUM))
-  if(hasStreamStride) {
-    l2_pf_arb.io.in(0).valid := strideOpt.get.io.l2_req.valid
-    l2_pf_arb.io.in(0).bits := strideOpt.get.io.l2_req.bits
-  } else {
-    l2_pf_arb.io.in(0).valid := false.B
-    l2_pf_arb.io.in(0).bits := DontCare
-  }
-  if(hasSMS) {
-    l2_pf_arb.io.in(1).valid := smsOpt.get.io.l2_req.valid
-    l2_pf_arb.io.in(1).bits := smsOpt.get.io.l2_req.bits
-  } else {
-    l2_pf_arb.io.in(1).valid := false.B
-    l2_pf_arb.io.in(1).bits := DontCare
-  }
   l2_pf_req <> Pipeline(in = l2_pf_arb.io.out, depth = L2_PF_REG_CNT, pipe = false, name = Some("pf_to_l2cache_reg"))
   l2_pf_req.ready := true.B
 
   // load/store prefetch to l3 cache
-  val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
-  val l3_pf_arb = Module(new RRArbiterInit(new L3PrefetchReq, L3_PF_SOURCE_NUM))
-  if(hasStreamStride) {
-    l3_pf_arb.io.in(0).valid := strideOpt.get.io.l3_req.valid
-    l3_pf_arb.io.in(0).bits := strideOpt.get.io.l3_req.bits
-  } else {
-    l3_pf_arb.io.in(0).valid := false.B
-    l3_pf_arb.io.in(0).bits := DontCare
-  }
   l3_pf_req <> Pipeline(in = l3_pf_arb.io.out, depth = L3_PF_REG_CNT, pipe = false, name = Some("pf_to_l3cache_reg"))
   l3_pf_req.ready := true.B
 
   io.fromDCache.sms_agt_evict_req.ready := false.B
-  if (!hasSMS) {
-    io.tlb_req(SMSIdx).req.valid := false.B
-    io.tlb_req(SMSIdx).req_kill := false.B
-    io.tlb_req(SMSIdx).req.bits := DontCare
-    io.tlb_req(SMSIdx).resp.ready := true.B
-  }
-  if (!hasStreamStride) {
-    io.tlb_req(StrideIdx).req.valid := false.B
-    io.tlb_req(StrideIdx).req_kill := false.B
-    io.tlb_req(StrideIdx).req.bits := DontCare
-    io.tlb_req(StrideIdx).resp.ready := true.B
-  }
+
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
@@ -283,6 +274,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l3_trace_table.log(l3_trace, l3_pf_req.valid, "L3StreamStride", clock, reset)
   }.otherwise {
     l3_trace_table.log(l3_trace, l3_pf_req.valid, "L3Unknown", clock, reset)
+  }
+
+  val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)
+  arb_seq.zipWithIndex.foreach { case (arb, i) =>
+    XSPerfAccumulate(s"Stride_fire_l${i+1}", arb.io.in(StrideIdx).fire)
+    XSPerfAccumulate(s"Stride_block_l${i+1}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
+    XSPerfAccumulate(s"SMS_fire_l${i+1}", arb.io.in(SMSIdx).fire)
+    XSPerfAccumulate(s"SMS_block_l${i+1}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
   }
 
 }

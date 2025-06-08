@@ -68,8 +68,8 @@ class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())
-  val l2_req = ValidIO(new L2PrefetchReq())
-  val l3_req = ValidIO(new L3PrefetchReq()) // TODO: l3 pf source
+  val l2_req = DecoupledIO(new L2PrefetchReq())
+  val l3_req = DecoupledIO(new L3PrefetchReq())
   val enable = Input(Bool())
 }
 
