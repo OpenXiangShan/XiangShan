@@ -477,7 +477,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
                                                 s2_pmp.ld && s2_isCbo_noZero || // cmo need read permission but produce store exception
                                                 ((s2_in.isvec || s2_isCbo) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
                                                 ) && s2_vecActive
-  s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_actually_uncache && (s2_in.isMisalign || s2_in.isFrmMisAlignBuf) && !s2_un_misalign_exception
+  s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_actually_uncache && !s2_in.isvec && (s2_in.isMisalign || s2_in.isFrmMisAlignBuf) && !s2_un_misalign_exception
   s2_out.uop.vpu.vstart     := s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew
 
   // kill dcache write intent request when mmio or exception

@@ -479,8 +479,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
       exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
-      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
-      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st || Pbmt.isUncache(io.dtlb.resp.bits.pbmt.head)
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld || Pbmt.isUncache(io.dtlb.resp.bits.pbmt.head)
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
         instMicroOp.exceptionVaddr    := io.dtlb.resp.bits.fullva
@@ -515,8 +515,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     notCross16ByteWire   := highAddress(4) === vaddr(4)
     isMisalignWire       := !addr_aligned && !isMisalignReg
     canHandleMisalign    := !pmp.mmio && !triggerBreakpoint && !triggerDebugMode
-    exceptionVec(loadAddrMisaligned)  := isMisalignWire && isVSegLoad  && canTriggerException && pmp.mmio
-    exceptionVec(storeAddrMisaligned) := isMisalignWire && isVSegStore && canTriggerException && pmp.mmio
 
     exception_va  := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
                      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) ||
