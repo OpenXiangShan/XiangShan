@@ -15,7 +15,9 @@ import xiangshan.mem.L1PrefetchSource
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 
-case class StreamStrideParams() extends PrefetcherParams{}
+case class StreamStrideParams() extends PrefetcherParams{
+  override def tlbPlace = TLBPlace.dtlb_ld
+}
 
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related

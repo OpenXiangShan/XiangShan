@@ -580,6 +580,7 @@ trait HasXSParameter {
   
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
+  def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
 

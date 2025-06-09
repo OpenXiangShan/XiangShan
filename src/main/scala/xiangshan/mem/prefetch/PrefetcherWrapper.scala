@@ -16,7 +16,17 @@ import xiangshan.mem.trace._
 import freechips.rocketchip.diplomacy.BufferParams.default
 import utility.mbist.{MbistInterface, MbistPipeline}
 
+object TLBPlace extends Enumeration{
+  val none = Value("none")
+  val itlb = Value("itlb")
+  val dtlb_ld = Value("dtlb_ld")
+  val dtlb_st = Value("dtlb_st")
+  val dtlb_pf = Value("dtlb_pf")
+  val l2tlb = Value("l2tlb")
+}
+
 trait PrefetcherParams {
+  def tlbPlace = TLBPlace.dtlb_pf
   def TRAIN_FILTER_SIZE = 6
   def PREFETCH_FILTER_SIZE = 16
 }
@@ -25,7 +35,7 @@ trait HasPrefetcherParams extends HasXSParameter with PrefetcherParams{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
 
-  val PF_NUM = prefetcherSeq.size
+  val PF_NUM = prefetcherNum
   // TODO: change fixed number to option
   val StrideIdx = 0
   val SMSIdx = 1
@@ -119,6 +129,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   // init
   io.tlb_req.foreach{ x =>
     x.req.valid := false.B
+    x.req_kill := false.B
     x.req.bits := DontCare
     x.resp.ready := true.B
   }
@@ -278,10 +289,14 @@ val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher()))
 
   val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)
   arb_seq.zipWithIndex.foreach { case (arb, i) =>
-    XSPerfAccumulate(s"Stride_fire_l${i+1}", arb.io.in(StrideIdx).fire)
-    XSPerfAccumulate(s"Stride_block_l${i+1}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
-    XSPerfAccumulate(s"SMS_fire_l${i+1}", arb.io.in(SMSIdx).fire)
-    XSPerfAccumulate(s"SMS_block_l${i+1}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
+    if(hasStreamStride){
+      XSPerfAccumulate(s"Stride_fire_l${i+1}", arb.io.in(StrideIdx).fire)
+      XSPerfAccumulate(s"Stride_block_l${i+1}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
+    }
+    if(hasSMS){
+      XSPerfAccumulate(s"SMS_fire_l${i+1}", arb.io.in(SMSIdx).fire)
+      XSPerfAccumulate(s"SMS_block_l${i+1}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
+    }
   }
 
 }

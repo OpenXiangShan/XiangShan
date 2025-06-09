@@ -520,20 +520,30 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // dtlb
   val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
   val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(prefetcherNum, 2, pftlbParams))
   val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
   val dtlb_st = Seq(dtlb_st_tlb_st.io)
   val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, 2) // (load + hyu + stream pf, store, sms+l2bop)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, prefetcherNum) // (load + hyu + stream pf, store, sms+l2bop)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
+  // TODO lyq: The parameters above are still ugly
+  // Fixed Indexes
   val StrideDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
-  val SmsDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
-  val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
+  val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  // Changing Indexes
+  val SmsDTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
+  var pf2tlbIndexMap = Seq(StrideDTLBPortIndex)
+  if(hasSMS){
+    pf2tlbIndexMap = Seq(StrideDTLBPortIndex, SmsDTLBPortIndex)
+  }
+  println(f"Prefetcher:")
+  println(f"  prefetcherNum = ${prefetcherNum}%d")
+  println(f"  pf2tlbIndexMap = ${pf2tlbIndexMap}")
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -660,11 +670,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
-  // fixme lyq: 0, 1 use parameters
-  dtlb_reqs(StrideDTLBPortIndex) <> prefetcher.io.tlb_req(0)
-  dtlb_reqs(SmsDTLBPortIndex) <> prefetcher.io.tlb_req(1)
-  prefetcher.io.pmp_resp(0) := pmp_check(StrideDTLBPortIndex).resp
-  prefetcher.io.pmp_resp(1) := pmp_check(SmsDTLBPortIndex).resp
+  pf2tlbIndexMap.zipWithIndex.foreach{ case (k, i) =>
+    dtlb_reqs(k) <> prefetcher.io.tlb_req(i)
+    prefetcher.io.pmp_resp(i) := pmp_check(k).resp
+  }
   l1_pf_req <> prefetcher.io.l1_pf_to_l1
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
