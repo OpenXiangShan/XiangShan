@@ -37,6 +37,12 @@ import freechips.rocketchip.devices.debug._
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm and dtm
 
+// systemjtagio will be defined the io of xiangshan top, add modify since reset is abstract define in top,
+//compile will be report error if it is defined reset type.
+class SystemJTAGTopIO extends SystemJTAGIO {
+  override val reset = Input(AsyncReset())
+
+}
 
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 

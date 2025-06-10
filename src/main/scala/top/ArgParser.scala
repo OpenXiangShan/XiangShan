@@ -153,6 +153,18 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case coupledL2.tl2chi.NonSecureKey => true
           }), tail)
+        case "--dm-in-top" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(UseDMInTop = true)
+          }), tail)
+        case "--chiasync-from-cj" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(CHIAsyncFromCJ = true)
+          }), tail)
+        case "--clintasync-from-cj" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(ClintAsyncFromCJ = true)
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)

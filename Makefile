@@ -99,6 +99,21 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
+# embed debug module in top
+ifeq ($(DM_IN_TOP),1)
+COMMON_EXTRA_ARGS += --dm-in-top
+endif
+
+# chiasync bridge from customer j
+ifeq ($(CHIASYNC_FROM_CJ),1)
+COMMON_EXTRA_ARGS += --chiasync-from-cj
+endif
+
+# clintasync bridge from customer spacemit
+ifeq ($(CLINTASYNC_FROM_CJ),1)
+COMMON_EXTRA_ARGS += --clintasync-from-cj
+endif
+
 # enable or disable sram ctl maunally
 ifeq ($(SRAM_WITH_CTL),1)
 COMMON_EXTRA_ARGS += --sram-with-ctl

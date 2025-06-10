@@ -52,7 +52,9 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
     baseAddress = BigInt(0x38020000),
     nScratch = 2,
     crossingHasSafeReset = false,
-    hasHartResets = true
+    hasHartResets = true,
+    nHaltGroups = 15,
+    nExtTriggers = 4,
   ))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => log2Up(n) max 6

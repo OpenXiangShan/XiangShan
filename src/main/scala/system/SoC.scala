@@ -115,7 +115,10 @@ case class SoCParameters
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   SeperateTLAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = false)),
   WFIClockGate: Boolean = false,
-  EnablePowerDown: Boolean = false
+  EnablePowerDown: Boolean = false,
+  UseDMInTop: Boolean = false,
+  CHIAsyncFromCJ: Boolean = false, //CJ- customer ..
+  ClintAsyncFromCJ: Boolean = false 
 ){
   require(
     L3CacheParamsOpt.isDefined ^ OpenLLCParamsOpt.isDefined || L3CacheParamsOpt.isEmpty && OpenLLCParamsOpt.isEmpty,
@@ -138,6 +141,7 @@ trait HasSoCParameter {
   val tiles = p(XSTileKey)
   val enableCHI = p(EnableCHI)
   val issue = p(CHIIssue)
+  val dmOpt = p(DebugModuleKey)
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
@@ -178,7 +182,9 @@ trait HasSoCParameter {
 
   // seperate TL bus
   val EnableSeperateTLAsync = SeperateTLAsyncBridge.isDefined
-
+  val UseDMInTop = SeperateTLBus & soc.UseDMInTop
+  val CHIAsyncFromCJ = soc.CHIAsyncFromCJ
+  val ClintAsyncFromCJ = soc.ClintAsyncFromCJ
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
 
