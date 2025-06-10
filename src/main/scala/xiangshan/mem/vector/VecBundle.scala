@@ -265,6 +265,7 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
+  val csrCtrl             = Flipped(new CustomCSRCtrlIO)
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
   val vecDifftestInfo     = Decoupled(new ToSbufferDifftestInfoBundle) // to sbuffer

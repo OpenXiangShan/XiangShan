@@ -311,8 +311,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-
-        stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
+        when(io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable)) {
+          stateNext := s_finish
+        }.otherwise {
+          stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
+        }
       }
     }.otherwise{
       stateNext := s_cache_resp
@@ -585,6 +588,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
 
+  when(state === s_cache_resp && io.rdcache.resp.fire && !io.rdcache.resp.bits.miss && !io.rdcache.s2_bank_conflict) {
+    exceptionVec(hardwareError) := io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable)
+    exception_pa := exceptionVec(hardwareError)
+    instMicroOp.exception_pa := exception_pa
+  }
 
   /**
    * merge data for load
