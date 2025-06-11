@@ -537,6 +537,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
   val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  println(f"TLB Size:")
+  println(f"  size = $DTlbSize = ${TlbSubSizeVec}")
+  println(f"TLB Index Vec:")
+  println(f"  TlbStartVec = ${TlbStartVec}")
+  println(f"  TlbEndVec = ${TlbEndVec}")
   println(f"TLB for Prefetcher:")
   prefetcherSeq zip pf2tlbIndexMap foreach { case (pf, idx) =>
     println(f"  TLB #$idx%-2d => ${pf.name}")
@@ -571,7 +576,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   } else {
     // TODO: there will be bugs in TlbReplace when outReplace enable, since the order of Hyu is not right.
     if (ldtlbParams.outReplace) {
-      val replace_ld = Module(new TlbReplace(LduCnt + 1, ldtlbParams))
+      val replace_ld = Module(new TlbReplace(LduCnt + PfNumInDtlbLD, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (hytlbParams.outReplace) {
@@ -626,9 +631,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_st_idx), TlbEndVec(dtlb_st_idx))).orR)
     dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(TlbStartVec(dtlb_pf_idx), TlbEndVec(dtlb_pf_idx))).orR)
   }
-  dtlb_ld.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.take(LduCnt + HyuCnt + 1)).orR)
-  dtlb_st.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(LduCnt + HyuCnt + 1, LduCnt + HyuCnt + 1 + StaCnt)).orR)
-  dtlb_prefetch.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR)
+  dtlb_ld.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(TlbStartVec(dtlb_ld_idx), TlbEndVec(dtlb_ld_idx))).orR)
+  dtlb_st.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(TlbStartVec(dtlb_st_idx), TlbEndVec(dtlb_st_idx))).orR)
+  dtlb_prefetch.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(TlbStartVec(dtlb_pf_idx), TlbEndVec(dtlb_pf_idx))).orR)
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
   val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
@@ -1139,7 +1144,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
-    stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
+    stu.io.pmp          <> pmp_check(TlbStartVec(dtlb_st_idx) + i).resp
 
     // -------------------------
     // Store Triggers
