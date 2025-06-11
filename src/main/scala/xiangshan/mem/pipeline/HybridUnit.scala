@@ -1088,7 +1088,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_prefetch_train_valid = s2_valid && !s2_actually_mmio && !s2_in.isHWPrefetch
   io.prefetch_train.valid              := s2_prefetch_train_valid
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
-  // TODO lyq: use trace with bank conflict?
+  // TODO: use trace with bank conflict?
   io.prefetch_train.bits.miss          := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss), s2_prefetch_train_valid)
   io.prefetch_train.bits.meta_prefetch := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_prefetch, false.B), s2_prefetch_train_valid)
   io.prefetch_train.bits.meta_access   := RegEnable(Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_access, false.B), s2_prefetch_train_valid)
