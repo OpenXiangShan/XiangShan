@@ -1019,6 +1019,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       loadUnits(i).io.misalign_ldin.bits := DontCare
     }
 
+    loadUnits(i).io.release := dcache.io.lsu.release
+
     // alter writeback exception info
     io.mem_to_ooo.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 

@@ -205,6 +205,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Load RAR rollback
     val rollback = Valid(new Redirect)
 
+    // release cacheline
+    val release = Flipped(Valid(new Release))
+
     // perf
     val debug_ls         = Output(new DebugLsInfoBundle)
     val lsTopdownInfo    = Output(new LsTopdownInfo)
@@ -1577,10 +1580,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_lrq_rep_info = WireInit(s3_in.rep_info)
   s3_lrq_rep_info.misalign_nack := toMisalignBufferValid && !(io.misalign_enq.req.ready && s3_misalign_can_go)
+  val s3_release_match = io.release.valid &&
+    (io.release.bits.paddr(PAddrBits-1, DCacheLineOffset) === s3_in.paddr(PAddrBits-1, DCacheLineOffset)) && s3_troublem
+  s3_lrq_rep_info.rar_nack := s3_release_match || s3_in.rep_info.rar_nack
   val s3_lrq_sel_rep_cause = PriorityEncoderOH(s3_lrq_rep_info.cause.asUInt)
   val s3_replayqueue_rep_cause = WireInit(0.U.asTypeOf(s3_in.rep_info.cause))
 
   val s3_mab_rep_info = WireInit(s3_in.rep_info)
+  s3_mab_rep_info.rar_nack := s3_lrq_rep_info.rar_nack
   val s3_mab_sel_rep_cause = PriorityEncoderOH(s3_mab_rep_info.cause.asUInt)
   val s3_misalign_rep_cause = WireInit(0.U.asTypeOf(s3_in.rep_info.cause))
 
@@ -1596,7 +1603,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
 
   // Int load, if hit, will be writebacked at s3
-  s3_out.valid                := s3_valid && s3_safe_writeback && !toMisalignBufferValid
+  s3_out.valid                := s3_valid && (s3_safe_writeback && !s3_release_match) && !toMisalignBufferValid
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.fpWen       := s3_in.uop.fpWen
   s3_out.bits.uop.exceptionVec(loadAccessFault) := s3_in.uop.exceptionVec(loadAccessFault) && s3_vecActive
