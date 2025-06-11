@@ -1680,7 +1680,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
   // TODO: vector wakeup?
-  io.ldCancel.ld2Cancel := s3_valid && !s3_safe_wakeup && !s3_isvec
+  io.ldCancel.ld2Cancel := s3_valid && (!s3_safe_wakeup || s3_release_match) && !s3_isvec
 
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio_req.bits)
 
