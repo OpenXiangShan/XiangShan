@@ -84,6 +84,8 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule {
   val io = IO(new PrefetcherIO())
 
+  io.l2_req.valid := false.B
+  io.l2_req.bits  := DontCare
   io.l3_req.valid := false.B
   io.l3_req.bits  := DontCare
 }

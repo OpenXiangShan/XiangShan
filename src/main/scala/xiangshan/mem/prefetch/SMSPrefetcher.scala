@@ -55,7 +55,9 @@ case class SMSParams
   pht_lookup_queue_size: Int = 4,
   pf_filter_size: Int = 16,
   train_filter_size: Int = 8
-) extends PrefetcherParams
+) extends PrefetcherParams {
+  override def name = "SMS"
+}
 
 trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParameters
 { this: HasXSParameter =>

@@ -36,17 +36,17 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.FuType._
-import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, TriggerUtil, PFEvent}
+import xiangshan.backend.fu.NewCSR.{CsrTriggerBundle, PFEvent, TriggerUtil}
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
-import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr, RobLsqIO}
+import xiangshan.backend.rob.{RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
-import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher}
+import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, PrefetcherWrapper, SMSParams, SMSPrefetcher, TLBPlace}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import coupledL2.PrefetchRecv
@@ -517,33 +517,40 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     Seq()
   }
 
-  // dtlb
-  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
-  val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(prefetcherNum, 2, pftlbParams))
-  val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
-  val dtlb_st = Seq(dtlb_st_tlb_st.io)
-  val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
-  /* tlb vec && constant variable */
-  val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
+  // dtlb parameters
+  var pf2tlbIndexMap: Seq[Int] = Seq()
+  var tmp_pf_num_in_dtlb_ld: Int = 0
+  var tmp_pf_num_in_dtlb_pf: Int = 1 // 1 for l2 prefetch
+  prefetcherSeq foreach { x =>
+    if(x.tlbPlace == TLBPlace.dtlb_ld){
+      pf2tlbIndexMap = pf2tlbIndexMap :+ (LduCnt + HyuCnt + tmp_pf_num_in_dtlb_ld)
+      tmp_pf_num_in_dtlb_ld += 1
+    }else if(x.tlbPlace == TLBPlace.dtlb_pf){
+      // 1 for l2 prefetch
+      pf2tlbIndexMap = pf2tlbIndexMap :+ (LduCnt + HyuCnt + PfNumInDtlbLD + StaCnt + tmp_pf_num_in_dtlb_pf)
+      tmp_pf_num_in_dtlb_pf += 1
+    }
+  }
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + 1, StaCnt, prefetcherNum) // (load + hyu + stream pf, store, sms+l2bop)
+  val TlbSubSizeVec = Seq(LduCnt + HyuCnt + PfNumInDtlbLD, StaCnt, PfNumInDtlbPF) // (load + hyu + stream pf, store, sms+l2bop)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
-  // TODO lyq: The parameters above are still ugly
-  // Fixed Indexes
-  val StrideDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx)
-  // Changing Indexes
-  val SmsDTLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
-  var pf2tlbIndexMap = Seq(StrideDTLBPortIndex)
-  if(hasSMS){
-    pf2tlbIndexMap = Seq(StrideDTLBPortIndex, SmsDTLBPortIndex)
+  println(f"TLB for Prefetcher:")
+  prefetcherSeq zip pf2tlbIndexMap foreach { case (pf, idx) =>
+    println(f"  TLB #$idx%-2d => ${pf.name}")
   }
-  println(f"Prefetcher:")
-  println(f"  prefetcherNum = ${prefetcherNum}%d")
-  println(f"  pf2tlbIndexMap = ${pf2tlbIndexMap}")
+  println(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
+
+  // dtlb instantiation
+  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_ld_idx), 2, ldtlbParams))
+  val dtlb_st_tlb_st = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_st_idx), 1, sttlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_pf_idx), 2, pftlbParams))
+  val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
+  val dtlb_st = Seq(dtlb_st_tlb_st.io)
+  val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
+  val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -670,6 +677,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.s1_prefetch_spec) ++ hybridUnits.map(_.io.s1_prefetch_spec)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.s2_prefetch_spec) ++ hybridUnits.map(_.io.s2_prefetch_spec)
   prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetch_train) ++ hybridUnits.map(_.io.prefetch_train)
+  (0 until prefetcherNum).foreach { i => //NOTE lyq: prefetcherNum minimum is 1 for simpler code generation, which is ugly
+    prefetcher.io.tlb_req(i).req.ready := false.B
+    prefetcher.io.tlb_req(i).resp.valid := false.B
+    prefetcher.io.tlb_req(i).resp.bits := DontCare
+    prefetcher.io.pmp_resp(i) := DontCare
+  }
   pf2tlbIndexMap.zipWithIndex.foreach{ case (k, i) =>
     dtlb_reqs(k) <> prefetcher.io.tlb_req(i)
     prefetcher.io.pmp_resp(i) := pmp_check(k).resp
@@ -682,6 +695,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l3.l2_pf_en)
+  XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
   XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
   XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
   

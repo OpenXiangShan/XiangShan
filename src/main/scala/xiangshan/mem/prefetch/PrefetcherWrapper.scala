@@ -17,28 +17,25 @@ import freechips.rocketchip.diplomacy.BufferParams.default
 import utility.mbist.{MbistInterface, MbistPipeline}
 
 object TLBPlace extends Enumeration{
-  val none = Value("none")
-  val itlb = Value("itlb")
+  /* now only support dtlb_ld and dtlb_st */
+  // val none = Value("none")
+  // val itlb = Value("itlb")
   val dtlb_ld = Value("dtlb_ld")
-  val dtlb_st = Value("dtlb_st")
+  // val dtlb_st = Value("dtlb_st")
   val dtlb_pf = Value("dtlb_pf")
-  val l2tlb = Value("l2tlb")
+  // val l2tlb = Value("l2tlb")
 }
 
 trait PrefetcherParams {
+  def name: String
   def tlbPlace = TLBPlace.dtlb_pf
   def TRAIN_FILTER_SIZE = 6
   def PREFETCH_FILTER_SIZE = 16
 }
 
-trait HasPrefetcherParams extends HasXSParameter with PrefetcherParams{
+trait HasPrefetcherParams extends HasXSParameter{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
-
-  val PF_NUM = prefetcherNum
-  // TODO: change fixed number to option
-  val StrideIdx = 0
-  val SMSIdx = 1
 
   // You can set the unified interface to N, and the invalid that you don't need can be set to 0
   val L1_PF_REG_CNT = 1
@@ -82,6 +79,10 @@ class TrainSourceIO(implicit p: Parameters) extends PrefetchBundle {
 }
 
 class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
+  println(s"PrefetcherWrapper:")
+  prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
+    println(f"  Prefetcher #$idx%-2d => ${pf.name}")
+  }
   val io = IO(new Bundle() {
     // prefetch control
     val pfCtrlFromTile = Input(new PrefetchCtrlFromTile)
@@ -93,8 +94,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     // train
     val trainSource = Flipped(new TrainSourceIO)
     // tlb
-    val tlb_req = Vec(PF_NUM, new TlbRequestIO(nRespDups = 2))
-    val pmp_resp = Vec(PF_NUM, Flipped(new PMPRespBundle()))
+    val tlb_req = Vec(prefetcherNum, new TlbRequestIO(nRespDups = 2))
+    val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new coupledL2.PrefetchRecv())
@@ -120,11 +121,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  val l1_pf_arb = Module(new RRArbiterInit(new L1PrefetchReq, PF_NUM))
+  val l1_pf_arb = Module(new RRArbiterInit(new L1PrefetchReq, prefetcherNum))
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
-  val l2_pf_arb = Module(new RRArbiterInit(new L2PrefetchReq, PF_NUM))
+  val l2_pf_arb = Module(new RRArbiterInit(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
-  val l3_pf_arb = Module(new RRArbiterInit(new L3PrefetchReq, PF_NUM))
+  val l3_pf_arb = Module(new RRArbiterInit(new L3PrefetchReq, prefetcherNum))
 
   // init
   io.tlb_req.foreach{ x =>
@@ -152,7 +153,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     * L2: Stride, SMS
     * L3: Stride
     */
-val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher())) else None
+  val HasSMS = prefetcherSeq.exists(_.isInstanceOf[SMSParams])
+  val IdxSMS = prefetcherSeq.indexWhere(_.isInstanceOf[SMSParams])
+  val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
     val enableSMS = Constantin.createRecord(s"enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
@@ -194,15 +197,17 @@ val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher()))
       pf.io.st_in(i).bits.uop.pc := s3_storePcVec(i)
     }
 
-    io.tlb_req(SMSIdx) <> pf.io.tlb_req
-    pf.io.pmp_resp := io.pmp_resp(SMSIdx)
+    io.tlb_req(IdxSMS) <> pf.io.tlb_req
+    pf.io.pmp_resp := io.pmp_resp(IdxSMS)
 
-    l2_pf_arb.io.in(SMSIdx) <> pf.io.l2_req
+    l2_pf_arb.io.in(IdxSMS) <> pf.io.l2_req
     pf.io.l1_req.ready := false.B
     pf.io.l3_req.ready := false.B
   })
 
-  val strideOpt: Option[L1Prefetcher] = if(hasStreamStride) Some(Module(new L1Prefetcher())) else None
+  val HasStreamStride = prefetcherSeq.exists(_.isInstanceOf[StreamStrideParams])
+  val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
+  val strideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   strideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
@@ -233,12 +238,12 @@ val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher()))
       pf.io.st_in(i).bits := DontCare
     }
 
-    io.tlb_req(StrideIdx) <> pf.io.tlb_req
-    pf.io.pmp_resp := io.pmp_resp(StrideIdx)
+    io.tlb_req(IdxStreamStride) <> pf.io.tlb_req
+    pf.io.pmp_resp := io.pmp_resp(IdxStreamStride)
 
-    l1_pf_arb.io.in(StrideIdx) <> pf.io.l1_req
-    l2_pf_arb.io.in(StrideIdx) <> pf.io.l2_req
-    l3_pf_arb.io.in(StrideIdx) <> pf.io.l3_req
+    l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
+    l2_pf_arb.io.in(IdxStreamStride) <> pf.io.l2_req
+    l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
   })
 
   /**
@@ -288,14 +293,9 @@ val smsOpt: Option[SMSPrefetcher] = if(hasSMS) Some(Module(new SMSPrefetcher()))
   }
 
   val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)
-  arb_seq.zipWithIndex.foreach { case (arb, i) =>
-    if(hasStreamStride){
-      XSPerfAccumulate(s"Stride_fire_l${i+1}", arb.io.in(StrideIdx).fire)
-      XSPerfAccumulate(s"Stride_block_l${i+1}", arb.io.in(StrideIdx).valid && !arb.io.in(StrideIdx).ready)
-    }
-    if(hasSMS){
-      XSPerfAccumulate(s"SMS_fire_l${i+1}", arb.io.in(SMSIdx).fire)
-      XSPerfAccumulate(s"SMS_block_l${i+1}", arb.io.in(SMSIdx).valid && !arb.io.in(SMSIdx).ready)
+  arb_seq.zipWithIndex.foreach { case (arb, level) =>
+    prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
+      XSPerfAccumulate(s"${pf.name}_fire_l${level+1}", arb.io.in(idx).fire)
     }
   }
 

@@ -16,6 +16,7 @@ import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 
 case class StreamStrideParams() extends PrefetcherParams{
+  override def name = "StreamStride"
   override def tlbPlace = TLBPlace.dtlb_ld
 }
 

@@ -26,7 +26,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
@@ -44,7 +44,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
-import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams}
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams, TLBPlace}
 
 import scala.math.{max, min, pow}
 
@@ -581,8 +581,8 @@ trait HasXSParameter {
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
-  def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
-  def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
+  def PfNumInDtlbLD = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_ld)
+  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 1 // 1 for l2 prefetch
 
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
