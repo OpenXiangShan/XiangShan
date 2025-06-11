@@ -133,8 +133,6 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     validArray(writeWayNum) := validArray(writeWayNum).bitSet(io.write.req.bits.vSetIdx, true.B)
   }
 
-  XSPerfAccumulate("meta_refill_num", io.write.req.valid)
-
   io.read.resp.metas <> DontCare
   io.read.resp.codes <> DontCare
   private val readMetaEntries = tagArrays.map(port => port.io.r.resp.asTypeOf(Vec(nWays, new ICacheMetaEntry())))
@@ -186,7 +184,10 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheEc
     (0 until nWays).foreach(w => validArray(w) := 0.U)
   }
 
-  // PERF: flush counter
+  /* *** perf *** */
+  // refill
+  XSPerfAccumulate("refill", io.write.req.valid)
+  // flush
   XSPerfAccumulate("flush", io.flush.req.map(_.valid).reduce(_ || _))
-  XSPerfAccumulate("flush_all", io.flushAll)
+  XSPerfAccumulate("flushAll", io.flushAll)
 }
