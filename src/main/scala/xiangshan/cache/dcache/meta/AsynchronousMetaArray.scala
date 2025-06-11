@@ -62,6 +62,8 @@ class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true
   )
 
   val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s0_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s0_way_wdata = Wire(Vec(nWays, Vec(writePorts, new Meta)))
   val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
   val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
   val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, new Meta)))
@@ -73,12 +75,16 @@ class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true
         val read_way_bypass = WireInit(false.B)
         val bypass_data = Wire(new Meta)
         bypass_data := DontCare
-        (0 until writePorts).map(wport =>
-          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx){
+        (0 until writePorts).map { wport =>
+          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx) {
             read_way_bypass := true.B
             bypass_data := s1_way_wdata(way)(wport)
           }
-        )
+          when(s0_way_wen(way)(wport) && s0_way_waddr(way)(wport) === read.bits.idx) {
+            read_way_bypass := true.B
+            bypass_data := s0_way_wdata(way)(wport)
+          }
+        }
         if (bypassRead) {
           resp(way) := Mux(
             RegEnable(read_way_bypass, read.valid),
@@ -97,9 +103,11 @@ class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true
       write.bits.way_en.asBools.zipWithIndex.foreach {
         case (wen, way) =>
           s0_way_wen(way)(wport) := write.valid && wen
+          s0_way_waddr(way)(wport) := write.bits.idx
+          s0_way_wdata(way)(wport) := write.bits.meta
           s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
-          s1_way_waddr(way)(wport) := RegEnable(write.bits.idx, s0_way_wen(way)(wport))
-          s1_way_wdata(way)(wport) := RegEnable(write.bits.meta, s0_way_wen(way)(wport))
+          s1_way_waddr(way)(wport) := RegEnable(s0_way_waddr(way)(wport), s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(s0_way_wdata(way)(wport), s0_way_wen(way)(wport))
           when (s1_way_wen(way)(wport)) {
             meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
           }
@@ -123,6 +131,8 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) e
   )
 
   val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s0_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
+  val s0_way_wdata = Wire(Vec(nWays, Vec(writePorts, Bool())))
   val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
   val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
   val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, Bool())))
@@ -134,12 +144,16 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) e
         val read_way_bypass = WireInit(false.B)
         val bypass_data = Wire(Bool())
         bypass_data := DontCare
-        (0 until writePorts).map(wport =>
-          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx){
+        (0 until writePorts).map { wport =>
+          when(s1_way_wen(way)(wport) && s1_way_waddr(way)(wport) === read.bits.idx) {
             read_way_bypass := true.B
             bypass_data := s1_way_wdata(way)(wport)
           }
-        )
+          when(s0_way_wen(way)(wport) && s0_way_waddr(way)(wport) === read.bits.idx) {
+            read_way_bypass := true.B
+            bypass_data := s0_way_wdata(way)(wport)
+          }
+        }
         resp(way) := Mux(
           RegEnable(read_way_bypass, read.valid),
           RegEnable(bypass_data, read_way_bypass),
@@ -154,9 +168,11 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) e
       write.bits.way_en.asBools.zipWithIndex.foreach {
         case (wen, way) =>
           s0_way_wen(way)(wport) := write.valid && wen
+          s0_way_waddr(way)(wport) := write.bits.idx
+          s0_way_wdata(way)(wport) := write.bits.flag
           s1_way_wen(way)(wport) := RegNext(s0_way_wen(way)(wport))
-          s1_way_waddr(way)(wport) := RegEnable(write.bits.idx, s0_way_wen(way)(wport))
-          s1_way_wdata(way)(wport) := RegEnable(write.bits.flag, s0_way_wen(way)(wport))
+          s1_way_waddr(way)(wport) := RegEnable(s0_way_waddr(way)(wport), s0_way_wen(way)(wport))
+          s1_way_wdata(way)(wport) := RegEnable(s0_way_wdata(way)(wport), s0_way_wen(way)(wport))
           when (s1_way_wen(way)(wport)) {
             meta_array(s1_way_waddr(way)(wport))(way) := s1_way_wdata(way)(wport)
           }
