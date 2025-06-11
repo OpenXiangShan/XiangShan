@@ -28,6 +28,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
     val read:   DecoupledIO[WayLookupBundle] = DecoupledIO(new WayLookupBundle)
     val write:  DecoupledIO[WayLookupBundle] = Flipped(DecoupledIO(new WayLookupBundle))
     val update: Valid[MissRespBundle]        = Flipped(ValidIO(new MissRespBundle))
+
+    val perf: WayLookupPerfInfo = Output(new WayLookupPerfInfo)
   }
 
   val io: ICacheWayLookupIO = IO(new ICacheWayLookupIO)
@@ -131,4 +133,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
       gpfPtr         := writePtr
     }
   }
+
+  /* *** perf *** */
+  // tell ICache top if queue is empty
+  io.perf.empty := empty
 }

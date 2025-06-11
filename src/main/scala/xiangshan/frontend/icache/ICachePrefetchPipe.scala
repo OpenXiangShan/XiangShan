@@ -51,6 +51,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val missReq:        DecoupledIO[MissReqBundle]     = DecoupledIO(new MissReqBundle)
     val missResp:       Valid[MissRespBundle]          = Flipped(ValidIO(new MissRespBundle))
     val wayLookupWrite: DecoupledIO[WayLookupBundle]   = DecoupledIO(new WayLookupBundle)
+
+    val perf: PrefetchPipePerfInfo = Output(new PrefetchPipePerfInfo)
   }
 
   val io: ICachePrefetchPipeIO = IO(new ICachePrefetchPipeIO)
@@ -534,7 +536,12 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   s2_ready := s2_finish || !s2_valid
   s2_fire  := s2_valid && s2_finish && !s2_flush
 
-  /** PerfAccumulate */
+  /* *****************************************************************************
+   * perf
+   * ***************************************************************************** */
+  // tell ICache top when handling itlb miss
+  io.perf.pendingItlbMiss := s1_valid && !tlbFinish
+
   // the number of bpu flush
   XSPerfAccumulate("bpu_s0_flush", fromBpuS0Flush)
   XSPerfAccumulate("bpu_s1_flush", fromBpuS1Flush)
