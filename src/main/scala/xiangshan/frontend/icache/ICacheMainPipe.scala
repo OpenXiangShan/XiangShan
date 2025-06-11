@@ -61,10 +61,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // backend/Beu
     val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
 
-    /* *** Perf *** */
-    val perf:       ICachePerfInfo       = Output(new ICachePerfInfo)
-    val topdown:    ICacheTopdownInfo    = Output(new ICacheTopdownInfo)
-    val perfEvents: ICachePerfEventsInfo = Output(new ICachePerfEventsInfo)
+    val perf: MainPipePerfInfo = Output(new MainPipePerfInfo)
   }
 
   val io: ICacheMainPipeIO = IO(new ICacheMainPipeIO)
@@ -505,25 +502,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /* *****************************************************************************
    * perf
    * ***************************************************************************** */
-  // when fired, tell ifu hit state of each cache line
+  // when fired, tell ifu raw hit state of each cache line
   // NOTE: we cannot use s2_hits, it will be reset when refilled from L2
   private val s2_rawHits = RegEnable(s1_hits, 0.U.asTypeOf(s1_hits), s1_fire)
-  io.perf.hits         := s2_rawHits
-  io.perf.isDoubleLine := s2_doubleline
-  io.perf.exception    := s2_exceptionOut
+  io.perf.rawHits := s2_rawHits
+  // tell ICache top when handling miss
+  io.perf.pendingMiss := s2_valid && !s2_fetchFinish
 
-  // tell topdown when waiting for icache refill or itlb refill
-  io.topdown.iCacheMissBubble := s2_valid && !s2_fetchFinish
-  io.topdown.itlbMissBubble   := s0_valid && !fromWayLookup.ready
-
-  // tell icache top when waiting for refill
-  io.perfEvents.missBubble := s2_valid && !s2_fetchFinish
-  // and when fired, tell icache top if it is a miss
-  io.perfEvents.miss := s2_fire && (!s2_rawHits(0) || !s2_rawHits(1) && s2_doubleline)
-
-  // count fetch bubble, same as topdown, but an inner perf counter
   XSPerfAccumulate("icache_bubble_s2_miss", s2_valid && !s2_fetchFinish)
-  XSPerfAccumulate("icache_bubble_s0_wayLookup", s0_valid && !fromWayLookup.ready)
+  XSPerfAccumulate("icache_bubble_s0_wayLookup", s0_valid && !fromWayLookup.valid)
 
   // class ICacheTouchDB(implicit p: Parameters) extends ICacheBundle{
   //   val blkPAddr  = UInt((PAddrBits - blockOffBits).W)

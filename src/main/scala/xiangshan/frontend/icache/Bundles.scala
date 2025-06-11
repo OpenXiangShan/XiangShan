@@ -290,6 +290,7 @@ class PmpCheckBundle(implicit p: Parameters) extends ICacheBundle {
 }
 
 /* ***** Perf ***** */
+// to Ifu
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   val hits:         Vec[Bool]          = Vec(PortNumber, Bool())
   val isDoubleLine: Bool               = Bool()
@@ -316,12 +317,24 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle {
   def except: Bool = exception(0).hasException || (isDoubleLine && exception(1).hasException)
 }
 
+// to Ifu -> IBuffer -> Backend
 class ICacheTopdownInfo(implicit p: Parameters) extends ICacheBundle {
   val iCacheMissBubble: Bool = Output(Bool())
   val itlbMissBubble:   Bool = Output(Bool())
 }
 
-class ICachePerfEventsInfo(implicit p: Parameters) extends ICacheBundle {
-  val miss:       Bool = Output(Bool())
-  val missBubble: Bool = Output(Bool())
+// inner MainPipe -> top
+class MainPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
+  val rawHits:     Vec[Bool] = Vec(PortNumber, Bool())
+  val pendingMiss: Bool      = Bool() // currently handling a miss
+}
+
+// inner PrefetchPipe -> top
+class PrefetchPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
+  val pendingItlbMiss: Bool = Bool()
+}
+
+// inner WayLookup -> top
+class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
+  val empty: Bool = Bool()
 }

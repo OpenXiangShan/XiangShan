@@ -204,8 +204,15 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.toIfu.fetchResp <> mainPipe.io.resp
 
   // perf
-  io.toIfu.perf    := mainPipe.io.perf
-  io.toIfu.topdown := mainPipe.io.topdown
+  io.toIfu.perf.hits         := mainPipe.io.perf.rawHits
+  io.toIfu.perf.isDoubleLine := mainPipe.io.resp.bits.doubleline
+  io.toIfu.perf.exception    := mainPipe.io.resp.bits.exception
+
+  // topdown perf
+  // when mainPipe is handling a miss, it will create a bubble in Ifu pipe
+  io.toIfu.topdown.iCacheMissBubble := mainPipe.io.perf.pendingMiss
+  // when prefetcher is handling an Itlb miss, and wayLookup is empty, it will create a bubble in MainPipe
+  io.toIfu.topdown.itlbMissBubble := prefetcher.io.perf.pendingItlbMiss && wayLookup.io.perf.empty
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -233,8 +240,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.fromFtq.prefetchReq.valid)
 
   val perfEvents: Seq[(String, Bool)] = Seq(
-    ("icache_miss_cnt", mainPipe.io.perfEvents.miss),
-    ("icache_miss_penalty", mainPipe.io.perfEvents.missBubble)
+    (
+      "icache_miss_cnt",                                                   // count misses when:
+      mainPipe.io.resp.valid && (                                          // response is sent to Ifu, and
+        !mainPipe.io.perf.rawHits(0) ||                                    // port 0 miss, or
+          mainPipe.io.resp.bits.doubleline && !mainPipe.io.perf.rawHits(1) // port 1 is needed and miss
+      )
+    ),
+    ("icache_miss_penalty", mainPipe.io.perf.pendingMiss) // count penalty cycles when mainPipe is handling a miss
   )
   generatePerfEvent()
 }
