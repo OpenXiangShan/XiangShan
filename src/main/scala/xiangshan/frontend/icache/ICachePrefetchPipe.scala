@@ -543,32 +543,16 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   io.perf.pendingItlbMiss := s1_valid && !tlbFinish
 
   // the number of bpu flush
-  XSPerfAccumulate("bpu_s0_flush", fromBpuS0Flush)
-  XSPerfAccumulate("bpu_s1_flush", fromBpuS1Flush)
+  XSPerfAccumulate("bpuS0Flush", fromBpuS0Flush)
+  XSPerfAccumulate("bpuS1Flush", fromBpuS1Flush)
   // the number of prefetch request received from ftq or backend (software prefetch)
-//  XSPerfAccumulate("prefetch_req_receive", io.req.fire)
-  XSPerfAccumulate("prefetch_req_receive_hw", io.req.fire && !io.req.bits.isSoftPrefetch)
-  XSPerfAccumulate("prefetch_req_receive_sw", io.req.fire && io.req.bits.isSoftPrefetch)
+  XSPerfAccumulate("hwReq", io.req.fire && !io.req.bits.isSoftPrefetch)
+  XSPerfAccumulate("swReq", io.req.fire && io.req.bits.isSoftPrefetch)
   // the number of prefetch request sent to missUnit
-//  XSPerfAccumulate("prefetch_req_send", toMiss.fire)
-  XSPerfAccumulate("prefetch_req_send_hw", toMiss.fire && !s2_isSoftPrefetch)
-  XSPerfAccumulate("prefetch_req_send_sw", toMiss.fire && s2_isSoftPrefetch)
-  XSPerfAccumulate("to_missUnit_stall", toMiss.valid && !toMiss.ready)
+  XSPerfAccumulate("hwMiss", toMiss.fire && !s2_isSoftPrefetch)
+  XSPerfAccumulate("swMiss", toMiss.fire && s2_isSoftPrefetch)
+  XSPerfAccumulate("missUnitStall", toMiss.valid && !toMiss.ready)
 
-  /**
-    * Count the number of requests that are filtered for various reasons.
-    * The number of prefetch discard in Performance Accumulator may be
-    * a little larger the number of really discarded. Because there can
-    * be multiple reasons for a canceled request at the same time.
-    */
-  // discard prefetch request by flush
-  // XSPerfAccumulate("fdip_prefetch_discard_by_tlb_except",  p1_discard && p1_tlb_except)
-  // // discard prefetch request by hit icache SRAM
-  // XSPerfAccumulate("fdip_prefetch_discard_by_hit_cache",   p2_discard && p1_meta_hit)
-  // // discard prefetch request by hit write SRAM
-  // XSPerfAccumulate("fdip_prefetch_discard_by_p1_monitor",  p1_discard && p1_monitor_hit)
-  // // discard prefetch request by pmp except or mmio
-  // XSPerfAccumulate("fdip_prefetch_discard_by_pmp",         p2_discard && p2_pmp_except)
-  // // discard prefetch request by hit mainPipe info
-  // // XSPerfAccumulate("fdip_prefetch_discard_by_mainPipe",    p2_discard && p2_mainPipe_hit)
+  // itlb miss bubble
+  XSPerfAccumulate("itlbMissBubble", s1_valid && !tlbFinish)
 }

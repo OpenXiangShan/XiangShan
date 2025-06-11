@@ -19,9 +19,12 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
-import xiangshan.frontend.ExceptionType
+import utility.HasCircularQueuePtrHelper
+import utility.XSPerfHistogram
 
-class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMissUpdateHelper {
+class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
+    with ICacheMissUpdateHelper
+    with HasCircularQueuePtrHelper {
 
   class ICacheWayLookupIO(implicit p: Parameters) extends ICacheBundle {
     val flush:  Bool                         = Input(Bool())
@@ -137,4 +140,14 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule with ICacheMi
   /* *** perf *** */
   // tell ICache top if queue is empty
   io.perf.empty := empty
+
+  // perf counter
+  // occupancy
+  XSPerfHistogram(
+    "occupiedEntryCnt",
+    distanceBetween(writePtr, readPtr),
+    true.B,
+    0,
+    nWayLookupSize
+  )
 }
