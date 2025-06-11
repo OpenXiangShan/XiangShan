@@ -934,9 +934,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
   ) || 
   ren && (
-    (addr === CSRs.vstopi.U) ||
-    (addr === CSRs.stopi.U) || 
-    (addr === CSRs.mtopi.U)
+    (addr === CSRs.vstopi.U) || (addr === CSRs.vstopei.U) ||
+    (addr === CSRs.stopi.U) || (addr === CSRs.stopei.U) ||
+    (addr === CSRs.mtopi.U) || (addr === CSRs.mtopei.U)
   )
 
   val resetSatp = WireInit(false.B)
