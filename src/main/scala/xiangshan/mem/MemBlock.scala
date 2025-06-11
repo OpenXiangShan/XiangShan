@@ -654,8 +654,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   /******************************************************************
    * Prefetcher
    *  - L1 site
-   *      Stride --> l1, l2, l3
-   *      SMS --> l2
    *  - L2 site: provide tlb interface
    *  - L1 prefetch request: set confidence
    *  - L1 prefetcher: fuzzer interface
