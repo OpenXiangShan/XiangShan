@@ -84,6 +84,11 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule {
   val io = IO(new PrefetcherIO())
 
+  // By default, there are no tlb transformations, l2_req and l3_req
+  io.tlb_req.req.valid := false.B
+  io.tlb_req.req.bits := DontCare
+  io.tlb_req.req_kill := false.B
+  io.tlb_req.resp.ready := true.B
   io.l2_req.valid := false.B
   io.l2_req.bits  := DontCare
   io.l3_req.valid := false.B
