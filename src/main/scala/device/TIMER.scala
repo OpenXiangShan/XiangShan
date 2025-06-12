@@ -91,16 +91,23 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
      * bff8 mtime lo
      * bffc mtime hi
      */
-
-    node.regmap(
+val ipi_hartoffset =io.hartId * msipBytes.U
+    node.regmapClint(ipi_hartoffset,
       0 -> RegFieldGroup("msip", Some("MSIP Bits"), ipi.zipWithIndex.flatMap { case (r, i) =>
         RegField(1, r, RegFieldDesc(s"msip_$i", s"MSIP bit for Hart $i", reset = Some(0))) :: RegField(ipiWidth - 1) :: Nil
       }),
+//      timecmpOffset -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
+//        RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
+//      },
+//      timeOffset -> RegFieldGroup("mtime", Some("Timer Register"),
+//        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true))))
+    )
+
+    val timecmp_hartoffset =io.hartId * timecmpBytes.U
+    node.regmapClint(timecmp_hartoffset,
       timecmpOffset -> timecmp.zipWithIndex.flatMap { case (t, i) => RegFieldGroup(s"mtimecmp_$i", Some(s"MTIMECMP for hart $i"),
         RegField.bytes(t, Some(RegFieldDesc(s"mtimecmp_$i", "", reset = None))))
       },
-      timeOffset -> RegFieldGroup("mtime", Some("Timer Register"),
-        RegField.bytes(time, Some(RegFieldDesc("mtime", "", reset = Some(0), volatile = true))))
     )
 
     val msipAddr = params.baseAddress.U + io.hartId * msipBytes.U
@@ -116,9 +123,9 @@ class TIMER(params: TIMERParams, beatBytes: Int)(implicit p: Parameters) extends
     val isCorrectAccess = isMsipAccess || isTimecmpAccess
 
     // filter out accesses not belonging to this hart
-    when(!isCorrectAccess) {
-      d.bits.denied := true.B
-    }
+//    when(!isCorrectAccess) {
+//      d.bits.denied := true.B
+//    }
 
   }
 }
