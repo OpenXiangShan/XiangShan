@@ -224,12 +224,14 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
 
   def addr_to_dcache_div_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
+    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset + DCacheSetDivBits))
+    // Cat(addr(DCacheAboveIndexOffset + 3, DCacheAboveIndexOffset + 2), addr(DCacheAboveIndexOffset - 1 - 2, DCacheSetOffset + DCacheSetDivBits))
   }
 
   def addr_to_dcache_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
+    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset))
+    // Cat(addr(DCacheAboveIndexOffset + 3, DCacheAboveIndexOffset +2), addr(DCacheAboveIndexOffset-1 -2, DCacheSetOffset))
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
@@ -245,7 +247,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def get_alias(vaddr: UInt): UInt ={
     // require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
-      vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+      hashBitPairs(vaddr, PAddrBits - 1, pgIdxBits)
     }else{
       0.U
     }
@@ -254,7 +256,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
     require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
     if(blockOffBits + idxBits > pgIdxBits) {
-      vaddr0(blockOffBits + idxBits - 1, pgIdxBits) === vaddr1(blockOffBits + idxBits - 1, pgIdxBits)
+      hashBitPairs(vaddr0, PAddrBits - 1, pgIdxBits) === hashBitPairs(vaddr1, PAddrBits - 1, pgIdxBits)
+      //vaddr0(PAddrBits - 1, pgIdxBits) === vaddr1(PAddrBits - 1, pgIdxBits)
     }else {
       // no alias problem
       true.B
@@ -397,7 +400,7 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
-  def idx: UInt = get_idx(vaddr)
+  def idx: UInt = get_dcache_idx(vaddr)
 }
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
@@ -1728,11 +1731,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // ld_access.zip(ldu).foreach {
   //   case (a, u) =>
   //     a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-  //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
+  //     a.bits.idx := RegEnable(get_dcache_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
   //     a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   // }
   // st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
+  // st_access.bits.idx := RegEnable(get_dcache_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
   // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)
   // val access_info = ld_access.toSeq ++ Seq(st_access)
   // val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate

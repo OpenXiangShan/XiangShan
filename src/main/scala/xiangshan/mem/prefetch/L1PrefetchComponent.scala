@@ -340,7 +340,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res.sink := x.sink
     res.is_vaddr := true.B
     res.source := x.source
-    res.alias := x.region(PAGE_OFFSET - REGION_TAG_OFFSET + 1, PAGE_OFFSET - REGION_TAG_OFFSET)
+    res.alias := hashBitPairs(x.region, PAddrBits - REGION_TAG_OFFSET -1, PAGE_OFFSET - REGION_TAG_OFFSET) //x.region(PAGE_OFFSET - REGION_TAG_OFFSET + 1, PAGE_OFFSET - REGION_TAG_OFFSET)
     res.debug_va_region := x.region
 
     res
