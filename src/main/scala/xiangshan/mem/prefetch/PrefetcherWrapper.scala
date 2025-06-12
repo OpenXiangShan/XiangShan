@@ -296,6 +296,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   arb_seq.zipWithIndex.foreach { case (arb, level) =>
     prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
       XSPerfAccumulate(s"${pf.name}_fire_l${level+1}", arb.io.in(idx).fire)
+      XSPerfAccumulate(s"${pf.name}_block_l${level+1}", arb.io.in(idx).valid && !arb.io.in(idx).ready)
     }
   }
 
