@@ -60,14 +60,16 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val source = UInt(MemReqSource.reqSourceBits.W)
 }
 
+class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq
+
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())
-  val l2_req = ValidIO(new L2PrefetchReq())
-  val l3_req = ValidIO(UInt(PAddrBits.W)) // TODO: l3 pf source
+  val l2_req = DecoupledIO(new L2PrefetchReq())
+  val l3_req = DecoupledIO(new L3PrefetchReq())
   val enable = Input(Bool())
 }
 
@@ -79,11 +81,16 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val pfHitStream = Bool()
 }
 
-trait PrefetcherParams
-
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule {
   val io = IO(new PrefetcherIO())
 
+  // By default, there are no tlb transformations, l2_req and l3_req
+  io.tlb_req.req.valid := false.B
+  io.tlb_req.req.bits := DontCare
+  io.tlb_req.req_kill := false.B
+  io.tlb_req.resp.ready := true.B
+  io.l2_req.valid := false.B
+  io.l2_req.bits  := DontCare
   io.l3_req.valid := false.B
   io.l3_req.bits  := DontCare
 }
