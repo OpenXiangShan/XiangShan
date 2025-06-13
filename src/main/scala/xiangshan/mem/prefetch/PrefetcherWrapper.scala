@@ -203,6 +203,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l2_pf_arb.io.in(IdxSMS) <> pf.io.l2_req
     pf.io.l1_req.ready := false.B
     pf.io.l3_req.ready := false.B
+
+    // statistics
+    XSPerfAccumulate("SMS_in_train", PopCount(pf.io.ld_in.map(x => x.valid)))
   })
 
   val HasStreamStride = prefetcherSeq.exists(_.isInstanceOf[StreamStrideParams])
@@ -244,6 +247,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
     l2_pf_arb.io.in(IdxStreamStride) <> pf.io.l2_req
     l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
+    // statistics
+    XSPerfAccumulate("StreamStride_in_train", PopCount(pf.io.ld_in.map(x => x.valid)))
   })
 
   val HasNextLine = prefetcherSeq.exists(_.isInstanceOf[NextLineParams])
@@ -272,6 +277,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l1_pf_arb.io.in(IdxNextLine) <> pf.io.l1_req
     pf.io.l2_req.ready := false.B
     pf.io.l3_req.ready := false.B
+    // statistics
+    XSPerfAccumulate("NextLine_in_train", PopCount(pf.io.ld_in.map(x => x.valid)))
+    XSPerfAccumulate("NextLine_in_train_miss", PopCount(pf.io.ld_in.map(x => x.valid && x.bits.miss)))
+    XSPerfAccumulate("NextLine_in_train_nextLineHit", PopCount(pf.io.ld_in.map(x => x.valid && !x.bits.miss && isFromNextLine(x.bits.meta_prefetch))))
   })
 
   /**

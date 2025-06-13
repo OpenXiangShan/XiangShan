@@ -247,7 +247,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val raw_enq_pattern = Cat(reqs_vl)
   val filtered_enq_pattern = Cat(needAlloc)
   val actual_enq_pattern = Cat(canAlloc)
-  XSPerfAccumulate(s"${name}_train_filter_enq", allocNum > 0.U)
+  XSPerfAccumulate(s"${name}_train_filter_enq", allocNum)
   XSPerfAccumulate(s"${name}_train_filter_deq", io.train_req.fire)
   for(i <- 0 until (1 << enqLen)) {
     XSPerfAccumulate(s"${name}_train_filter_raw_enq_pattern_${toBinary(i)}", raw_enq_pattern === i.U)
