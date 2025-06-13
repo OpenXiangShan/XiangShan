@@ -212,7 +212,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           )),
         )),
         L2NBanks = 2,
-        prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
+        prefetcher = Nil // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
     )
     case SoCParamsKey =>

@@ -206,34 +206,15 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   io.getGpa := 0.U
 
-  // ugly code, should be optimized later
-  require(Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
-  if (Width == 1) {
-    require(Size == 8, s"prefetch filter Size ($Size) should be 8")
-    canenq(0) := !(Cat(v).andR)
-    enqidx(0) := firstValidIndex(v, false.B)
-  } else if (Width == 2) {
-    require(Size == 8, s"store filter Size ($Size) should be 8")
-    canenq(0) := !(Cat(v.take(Size/2)).andR)
-    enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
-    canenq(1) := !(Cat(v.drop(Size/2)).andR)
-    enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
-  } else if (Width == 3) {
-    require(Size == 16, s"load filter Size ($Size) should be 16")
-    canenq(0) := !(Cat(v.take(8)).andR)
-    enqidx(0) := firstValidIndex(v.take(8), false.B)
-    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
-    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-    // four entries for prefetch
-    canenq(2) := !(Cat(v.drop(12)).andR)
-    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
-  } else if (Width == 4) {
-    require(Size == 16, s"load filter Size ($Size) should be 16")
-    for (i <- 0 until Width) {
-      canenq(i) := !(Cat(VecInit(v.slice(i * 4, (i + 1) * 4))).andR)
-      enqidx(i) := firstValidIndex(v.slice(i * 4, (i + 1) * 4), false.B) + (i * 4).U
-    }
+  require(Width > 0 && Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
+  require(Size >= Width && ((Size & (Size-1)) == 0), s"DTLB Filter Size ($Size) must be bigger than Width ($Width) and a power of 2")
+  val step = Size / Width
+  for(i <- 0 until (Width - 1)) {
+    canenq(i) := !(Cat(VecInit(v.slice(i * step, (i + 1) * step))).andR)
+    enqidx(i) := firstValidIndex(v.slice(i * step, (i + 1) * step), false.B) + (i * step).U
   }
+  canenq(Width-1) := !(Cat(VecInit(v.slice((Width - 1) * step, Size))).andR)
+  enqidx(Width-1) := firstValidIndex(v.slice((Width - 1) * step, Size), false.B) + ((Width - 1) * step).U
 
   for (i <- 0 until Width) {
     enqvalid(i) := io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && canenq(i)
@@ -349,7 +330,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val io = IO(new PTWFilterIO(Width, hasHint = true))
 
   val load_filter = VecInit(Seq.fill(1) {
-    val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + 1, Size = loadfiltersize, hasHint = true))
+    val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + PfNumInDtlbLD, Size = loadfiltersize, hasHint = true))
     load_entry.io
   })
 
@@ -359,15 +340,15 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   })
 
   val prefetch_filter = VecInit(Seq.fill(1) {
-    val prefetch_entry = Module(new PTWFilterEntry(Width = 2, Size = prefetchfiltersize))
+    val prefetch_entry = Module(new PTWFilterEntry(Width = PfNumInDtlbPF, Size = prefetchfiltersize))
     prefetch_entry.io
   })
 
   val filter = load_filter ++ store_filter ++ prefetch_filter
 
-  load_filter.map(_.tlb.req := io.tlb.req.take(LdExuCnt + 1))
-  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1).take(StaCnt))
-  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1 + StaCnt))
+  load_filter.map(_.tlb.req := io.tlb.req.take(LdExuCnt + PfNumInDtlbLD))
+  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD).take(StaCnt))
+  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD + StaCnt))
 
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed), FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
@@ -395,11 +376,11 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.getGpa(i) := false.B
   }
   io.tlb.resp.bits.vector(0) := load_filter(0).refill
-  io.tlb.resp.bits.vector(LdExuCnt + 1) := store_filter(0).refill
-  io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := prefetch_filter(0).refill
+  io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := store_filter(0).refill
+  io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := prefetch_filter(0).refill
   io.tlb.resp.bits.getGpa(0) := load_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(LdExuCnt + 1) := store_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(LdExuCnt + 1 + StaCnt) := prefetch_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(LdExuCnt + PfNumInDtlbLD) := store_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(LdExuCnt + PfNumInDtlbLD + StaCnt) := prefetch_filter(0).getGpa
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
@@ -414,11 +395,11 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.data.memidx := load_filter(0).memidx
   }
   when (store_filter(0).refill) {
-    io.tlb.resp.bits.vector(LdExuCnt + 1) := true.B
+    io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD) := true.B
     io.tlb.resp.bits.data.memidx := store_filter(0).memidx
   }
   when (prefetch_filter(0).refill) {
-    io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := true.B
+    io.tlb.resp.bits.vector(LdExuCnt + PfNumInDtlbLD + StaCnt) := true.B
     io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   }
 
