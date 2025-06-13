@@ -44,7 +44,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
-import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams, StreamStrideParams, TLBPlace}
+import xiangshan.mem.prefetch.{NextLineParams,PrefetcherParams, SMSParams, StreamStrideParams, TLBPlace}
 
 import scala.math.{max, min, pow}
 
@@ -188,7 +188,7 @@ case class XSCoreParameters
   MemRegCacheSize: Int = 12,
   intSchdVlWbPort: Int = 0,
   vfSchdVlWbPort: Int = 1,
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams(), NextLineParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,

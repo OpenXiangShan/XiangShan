@@ -35,6 +35,7 @@ trait HasL1PrefetchSourceParameter {
   def L1_HW_PREFETCH_STRIDE = 2.U
   def L1_HW_PREFETCH_STREAM = 3.U
   def L1_HW_PREFETCH_STORE  = 4.U
+  def L1_HW_PREFETCH_NEXTLINE = 5.U
   
   // ------------------------------------------------------------------------------------------------------------------------
   // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
@@ -44,6 +45,7 @@ trait HasL1PrefetchSourceParameter {
   def isFromL1Prefetch(value: UInt)  = value >  L1_HW_PREFETCH_CLEAR
   def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
   def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
+  def isFromNextLine(value: UInt)    = value === L1_HW_PREFETCH_NEXTLINE
 }
 
 class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {

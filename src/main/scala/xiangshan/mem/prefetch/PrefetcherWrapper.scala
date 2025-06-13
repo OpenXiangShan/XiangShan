@@ -246,6 +246,34 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
   })
 
+  val HasNextLine = prefetcherSeq.exists(_.isInstanceOf[NextLineParams])
+  val IdxNextLine = prefetcherSeq.indexWhere(_.isInstanceOf[NextLineParams])
+  val nextLineOpt: Option[NextLinePrefetcher] = if (HasNextLine) Some(Module(new NextLinePrefetcher())) else None
+  nextLineOpt.foreach(pf => {
+    // enable
+    val enableCst = Constantin.createRecord(s"enableNextLinePrefetcher$hartId", initValue = true)
+    pf.io.enable := enableCst && l1D_pf_enable
+    // train connect
+    pf.io.ld_in zip io.trainSource.s3_load foreach{
+      case(sink, source) =>
+        sink.valid := source.valid && source.bits.isFirstIssue && (
+          source.bits.miss || isFromNextLine(source.bits.meta_prefetch)
+        )
+        sink.bits := source.bits
+    }
+    pf.io.st_in foreach { x =>
+      x.valid := false.B
+      x.bits := DontCare
+    }
+    // tlb connect
+    io.tlb_req(IdxNextLine) <> pf.io.tlb_req
+    pf.io.pmp_resp := io.pmp_resp(IdxNextLine)
+    // prefetch connect
+    l1_pf_arb.io.in(IdxNextLine) <> pf.io.l1_req
+    pf.io.l2_req.ready := false.B
+    pf.io.l3_req.ready := false.B
+  })
+
   /**
    * load prefetch to l1 Dcache
    * stride
