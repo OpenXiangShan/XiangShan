@@ -47,6 +47,7 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToIfuIO
+import xiangshan.frontend.IBufPtr
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.IfuToFtqIO
@@ -206,8 +207,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s0_flushFromBpu = fromFtq.flushFromBpu.shouldFlushByStage2(s0_ftqReq.ftqIdx) ||
     fromFtq.flushFromBpu.shouldFlushByStage3(s0_ftqReq.ftqIdx)
 
-  private val wbRedirect, mmioRedirect, backendRedirect = WireInit(false.B)
-  private val s3_wbNotFlush                             = WireInit(false.B)
+  private val wbRedirect, mmioRedirect, backendRedirect = WireDefault(false.B)
+  private val wbRedirectInstrCount                      = WireDefault(0.U(log2Ceil(PredictWidth + 1).W))
+  private val mmioRedirectInstrCount                    = 1.U(log2Ceil(PredictWidth + 1).W)
+  private val wbRedirectIBufEnqPtr                      = WireDefault(0.U.asTypeOf(new IBufPtr))
+  private val mmioRedirectIBufEnqPtr                    = WireDefault(0.U.asTypeOf(new IBufPtr))
+  private val s3_wbNotFlush                             = WireDefault(false.B)
 
   backendRedirect := fromFtq.redirect.valid
   s3_flush        := backendRedirect || (wbRedirect && !s3_wbNotFlush)
@@ -304,9 +309,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val icacheRespAllValid = WireInit(false.B)
 
-  private val s2_valid      = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
-  private val s2_ftqReq     = RegEnable(s1_ftqReq, s1_fire)
-  private val s2_doubleline = RegEnable(s1_doubleline, s1_fire)
+  private val s2_valid         = ValidHold(s1_fire && !s1_flush, s2_fire, s2_flush)
+  private val s2_ftqReq        = RegEnable(s1_ftqReq, s1_fire)
+  private val s2_doubleline    = RegEnable(s1_doubleline, s1_fire)
+  private val s2_preIBufEnqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
 
   s2_fire  := s2_valid && s3_ready && icacheRespAllValid
   s2_ready := s2_fire || !s2_valid
@@ -374,7 +380,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s2_ftqReq.nextStartAddr,
       s2_ftqReq.startAddr
     )
-  private val s2_instrRange = s2_jumpRange & s2_ftrRange
+  private val s2_instrRange = s2_jumpRange & s2_ftrRange & "hffff".U
   private val s2_exceptionVec = VecInit((0 until PredictWidth).map(i =>
     MuxCase(
       ExceptionType.None,
@@ -459,6 +465,37 @@ class Ifu(implicit p: Parameters) extends IfuModule
   })
   XSPerfAccumulate("fetch_bubble_icache_not_resp", s2_valid && !icacheRespAllValid)
 
+  /******************************************************
+    * 
+    */
+  private val s2_instrValid = Wire(Vec(PredictWidth, Bool()))
+  private val s2_preIsHalf  = RegInit(false.B)
+  s2_instrValid := Mux(s2_preIsHalf, s2_altValid, VecInit(s2_pd.map(inst => inst.valid)))
+
+  /**
+    * 
+    */
+  when(s2_flush) {
+    s2_preIsHalf := false.B
+  }.elsewhen(s2_fire) {
+    s2_preIsHalf := !s2_pd(PredictWidth - 1).isRVC && s2_instrRange(PredictWidth - 1) && s2_instrValid(
+      PredictWidth - 1
+    ) && !s2_ftqReq.ftqOffset.valid
+  }
+
+  // when(s2_fire) {
+  //   s2_preIBufEnqPtr  := s2_preIBufEnqPtr + PopCount(s2_instrRange(PredictWidth -1, 0).asUInt)
+  // }
+  when(backendRedirect) {
+    s2_preIBufEnqPtr := 0.U.asTypeOf(new IBufPtr)
+  }.elsewhen(wbRedirect) {
+    s2_preIBufEnqPtr := wbRedirectIBufEnqPtr + wbRedirectInstrCount
+  }.elsewhen(mmioRedirect) {
+    s2_preIBufEnqPtr := mmioRedirectIBufEnqPtr + mmioRedirectInstrCount
+  }.elsewhen(s2_fire) {
+    s2_preIBufEnqPtr := s2_preIBufEnqPtr + PopCount(s2_instrValid.asUInt & s2_instrRange(PredictWidth - 1, 0).asUInt)
+  }
+
   /* *****************************************************************************
    * IFU Stage 3
    * - handle MMIO instruction
@@ -474,8 +511,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // assign later
   private val s3_valid = WireInit(false.B)
 
-  private val s3_ftqReq     = RegEnable(s2_ftqReq, s2_fire)
-  private val s3_doubleline = RegEnable(s2_doubleline, s2_fire)
+  private val s3_ftqReq        = RegEnable(s2_ftqReq, s2_fire)
+  private val s3_doubleline    = RegEnable(s2_doubleline, s2_fire)
+  private val s3_preIBufEnqPtr = RegEnable(s2_preIBufEnqPtr, s2_fire)
   s3_fire := io.toIBuffer.fire
 
   private val s3_cutData = RegEnable(s2_cutData, s2_fire)
@@ -839,13 +877,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /* ** send to IBuffer ** */
   private val s3_toIBufferValid = s3_valid && (!s3_reqIsMmio || s3_mmioCanGo) && !s3_flush
-  io.toIBuffer.valid          := s3_toIBufferValid
-  io.toIBuffer.bits.instrs    := s3_expdInstr
-  io.toIBuffer.bits.valid     := s3_instrValid.asUInt
-  io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedRange.asUInt & s3_instrValid.asUInt
-  io.toIBuffer.bits.pd        := s3_pd
-  io.toIBuffer.bits.ftqPtr    := s3_ftqReq.ftqIdx
-  io.toIBuffer.bits.pc        := s3_pc
+  io.toIBuffer.valid              := s3_toIBufferValid
+  io.toIBuffer.bits.instrs        := s3_expdInstr
+  io.toIBuffer.bits.valid         := s3_instrValid.asUInt
+  io.toIBuffer.bits.enqEnable     := checkerOutStage1.fixedRange.asUInt & s3_instrValid.asUInt
+  io.toIBuffer.bits.pd            := s3_pd
+  io.toIBuffer.bits.ftqPtr        := s3_ftqReq.ftqIdx
+  io.toIBuffer.bits.preIBufEnqPtr := s3_preIBufEnqPtr
+  io.toIBuffer.bits.pc            := s3_pc
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
   io.toIBuffer.bits.ftqOffset.zipWithIndex.foreach { case (a, i) =>
@@ -958,6 +997,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   mmioRedirect := s3_reqIsMmio && mmioState === MmioFsmState.WaitCommit && RegNext(fromUncache.fire) && s3_mmioUseSnpc
+  mmioRedirectIBufEnqPtr := s3_preIBufEnqPtr
 
   XSPerfAccumulate("fetch_bubble_ibuffer_not_ready", io.toIBuffer.valid && !io.toIBuffer.ready)
 
@@ -967,13 +1007,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - redirect if found fault prediction
    * - redirect if false hit last half (last PC is not start + 32 Bytes, but in the middle of an notCFI RVI instruction)
    * ***************************************************************************** */
-  private val wbEnable = RegNext(s2_fire && !s2_flush) && !s3_reqIsMmio && !s3_flush
-  private val wbValid  = RegNext(wbEnable, init = false.B)
-  private val wbFtqReq = RegEnable(s3_ftqReq, wbEnable)
+  private val wbEnable        = RegNext(s2_fire && !s2_flush) && !s3_reqIsMmio && !s3_flush
+  private val wbValid         = RegNext(wbEnable, init = false.B)
+  private val wbFtqReq        = RegEnable(s3_ftqReq, wbEnable)
+  private val wbPreIBufEnqPtr = RegEnable(s3_preIBufEnqPtr, wbEnable)
 
   private val wbCheckResultStage1 = RegEnable(checkerOutStage1, wbEnable)
   private val wbCheckResultStage2 = checkerOutStage2
   private val wbInstrRange        = RegEnable(io.toIBuffer.bits.enqEnable, wbEnable)
+  private val wbInstrCount        = RegEnable(PopCount(io.toIBuffer.bits.enqEnable), wbEnable)
+  wbRedirectInstrCount := wbInstrCount
+  wbRedirectIBufEnqPtr := wbPreIBufEnqPtr
 
   private val wbPcLowerResult = RegEnable(s3_pcLowerResult, wbEnable)
   private val wbPcHigh        = RegEnable(s3_pcHigh, wbEnable)
