@@ -195,7 +195,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.block_addr.bits   := req.addr
 
   s_data_override := true.B // data_override takes only 1 cycle
-  s_no_merge_stall := true.B
   //s_data_merge := true.B // data_merge takes only 1 cycle
 
   XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
@@ -209,6 +208,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     assert (remain === 0.U)
     req := io.req.bits
     s_data_override := false.B
+    s_no_merge_stall := false.B
     // only update paddr when allocate a new missqueue entry
     paddr_dup_0 := io.req.bits.addr
     paddr_dup_1 := io.req.bits.addr
@@ -216,8 +216,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
     when (!probe_merge_with_release) {
+      s_no_merge_stall := true.B
       // when probe merge with release, state will not change
-      s_no_merge_stall := false.B
       state      := s_release_req
       state_dup_0 := s_release_req
       state_dup_1 := s_release_req
