@@ -529,29 +529,23 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s3 **
   val s2_prefetch_train_valid = WireInit(false.B)
-  s2_prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_out.nc && !s2_in.tlbMiss && !s2_in.isHWPrefetch
-  if(EnableStorePrefetchSMS) {
-    io.s1_prefetch_spec := s1_fire
-    io.s2_prefetch_spec := s2_prefetch_train_valid
-    io.prefetch_train.valid := RegNext(s2_prefetch_train_valid)
-    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
-  }else {
-    io.s1_prefetch_spec := false.B
-    io.s2_prefetch_spec := false.B
-    io.prefetch_train.valid := false.B
-    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
-  }
+  s2_prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_out.nc && !s2_in.tlbMiss
+  io.prefetch_train.valid := RegNext(s2_prefetch_train_valid)
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   // override miss bit
   io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid)
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
+  io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_in.isHWPrefetch)
   io.prefetch_train.bits.isFinalSplit := false.B
   io.prefetch_train.bits.misalignWith16Byte := false.B
   io.prefetch_train.bits.isMisalign := false.B
   io.prefetch_train.bits.misalignNeedWakeUp := false.B
   io.prefetch_train.bits.updateAddrValid := false.B
   io.prefetch_train.bits.hasException := false.B
+  io.s1_prefetch_spec := s1_fire
+  io.s2_prefetch_spec := s2_prefetch_train_valid
 
   // for misalign in vsMergeBuffer
   io.s0_s1_s2_valid := s0_valid || s1_valid || s2_valid
