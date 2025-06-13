@@ -78,7 +78,6 @@ trait HasL1CacheParameters extends HasXSParameter
   def blockWords = blockBytes / wordBytes
   def refillWords = refillBytes / wordBytes
   def hashBitPairs(addr: UInt, hi: Int = PAddrBits - 1, lo: Int = pgIdxBits, step: Int = 2): UInt = {
-    print(s"hashBitPairs: data=${addr.getWidth} bits, hi=$hi, lo=$lo, step=$step\n")
     require(hi > lo && (hi - lo + 1) % step == 0, "Invalid bit range or step")
     (lo to hi by step).map(i => addr(i + step - 1, i)).reduce(_ ^ _)
   }

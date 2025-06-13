@@ -225,13 +225,11 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def addr_to_dcache_div_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
     Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset + DCacheSetDivBits))
-    // Cat(addr(DCacheAboveIndexOffset + 3, DCacheAboveIndexOffset + 2), addr(DCacheAboveIndexOffset - 1 - 2, DCacheSetOffset + DCacheSetDivBits))
   }
 
   def addr_to_dcache_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
     Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset))
-    // Cat(addr(DCacheAboveIndexOffset + 3, DCacheAboveIndexOffset +2), addr(DCacheAboveIndexOffset-1 -2, DCacheSetOffset))
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
@@ -257,7 +255,6 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
     if(blockOffBits + idxBits > pgIdxBits) {
       hashBitPairs(vaddr0, PAddrBits - 1, pgIdxBits) === hashBitPairs(vaddr1, PAddrBits - 1, pgIdxBits)
-      //vaddr0(PAddrBits - 1, pgIdxBits) === vaddr1(PAddrBits - 1, pgIdxBits)
     }else {
       // no alias problem
       true.B
@@ -1731,11 +1728,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // ld_access.zip(ldu).foreach {
   //   case (a, u) =>
   //     a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-  //     a.bits.idx := RegEnable(get_dcache_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
+  //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
   //     a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   // }
   // st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  // st_access.bits.idx := RegEnable(get_dcache_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
+  // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
   // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)
   // val access_info = ld_access.toSeq ++ Seq(st_access)
   // val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate
