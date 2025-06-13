@@ -135,6 +135,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
 
     val block_addr  = Output(Valid(UInt()))
+    val block_conflict = Output(Bool())
   })
 
   val s_invalid :: s_release_req :: s_release_resp ::Nil = Enum(3)
@@ -150,6 +151,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
   val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid))) //TODO: clock gate
+  val release_merge_probe = RegInit(false.B)
+  val probe_merge_with_release = WireInit(false.B)
 
   val remain = RegInit(0.U(refillCycles.W))
   val remain_dup_0 = RegInit(0.U(refillCycles.W))
@@ -159,6 +162,10 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   remain := (remain | remain_set) & ~remain_clr
   remain_dup_0 := (remain_dup_0 | remain_set) & ~remain_clr
   remain_dup_1 := (remain_dup_1 | remain_set) & ~remain_clr
+
+  // when a probe merge with release (same paddr), it will stall until`ReleaseAck`
+  // received
+  val s_no_merge_stall = RegInit(true.B)
 
   // writeback queue data
   val data = Reg(UInt((cfg.blockBytes * 8).W))
@@ -176,7 +183,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // there are valid request that can be sent to release bus
   //val busy = remain.orR && s_data_override && s_data_merge // have remain beats and data write finished
-  val busy = remain.orR && s_data_override  // have remain beats and data write finished
+  val busy = remain.orR && s_data_override && s_no_merge_stall  // have remain beats and data write finished
   val req = Reg(new WritebackReqWodata)
 
   // assign default signals to output signals
@@ -188,6 +195,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.block_addr.bits   := req.addr
 
   s_data_override := true.B // data_override takes only 1 cycle
+  s_no_merge_stall := true.B
   //s_data_merge := true.B // data_merge takes only 1 cycle
 
   XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
@@ -207,10 +215,16 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     paddr_dup_2 := io.req.bits.addr
 
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-    state      := s_release_req
-    state_dup_0 := s_release_req
-    state_dup_1 := s_release_req
-    state_dup_for_mp.foreach(_ := s_release_req)
+    when (!probe_merge_with_release) {
+      // when probe merge with release, state will not change
+      s_no_merge_stall := false.B
+      state      := s_release_req
+      state_dup_0 := s_release_req
+      state_dup_1 := s_release_req
+      state_dup_for_mp.foreach(_ := s_release_req)
+    }
+
+    release_merge_probe := probe_merge_with_release
   }
 
   // --------------------------------------------------------------------------------
@@ -281,8 +295,14 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     }
   }
 
-  io.primary_ready := state === s_invalid
-  io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid }
+  val paddr_match = io.req.bits.addr === paddr_dup_0
+  val new_req_is_probe = !io.req.bits.voluntary
+  val old_req_is_release = req.voluntary
+  probe_merge_with_release := new_req_is_probe && old_req_is_release && paddr_match && state === s_release_resp
+  io.block_conflict := new_req_is_probe && old_req_is_release && paddr_match && state === s_release_req
+  io.primary_ready := state === s_invalid || probe_merge_with_release
+  io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid || probe_merge_with_release }
+
   // --------------------------------------------------------------------------------
   // receive ReleaseAck for Releases
   when (state === s_release_resp) {
@@ -290,6 +310,14 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (io.mem_grant.fire) {
       state := s_invalid
       state_dup_for_mp.foreach(_ := s_invalid)
+
+      val merge_when_resp = io.req.valid && io.primary_valid && probe_merge_with_release
+      when (merge_when_resp || release_merge_probe) {
+        state := s_release_req
+        state_dup_for_mp.foreach(_ := s_release_req)
+      }
+
+      s_no_merge_stall := true.B
     }
   }
 
@@ -356,7 +384,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.id := entry_id
 
       // entry req
-      entry.io.req.valid := req.valid && !block_conflict
+      entry.io.req.valid := req.valid
       primary_ready_vec(i)   := entry.io.primary_ready
       entry.io.req.bits  := req.bits
       entry.io.req_data  := req_data
@@ -377,7 +405,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   io.mem_grant.ready := true.B
-  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR
+  block_conflict := entries.map(_.io.block_conflict).reduce(_|_)
   val miss_req_conflict = io.miss_req_conflict_check.map{ r =>
     VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === r.bits)).asUInt.orR
   }
@@ -411,4 +439,3 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   generatePerfEvent()
 
 }
-
