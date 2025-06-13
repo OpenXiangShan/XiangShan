@@ -224,12 +224,12 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
 
   def addr_to_dcache_div_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset + DCacheSetDivBits))
+    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset + DCacheSetDivBits))
   }
 
   def addr_to_dcache_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset-3, DCacheSetOffset))
+    Cat(hashBitPairs(addr, PAddrBits - 1, pgIdxBits), addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset))
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
