@@ -983,10 +983,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // st-ld violation query
     // if store unit is 128-bits memory access, need match 128-bit
-  private val s1_isMatch128 = io.stld_nuke_query.map(x => (x.bits.matchLine || ((s1_in.isvec || s1_in.misalignWith16Byte) && s1_in.is128bit)))
-  val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).zip(s1_isMatch128).map{case (w, s) => {Mux(s,
-    s1_paddr_dup_lsu(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
-    s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}})
+  val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map{
+    case index => {
+      val stMathType = io.stld_nuke_query(index).bits.matchType
+      val stAddr = io.stld_nuke_query(index).bits.paddr
+      val isMatch128Bit = StLdNukeMatchType.isQuadWord(stMathType) || ((s1_in.isvec || s1_in.misalignWith16Byte) && s1_in.is128bit)
+      PriorityMux(Seq(
+        StLdNukeMatchType.isCacheLine(stMathType) -> (s1_paddr_dup_lsu(PAddrBits-1, blockOffBits) === stAddr(PAddrBits-1, blockOffBits)),
+        isMatch128Bit                             -> (s1_paddr_dup_lsu(PAddrBits-1, 4) === stAddr(PAddrBits-1, 4)),
+        StLdNukeMatchType.isNormal(stMathType)    -> (s1_paddr_dup_lsu(PAddrBits-1, 3) === stAddr(PAddrBits-1, 3)))
+      )
+    }
+  })
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
@@ -1266,10 +1274,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //  2. Load instruction is younger than requestors(store instructions).
   //  3. Physical address match.
   //  4. Data contains.
-  private val s2_isMatch128 = io.stld_nuke_query.map(x => (x.bits.matchLine || ((s2_in.isvec || s2_in.misalignWith16Byte) && s2_in.is128bit)))
-  val s2_nuke_paddr_match = VecInit((0 until StorePipelineWidth).zip(s2_isMatch128).map{case (w, s) => {Mux(s,
-    s2_in.paddr(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
-    s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}})
+  val s2_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map{
+    case index => {
+      val stMathType = io.stld_nuke_query(index).bits.matchType
+      val stAddr = io.stld_nuke_query(index).bits.paddr
+      val isMatch128Bit = StLdNukeMatchType.isQuadWord(stMathType) || ((s2_in.isvec || s2_in.misalignWith16Byte) && s2_in.is128bit)
+      PriorityMux(Seq(
+        StLdNukeMatchType.isCacheLine(stMathType) -> (s2_in.paddr(PAddrBits-1, blockOffBits) === stAddr(PAddrBits-1, blockOffBits)),
+        isMatch128Bit                             -> (s2_in.paddr(PAddrBits-1, 4) === stAddr(PAddrBits-1, 4)),
+        StLdNukeMatchType.isNormal(stMathType)    -> (s2_in.paddr(PAddrBits-1, 3) === stAddr(PAddrBits-1, 3)))
+      )
+    }
+  })
   val s2_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
                           io.stld_nuke_query(w).valid && // query valid
                           isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store

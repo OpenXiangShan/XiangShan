@@ -318,7 +318,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
-  io.stld_nuke_query.bits.matchLine := (s1_in.isvec || s1_in.misalignWith16Byte) && s1_in.is128bit
+  io.stld_nuke_query.bits.matchType := Mux(
+                                          s1_isCbo,
+                                          StLdNukeMatchType.CacheLine,
+                                          Mux(s1_in.is128bit, StLdNukeMatchType.QuadWord, StLdNukeMatchType.Normal)
+                                        )
 
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec && !s1_frm_mabuf
