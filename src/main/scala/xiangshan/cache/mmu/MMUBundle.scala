@@ -982,13 +982,13 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   }
 
   // For PTWCache l0 & l1 entries, need not consider napot
-  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, s2xlate: UInt) = {
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, ignoreID: Bool = false.B, s2xlate: UInt) = {
     val is_global = WireInit(false.B)
     if (hasPerm) {
       is_global := perms.get(sectorIdxClip(vpn, level)).g
     }
     val asid_value = Mux(s2xlate =/= noS2xlate, vasid, asid)
-    val asid_hit = Mux(s2xlate === onlyStage2, true.B, (this.asid === asid_value || is_global))
+    val asid_hit = ignoreID || Mux(s2xlate === onlyStage2, true.B, (this.asid === asid_value || is_global))
     val vmid_hit = Mux(s2xlate =/= noS2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
     asid_hit && vmid_hit && tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level))
   }

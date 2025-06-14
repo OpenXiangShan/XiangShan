@@ -299,6 +299,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     require(set.getWidth == log2Up(l2tlbParams.l1nSets))
     l1h(set)
   }
+  def getl1gSet(vpn: UInt) = {
+    require(log2Up(l2tlbParams.l1nWays) == log2Down(l2tlbParams.l1nWays))
+    val set = genPtwL1SetIdx(vpn)
+    require(set.getWidth == log2Up(l2tlbParams.l1nSets))
+    l1g(set)
+  }
 
   // l0: level 0 leaf pte of 4KB pages
   val l0 = Module(new SplittedSRAM(
@@ -407,7 +413,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val ptwl3replace = if(EnableSv48) Some(ReplacementPolicy.fromString(l2tlbParams.l3Replacer, l2tlbParams.l3Size)) else None
   if (EnableSv48) {
     val hitVecT = l3.get.zipWithIndex.map {
-        case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search)
+        case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l3g.get(i), s2xlate = h_search)
           && l3v.get(i) && h_search === l3h.get(i))
     }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
@@ -422,7 +428,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     l3AccessPerf.get.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l3Size) {
-      XSDebug(stageReq.fire, p"[l3] l3(${i.U}) ${l3.get(i)} hit:${l3.get(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search)}\n")
+      XSDebug(stageReq.fire, p"[l3] l3(${i.U}) ${l3.get(i)} hit:${l3.get(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l3g.get(i), s2xlate = h_search)}\n")
     }
     XSDebug(stageReq.fire, p"[l3] l3v:${Binary(l3v.get)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l3] l3Hit:${hit} l3HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
@@ -441,7 +447,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val ptwl2replace = ReplacementPolicy.fromString(l2tlbParams.l2Replacer, l2tlbParams.l2Size)
   val (l2Hit, l2HitPPN, l2HitPbmt, l2Pre) = {
     val hitVecT = l2.zipWithIndex.map {
-      case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search)
+      case (e, i) => (e.hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l2g(i), s2xlate = h_search)
         && l2v(i) && h_search === l2h(i))
     }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
@@ -456,7 +462,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l2Size) {
-      XSDebug(stageReq.fire, p"[l2] l2(${i.U}) ${l2(i)} hit:${l2(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, s2xlate = h_search)}\n")
+      XSDebug(stageReq.fire, p"[l2] l2(${i.U}) ${l2(i)} hit:${l2(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l2g(i), s2xlate = h_search)}\n")
     }
     XSDebug(stageReq.fire, p"[l2] l2v:${Binary(l2v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
@@ -479,6 +485,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l1.io.r.req.bits.apply(setIdx = ridx)
     val vVec_req = getl1vSet(vpn_search)
     val hVec_req = getl1hSet(vpn_search)
+    val gVec_req = getl1gSet(vpn_search)
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
@@ -490,8 +497,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val data_resp = DataHoldBypass(l1.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
+    val gVec_delay = RegEnable(gVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).vsatp.asid, io.csr_dup(1).hgatp.vmid, s2xlate = delay_h) && v && (delay_h === h)})
+      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).vsatp.asid, io.csr_dup(1).hgatp.vmid, ignoreID = gVec_delay, s2xlate = delay_h) && v && (delay_h === h)})
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
