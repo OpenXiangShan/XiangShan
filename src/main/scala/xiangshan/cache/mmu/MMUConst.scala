@@ -138,6 +138,11 @@ trait HasTlbConst extends HasXSParameter {
   def onlyStage1 = "b01".U
   def onlyStage2 = "b10".U
 
+  def noSfence = "b00".U
+  def isSfence = "b01".U
+  def isVSfence = "b10".U
+  def isGSfence = "b11".U
+
   def Sv39 = "h8".U
   def Sv48 = "h9".U
 

@@ -215,7 +215,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
    */
 
   def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
-    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid))
+    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid || perm.g))
     val addr_low_hit = valididx(vpn(2, 0))
     val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
     val isPageSuper = !(level.getOrElse(0.U) === 0.U)
@@ -242,13 +242,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s2vpn = data.s2.entry.tag(vpnLen - 1, sectortlbwidth)
     val wb_vpn = Mux(s2xlate === onlyStage2, s2vpn, s1vpn)
     val vpn = Cat(wb_vpn, 0.U(sectortlbwidth.W))
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    val vpn_hit = Wire(Bool())
-    val index_hit = Wire(Vec(tlbcontiguous, Bool()))
-    val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
     val hasS2xlate = this.s2xlate =/= noS2xlate
     val onlyS1 = this.s2xlate === onlyStage1
     val onlyS2 = this.s2xlate === onlyStage2
+    val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid || data.s1.entry.perm.get.g))
+    val vpn_hit = Wire(Bool())
+    val index_hit = Wire(Vec(tlbcontiguous, Bool()))
+    val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
     val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
     val pteidx_hit = MuxCase(true.B, Seq(
       onlyS2 -> (VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0))).asUInt === pteidx.asUInt),
@@ -683,7 +683,7 @@ class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
 }
 
 /****************************  L2TLB  *************************************/
-abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
+abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst with HasTlbConst
 abstract class PtwModule(outer: L2TLB) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
@@ -837,14 +837,45 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
   val v = Bool()
 
   //s2xlate control whether compare vmid or not
-  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreID: Bool = false.B, s2xlate: UInt = 0.U(2.W), sfence: UInt = 0.U(2.W)) = {
     require(vpn.getWidth == vpnLen)
+
+    require(s2xlate.getWidth == 2)
+    require(sfence.getWidth == 2)
+
+    val not_sfence = sfence === noSfence
+    // sfence && !virt, should check asid(may ignore)
+    val sfence_valid = sfence === isSfence
+    // hfence_v or sfence && virt, should check vmid && asid(may ignore)
+    val hfenceV_valid = sfence === isVSfence
+    // hfence_g, should check vmid
+    val hfenceG_valid = sfence === isGSfence // hfence_g
+
+    // !virt, should check asid(global)
+    val not_virt = (s2xlate === noS2xlate && not_sfence) || sfence_valid
+    val onlyS1 = s2xlate === onlyStage1
+    val onlyS2 = s2xlate === onlyStage2
+
+    // For sfence or hfence_vvma, ignoreID means ignoreAsid
+    // For hfenceG_valid, ignoreID means ignoreVmid and it itself also ignoreAsid
+    val ignoreAsid = ignoreID
+    val ignoreVmid = ignoreID && hfenceG_valid
+
+    val need_asid_check = !ignoreAsid && !onlyS2 && !hfenceG_valid
+    val need_vmid_check = !ignoreVmid && !not_virt && !sfence_valid
+
 //    require(this.asid.getWidth <= asid.getWidth)
-    val asid_value = Mux(s2xlate, vasid, asid)
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
-    val vmid_hit = Mux(s2xlate, (this.vmid.getOrElse(0.U) === vmid), true.B)
+    val asid_value = Mux(not_virt, asid, vasid)
+    val is_global = WireInit(false.B)
+    if (hasPerm) {
+      is_global := perm.get.g
+    }
+    val asid_hit = Mux(need_asid_check, (this.asid === asid_value || is_global), true.B)
+    val vmid_hit = Mux(need_vmid_check, this.vmid.getOrElse(0.U) === vmid, true.B)
+
     if (allType) {
       require(hasLevel)
+      require(hasPerm)
       val tag_match = Wire(Vec(4, Bool())) // 512GB, 1GB, 2MB or 4KB(including SVNapot), not parameterized here
       when (n.getOrElse(0.U) =/= 0.U) {
         tag_match(0) := tag(vpnnLen - 1, pteNapotBits) === vpn(vpnnLen - 1, pteNapotBits)
@@ -869,13 +900,17 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
     }
   }
 
-  def refill(vpn: UInt, asid: UInt, vmid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B): Unit = {
+  def refill(vpn: UInt, asid: UInt, vmid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B, s2xlate: UInt): Unit = {
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     pbmt := pte.asTypeOf(new PteBundle().cloneType).pbmt
     ppn := pte.asTypeOf(new PteBundle().cloneType).getPPN()
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
+    when (s2xlate === onlyStage2) {
+      // g bit in G-stage PTEs should be ignored by hardware
+      perm.map(_.g := false.B)
+    }
     n.map(_ := pte.asTypeOf(new PteBundle().cloneType).n)
     this.asid := asid
     this.vmid.map(_ := vmid)
@@ -884,9 +919,9 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false,
     this.level.map(_ := level)
   }
 
-  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) = {
+  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B, s2xlate: UInt) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, asid, pte, level, prefetch, valid)
+    e.refill(vpn, asid, pte, level, prefetch, valid, s2xlate = s2xlate)
     e
   }
 
@@ -947,10 +982,14 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
   }
 
   // For PTWCache l0 & l1 entries, need not consider napot
-  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
-    val asid_value = Mux(s2xlate, vasid, asid)
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
-    val vmid_hit = Mux(s2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, ignoreID: Bool = false.B, s2xlate: UInt) = {
+    val is_global = WireInit(false.B)
+    if (hasPerm) {
+      is_global := perms.get(sectorIdxClip(vpn, level)).g
+    }
+    val asid_value = Mux(s2xlate =/= noS2xlate, vasid, asid)
+    val asid_hit = ignoreID || Mux(s2xlate === onlyStage2, true.B, (this.asid === asid_value || is_global))
+    val vmid_hit = Mux(s2xlate =/= noS2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
     asid_hit && vmid_hit && tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level))
   }
 
@@ -970,6 +1009,10 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
       ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
       ps.perms.map(_(i) := pte.perm)
+      when (s2xlate === onlyStage2) {
+        // g bit in G-stage PTEs should be ignored by hardware
+        ps.perms.map(_(i).g := false.B)
+      }
     }
     ps.reservedBits.map(_ := true.B)
     ps
@@ -1162,12 +1205,11 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     !pf && !entry.v && !af
   }
 
-  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool): Bool = {
+  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
     require(vpn.getWidth == vpnLen)
     require(allType)
     // require(this.asid.getWidth <= asid.getWidth)
-    val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid)
-    val vmid_hit = Mux(s2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
+    val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g)
 
     val tag_match = Wire(Vec(Level + 1, Bool()))
     tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
@@ -1188,7 +1230,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     val isSuperPage = entry.level.getOrElse(0.U) =/= 0.U || entry.n.getOrElse(0.U) =/= 0.U
     val addr_low_hit = Mux(isSuperPage, true.B, valididx(vpn(sectortlbwidth - 1, 0)))
 
-    asid_hit && vmid_hit && level_match && addr_low_hit
+    asid_hit && level_match && addr_low_hit
   }
 }
 
@@ -1274,7 +1316,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
-    val noS2_hit = s1.hit(vpn, Mux(this.hasS2xlate, vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
+    val noS2_hit = s1.hit(vpn, asid, vmid, allType, ignoreAsid)
     val onlyS2_hit = s2.hit(vpn, vmid)
     // allstage and onlys1 hit
     val s1vpn = Cat(s1.entry.tag, s1.addr_low)
@@ -1311,7 +1353,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
 
     val vpn_hit = level_match
     val vmid_hit = s1.entry.vmid.getOrElse(0.U) === vmid
-    val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid)
+    val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid || s1.entry.perm.get.g)
     val all_onlyS1_hit = vpn_hit && vmid_hit && vasid_hit
     Mux(this.s2xlate === noS2xlate, noS2_hit,
       Mux(this.s2xlate === onlyStage2, onlyS2_hit, all_onlyS1_hit))
