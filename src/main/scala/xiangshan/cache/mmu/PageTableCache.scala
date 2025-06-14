@@ -303,7 +303,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     require(log2Up(l2tlbParams.l1nWays) == log2Down(l2tlbParams.l1nWays))
     val set = genPtwL1SetIdx(vpn)
     require(set.getWidth == log2Up(l2tlbParams.l1nSets))
-    l1g(set)
+    val l1gVec = l1g.asTypeOf(Vec(l2tlbParams.l1nSets, UInt(l2tlbParams.l1nWays.W)))
+    l1gVec(set)
   }
 
   // l0: level 0 leaf pte of 4KB pages
@@ -498,8 +499,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val gVec_delay = RegEnable(gVec_req, stageReq.fire)
-    val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).vsatp.asid, io.csr_dup(1).hgatp.vmid, ignoreID = gVec_delay, s2xlate = delay_h) && v && (delay_h === h)})
+    val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(gVec_delay.asBools).zip(hVec_delay).map { case (((wayData, v), g), h) =>
+      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).vsatp.asid, io.csr_dup(1).hgatp.vmid, ignoreID = g, s2xlate = delay_h) && v && (delay_h === h)})
 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
