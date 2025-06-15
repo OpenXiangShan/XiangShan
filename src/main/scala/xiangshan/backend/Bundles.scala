@@ -878,6 +878,7 @@ object Bundles {
     val vls = Bool()
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
+    val isFromFetchHWE = Bool()
   }
 
   object UopIdx {
