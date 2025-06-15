@@ -237,10 +237,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
-    if (iq.params.needLoadDependency)
-      iq.io.ldCancel := io.ldCancel
-    else
-      iq.io.ldCancel := 0.U.asTypeOf(io.ldCancel)
+    iq.io.ldCancel := 0.U.asTypeOf(io.ldCancel)
   }
 
   // connect the vl writeback informatino to the issue queues
