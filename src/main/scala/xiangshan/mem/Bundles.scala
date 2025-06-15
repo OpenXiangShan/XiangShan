@@ -37,6 +37,18 @@ import math._
 
 object Bundles {
 
+  object StLdNukeMatchType {
+    def Normal      = "b00".U
+    def QuadWord    = "b01".U
+    def CacheLine   = "b10".U
+
+    def isNormal(matchType: UInt)    = matchType === Normal
+    def isQuadWord(matchType: UInt)  = matchType === QuadWord
+    def isCacheLine(matchType: UInt) = matchType === CacheLine
+
+    def apply() = UInt(2.W)
+  }
+
   class LsPipelineBundle(implicit p: Parameters) extends XSBundle
     with HasDCacheParameters
     with HasVLSUParameters {
@@ -257,8 +269,8 @@ object Bundles {
     //  mask: requestor's (a store instruction) data width mask for match logic.
     val mask = UInt((VLEN/8).W)
 
-    // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
-    val matchLine = Bool()
+    // matchType: store load nuke match type. See this class for details.
+    val matchType = StLdNukeMatchType()
   }
 
   class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
