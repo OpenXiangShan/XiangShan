@@ -221,15 +221,19 @@ class TLBFA(
   when (hfencev_valid) {
     when (hfencev.bits.rs1) {
       when (hfencev.bits.rs2) {
+        // all addr and all asid
         v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid)}
       }.otherwise {
+        // all addr but specific asid
         v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid))
         }
       }
     }.otherwise {
       when (hfencev.bits.rs2) {
+        // specific addr but all asid
         v.zipWithIndex.map{ case (a, i) => a := a && !hfencevHit_noasid(i) }
       }.otherwise {
+        // specific addr and specific asid
         v.zipWithIndex.map{ case (a, i) => a := a && !(hfencevHit(i) && !g(i)) }
       }
     }
