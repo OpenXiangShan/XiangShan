@@ -69,6 +69,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val SCMissBubble:         Bool = Output(Bool())
     val ITTAGEMissBubble:     Bool = Output(Bool())
     val RASMissBubble:        Bool = Output(Bool())
+
+    val reset_vector: PrunedAddr = Input(new PrunedAddr(VAddrBits))
   }
 
   val io: FtqIO = IO(new FtqIO)
@@ -82,9 +84,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val ifuWbPtr  = RegInit(FtqPtrVec())
   private val commitPtr = RegInit(FtqPtrVec(2))
 
-  XSError(bpuPtr < ifuPtr && !isFull(bpuPtr(0), ifuPtr(0)), "ifuPtr runs ahead of bpuPtr")
-  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
-  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
+  // TODO: remove them for now to run dummy FTQ
+//  XSError(bpuPtr < ifuPtr && !isFull(bpuPtr(0), ifuPtr(0)), "ifuPtr runs ahead of bpuPtr")
+//  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
+//  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
 
   private val validEntries = distanceBetween(bpuPtr(0), commitPtr(0))
 
@@ -605,4 +608,66 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
+
+  // Dummy FTQ below
+  io.toBpu.redirect.valid := false.B
+
+  private val dummy_startAddr = Reg(new PrunedAddr(VAddrBits))
+  private val dummy_ftqIdx    = RegInit(FtqPtr(false.B, 0.U))
+
+  when(reset.asBool) {
+    dummy_startAddr := io.reset_vector
+  }.elsewhen(backendRedirect.valid) {
+    dummy_startAddr := backendRedirect.bits.cfiUpdate.target
+    dummy_ftqIdx    := backendRedirect.bits.ftqIdx + 1.U
+  }.elsewhen(ifuRedirect.valid) {
+    dummy_startAddr := pdWb.bits.target.toUInt
+    dummy_ftqIdx    := ifuRedirect.bits.ftqIdx + 1.U
+  }.elsewhen(io.toIfu.req.fire) {
+    dummy_startAddr := dummy_startAddr + 32.U(VAddrBits.W)
+    dummy_ftqIdx    := dummy_ftqIdx + 1.U
+  }
+
+  for (stage <- 2 to 3) {
+    io.toICache.flushFromBpu.stage(stage).valid := false.B
+    io.toICache.flushFromBpu.stage(stage).bits  := DontCare
+    io.toIfu.flushFromBpu.stage(stage).valid    := false.B
+    io.toIfu.flushFromBpu.stage(stage).bits     := DontCare
+  }
+
+  io.toIfu.req.valid                := !reset.asBool && !backendRedirect.valid && !ifuRedirect.valid
+  io.toIfu.req.bits.startAddr       := dummy_startAddr
+  io.toIfu.req.bits.nextStartAddr   := dummy_startAddr + 32.U(VAddrBits.W)
+  io.toIfu.req.bits.nextlineStart   := dummy_startAddr + (FetchWidth * 4 * 2).U
+  io.toIfu.req.bits.ftqIdx          := dummy_ftqIdx
+  io.toIfu.req.bits.ftqOffset.valid := false.B
+
+  private val dummy_canPrefetch = RegInit(true.B)
+
+  when(backendRedirect.valid || ifuRedirect.valid || io.toIfu.req.fire) {
+    dummy_canPrefetch := true.B
+  }.elsewhen(io.toICache.prefetchReq.fire) {
+    dummy_canPrefetch := false.B
+  }
+
+  io.fromIfu.mmioCommitRead.mmioLastCommit := true.B
+
+  io.toICache.prefetchReq.valid                  := dummy_canPrefetch && !backendRedirect.valid && !ifuRedirect.valid
+  io.toICache.prefetchReq.bits.req.startAddr     := dummy_startAddr
+  io.toICache.prefetchReq.bits.req.nextlineStart := dummy_startAddr + (FetchWidth * 4 * 2).U
+  io.toICache.prefetchReq.bits.req.ftqIdx        := dummy_ftqIdx
+  io.toICache.prefetchReq.bits.backendException  := ExceptionType.None
+
+  io.toICache.fetchReq.valid := true.B
+  io.toICache.fetchReq.bits.readValid.foreach(valid =>
+    valid := true.B
+  )
+  io.toICache.fetchReq.bits.req.foreach { req =>
+    req.startAddr     := dummy_startAddr
+    req.nextlineStart := dummy_startAddr + (FetchWidth * 4 * 2).U
+    req.ftqIdx        := dummy_ftqIdx
+  }
+  io.toICache.fetchReq.bits.isBackendException := false.B
+
+  // FIXME: backend seems to commit one entry mutiple times
 }

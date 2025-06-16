@@ -38,10 +38,11 @@ trait BackendRedirectReceiver extends HasXSParameter {
     )
 
     val redirect = Wire(Valid(new BranchPredictionRedirect))
-    redirect.valid := fromBackend.redirect.valid
+    redirect.valid := fromBackend.redirect.valid && ftqIdxInAdvanceNext
     redirect.bits.connectRedirect(fromBackend.redirect.bits)
     redirect.bits.BTBMissBubble := false.B // FIXME: wtf?
     val redirectReg = RegNext(redirect)
+    redirectReg.valid := fromBackend.redirect.valid && !ftqIdxInAdvanceNext
     XSError(
       ftqIdxInAdvance.valid && redirect.valid,
       "Redirect request sent but ftqIdx is also sent in advance\n"
