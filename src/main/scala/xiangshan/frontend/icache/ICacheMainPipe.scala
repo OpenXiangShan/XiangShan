@@ -255,12 +255,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s1_req_offset  = s1_req_vaddr(0)(log2Ceil(blockBytes) - 1, 0)
 
   // do metaArray ECC check
-  private val s1_meta_corrupt = VecInit((s1_req_ptags zip s1_meta_codes zip s1_waymasks).map {
-    case ((meta, code), waymask) =>
-      val hit_num = PopCount(waymask)
+  private val s1_meta_corrupt = VecInit((0 until PortNumber).map { i =>
+    val hit_num      = PopCount(s1_waymasks(i))
+    // if !s1_doubleline, s1_waymasks(1) is invalid and should not be checked
+    val needThisLine = if (i == 0) true.B else s1_doubleline
+    needThisLine && (
       // NOTE: if not hit, encodeMetaECC(meta) =/= code can also be true, but we don't care about it
-      (encodeMetaECC(meta) =/= code && hit_num === 1.U) || // hit one way, but parity code does not match, ECC failure
-      hit_num > 1.U                                        // hit multi-way, must be an ECC failure
+      // hit one way, but parity code does not match, ECC failure
+      (encodeMetaECC(s1_req_ptags(i)) =/= s1_meta_codes(i) && hit_num === 1.U) ||
+        // hit multi-way, must be an ECC failure
+        hit_num > 1.U
+    )
   })
   // force clear meta_corrupt when parity check is disabled
   when(!ecc_enable) {
