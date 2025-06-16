@@ -256,7 +256,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
 
   // do metaArray ECC check
   private val s1_meta_corrupt = VecInit((0 until PortNumber).map { i =>
-    val hit_num      = PopCount(s1_waymasks(i))
+    val hit_num = PopCount(s1_waymasks(i))
     // if !s1_doubleline, s1_waymasks(1) is invalid and should not be checked
     val needThisLine = if (i == 0) true.B else s1_doubleline
     needThisLine && (
@@ -393,6 +393,18 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   }
   // meta error is checked in s1 stage
   private val s2_meta_corrupt = RegEnable(s1_meta_corrupt, 0.U.asTypeOf(s1_meta_corrupt), s1_fire)
+
+  /* NOTE: if !s2_doubline:
+   * - s2_meta_corrupt(1) should be false.B (as waymask(1) is invalid, and meta ecc is not checked)
+   * - s2_data_corrupt(1) should also be false.B, as getLineSel() should not select line(1)
+   * so we don't need to check s2_doubleline in the following io.errors and toMetaFlush ports
+   * we add a sanity check to make sure the above assumption holds
+   */
+  assert(
+    !(!s2_doubleline && (s2_meta_corrupt(1) || s2_data_corrupt(1))),
+    "meta or data corrupt detected on line 1 but s2_doubleline is false.B"
+  )
+
   // send errors to top
   // TODO: support RERI spec standard interface
   (0 until PortNumber).foreach { i =>
