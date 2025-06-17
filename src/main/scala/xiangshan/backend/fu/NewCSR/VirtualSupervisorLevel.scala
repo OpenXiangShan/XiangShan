@@ -33,7 +33,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         reg.FS := ContextStatus.Dirty
       }
 
-      when ((robCommit.vsDirty || writeVCSR) && isVirtMode) {
+      when ((robCommit.vsDirty || writeVCSR || robCommit.vstart.valid && robCommit.vstart.bits =/= 0.U) && isVirtMode) {
         assert(reg.VS =/= ContextStatus.Off, "The vsstatus.VS should not be Off when set dirty, please check decode")
         reg.VS := ContextStatus.Dirty
       }
