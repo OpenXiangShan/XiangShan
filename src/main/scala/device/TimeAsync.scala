@@ -26,9 +26,6 @@ class TimeVldGen extends Module {  // work with reference clock,sync with syscnt
     val i_time = Input(UInt(64.W))
     val o_time = Output(ValidIO(UInt(64.W)))
   })
-  val time_vld_o = RegInit(false.B)
-  val time_vld_inv = !time_vld_o
-  time_vld_o := withClockAndReset(clock,reset)(RegNext(time_vld_inv))
   io.o_time.bits := io.i_time
-  io.o_time.valid := time_vld_o
+  io.o_time.valid := io.i_time(0)
 }
