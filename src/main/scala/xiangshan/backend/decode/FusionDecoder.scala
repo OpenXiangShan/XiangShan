@@ -26,6 +26,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import yunsuan.MULOpType
 
 abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {
@@ -461,7 +462,7 @@ class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
   override def fusedInstr: Option[BitPat] = Some(Instructions.MULW)
-  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => MDUOpType.mulw7)
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => MULOpType.mulw7)
   override def lsrc2NeedMux: Boolean = true
 
   def fusionName: String = "andi127_mulw"

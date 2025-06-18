@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
 import utils.SeqUtils._
-import xiangshan.{ALUOpType, JumpOpType, SelImm, XSBundle, XSModule}
+import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, ExuVec, ImmInfo}
 import xiangshan.backend.issue._
