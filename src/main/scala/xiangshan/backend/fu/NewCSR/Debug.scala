@@ -114,7 +114,7 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrol6WireVec).map {
     case (tEnable, mod) => tEnable && mod.isMemAccTrigger
   }
-  
+
   io.out.frontendTrigger.tUpdate.valid        := RegNext(RegNext(frontendTriggerUpdate))
   io.out.frontendTrigger.tUpdate.bits.addr    := tselect.asUInt
   io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
@@ -192,8 +192,14 @@ class CsrTriggerBundle(implicit val p: Parameters) extends Bundle with HasXSPara
 }
 
 object MemType {
-  val LOAD  = true
-  val STORE = false
+  def width: Int = 2
+
+  val LOAD  = 0
+  val STORE = 1
+  val HYBRID = 2
+
+  def hasLoadType(_type: Int) = _type == LOAD || _type == HYBRID
+  def hasStoreType(_type: Int) = _type == STORE || _type == HYBRID
 }
 
 
@@ -263,10 +269,10 @@ abstract class BaseTrigger()(implicit val p: Parameters) extends Module with Has
 }
 
 
-class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Parameters) extends BaseTrigger {
+class MemTrigger(memType: Int = MemType.LOAD)(override implicit val p: Parameters) extends BaseTrigger {
 
   class MemTriggerIO extends BaseTriggerIO{
-    val isCbo = OptionWrapper(memType == MemType.STORE, Input(Bool()))
+    val isCbo = OptionWrapper(MemType.hasStoreType(memType), Input(Bool()))
   }
 
   override lazy val io = IO(new MemTriggerIO)
@@ -274,11 +280,13 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
   override def getTriggerHitVec(): Vec[Bool] = {
     val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
     for (i <- 0 until TriggerNum) {
+      val tdataVecEnable = (MemType.hasLoadType(memType).B && tdataVec(i).load) ||
+        (MemType.hasStoreType(memType).B && tdataVec(i).store)
       triggerHitVec(i) := !tdataVec(i).select && !debugMode && TriggerCmp(
       vaddr,
       tdataVec(i).tdata2,
       tdataVec(i).matchType,
-      tEnableVec(i) && (if(memType == MemType.LOAD) tdataVec(i).load else tdataVec(i).store)
+      tEnableVec(i) && tdataVecEnable
       )
     }
     triggerHitVec
@@ -286,8 +294,10 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
 
   override def highBitsEq(): Vec[Bool] = {
     VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
+      val tdataVecEnable = (MemType.hasLoadType(memType).B && tdata.load) ||
+        (MemType.hasStoreType(memType).B && tdata.store)
       !tdata.select && !debugMode && en &&
-        (if(memType == MemType.LOAD) tdata.load else tdata.store) &&
+        tdataVecEnable &&
         (vaddr >> lowBitWidth) === (tdata.tdata2 >> lowBitWidth)
     })
   }
@@ -297,7 +307,7 @@ class MemTrigger(memType: Boolean = MemType.LOAD)(override implicit val p: Param
     io.isCbo.getOrElse(false.B),
     VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
       !tdata.select && !debugMode && en &&
-        tdata.store && io.isCbo.getOrElse(false.B) &&
+        (MemType.hasStoreType(memType).B && tdata.store) && io.isCbo.getOrElse(false.B) &&
         (vaddr >> DCacheLineOffset) === (tdata.tdata2 >> DCacheLineOffset)
     })
     )
@@ -320,7 +330,7 @@ class VSegmentTrigger(override implicit val p: Parameters) extends BaseTrigger {
         vaddr,
         tdataVec(i).tdata2,
         tdataVec(i).matchType,
-        tEnableVec(i) && Mux(io.memType === MemType.LOAD.asBool, tdataVec(i).load, tdataVec(i).store)
+        tEnableVec(i) && Mux(io.memType === MemType.LOAD.U, tdataVec(i).load, tdataVec(i).store)
       )
     }
     triggerHitVec
@@ -329,7 +339,7 @@ class VSegmentTrigger(override implicit val p: Parameters) extends BaseTrigger {
   override def highBitsEq(): Vec[Bool] = {
     VecInit(tdataVec.zip(tEnableVec).map{ case(tdata, en) =>
       !tdata.select && !debugMode && en &&
-        Mux(io.memType === MemType.LOAD.asBool, tdata.load, tdata.store) &&
+        Mux(io.memType === MemType.LOAD.U, tdata.load, tdata.store) &&
         (vaddr >> lowBitWidth) === (tdata.tdata2 >> lowBitWidth)
     })
   }

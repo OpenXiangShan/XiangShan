@@ -29,6 +29,27 @@ class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
   val instrtype   = UInt(sourceTypeWidth.W)
 }
 
+class DCacheStoreReqIO(implicit p: Parameters) extends DCacheBundle {
+  val req = DecoupledIO(new DcacheStoreRequestIO)
+  // Paddr in STA s1, used for hit check
+  val s1_paddr = Output(UInt(PAddrBits.W))
+  // TLB miss or Exception in STA s1, kill Dcache req
+  val s1_kill = Output(Bool())
+  // Access Fault or MMIO in STA s2, kill Dcache req
+  val s2_kill = Output(Bool())
+  // Debug PC
+  val s2_pc = Output(UInt(VAddrBits.W))
+}
+
+class DCachceStoreRespIO(implicit p: Parameters) extends DCacheBundle {
+  // this store misses (for now, not used)
+  val miss = Output(Bool())
+  // this store needs replay (for now, not used)
+  val replay = Output(Bool())
+  // tag error TODO: add logic
+  val tag_error = Output(Bool())
+}
+
 class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
   // Paddr in STA s1, used for hit check
   val s1_paddr = Output(UInt(PAddrBits.W))

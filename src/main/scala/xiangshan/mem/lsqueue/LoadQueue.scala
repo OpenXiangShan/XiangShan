@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.frontend.ftq.FtqPtr
@@ -48,33 +49,34 @@ object LqPtr {
   }
 }
 
-trait HasLoadHelper { this: XSModule =>
-  def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
+object BitUtils {
+
+  def rdataHelper(uop: DynInst, rdata: UInt, nBits: Int)(implicit p: Parameters): UInt = {
     val fpWen = uop.fpWen
     LookupTree(uop.fuOpType, List(
-      LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.lb   -> SignExt(rdata(7, 0) , nBits),
+      LSUOpType.lh   -> SignExt(rdata(15, 0), nBits),
       /*
           riscv-spec-20191213: 12.2 NaN Boxing of Narrower Values
           Any operation that writes a narrower result to an f register must write
           all 1s to the uppermost FLEN−n bits to yield a legal NaN-boxed value.
       */
-      LSUOpType.lw   -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), XLEN)),
-      LSUOpType.ld   -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), XLEN)),
-      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
-      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.lw   -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), nBits)),
+      LSUOpType.ld   -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), nBits)),
+      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , nBits),
+      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), nBits),
+      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), nBits),
 
       // hypervisor
-      LSUOpType.hlvb -> SignExt(rdata(7, 0), XLEN),
-      LSUOpType.hlvh -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvw -> SignExt(rdata(31, 0), XLEN),
-      LSUOpType.hlvd -> SignExt(rdata(63, 0), XLEN),
-      LSUOpType.hlvbu -> ZeroExt(rdata(7, 0), XLEN),
-      LSUOpType.hlvhu -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvwu -> ZeroExt(rdata(31, 0), XLEN),
-      LSUOpType.hlvxhu -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvxwu -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.hlvb -> SignExt(rdata(7, 0), nBits),
+      LSUOpType.hlvh -> SignExt(rdata(15, 0), nBits),
+      LSUOpType.hlvw -> SignExt(rdata(31, 0), nBits),
+      LSUOpType.hlvd -> SignExt(rdata(63, 0), nBits),
+      LSUOpType.hlvbu -> ZeroExt(rdata(7, 0), nBits),
+      LSUOpType.hlvhu -> ZeroExt(rdata(15, 0), nBits),
+      LSUOpType.hlvwu -> ZeroExt(rdata(31, 0), nBits),
+      LSUOpType.hlvxhu -> ZeroExt(rdata(15, 0), nBits),
+      LSUOpType.hlvxwu -> ZeroExt(rdata(31, 0), nBits),
     ))
   }
 
@@ -95,16 +97,17 @@ trait HasLoadHelper { this: XSModule =>
     result
   }
 
-  def newRdataHelper(select: UInt, rdata: UInt): UInt = {
+  def newRdataHelper(select: UInt, rdata: UInt, nBits: Int)(implicit p: Parameters): UInt = {
     XSError(PopCount(select) > 1.U, "data selector must be One-Hot!\n")
+    require(nBits == 64, "nBits must be 64")
     val selData = Seq(
-      ZeroExt(rdata(7, 0), XLEN),
-      ZeroExt(rdata(15, 0), XLEN),
-      ZeroExt(rdata(31, 0), XLEN),
+      ZeroExt(rdata(7, 0), nBits),
+      ZeroExt(rdata(15, 0), nBits),
+      ZeroExt(rdata(31, 0), nBits),
       rdata(63, 0),
-      SignExt(rdata(7, 0) , XLEN),
-      SignExt(rdata(15, 0) , XLEN),
-      SignExt(rdata(31, 0) , XLEN),
+      SignExt(rdata(7, 0) , nBits),
+      SignExt(rdata(15, 0) , nBits),
+      SignExt(rdata(31, 0) , nBits),
       FPU.box(rdata, FPU.H),
       FPU.box(rdata, FPU.S)
     )
@@ -118,12 +121,13 @@ trait HasLoadHelper { this: XSModule =>
     })
   }
 
-  def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
+  def rdataVecHelper(alignedType: UInt, rdata: UInt, nBits: Int): UInt = {
+    require(nBits >= 64, "nBits must be great or equal 64")
     LookupTree(alignedType, List(
-      "b00".U -> ZeroExt(rdata(7, 0), VLEN),
-      "b01".U -> ZeroExt(rdata(15, 0), VLEN),
-      "b10".U -> ZeroExt(rdata(31, 0), VLEN),
-      "b11".U -> ZeroExt(rdata(63, 0), VLEN)
+      "b00".U -> ZeroExt(rdata(7, 0), nBits),
+      "b01".U -> ZeroExt(rdata(15, 0), nBits),
+      "b10".U -> ZeroExt(rdata(31, 0), nBits),
+      "b11".U -> ZeroExt(rdata(63, 0), nBits)
     ))
   }
 }
@@ -154,7 +158,6 @@ class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {
 class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
@@ -170,7 +173,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s0, store data, send to sq from rs
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)
@@ -180,7 +183,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val stIssuePtr       = Input(new SqPtr)
       val sqEmpty          = Input(Bool())
     }
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val ncOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))

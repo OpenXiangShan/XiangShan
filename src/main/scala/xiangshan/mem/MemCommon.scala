@@ -157,6 +157,11 @@ object ReplayCauseNO {
     priorities.slice(0, idx)
   }
 
+  def hasHigherCausesThan(causeVec: Vec[Bool], cause: Int): Bool = {
+    val higherCauses = getHigherCauseThan(cause)
+    causeVec.take(higherCauses.length).reduce(_|_)
+  }
+
   def slice(seq: Seq[Bool], lower: Int, upper: Int): Seq[Bool] = {
     seq.zipWithIndex.filter(x => x._2 >= lower && x._2 < upper).map(_._1)
   }

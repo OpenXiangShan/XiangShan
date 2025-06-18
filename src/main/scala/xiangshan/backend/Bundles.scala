@@ -40,6 +40,17 @@ object Bundles {
         data := bundleSink.elements(name)
     }
   }
+
+  /**
+    * Connect Same Name Port with direction like bundleSource.ready <> bundleSinkBunlde.ready
+    */
+  def connectSameIOPort(bundleSource: Bundle, bundleSink: Bundle):Unit = {
+    bundleSource.elements.foreach { case (name, data) =>
+      if (bundleSink.elements.contains(name))
+        data <> bundleSink.elements(name)
+    }
+  }
+
   // frontend -> backend
   class StaticInst(implicit p: Parameters) extends XSBundle {
     val instr            = UInt(32.W)

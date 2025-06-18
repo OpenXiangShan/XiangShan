@@ -612,6 +612,36 @@ class CMOResp(implicit p: Parameters) extends Bundle {
 }
 
 // used by load unit
+class DCacheLoadReqIO(implicit p: Parameters) extends DCacheBundle {
+  val req               = DecoupledIO(new DCacheWordReq)
+  val s1_kill_data_read = Output(Bool()) // only kill bandedDataRead at s1
+  val s1_kill           = Output(Bool()) // kill loadpipe req at s1
+  val s2_kill           = Output(Bool())
+  val s0_pc             = Output(UInt(VAddrBits.W))
+  val s1_pc             = Output(UInt(VAddrBits.W))
+  val s2_pc             = Output(UInt(VAddrBits.W))
+  val replacementUpdated = Output(Bool())
+  val is128Req          = Output(Bool())
+  val pf_source         = Output(UInt(L1PfSourceBits.W))
+  val s1_paddr_dup_lsu  = Output(UInt(PAddrBits.W)) // lsu side paddr
+  val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
+}
+
+class DCacheLoadRespIO(implicit p: Parameters) extends DCacheBundle {
+  val resp                   = Flipped(DecoupledIO(new DCacheWordResp))
+  val s1_disable_fast_wakeup = Input(Bool())
+  val s2_hit                 = Input(Bool()) // hit signal for lsu,
+  val s2_first_hit           = Input(Bool())
+  val s2_bank_conflict       = Input(Bool())
+  val s2_wpu_pred_fail       = Input(Bool())
+  val s2_mq_nack             = Input(Bool())
+  // debug
+  val debug_s1_hit_way       = Input(UInt(nWays.W))
+  val debug_s2_pred_way_num  = Input(UInt(XLEN.W))
+  val debug_s2_dm_way_num    = Input(UInt(XLEN.W))
+  val debug_s2_real_way_num  = Input(UInt(XLEN.W))
+}
+
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
@@ -769,6 +799,27 @@ class MissQueueForwardRespBundle(implicit p: Parameters) extends DCacheBundle {
 }
 
 // forward mshr's data to ldu
+class LoadForwardMissQueueReqBundle(implicit p: Parameters) extends DCacheBundle {
+  val mshrId = Input(UInt(log2Up(cfg.nMissEntries).W))
+  val paddr = Input(UInt(PAddrBits.W))
+}
+
+class LoadForwardMissQueueRespBundle(implicit p: Parameters) extends DCacheBundle {
+  val forwardValid = Bool()
+  val mshrHit = Bool()
+  val data = Vec(VLEN/8, UInt(8.W))
+  val corrupt = Bool()
+
+  def forward() = {
+    (forwardValid, mshrHit, data, corrupt)
+  }
+}
+
+class LoadForwardMissQueueIO(implicit p: Parameters) extends DCacheBundle {
+  val req = ValidIO(new LoadForwardMissQueueReqBundle)
+  val resp = Input(new LoadForwardMissQueueRespBundle)
+}
+
 class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
   // TODO: use separate Bundles for req and resp
   // req
@@ -811,7 +862,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
   val forward_D = Output(Vec(LoadPipelineWidth, new DcacheToLduForwardIO))
-  val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+  val forward_mshr = Vec(LoadPipelineWidth, Flipped(new LoadForwardMissQueueIO))
 }
 
 class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
@@ -980,7 +1031,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  HasCMO: " + HasCMO)
 
   // Enable L1 Store prefetch
-  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   val MetaReadPort =
         if (StorePrefetchL1Enabled)
           1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt
@@ -1521,7 +1571,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
 
   // forward missqueue
-  (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
+  (0 until LoadPipelineWidth).foreach { i =>
+    io.lsu.forward_mshr(i) <> missQueue.io.forward(i)
+  }
 
   // refill to load queue
  // io.lsu.lsq <> missQueue.io.refill_to_ldq

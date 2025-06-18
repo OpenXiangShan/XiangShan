@@ -24,21 +24,20 @@ import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.rob.RobLsqIO
-import xiangshan.mem.Bundles._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles.{MemExuOutput, DynInst}
 import xiangshan.backend.fu.FuConfig.LduCfg
-import xiangshan.cache.mmu.HasTlbConst
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.mem.Bundles._
+import xiangshan.mem.BitUtils._
 import xiangshan.cache._
+import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache.wpu.ReplayCarry
 
 class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
   with HasTlbConst
 {
   private val enqPortNum = LoadPipelineWidth
@@ -541,7 +540,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
         }
       }
     }
-    combinedData := Mux(req.isVector, rdataVecHelper(req.alignType, (catResult.asUInt)(XLEN - 1, 0)), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0)))
+    combinedData := Mux(req.isVector, rdataVecHelper(req.alignType, (catResult.asUInt)(XLEN - 1, 0), VLEN), rdataHelper(req.uop, (catResult.asUInt)(XLEN - 1, 0), XLEN))
 
   }
 
@@ -553,7 +552,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.writeBack.bits.uop.fuType := FuType.ldu.U
   io.writeBack.bits.uop.flushPipe := false.B
   io.writeBack.bits.uop.replayInst := false.B
-  io.writeBack.bits.data := newRdataHelper(data_select, combinedData)
+  io.writeBack.bits.data := newRdataHelper(data_select, combinedData, XLEN)
   io.writeBack.bits.isFromLoadUnit := needWakeUpWB
   // Misaligned accesses to uncache space trigger exceptions, so theoretically these signals won't do anything practical.
   // But let's get them assigned correctly.

@@ -21,21 +21,22 @@ import chisel3._
 import chisel3.util._
 import utils._
 import utility._
-import xiangshan._
-import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.Bundles._
-import xiangshan.mem._
-import xiangshan.backend.fu.{FuType, PMPRespBundle}
 import freechips.rocketchip.diplomacy.BufferParams
-import xiangshan.cache.mmu._
-import xiangshan.cache._
-import xiangshan.cache.wpu.ReplayCarry
-import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.fu.{FuType, PMPRespBundle}
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
+import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.backend.rob.RobPtr
+import xiangshan.mem._
+import xiangshan.mem.BitUtils._
+import xiangshan.cache._
+import xiangshan.cache.mmu._
+import xiangshan.cache.wpu.ReplayCarry
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
 {
@@ -72,7 +73,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   with HasDCacheParameters
   with MemoryOpConstants
   with SdtrigExt
-  with HasLoadHelper
 {
   val io               = IO(new VSegmentUnitIO)
 
@@ -637,7 +637,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val shiftData    = (io.rdcache.resp.bits.data_delayed >> (latchVaddr(3, 0) << 3)).asUInt(63, 0)
   val mergemisalignData = Mux(notCross16ByteReg, shiftData, combinedData)
-  val pickData  = rdataVecHelper(alignedType(1,0), Mux(isMisalignReg, mergemisalignData, cacheData))
+  val pickData  = rdataVecHelper(alignedType(1,0), Mux(isMisalignReg, mergemisalignData, cacheData), VLEN)
   val mergedData = mergeDataWithElemIdx(
     oldData = data(splitPtr.value),
     newData = Seq(pickData),
@@ -936,4 +936,3 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
-

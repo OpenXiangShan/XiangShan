@@ -130,7 +130,6 @@ object AgeDetector {
 class LoadQueueReplay(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
   with HasTlbConst
   with HasPerfEvents
 {
@@ -146,7 +145,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // from std s1
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true))))
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))

@@ -9,7 +9,6 @@ import xiangshan.backend.fu.fpu.{IntToFP, IntFPToVec}
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.mem.Std
 
 /**
   *
@@ -449,7 +448,7 @@ object FuConfig {
   val StdCfg: FuConfig = FuConfig (
     name = "std",
     fuType = FuType.stu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new Std(cfg)(p).suggestName("Std")),
+    fuGen = null,
     srcData = Seq(
       Seq(IntData()),
       Seq(FpData()),
@@ -847,4 +846,3 @@ object FuConfig {
     VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
   )
 }
-

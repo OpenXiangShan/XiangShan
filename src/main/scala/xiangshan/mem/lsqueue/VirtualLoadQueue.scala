@@ -34,7 +34,6 @@ import xiangshan.cache._
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
   with HasPerfEvents
   with HasVLSUParameters {
   val io = IO(new Bundle() {

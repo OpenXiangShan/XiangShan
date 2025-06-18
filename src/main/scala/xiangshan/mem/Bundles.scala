@@ -24,6 +24,7 @@ import chisel3.util._
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.FenceToSbuffer
@@ -65,6 +66,8 @@ object Bundles {
     val isPrefetch = Bool()
     val isHWPrefetch = Bool()
     val isStore = Bool()
+    val src = Vec(3, UInt(XLEN.W))
+    val iqIdx = UInt(log2Up(MemIQSizeMax).W)
 
     // vector
     val isVector = Bool()
@@ -128,9 +131,13 @@ object Bundles {
     val pfSource = new L1PrefetchSource
     val confidence = UInt(1.W)
 
-    val debug = new PerfDebugInfo
-
     def isSWPrefetch: Bool = isPrefetch && !isHWPrefetch
+
+    def isPrefetchI: Bool = uop.fuOpType === LSUOpType.prefetch_i
+
+    def isPrefetchRead: Bool = uop.fuOpType === LSUOpType.prefetch_r
+
+    def isPrefetchWrite: Bool = uop.fuOpType === LSUOpType.prefetch_w
 
     def isLoad: Bool = !isStore
 
@@ -171,12 +178,12 @@ object Bundles {
       res
     }
 
-    def fromVecPipeBundle(input: VecPipeBundle, isStore: Boolean = false) = {
+    def fromVecPipeBundle(input: VecPipeBundle, isVStore: Boolean = false) = {
       this := 0.U.asTypeOf(this)
       connectSamePort(this, input)
       this.vecBaseVaddr := input.basevaddr
-      this.isVector := input.isvec
-      this.isStore := isStore.B
+      this.isVector := true.B
+      this.isStore := isVStore.B
       this.uopUnitStrideFof := input.uop_unit_stride_fof
       this.regOffset := input.reg_offset
       this.alignType := input.alignedType
@@ -189,7 +196,7 @@ object Bundles {
       val res = Wire(new VecPipelineFeedbackIO(isVStore = isVStore))
       res.mBIndex := this.mbIdx
       res.hit := this.feedbacked && this.isVector
-      res.isvec := this.isVector
+      res.isvec := true.B
       res.flushState := DontCare
       res.sourceType := Mux(isVStore.B, RSFeedbackType.tlbMiss, RSFeedbackType.lrqFull)
       res.trigger := this.uop.trigger
@@ -205,6 +212,7 @@ object Bundles {
       res.vaNeedExt := this.vaNeedExt
       res.gpaddr := this.gpaddr
       res.isForVSnonLeafPTE := this.isForVSnonLeafPTE
+      res.hasException := this.hasException
       res.vstart := this.uop.vpu.vstart
       res.vecTriggerMask := this.vecTriggerMask
       res.reg_offset.foreach { _ := this.regOffset }
@@ -292,13 +300,13 @@ object Bundles {
       res
     }
 
-    def toRedirectBundle(): Redirect = {
+    def toRedirectBundle(flushLevel: UInt): Redirect = {
       val res = WireInit(0.U.asTypeOf(new Redirect))
       res.isRVC  := this.uop.preDecodeInfo.isRVC
       res.robIdx := this.uop.robIdx
       res.ftqIdx := this.uop.ftqPtr
       res.ftqOffset := this.uop.ftqOffset
-      res.level := RedirectLevel.flush
+      res.level := flushLevel
       res.cfiUpdate.target  := this.uop.pc
       res.debug_runahead_checkpoint_id := this.uop.debugInfo.runahead_checkpoint_id
       res
@@ -326,6 +334,14 @@ object Bundles {
       res.pfHitStream := isFromStream(this.metaPrefetch)
       res
     }
+  }
+
+  class LsPrefetchTrainIO(implicit p: Parameters) extends XSBundle {
+    val req = ValidIO(new LsPrefetchTrainBundle)
+    val canAcceptLowConfPrefetch  = Output(Bool())
+    val canAcceptHighConfPrefetch = Output(Bool())
+    val s1PrefetchSpec = Output(Bool())
+    val s2PrefetchSpec = Output(Bool())
   }
 
   class LoadForwardReqBundle(implicit p: Parameters) extends XSBundle {
@@ -375,6 +391,11 @@ object Bundles {
     val paddr = UInt(PAddrBits.W)
     val dataValid = Bool()
     val nc = Bool()
+  }
+
+  class LoadNukeQueryReqIO(implicit p: Parameters) extends XSBundle {
+    val req = Decoupled(new LoadNukeQueryReqBundle)
+    val revoke = Output(Bool())
   }
 
   class LoadNukeQueryRespBundle(implicit p: Parameters) extends XSBundle {
@@ -485,9 +506,14 @@ object Bundles {
     val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
   }
 
+  class MisalignBufferIO(implicit p: Parameters) extends XSBundle {
+    val enq = DecoupledIO(new LsPipelineBundle)
+    val revoke = Output(Bool())
+    val writeback = ValidIO(new LsPipelineBundle)
+  }
+
   class MisalignBufferEnqIO(implicit p: Parameters) extends XSBundle {
     val req = DecoupledIO(new LsPipelineBundle)
     val revoke = Output(Bool())
   }
-
 }

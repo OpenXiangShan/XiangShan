@@ -934,7 +934,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val full = Output(Bool())
 
     // forward missqueue
-    val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardMissQueueIO))
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
@@ -1027,15 +1027,15 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {
-    val id = io.forward(i).mshrid
-    val req_valid = io.forward(i).valid
-    val paddr = io.forward(i).paddr
+    val req_valid = io.forward(i).req.valid
+    val id = io.forward(i).req.bits.mshrId
+    val paddr = io.forward(i).req.bits.paddr
 
     val (forward_mshr, forwardData) = forwardInfo_vec(id).forward(req_valid, paddr)
-    io.forward(i).forward_result_valid := forwardInfo_vec(id).check(req_valid, paddr)
-    io.forward(i).forward_mshr := forward_mshr
-    io.forward(i).forwardData := forwardData
-    io.forward(i).corrupt := RegNext(forwardInfo_vec(id).corrupt)
+    io.forward(i).resp.forwardValid := forwardInfo_vec(id).check(req_valid, paddr)
+    io.forward(i).resp.mshrHit := forward_mshr
+    io.forward(i).resp.data := forwardData
+    io.forward(i).resp.corrupt := RegNext(forwardInfo_vec(id).corrupt)
   })
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))

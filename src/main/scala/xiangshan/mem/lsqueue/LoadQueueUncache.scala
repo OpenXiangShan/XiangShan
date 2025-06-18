@@ -28,11 +28,11 @@ import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.mem.Bundles._
+import xiangshan.mem.BitUtils._
 import xiangshan.cache._
 
 class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
 {
   val io = IO(new Bundle() {
     /* control */
@@ -50,7 +50,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     // from ldu
     val req = Flipped(Valid(new LsPipelineBundle))
     // to ldu: mmio, data
-    val mmioOut = DecoupledIO(new MemExuOutput)
+    val mmioOut = DecoupledIO(new LsPipelineBundle)
     val mmioRawData = Output(new LoadDataFromLQBundle)
     // to ldu: nc with data
     val ncOut = DecoupledIO(new LsPipelineBundle)
@@ -201,7 +201,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
       "b110".U -> uncacheData(63, 48),
       "b111".U -> uncacheData(63, 56)
     ))
-  val rdataPartialLoad = rdataHelper(selUop, rdataSel)
+  val rdataPartialLoad = rdataHelper(selUop, rdataSel, XLEN)
 
   io.mmioOut.valid := false.B
   io.mmioOut.bits := DontCare
@@ -225,16 +225,18 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.is128Bits := req.is128Bits
     io.ncOut.bits.vecActive := req.vecActive
   }.otherwise{
+    val mmioOut = Wire(new MemExuOutput)
+    mmioOut := DontCare
+    mmioOut.uop := selUop
+    mmioOut.uop.lqIdx := req.uop.lqIdx
+    mmioOut.uop.exceptionVec(loadAccessFault) := nderr
+    mmioOut.data := rdataPartialLoad
+    mmioOut.debug.isMMIO := true.B
+    mmioOut.debug.isNC := false.B
+    mmioOut.debug.paddr := req.paddr
+    mmioOut.debug.vaddr := req.vaddr
     io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
-    io.mmioOut.bits := DontCare
-    io.mmioOut.bits.uop := selUop
-    io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
-    io.mmioOut.bits.uop.exceptionVec(loadAccessFault) := nderr
-    io.mmioOut.bits.data := rdataPartialLoad
-    io.mmioOut.bits.debug.isMMIO := true.B
-    io.mmioOut.bits.debug.isNC := false.B
-    io.mmioOut.bits.debug.paddr := req.paddr
-    io.mmioOut.bits.debug.vaddr := req.vaddr
+    io.mmioOut.bits.fromMemExuOutputBundle(mmioOut)
     io.mmioRawData.lqData := uncacheData
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
@@ -284,7 +286,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     // enqueue: from ldu s3
     val req = Vec(LoadPipelineWidth, Flipped(Decoupled(new LsPipelineBundle)))
     // writeback: mmio to ldu s0, s3
-    val mmioOut = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
+    val mmioOut = Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle))
     val mmioRawData = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     // writeback: nc to ldu s0--s3
     val ncOut = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))

@@ -166,8 +166,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
-    val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // store data, send to sq from rs
+    val storeAddrInRe = Vec(StorePipelineWidth, Flipped(ValidIO(new LsPipelineBundle()))) // store more mmio and exception
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
     val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is, write committed store to sbuffer
@@ -535,27 +535,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     )
 
     // re-replinish mmio, for pma/pmp will get mmio one cycle later
-    val storeAddrInFireReg = RegNext(io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss) && io.storeAddrInRe(i).updateAddrValid
+    val storeAddrInFireReg = RegNext(io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss) && io.storeAddrInRe(i).bits.updateAddrValid
     //val stWbIndexReg = RegNext(stWbIndex)
     val stWbIndexReg = RegEnable(stWbIndex, io.storeAddrIn(i).fire)
-    when (storeAddrInFireReg) {
-      pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
-      mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
-      atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
-      memBackTypeMM(stWbIndexReg) := io.storeAddrInRe(i).memBackTypeMM
-      hasException(stWbIndexReg) := io.storeAddrInRe(i).hasException
+    when (storeAddrInFireReg && io.storeAddrInRe(i).valid) {
+      pending(stWbIndexReg) := io.storeAddrInRe(i).bits.mmio
+      mmio(stWbIndexReg) := io.storeAddrInRe(i).bits.mmio
+      atomic(stWbIndexReg) := io.storeAddrInRe(i).bits.atomic
+      memBackTypeMM(stWbIndexReg) := io.storeAddrInRe(i).bits.memBackTypeMM
+      hasException(stWbIndexReg) := io.storeAddrInRe(i).bits.hasException
       waitStoreS2(stWbIndexReg) := false.B
     }
     // dcache miss info (one cycle later than storeIn)
     // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer (if EnableAtCommitMissTrigger)
-    when (storeAddrInFireReg) {
-      prefetch(stWbIndexReg) := io.storeAddrInRe(i).miss
+    when (storeAddrInFireReg && io.storeAddrInRe(i).valid) {
+      prefetch(stWbIndexReg) := io.storeAddrInRe(i).bits.miss
     }
     // enter exceptionbuffer again
-    when (storeAddrInFireReg) {
-      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).hasException && !io.storeAddrInRe(i).isVector
-      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := io.storeAddrInRe(i)
-      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec(storeAccessFault) := io.storeAddrInRe(i).af
+    when (storeAddrInFireReg && io.storeAddrInRe(i).valid) {
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).bits.hasException && !io.storeAddrInRe(i).bits.isVector
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := io.storeAddrInRe(i).bits
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec(storeAccessFault) := io.storeAddrInRe(i).bits.af
     }
 
     when(vaddrModule.io.wen(i)){

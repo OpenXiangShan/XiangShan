@@ -29,7 +29,6 @@ import xiangshan.cache._
 class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
-  with HasLoadHelper
   with HasPerfEvents
 {
   val io = IO(new Bundle() {

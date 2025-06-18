@@ -26,6 +26,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.NewCSR.{MemType}
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
@@ -45,6 +46,7 @@ import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import coupledL2.tl2chi._
 import xiangshan.backend.datapath.WakeUpConfig
+import xiangshan.mem._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.{max, min, pow}
@@ -212,8 +214,6 @@ case class XSCoreParameters
   vfSchdVlWbPort: Int = 1,
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   IfuRedirectNum: Int = 1,
-  LoadPipelineWidth: Int = 3,
-  StorePipelineWidth: Int = 2,
   VecLoadPipelineWidth: Int = 2,
   VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -502,6 +502,26 @@ case class XSCoreParameters
     )
   }
 
+  val stdUnitParams = Seq(
+    MemUnitParams(name = "STD0", unitType = Std(), dataBits = 64),
+    MemUnitParams(name = "STD1", unitType = Std(), dataBits = 64)
+  )
+  val staUnitParams = Seq(
+    MemUnitParams(name = "STA0", unitType = Sta(), dataBits = 64, exceptionOut = Seq(), triggerType = MemType.STORE),
+    MemUnitParams(name = "STA1", unitType = Sta(), dataBits = 64, exceptionOut = Seq(), triggerType = MemType.STORE),
+  )
+  val ldUnitParams = Seq(
+    MemUnitParams(name = "LDU0", unitType = Ldu(), dataBits = 128, exceptionOut = Seq(), triggerType = MemType.LOAD),
+    MemUnitParams(name = "LDU1", unitType = Ldu(), dataBits = 128, exceptionOut = Seq(), triggerType = MemType.LOAD),
+    MemUnitParams(name = "LDU2", unitType = Ldu(), dataBits = 128, exceptionOut = Seq(), triggerType = MemType.LOAD),
+  )
+  val hyUnitParams = Seq(
+    // MemUnitParams(name = "HYU0", unitType = Hyu(), dataBits = 128, exceptionOut = Seq(), triggerType = MemType.HYBRID)
+  )
+  val amoUnitParams = Seq(
+    MemUnitParams(name = "AMO0", unitType = Amo(), dataBits = 128, exceptionOut = Seq(), triggerType = MemType.LOAD),
+  )
+
   def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
 
   def iqWakeUpParams = {
@@ -783,6 +803,13 @@ trait HasXSParameter {
   def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   def VlsQueueSize = coreParams.VlsQueueSize
+  def stdUnitParams = coreParams.stdUnitParams
+  def staUnitParams = coreParams.staUnitParams
+  def ldUnitParams = coreParams.ldUnitParams
+  def hyUnitParams = coreParams.hyUnitParams
+  def amoUnitParams = coreParams.amoUnitParams
+  def LoadPipelineWidth = ldUnitParams.length + hyUnitParams.length
+  def StorePipelineWidth = staUnitParams.length + hyUnitParams.length
 
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
@@ -791,8 +818,6 @@ trait HasXSParameter {
   def BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   def FtqRedirectAheadNum = NumRedirect
   def IfuRedirectNum = coreParams.IfuRedirectNum
-  def LoadPipelineWidth = coreParams.LoadPipelineWidth
-  def StorePipelineWidth = coreParams.StorePipelineWidth
   def VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
   def VecStorePipelineWidth = coreParams.VecStorePipelineWidth
   def VecMemSrcInWidth = coreParams.VecMemSrcInWidth
@@ -827,13 +852,14 @@ trait HasXSParameter {
   def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   def HasCMO = coreParams.HasCMO && p(EnableCHI)
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
   def asidLen = coreParams.MMUAsidLen
   def vmidLen = coreParams.MMUVmidLen
-  def BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  def BTLBWidth = LoadPipelineWidth + StorePipelineWidth
   def refillBothTlb = coreParams.refillBothTlb
   def iwpuParam = coreParams.iwpuParameters
   def dwpuParam = coreParams.dwpuParameters
