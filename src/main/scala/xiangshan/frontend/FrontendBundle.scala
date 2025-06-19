@@ -29,7 +29,13 @@ import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
-import xiangshan.frontend.bpu._
+// FIXME: remove old FullBranchPrediction
+import xiangshan.frontend.bpu.{FullBranchPrediction => NewFullBranchPrediction}
+import xiangshan.frontend.bpu.BPUUtils
+import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.HasBPUConst
+import xiangshan.frontend.bpu.PredictorMeta
+import xiangshan.frontend.bpu.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
@@ -763,7 +769,13 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   def lastStage = s3
 }
 
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
+class BpuToFtqBundle(implicit p: Parameters) extends XSBundle {
+  val prediction  = new NewFullBranchPrediction // FIXME: remove old FullBranchPrediction
+  val s2_override = Bool()
+  val s3_override = Bool()
+  val s2_ftqPtr   = new FtqPtr
+  val s3_ftqPtr   = new FtqPtr
+}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = PrunedAddr(VAddrBits)

@@ -96,11 +96,18 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
   val s3_fire: Bool = Bool()
 }
 
-// as Bpu prediction result
-class FetchBlockInfo(implicit p: Parameters) extends BpuBundle {
-  val taken:     Bool            = Bool()
-  val position:  UInt            = UInt(PositionWidth.W)
-  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
-  val attribute: BranchAttribute = new BranchAttribute
+// sub predictors -> Bpu top
+class BranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val cfiPosition: Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
+  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute:   BranchAttribute = new BranchAttribute
+  // TODO: what else do we need?
+}
+
+// Bpu -> Ftq
+class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val startVAddr:  PrunedAddr  = PrunedAddr(VAddrBits)
+  val cfiPosition: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val target:      PrunedAddr  = PrunedAddr(VAddrBits)
   // TODO: what else do we need?
 }
