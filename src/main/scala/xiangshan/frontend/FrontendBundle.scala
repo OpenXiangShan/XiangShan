@@ -255,13 +255,19 @@ class PreDecodeInfo extends Bundle { // 8 bit
   def notCFI = brType === BrType.NotCfi
 }
 
+// pc = ftq.startAddr + Cat(offset, 0.U(1.W)) - Cat(borrow, 0.U(1.W))
+class FtqPcOffset(implicit p: Parameters) extends XSBundle {
+  val borrow = Bool()
+  val offset = UInt(log2Ceil(PredictWidth).W)
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs           = Vec(PredictWidth, UInt(32.W))
   val valid            = UInt(PredictWidth.W)
   val enqEnable        = UInt(PredictWidth.W)
   val pd               = Vec(PredictWidth, new PreDecodeInfo)
   val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val ftqPcOffset      = Vec(PredictWidth, ValidUndirectioned(new FtqPcOffset))
   val backendException = Vec(PredictWidth, Bool())
   val exceptionType    = Vec(PredictWidth, new ExceptionType)
   val crossPageIPFFix  = Vec(PredictWidth, Bool())
