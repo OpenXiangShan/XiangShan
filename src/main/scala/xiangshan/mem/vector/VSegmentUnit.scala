@@ -904,8 +904,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     writebackOut.uop.vpu.vstart         := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
     writebackOut.uop.vpu.vmask          := maskUsed
     writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
-    // when exception updates vl, should use vtu strategy.
-    writebackOut.uop.vpu.vta            := Mux(instMicroOp.exceptionVl.valid, VType.tu, instMicroOp.uop.vpu.vta)
     writebackOut.debug                  := DontCare
     writebackOut.vdIdxInField.get       := vdIdxInField
     writebackOut.uop.robIdx             := instMicroOp.uop.robIdx
