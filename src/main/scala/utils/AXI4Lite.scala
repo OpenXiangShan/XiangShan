@@ -31,6 +31,7 @@ class AXI4LiteBundleAW(addrWidth: Int, idWidth: Int = 0) extends AXI4LiteBundleA
 
 class AXI4LiteBundleW(dataWidth: Int) extends Bundle {
   val data = UInt(dataWidth.W)
+  val strb = UInt((dataWidth/8).W)
 }
 
 class AXI4LiteBundleR(dataWidth: Int, idWidth: Int = 0) extends Bundle {
