@@ -176,6 +176,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   val is_fast_pred   = false
   val io             = IO(new BasePredictorIO())
 
+  val modified_reset = RegInit(true.B)
+  when(modified_reset)(modified_reset := false.B)
+
   io.out := io.in.bits.resp_in(0)
 
   io.fauftb_entry_out     := io.fauftb_entry_in
@@ -190,16 +193,17 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s3_ready := true.B
 
   val s0_pc_dup = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
-  val s1_pc_dup = s0_pc_dup.zip(io.s0_fire).map { case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire) }
+  val s1_pc_dup = s0_pc_dup.zip(io.s0_fire).map { case (s0_pc, s0_fire) =>
+    RegEnable(s0_pc, s0_fire)
+  }
+  when(modified_reset) {
+    s1_pc_dup.map(_ := io.reset_vector)
+  }
   val s2_pc_dup = s1_pc_dup.zip(io.s1_fire).map { case (s1_pc, s1_fire) =>
     SegmentedAddrNext(s1_pc, pcSegments, s1_fire, Some("s2_pc"))
   }
   val s3_pc_dup = s2_pc_dup.zip(io.s2_fire).map { case (s2_pc, s2_fire) =>
     SegmentedAddrNext(s2_pc, s2_fire, Some("s3_pc"))
-  }
-
-  when(RegNext(RegNext(reset.asBool) && !reset.asBool)) {
-    s1_pc_dup.map { case s1_pc => s1_pc := io.reset_vector }
   }
 
   io.out.s1.pc := s1_pc_dup
@@ -231,6 +235,9 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
     with HasCircularQueuePtrHelper {
   val io = IO(new PredictorIO)
+
+  val modified_reset = RegInit(true.B)
+  when(modified_reset)(modified_reset := false.B)
 
   val ctrl       = DelayN(io.ctrl, 1)
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
@@ -279,10 +286,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_ready_dup, s2_ready_dup, s3_ready_dup                                  = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup     = dup(WireInit(0.U.asTypeOf(UInt(VAddrBits.W))))
-  val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map { case (s0_pc, s0_stall) => RegEnable(s0_pc, !s0_stall) }
-  when(RegNext(RegNext(reset.asBool) && !reset.asBool)) {
-    s0_pc_reg_dup.map { case s0_pc => s0_pc := io.reset_vector }
+  val s0_pc_dup = dup(WireInit(0.U(VAddrBits.W)))
+  val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map { case (s0_pc, s0_stall) =>
+    RegEnable(s0_pc, !s0_stall)
+  }
+  when(modified_reset) {
+    s0_pc_reg_dup.map(_ := io.reset_vector)
   }
   val s1_pc = RegEnable(s0_pc_dup(0), s0_fire_dup(0))
   val s2_pc = RegEnable(s1_pc, s1_fire_dup(0))
