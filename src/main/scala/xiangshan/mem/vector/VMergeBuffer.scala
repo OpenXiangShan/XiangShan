@@ -47,6 +47,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   // for exception
   val vstart           = UInt(elemIdxBits.W)
   val vl               = UInt(elemIdxBits.W)
+  val originVl         = UInt(elemIdxBits.W) // for backend merge data
   val vaNeedExt        = Bool()
   val vaddr            = UInt(XLEN.W)
   val gpaddr           = UInt(GPAddrBits.W)
@@ -84,6 +85,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.fof          := source.fof
     sink.vlmax        := source.vlmax
     sink.vl           := source.uop.vpu.vl
+    sink.originVl     := source.uop.vpu.vl
     sink.vaddr        := source.vaddr
     sink.vstart       := 0.U
   }
@@ -98,7 +100,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.vdIdxInField.get := source.vdIdx // Mgu needs to use this.
     sink.vdIdx.get        := source.vdIdx
     sink.uop.vpu.vstart   := source.vstart
-    sink.uop.vpu.vl       := source.vl
+    sink.uop.vpu.vl       := source.originVl
     sink
   }
   def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
@@ -288,7 +290,6 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         entry.gpaddr       := selPort(0).gpaddr
         entry.isForVSnonLeafPTE := selPort(0).isForVSnonLeafPTE
       }.otherwise{
-        entry.uop.vpu.vta  := VType.tu
         entry.vl           := Mux(entry.vl < vstart, entry.vl, vstart)
       }
     }

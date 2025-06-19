@@ -1712,8 +1712,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
     }
 
-    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.uopWriteback(i).valid
-    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.uopWriteback(i).bits
+    vfofBuffer.io.mergeUopWriteback(i).valid := vlMergeBuffer.io.toLsq(i).valid
+    vfofBuffer.io.mergeUopWriteback(i).bits  := vlMergeBuffer.io.toLsq(i).bits
   }
 
 

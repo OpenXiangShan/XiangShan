@@ -282,7 +282,7 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
 class VfofDataBuffIO(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new MemExuInput(isVector=true))))
-  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new MemExuOutput(isVector=true))))
+  val mergeUopWriteback   = Vec(VLUopWritebackWidth, Flipped(DecoupledIO(new FeedbackToLsqIO)))
 
   val uopWriteback        = DecoupledIO(new MemExuOutput(isVector = true))
 }
