@@ -92,7 +92,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   // only driven by clock, not valid-ready
-  topdown_stage                  := io.fromBpu.resp.bits.topdown_info
+//  topdown_stage                  := io.fromBpu.resp.bits.topdown_info
   io.toIfu.req.bits.topdown_info := topdown_stage
 
   // io.fromBackend.ftqIdxAhead: bju(BjuCnt) + ldReplay + exception
@@ -183,26 +183,27 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val new_entry_ready = validEntries < FtqSize.U || readyToCommit
   io.fromBpu.resp.ready := new_entry_ready
 
-  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
-  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
-  val bpu_s3_redirect = bpu_s3_resp.valid && bpu_s3_resp.hasRedirect
+//  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
+//  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
+  val bpu_s2_redirect = io.fromBpu.resp.bits.s2_override
+  val bpu_s3_redirect = io.fromBpu.resp.bits.s3_override
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire    = io.fromBpu.resp.fire && allowBpuIn // from bpu s1
   val bpu_in_fire = (io.fromBpu.resp.fire || bpu_s2_redirect || bpu_s3_redirect) && allowBpuIn
 
-  val bpu_in_resp     = io.fromBpu.resp.bits.selectedResp
-  val bpu_in_stage    = io.fromBpu.resp.bits.selectedRespIdxForFtq
-  val bpu_in_resp_ptr = Mux(bpu_in_stage === BP_S1, bpuPtr, bpu_in_resp.ftq_idx)
-  val bpu_in_resp_idx = bpu_in_resp_ptr.value
+  val bpu_in_resp     = io.fromBpu.resp.bits
+  val bpuRespFtqIdx   = bpuPtr       // FIXME
+  val bpu_in_stage    = BP_S1        // FIXME
+  val bpu_in_resp_ptr = bpuPtr       // FIXME
+  val bpu_in_resp_idx = bpuPtr.value // FIXME
 
   // read ports:      pfReq1 + pfReq2 ++  ifuReq1 + ifuReq2 + ifuReq3 + commitUpdate2 + commitUpdate
   val ftq_pc_mem = Module(new FtqPcMemWrapper(2))
   // resp from uBTB
   ftq_pc_mem.io.wen   := bpu_in_fire
   ftq_pc_mem.io.waddr := bpu_in_resp_idx
-  ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
+  ftq_pc_mem.io.wdata.fromPrediction(bpu_in_resp.prediction)
 
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_mem = Module(new SyncDataModuleTemplate(
@@ -213,17 +214,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
     hasRen = true
   ))
   // these info is intended to enq at the last stage of bpu
-  ftq_redirect_mem.io.wen(0)   := io.fromBpu.resp.bits.s3.valid
-  ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.s3.ftq_idx.value
-  ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.s3_specInfo
+  ftq_redirect_mem.io.wen(0)   := false.B
+  ftq_redirect_mem.io.waddr(0) := 0.U
+  ftq_redirect_mem.io.wdata(0) := 0.U.asTypeOf(new FtqRedirectSramEntry)
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen             := io.fromBpu.resp.bits.s3.valid
-  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.s3.ftq_idx.value
-  ftq_meta_1r_sram.io.wdata.meta      := io.fromBpu.resp.bits.s3_meta
-  ftq_meta_1r_sram.io.wdata.ftb_entry := io.fromBpu.resp.bits.s3_ftbEntry
+  ftq_meta_1r_sram.io.wen             := false.B
+  ftq_meta_1r_sram.io.waddr           := 0.U
+  ftq_meta_1r_sram.io.wdata.meta      := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).meta)
+  ftq_meta_1r_sram.io.wdata.ftb_entry := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).ftb_entry)
   if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
     ftq_meta_1r_sram.io.wdata.paddingBit.get := 0.U
   }
@@ -235,9 +236,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     1,
     hasRen = true
   ))
-  ftb_entry_mem.io.wen(0)   := io.fromBpu.resp.bits.s3.valid
-  ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.s3.ftq_idx.value
-  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.s3_ftbEntry
+  ftb_entry_mem.io.wen(0)   := false.B
+  ftb_entry_mem.io.waddr(0) := 0.U
+  ftb_entry_mem.io.wdata(0) := 0.U.asTypeOf(new FTBEntry_FtqMem)
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtq", hasMbist)
 
   // multi-write
@@ -262,8 +263,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val last_cycle_bpu_in       = RegNext(bpu_in_fire)
   val last_cycle_bpu_in_ptr   = RegEnable(bpu_in_resp_ptr, bpu_in_fire)
   val last_cycle_bpu_in_idx   = last_cycle_bpu_in_ptr.value
-  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.getTarget, bpu_in_fire)
-  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.cfiIndex, bpu_in_fire)
+  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.prediction.target, bpu_in_fire)
+  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.prediction.cfiPosition, bpu_in_fire)
   val last_cycle_bpu_in_stage = RegEnable(bpu_in_stage, bpu_in_fire)
 
   val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))
@@ -291,11 +292,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   // record s1 pred cycles
-  pred_s1_cycle.map { vec =>
-    when(bpu_in_fire && (bpu_in_stage === BP_S1)) {
-      vec(bpu_in_resp_ptr.value) := bpu_in_resp.full_pred.predCycle.getOrElse(0.U)
-    }
-  }
+//  pred_s1_cycle.map { vec =>
+//    when(bpu_in_fire && (bpu_in_stage === BP_S1)) {
+//      vec(bpu_in_resp_ptr.value) := bpu_in_resp.full_pred.predCycle.getOrElse(0.U)
+//    }
+//  }
 
   bpuPtr := bpuPtr + enq_fire
   copied_bpu_ptr.map(_ := bpuPtr + enq_fire)
@@ -310,45 +311,46 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   // only use ftb result to assign hit status
-  when(bpu_s2_resp.valid) {
-    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.full_pred.hit, h_hit, h_not_hit)
-  }
+//  when(bpu_s2_resp.valid) {
+//    entry_hit_status(bpuRespFtqIdx.value) := Mux(bpu_s2_resp.full_pred.hit, h_hit, h_not_hit)
+//  }
+  entry_hit_status(bpuRespFtqIdx.value) := h_not_hit // FIXME
 
   io.toIfu.flushFromBpu.s2.valid    := bpu_s2_redirect
-  io.toIfu.flushFromBpu.s2.bits     := bpu_s2_resp.ftq_idx
+  io.toIfu.flushFromBpu.s2.bits     := bpuRespFtqIdx
   io.toICache.flushFromBpu.s2.valid := bpu_s2_redirect
-  io.toICache.flushFromBpu.s2.bits  := bpu_s2_resp.ftq_idx
+  io.toICache.flushFromBpu.s2.bits  := bpuRespFtqIdx
   when(bpu_s2_redirect) {
-    bpuPtr := bpu_s2_resp.ftq_idx + 1.U
-    copied_bpu_ptr.map(_ := bpu_s2_resp.ftq_idx + 1.U)
+    bpuPtr := bpuRespFtqIdx + 1.U
+    copied_bpu_ptr.map(_ := bpuRespFtqIdx + 1.U)
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
-    when(!isBefore(ifuPtr, bpu_s2_resp.ftq_idx)) {
-      ifuPtr_write      := bpu_s2_resp.ftq_idx
-      ifuPtrPlus1_write := bpu_s2_resp.ftq_idx + 1.U
-      ifuPtrPlus2_write := bpu_s2_resp.ftq_idx + 2.U
+    when(!isBefore(ifuPtr, bpuRespFtqIdx)) {
+      ifuPtr_write      := bpuRespFtqIdx
+      ifuPtrPlus1_write := bpuRespFtqIdx + 1.U
+      ifuPtrPlus2_write := bpuRespFtqIdx + 2.U
     }
-    when(!isBefore(pfPtr, bpu_s2_resp.ftq_idx)) {
-      pfPtr_write      := bpu_s2_resp.ftq_idx
-      pfPtrPlus1_write := bpu_s2_resp.ftq_idx + 1.U
+    when(!isBefore(pfPtr, bpuRespFtqIdx)) {
+      pfPtr_write      := bpuRespFtqIdx
+      pfPtrPlus1_write := bpuRespFtqIdx + 1.U
     }
   }
 
   io.toIfu.flushFromBpu.s3.valid    := bpu_s3_redirect
-  io.toIfu.flushFromBpu.s3.bits     := bpu_s3_resp.ftq_idx
+  io.toIfu.flushFromBpu.s3.bits     := bpuRespFtqIdx
   io.toICache.flushFromBpu.s3.valid := bpu_s3_redirect
-  io.toICache.flushFromBpu.s3.bits  := bpu_s3_resp.ftq_idx
+  io.toICache.flushFromBpu.s3.bits  := bpuRespFtqIdx
   when(bpu_s3_redirect) {
-    bpuPtr := bpu_s3_resp.ftq_idx + 1.U
-    copied_bpu_ptr.map(_ := bpu_s3_resp.ftq_idx + 1.U)
+    bpuPtr := bpuRespFtqIdx + 1.U
+    copied_bpu_ptr.map(_ := bpuRespFtqIdx + 1.U)
     // only when ifuPtr runs ahead of bpu s2 resp should we recover it
-    when(!isBefore(ifuPtr, bpu_s3_resp.ftq_idx)) {
-      ifuPtr_write      := bpu_s3_resp.ftq_idx
-      ifuPtrPlus1_write := bpu_s3_resp.ftq_idx + 1.U
-      ifuPtrPlus2_write := bpu_s3_resp.ftq_idx + 2.U
+    when(!isBefore(ifuPtr, bpuRespFtqIdx)) {
+      ifuPtr_write      := bpuRespFtqIdx
+      ifuPtrPlus1_write := bpuRespFtqIdx + 1.U
+      ifuPtrPlus2_write := bpuRespFtqIdx + 2.U
     }
-    when(!isBefore(pfPtr, bpu_s3_resp.ftq_idx)) {
-      pfPtr_write      := bpu_s3_resp.ftq_idx
-      pfPtrPlus1_write := bpu_s3_resp.ftq_idx + 1.U
+    when(!isBefore(pfPtr, bpuRespFtqIdx)) {
+      pfPtr_write      := bpuRespFtqIdx
+      pfPtrPlus1_write := bpuRespFtqIdx + 1.U
     }
   }
 
@@ -495,27 +497,27 @@ class Ftq(implicit p: Parameters) extends FtqModule
     p"\nifu_req_target wrong! ifuPtr: ${ifuPtr}, entry_next_addr: ${Hexadecimal(entry_next_addr.toUInt)} diff_entry_next_addr: ${Hexadecimal(diff_entry_next_addr.toUInt)}\n"
   )
 
-  // when fall through is smaller in value than start address, there must be a false hit
-  when(toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
-    when(io.toIfu.req.fire &&
-      !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) &&
-      !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)) {
-      entry_hit_status(ifuPtr.value) := h_false_hit
-      // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
-    }
-  }
-  XSDebug(
-    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit,
-    "fallThruError! start:%x, fallThru:%x\n",
-    io.toIfu.req.bits.startAddr.toUInt,
-    io.toIfu.req.bits.nextStartAddr.toUInt
-  )
-
-  XSPerfAccumulate(
-    f"fall_through_error_to_ifu",
-    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit &&
-      io.toIfu.req.fire && !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) && !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
-  )
+//  // when fall through is smaller in value than start address, there must be a false hit
+//  when(toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
+//    when(io.toIfu.req.fire &&
+//      !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) &&
+//      !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)) {
+//      entry_hit_status(ifuPtr.value) := h_false_hit
+//      // XSError(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.nextStartAddr)
+//    }
+//  }
+//  XSDebug(
+//    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit,
+//    "fallThruError! start:%x, fallThru:%x\n",
+//    io.toIfu.req.bits.startAddr.toUInt,
+//    io.toIfu.req.bits.nextStartAddr.toUInt
+//  )
+//
+//  XSPerfAccumulate(
+//    f"fall_through_error_to_ifu",
+//    toIfuPcBundle.fallThruError && entry_hit_status(ifuPtr.value) === h_hit &&
+//      io.toIfu.req.fire && !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) && !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
+//  )
 
   val ifu_req_should_be_flushed =
     io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
@@ -1132,8 +1134,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val gen_ftb_entry_len = getFtbEntryLen(update.pc, ftbEntryGen.new_entry)
   XSPerfHistogram("ftb_init_entry_len", gen_ftb_entry_len, ftb_new_entry, 0, PredictWidth + 1, 1)
   XSPerfHistogram("ftb_modified_entry_len", gen_ftb_entry_len, ftb_modified_entry, 0, PredictWidth + 1, 1)
-  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc, from_bpu.s3_ftbEntry)
-  XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid, 0, PredictWidth + 1, 1)
+//  val s3_ftb_entry_len = getFtbEntryLen(from_bpu.s3.pc, from_bpu.s3_ftbEntry)
+//  XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid, 0, PredictWidth + 1, 1)
 
   XSPerfHistogram("ftq_has_entry", validEntries, true.B, 0, FtqSize + 1, 1)
 

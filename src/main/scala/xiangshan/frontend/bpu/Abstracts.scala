@@ -15,10 +15,31 @@
 
 package xiangshan.frontend.bpu
 
+import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSBundle
 import xiangshan.XSModule
+import xiangshan.frontend.PrunedAddr
 
 abstract class BpuBundle(implicit p: Parameters) extends XSBundle with HasBpuParameters
 
 abstract class BpuModule(implicit p: Parameters) extends XSModule with HasBpuParameters
+
+abstract class BasePredictor(implicit p: Parameters) extends BpuModule {
+  val io: BasePredictorIO
+}
+
+abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
+  // control
+  val enable: Bool = Input(Bool())
+  // predict request
+  val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
+  // predict response
+  val prediction: Valid[BranchPrediction] = Valid(new BranchPrediction)
+  // maybe meta, differs from predictor to predictor
+  // predict stage control
+  val stageCtrl: StageCtrl = Input(new StageCtrl)
+  // train: differs from predictor to predictor
+  // ...
+}
