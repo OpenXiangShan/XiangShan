@@ -23,6 +23,7 @@ import utility.ParallelPriorityMux
 import xiangshan.ValidUndirectioned
 import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.BpuToFtqBundle
 import xiangshan.frontend.BranchPredictionBundle
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.BranchPredictionUpdate
@@ -35,6 +36,7 @@ import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.PredictorMeta
+import xiangshan.frontend.bpu.abtb.Prediction
 
 class FtqDebugBundle(implicit p: Parameters) extends FtqBundle {
   val pc        = PrunedAddr(VAddrBits)
@@ -72,6 +74,16 @@ class FtqRfComponents(implicit p: Parameters) extends FtqBundle with BPUUtils {
     ))
     this.fallThruError := resp.fallThruError
   }
+
+  def fromPrediction(pred: Prediction): Unit = {
+    this.startAddr    := pred.startPc
+    this.nextLineAddr := pred.startPc + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.isNextMask := VecInit((0 until PredictWidth).map(i =>
+      (pred.startPc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool
+    ))
+    this.fallThruError := pred.fallThroughError
+  }
+
   override def toPrintable: Printable =
     p"startAddr:${Hexadecimal(startAddr.toUInt)}"
 }

@@ -30,6 +30,7 @@ import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
 import xiangshan.frontend.bpu._
+import xiangshan.frontend.bpu.abtb.Prediction
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
@@ -763,7 +764,11 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   def lastStage = s3
 }
 
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
+class BpuToFtqBundle(implicit p: Parameters) extends XSBundle {
+  val prediction  = new Prediction
+  val s3_override = Bool()
+  val s3_ftqPtr   = new FtqPtr
+}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = PrunedAddr(VAddrBits)
