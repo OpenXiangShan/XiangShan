@@ -18,13 +18,14 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
+import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
 case class BpuParameters(
     // general
     FetchBlockSize:      Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
-    FetchBlockAlignSize: Int = 32  // bytes
+    FetchBlockAlignSize: Int = 32, // bytes
     // sub predictors
-    // TODO
+    ubtbParameters: MicroBtbParameters = MicroBtbParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))
