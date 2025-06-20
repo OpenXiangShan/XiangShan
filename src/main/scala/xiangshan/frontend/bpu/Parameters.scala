@@ -19,20 +19,16 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 
+// TODO: expose this to Parameters.scala / XSCore.scala
 trait HasBpuParameters extends HasXSParameter {
   // general
+  def FetchBlockMaxSize:    Int = 64 // bytes
+  def FetchBlockAlign:      Int = 32 // bytes
+  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlign)
 
-  // ubtb
+  def PositionWidth: Int = log2Ceil(FetchBlockMaxSize) - 1 // 2B(rvc inst) aligned
 
-  // abtb
-
-  // mbtb
-
-  // tage
-
-  // sc
-
-  // ras
-
-  // ...?
+  // sanity check
+  require(isPow2(FetchBlockMaxSize))
+  require(isPow2(FetchBlockAlign))
 }

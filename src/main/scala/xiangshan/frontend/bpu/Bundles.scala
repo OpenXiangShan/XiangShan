@@ -17,7 +17,9 @@ package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
+import xiangshan.frontend.PrunedAddr
 
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
@@ -83,4 +85,22 @@ object BranchAttribute {
   def ReturnAndCall: BranchAttribute = apply(BranchType.Indirect, RasAction.PopAndPush)
   def OtherDirect:   BranchAttribute = apply(BranchType.Direct, RasAction.None)
   def OtherIndirect: BranchAttribute = apply(BranchType.Indirect, RasAction.None)
+}
+
+// used to sync sub-predictors
+class StageCtrl(implicit p: Parameters) extends BpuBundle {
+  // TODO: do we need ready / valid of each stage?
+  val s0_fire: Bool = Bool()
+  val s1_fire: Bool = Bool()
+  val s2_fire: Bool = Bool()
+  val s3_fire: Bool = Bool()
+}
+
+// as Bpu prediction result
+class FetchBlockInfo(implicit p: Parameters) extends BpuBundle {
+  val taken:     Bool            = Bool()
+  val position:  UInt            = UInt(PositionWidth.W)
+  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute: BranchAttribute = new BranchAttribute
+  // TODO: what else do we need?
 }
