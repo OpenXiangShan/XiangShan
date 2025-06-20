@@ -848,9 +848,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.pc        := s3_pc
   // Find last using PriorityMux
   io.toIBuffer.bits.isLastInFtqEntry := Reverse(PriorityEncoderOH(Reverse(io.toIBuffer.bits.enqEnable))).asBools
-  io.toIBuffer.bits.ftqOffset.zipWithIndex.foreach { case (a, i) =>
-    a.bits  := i.U
-    a.valid := checkerOutStage1.fixedTaken(i) && !s3_reqIsMmio
+  io.toIBuffer.bits.ftqPcOffset.zipWithIndex.foreach { case (a, i) =>
+    a.bits.borrow := false.B
+    a.bits.offset := i.U
+    a.valid       := checkerOutStage1.fixedTaken(i) && !s3_reqIsMmio
   }
   io.toIBuffer.bits.foldpc := s3_foldPc
   io.toIBuffer.bits.exceptionType := VecInit((s3_exceptionVec zip s3_crossPageExceptionVec).map { case (e, ce) =>
