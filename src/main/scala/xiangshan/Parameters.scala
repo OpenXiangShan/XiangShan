@@ -31,10 +31,10 @@ import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
+import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
-import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
 import system.SoCParamsKey
@@ -95,6 +95,7 @@ case class XSCoreParameters
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
   EnableCommitGHistDiff: Boolean = true,
+  // old bpu deprecate start, TODO: remove when v3 Bpu is ready
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   FtbWays: Int = 4,
@@ -121,6 +122,8 @@ case class XSCoreParameters
   SCCtrBits: Int = 6,
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
+  // old bpu deprecate end
+  bpuParameters: BpuParameters = BpuParameters(),
   ICacheForceMetaECCError: Boolean = false,
   ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,

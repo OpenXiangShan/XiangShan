@@ -17,48 +17,143 @@ package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.ftq.FtqPtr
 
 class BranchAttribute extends Bundle {
-  val value: UInt = BranchAttribute.Value()
+  val branchType: UInt = BranchAttribute.BranchType()
+  val rasAction:  UInt = BranchAttribute.RasAction()
 
-  def isNone:        Bool = value === BranchAttribute.Value.None
-  def isPop:         Bool = value === BranchAttribute.Value.Pop
-  def isPush:        Bool = value === BranchAttribute.Value.Push
-  def isPopAndPush:  Bool = value === BranchAttribute.Value.PopAndPush
-  def isConditional: Bool = value === BranchAttribute.Value.Conditional
-  def isIndirect:    Bool = value === BranchAttribute.Value.Indirect
+  def isNone:        Bool = branchType === BranchAttribute.BranchType.None
+  def isConditional: Bool = branchType === BranchAttribute.BranchType.Conditional
+  def isDirect:      Bool = branchType === BranchAttribute.BranchType.Direct
+  def isIndirect:    Bool = branchType === BranchAttribute.BranchType.Indirect
 
-  def hasPop:  Bool = value === BranchAttribute.Value.Pop || value === BranchAttribute.Value.PopAndPush
-  def hasPush: Bool = value === BranchAttribute.Value.Push || value === BranchAttribute.Value.PopAndPush
+  // NOTE: maybe we should check branchType === BranchAttribute.BranchType.Direct/Indirect,
+  //       but as BranchAttribute.BranchType is declared as private,
+  //       we should not able to create attribute with (Conditional, Push) or something like that.
+  //       So, just check rasAction should be enough.
+  def isCall:          Bool = rasAction === BranchAttribute.RasAction.Push
+  def isReturn:        Bool = rasAction === BranchAttribute.RasAction.Pop
+  def isReturnAndCall: Bool = rasAction === BranchAttribute.RasAction.PopAndPush
+
+  // hasPop = isPop || isPushAndPop, hasPush = isPush || isPushAndPop
+  def hasPop:  Bool = rasAction(BranchAttribute.RasAction.popBit)
+  def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
 }
 
 object BranchAttribute {
-  private object Value extends EnumUInt(6) {
+  private object BranchType extends EnumUInt(4) {
     // no branch
     def None: UInt = 0.U(width.W)
-    // special indirect branches: return/call, refer to risc-v spec Table3. Return-address stack prediction hints
-    // NOTE: do not change this encoding, this actually ensures `Pop | Push = PopAndPush`, so area can be better
-    def Pop:        UInt = 1.U(width.W) // return: rs1 is x1/x5 and rd is not
-    def Push:       UInt = 2.U(width.W) // call: rd is x1/x5 and rs1 is not; or rd is x1/x5 and rs1 == rd
-    def PopAndPush: UInt = 3.U(width.W) // return & call: both rd and rs1 is x1/x5, and rs1 != rd
     // conditional branches: beq, bne, blt, bge, bltu, bgeu
-    def Conditional: UInt = 4.U(width.W)
-    // indirect branches, other than return/call
-    def Indirect: UInt = 5.U(width.W)
+    def Conditional: UInt = 1.U(width.W)
+    // direct branches: j, jal
+    def Direct: UInt = 2.U(width.W)
+    // indirect branches: jr, jalr
+    def Indirect: UInt = 3.U(width.W)
+  }
+  private object RasAction extends EnumUInt(4) {
+    def popBit:  Int = 0
+    def pushBit: Int = 1
+    // no action
+    def None: UInt = 0.U(width.W)
+    // special indirect branches: return/call, refer to risc-v spec Table3. Return-address stack prediction hints
+    // return: jalr with rs1=x1/x5 and rd!=x1/x5
+    def Pop: UInt = (1 << popBit).U(width.W)
+    // call: jalr with rd=x1/x5 and rs1!=x1/x5; or rd=x1/x5 and rs1=rd. Or jal with rd=x1/x5
+    def Push: UInt = (1 << pushBit).U(width.W)
+    // return & call: jalr with rd=x1/x5 and rs1=x1/x5 and rs1!=rd
+    def PopAndPush: UInt = ((1 << popBit) | (1 << pushBit)).U(width.W)
   }
 
-  def apply(that: UInt): BranchAttribute = {
-    Value.assertLegal(that)
+  def apply(branchType: UInt, rasAction: UInt): BranchAttribute = {
+    BranchType.assertLegal(branchType)
+    RasAction.assertLegal(rasAction)
     val e = Wire(new BranchAttribute)
-    e.value := that
+    e.branchType := branchType
+    e.rasAction  := rasAction
     e
   }
 
-  def None:        BranchAttribute = apply(Value.None)
-  def Pop:         BranchAttribute = apply(Value.Pop)
-  def Push:        BranchAttribute = apply(Value.Push)
-  def PopAndPush:  BranchAttribute = apply(Value.PopAndPush)
-  def Conditional: BranchAttribute = apply(Value.Conditional)
-  def Indirect:    BranchAttribute = apply(Value.Indirect)
+  def None:          BranchAttribute = apply(BranchType.None, RasAction.None)
+  def Conditional:   BranchAttribute = apply(BranchType.Conditional, RasAction.None)
+  def DirectCall:    BranchAttribute = apply(BranchType.Direct, RasAction.Push)
+  def IndirectCall:  BranchAttribute = apply(BranchType.Indirect, RasAction.Push)
+  def Return:        BranchAttribute = apply(BranchType.Indirect, RasAction.Pop)
+  def ReturnAndCall: BranchAttribute = apply(BranchType.Indirect, RasAction.PopAndPush)
+  def OtherDirect:   BranchAttribute = apply(BranchType.Direct, RasAction.None)
+  def OtherIndirect: BranchAttribute = apply(BranchType.Indirect, RasAction.None)
+}
+
+// used to sync sub-predictors
+class StageCtrl(implicit p: Parameters) extends BpuBundle {
+  // TODO: do we need ready / valid of each stage?
+  val s0_fire: Bool = Bool()
+  val s1_fire: Bool = Bool()
+  val s2_fire: Bool = Bool()
+  val s3_fire: Bool = Bool()
+}
+
+// sub predictors -> Bpu top
+class BranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val attribute:   BranchAttribute = new BranchAttribute
+  // TODO: what else do we need?
+}
+
+class OverrideBranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val ftqPtr: FtqPtr = new FtqPtr
+}
+
+// Bpu -> Ftq
+class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  // FIXME: do not use Valid[UInt] for cfiPosition, currently keeping it for Ftq compatibility
+//  val taken:       Bool       = Bool()
+  val cfiPosition: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val target:      PrunedAddr  = PrunedAddr(VAddrBits)
+  // override valid
+  val s2Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+  val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+
+  def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
+    this.startVAddr        := pc
+    this.cfiPosition.valid := prediction.taken
+    this.cfiPosition.bits  := prediction.cfiPosition
+    this.target            := prediction.target
+  }
+
+  // TODO: what else do we need?
+}
+
+class TargetState extends Bundle {
+  val value: UInt = TargetState.Value()
+
+  def noCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
+  def isCarry:          Bool = value === TargetState.Value.Carry
+  def isBorrow:         Bool = value === TargetState.Value.Borrow
+}
+
+object TargetState {
+  private object Value extends EnumUInt(3) {
+    def NoCarryAndBorrow: UInt = 0.U(width.W)
+    def Carry:            UInt = 1.U(width.W)
+    def Borrow:           UInt = 2.U(width.W)
+  }
+
+  def apply(value: UInt): TargetState = {
+    Value.assertLegal(value)
+    val e = Wire(new TargetState)
+    e.value := value
+    e
+  }
+
+  def NoCarryAndBorrow: TargetState = apply(Value.NoCarryAndBorrow)
+  def Carry:            TargetState = apply(Value.Carry)
+  def Borrow:           TargetState = apply(Value.Borrow)
 }
