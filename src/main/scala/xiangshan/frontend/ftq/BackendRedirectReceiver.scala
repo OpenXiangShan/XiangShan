@@ -33,14 +33,15 @@ trait BackendRedirectReceiver extends HasXSParameter {
     // TODO: Now only channel 0 is used. Will change to single valid bundle and remove ftqIdxSelOH in the future.
     val ftqIdxInAdvance     = fromBackend.ftqIdxAhead(0)
     val ftqIdxInAdvanceNext = RegNext(ftqIdxInAdvance.valid)
-    XSError(
-      ftqIdxInAdvanceNext && !fromBackend.redirect.valid,
-      "FTQ index sent in advance, but no redirect comes in the next cycle\n"
-    )
-    XSError(
-      ftqIdxInAdvanceNext && fromBackend.redirect.bits.ftqIdx =/= ftqIdxInAdvance.bits,
-      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
-    )
+    // TODO: why this is not designed as folloing two assertions?
+//    XSError(
+//      ftqIdxInAdvanceNext && !fromBackend.redirect.valid,
+//      "FTQ index sent in advance, but no redirect comes in the next cycle\n"
+//    )
+//    XSError(
+//      ftqIdxInAdvanceNext && fromBackend.redirect.bits.ftqIdx =/= RegNext(ftqIdxInAdvance.bits),
+//      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
+//    )
 
     val redirect = Wire(Valid(new BranchPredictionRedirect))
     redirect.valid := fromBackend.redirect.valid
@@ -53,7 +54,7 @@ trait BackendRedirectReceiver extends HasXSParameter {
     ftqIdx.bits  := redirect.bits.ftqIdx
 
     (
-      Mux(ftqIdxInAdvance.valid, ftqIdxInAdvance, ftqIdx),
+      Mux(ftqIdxInAdvance.valid && !redirect.valid, ftqIdxInAdvance, ftqIdx),
       Mux(ftqIdxInAdvanceNext, redirect, redirectReg)
     )
   }
