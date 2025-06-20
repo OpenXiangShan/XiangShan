@@ -501,10 +501,10 @@ class Ras(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }.elsewhen(io.commit.valid && (distanceBetween(io.commit.metaTOSW, BOS) > 2.U)) {
       BOS := specPtrDec(io.commit.metaTOSW)
     }
-    XSError(
-      io.commit.valid && (distanceBetween(io.commit.metaTOSW, BOS) > 2.U),
-      "The use of inference queue of the RAS module has unexpected situations"
-    )
+//    XSError(
+//      io.commit.valid && (distanceBetween(io.commit.metaTOSW, BOS) > 2.U),
+//      "The use of inference queue of the RAS module has unexpected situations"
+//    )
 
     when(io.redirect.valid) {
       TOSR := io.redirect.meta.TOSR
