@@ -34,6 +34,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.RasSpeculativeInfo
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.FullBranchPrediction
 import xiangshan.frontend.bpu.HasBPUConst
 import xiangshan.frontend.bpu.PredictorMeta
 
@@ -54,11 +55,12 @@ class FtqEntry(implicit p: Parameters) extends FtqBundle with BPUUtils {
   val nextLineAddr  = PrunedAddr(VAddrBits)
   val fallThruError = Bool()
 
-  def :=(resp: BranchPredictionBundle): Unit = {
-    this.startAddr     := resp.pc
-    this.nextLineAddr  := resp.pc + (FetchWidth * 4 * 2).U // may be broken on other configs
-    this.fallThruError := resp.fallThruError
+  def :=(pred: FullBranchPrediction): Unit = {
+    this.startAddr     := pred.startVAddr
+    this.nextLineAddr  := pred.startVAddr + (FetchWidth * 4 * 2).U // may be broken on other configs
+    this.fallThruError := false.B                                  // FIXME
   }
+
   override def toPrintable: Printable =
     p"startAddr:${Hexadecimal(startAddr.toUInt)}"
 }

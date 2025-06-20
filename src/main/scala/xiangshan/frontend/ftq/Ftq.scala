@@ -31,13 +31,13 @@ import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.ValidUndirectioned
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BpuToFtqIO
 import xiangshan.frontend.bpu.HasBPUConst
 
 class Ftq(implicit p: Parameters) extends FtqModule
@@ -141,8 +141,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val bpuResp = io.fromBpu.resp.bits
 
-  private val bpuS2Redirect = bpuResp.s2.valid && bpuResp.s2.hasRedirect
-  private val bpuS3Redirect = bpuResp.s3.valid && bpuResp.s3.hasRedirect
+  private val bpuS2Redirect = bpuResp.s2Override.valid && io.fromBpu.resp.valid
+  private val bpuS3Redirect = bpuResp.s3Override.valid && io.fromBpu.resp.valid
 
   io.toBpu.enq_ptr := bpuPtr(0)
   // TODO: Why use bpuResp.s2&3.valid for s2 and s3, but io.fromBpu.resp.fire for s1?
@@ -151,41 +151,56 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val bpuIn = (io.fromBpu.resp.fire || bpuS2Redirect || bpuS3Redirect) &&
     !ifuRedirect.valid && !backendRedirect.valid
 
-  private val bpuInResp    = bpuResp.selectedResp
-  private val bpuInStage   = bpuResp.selectedRespIdxForFtq
-  private val bpuInRespPtr = Mux(bpuInStage === BP_S1, bpuPtr(0), bpuInResp.ftq_idx)
+  private val bpuInResp = bpuResp
+//  private val bpuInStage   = bpuResp.selectedRespIdxForFtq
+  private val bpuInRespPtr = MuxCase(
+    bpuPtr(0),
+    Seq(
+      bpuResp.s3Override.valid -> bpuResp.s3Override.bits.ftqPtr,
+      bpuResp.s2Override.valid -> bpuResp.s2Override.bits.ftqPtr
+    )
+  )
 
   private val bpuInNext        = RegNext(bpuIn)
   private val bpuInRespNext    = RegEnable(bpuInResp, bpuIn)
   private val bpuInRespPtrNext = RegEnable(bpuInRespPtr, bpuIn)
-  private val bpuInStageNext   = RegEnable(bpuInStage, bpuIn)
+//  private val bpuInStageNext   = RegEnable(bpuInStage, bpuIn)
 
   bpuPtr := bpuPtr + bpuEnqueue
-  for (stage <- 2 to 3) {
-    when(bpuResp.stage(stage).valid && bpuResp.stage(stage).hasRedirect) {
-      bpuPtr := bpuResp.stage(stage).ftq_idx + 1.U
-    }
-  }
+//  for (stage <- 2 to 3) {
+//    when(bpuResp.stage(stage).valid && bpuResp.stage(stage).hasRedirect) {
+//      bpuPtr := bpuResp.stage(stage).ftq_idx + 1.U
+//    }
+//  }
 
   entryQueue.io.wen   := bpuIn
   entryQueue.io.waddr := bpuInRespPtr.value
   entryQueue.io.wdata := bpuInResp
 
-  redirectQueue.io.wen   := bpuResp.lastStage.valid
-  redirectQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
-  redirectQueue.io.wdata := bpuResp.s3_specInfo
+//  redirectQueue.io.wen   := bpuResp.lastStage.valid
+//  redirectQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
+//  redirectQueue.io.wdata := bpuResp.s3_specInfo
+  redirectQueue.io.wen   := false.B
+  redirectQueue.io.waddr := DontCare
+  redirectQueue.io.wdata := DontCare
 
-  metaQueue.io.wen        := bpuResp.lastStage.valid
-  metaQueue.io.waddr      := bpuResp.lastStage.ftq_idx.value
-  metaQueue.io.wdata.meta := bpuResp.s3_meta
-  if (metaQueue.io.wdata.paddingBit.isDefined) {
-    metaQueue.io.wdata.paddingBit.get := 0.U
-  }
-  metaQueue.io.wdata.ftb_entry := bpuResp.s3_ftbEntry
+//  metaQueue.io.wen        := bpuResp.lastStage.valid
+//  metaQueue.io.waddr      := bpuResp.lastStage.ftq_idx.value
+//  metaQueue.io.wdata.meta := bpuResp.s3_meta
+//  if (metaQueue.io.wdata.paddingBit.isDefined) {
+//    metaQueue.io.wdata.paddingBit.get := 0.U
+//  }
+//  metaQueue.io.wdata.ftb_entry := bpuResp.s3_ftbEntry
+  metaQueue.io.wen   := false.B
+  metaQueue.io.waddr := DontCare
+  metaQueue.io.wdata := DontCare
 
-  ftbEntryQueue.io.wen   := bpuResp.lastStage.valid
-  ftbEntryQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
-  ftbEntryQueue.io.wdata := bpuResp.s3_ftbEntry
+//  ftbEntryQueue.io.wen   := bpuResp.lastStage.valid
+//  ftbEntryQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
+//  ftbEntryQueue.io.wdata := bpuResp.s3_ftbEntry
+  ftbEntryQueue.io.wen   := false.B
+  ftbEntryQueue.io.waddr := DontCare
+  ftbEntryQueue.io.wdata := DontCare
 
   private val latestTarget           = Reg(PrunedAddr(VAddrBits))
   private val latestTargetModified   = RegInit(false.B)
@@ -204,11 +219,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val ftqIdx = bpuInRespPtrNext.value
 
     entrySentToIfu(ftqIdx) := false.B
-    cfiIndexVec(ftqIdx)    := bpuInRespNext.cfiIndex
-    predStage(ftqIdx)      := bpuInStageNext
+    cfiIndexVec(ftqIdx)    := bpuInRespNext.cfiPosition
+//    predStage(ftqIdx)      := bpuInStageNext
 
     latestTargetModified   := true.B
-    latestTarget           := bpuInRespNext.getTarget
+    latestTarget           := bpuInRespNext.target
     latestEntryPtrModified := true.B
     latestEntryPtr         := bpuInRespPtrNext
 
@@ -225,9 +240,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // Only use FTB result to modify hit status
   // TODO: Why?
-  when(bpuResp.s2.valid) {
-    entryHitStatus(bpuResp.s2.ftq_idx.value) := Mux(bpuResp.s2.full_pred.hit, entryHit, entryNotHit)
-  }
+//  when(bpuResp.s2.valid) {
+//    entryHitStatus(bpuResp.s2.ftq_idx.value) := Mux(bpuResp.s2.full_pred.hit, entryHit, entryNotHit)
+//  }
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -241,8 +256,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   for (stage <- 2 to 3) {
-    val redirect = bpuResp.stage(stage).valid && bpuResp.stage(stage).hasRedirect
-    val ftqIdx   = bpuResp.stage(stage).ftq_idx
+    val redirect = if (stage == 2) bpuResp.s2Override.valid else bpuResp.s3Override.valid
+    val ftqIdx   = if (stage == 2) bpuResp.s2Override.bits.ftqPtr else bpuResp.s3Override.bits.ftqPtr
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
@@ -295,14 +310,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   when(bpuInIfuBypass) {
     toIfuEntry          := bpuInRespNext
-    toIfuEntryNextAddr  := bpuInRespNext.getTarget
-    toIfuEntryFtqOffset := bpuInRespNext.cfiIndex
+    toIfuEntryNextAddr  := bpuInRespNext.target
+    toIfuEntryFtqOffset := bpuInRespNext.cfiPosition
   }.otherwise {
     toIfuEntry := Mux(RegNext(io.toIfu.req.fire), entryQueue.io.ifuPtr(1).rdata, entryQueue.io.ifuPtr(0).rdata)
     // TODO: potential problems here
     toIfuEntryNextAddr := Mux(
       bpuInNext && bpuInRespPtrNext === ifuPtr(1),
-      bpuInRespNext.pc,
+      bpuInRespNext.startVAddr,
       Mux(ifuPtr(0) === latestEntryPtr, latestTarget, RegNext(entryQueue.io.ifuPtr(1).rdata.startAddr))
     )
   }
@@ -327,8 +342,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // False hit if fall through is smaller than start address
   when(toIfuEntry.fallThruError && entryHitStatus(ifuPtr(0).value) === entryHit) {
     when(io.toIfu.req.fire &&
-      !(bpuS2Redirect && bpuResp.stage(2).ftq_idx === ifuPtr(0)) &&
-      !(bpuS3Redirect && bpuResp.stage(3).ftq_idx === ifuPtr(0))) {
+      !(bpuS2Redirect && bpuResp.s2Override.bits.ftqPtr === ifuPtr(0)) &&
+      !(bpuS3Redirect && bpuResp.s3Override.bits.ftqPtr === ifuPtr(0))) {
       entryHitStatus(ifuPtr(0).value) := entryFalseHit
     }
   }
