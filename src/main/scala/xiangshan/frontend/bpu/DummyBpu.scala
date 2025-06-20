@@ -22,6 +22,7 @@ import utility.DelayN
 import utility.XSError
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.ubtb.Ubtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule {
@@ -36,15 +37,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
 
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
+  private val ubtb        = Module(new Ubtb)
 
   private def predictors: Seq[BasePredictor] = Seq(
-    fallThrough
+    fallThrough,
+    ubtb
   )
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  // ubtb.io.enable := ctrl.ubtb_enable
+  ubtb.io.enable        := ctrl.ubtb_enable
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -129,6 +132,9 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   s0_stall := !(s1_valid || s2_override || s3_override || redirect.valid)
 
   private val s1_prediction = fallThrough.io.prediction // FIXME
+
+  ubtb.io.train.valid := false.B  // FIXME: should be s3_prediction
+  ubtb.io.train.bits  := DontCare // FIXME: should be s3_prediction
 
   io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
 
