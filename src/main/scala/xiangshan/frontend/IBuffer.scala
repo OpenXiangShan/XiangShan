@@ -99,14 +99,13 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val debug_seqNum     = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst               := fetch.instrs(i)
-    pc                 := fetch.pc(i)
-    foldpc             := fetch.foldpc(i)
-    pd                 := fetch.pd(i)
-    pred_taken         := fetch.ftqPcOffset(i).valid
-    ftqPtr             := fetch.ftqPtr
-    ftqPcOffset.borrow := fetch.ftqPcOffset(i).bits.borrow
-    ftqPcOffset.offset := fetch.ftqPcOffset(i).bits.offset
+    inst        := fetch.instrs(i)
+    pc          := fetch.pc(i)
+    foldpc      := fetch.foldpc(i)
+    pd          := fetch.pd(i)
+    pred_taken  := fetch.ftqPcOffset(i).valid
+    ftqPtr      := fetch.ftqPtr
+    ftqPcOffset := fetch.ftqPcOffset(i).bits
     exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
       fetch.exceptionType(i),
       fetch.crossPageIPFFix(i),
