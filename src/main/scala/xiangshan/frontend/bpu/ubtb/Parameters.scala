@@ -1,0 +1,46 @@
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package xiangshan.frontend.bpu.ubtb
+
+import chisel3._
+import chisel3.util._
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HasBpuParameters
+
+// TODO: expose this to Parameters.scala / XSCore.scala
+trait HasUbtbParameters extends HasBpuParameters {
+  def nEntries:       Int = 32
+  def TagWidth:       Int = 22
+  def TargetWidth:    Int = 22 // 2B aligned
+  def UsefulCntWidth: Int = 2
+  def TakenCntWidth:  Int = 2
+
+  def Replacer: String = "plru"
+
+  def getTag(vAddr: PrunedAddr): UInt =
+    vAddr(TagWidth, 1)
+
+  def getFullTarget(startVAddr: PrunedAddr, target: UInt): PrunedAddr =
+    PrunedAddrInit(Cat(
+      startVAddr(VAddrBits - 1, TargetWidth + 1),
+      target, // (TargetWidth, 1)
+      0.U(1.W)
+    ))
+
+  def getEntryTarget(fullTarget: PrunedAddr): UInt =
+    fullTarget(TargetWidth, 1) // (TargetWidth, 1)
+}

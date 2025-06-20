@@ -23,6 +23,7 @@ import utility.XSError
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.ubtb.Ubtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule {
@@ -37,15 +38,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
 
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
+  private val ubtb        = Module(new Ubtb)
 
   private def predictors: Seq[BasePredictor] = Seq(
-    fallThrough
+    fallThrough,
+    ubtb
   )
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  // ubtb.io.enable := ctrl.ubtb_enable
+  ubtb.io.enable        := ctrl.ubtb_enable
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -94,6 +97,24 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     p.io.stageCtrl.s3_fire := s3_fire
   }
 
+  // ubtb specific inputs
+  // FIXME: should use s3_prediction to train ubtb
+  ubtb.io.train.valid                  := io.fromFtq.update.valid
+  ubtb.io.train.bits.startVAddr        := io.fromFtq.update.bits.pc
+  ubtb.io.train.bits.cfiPosition.valid := io.fromFtq.update.bits.cfi_idx.valid
+  ubtb.io.train.bits.cfiPosition.bits  := io.fromFtq.update.bits.cfi_idx.bits
+  ubtb.io.train.bits.target            := io.fromFtq.update.bits.full_target
+  ubtb.io.train.bits.attribute := MuxCase(
+    BranchAttribute.Conditional,
+    Seq(
+      (io.fromFtq.update.bits.is_call && io.fromFtq.update.bits.is_jal)  -> BranchAttribute.DirectCall,
+      (io.fromFtq.update.bits.is_call && io.fromFtq.update.bits.is_jalr) -> BranchAttribute.IndirectCall,
+      io.fromFtq.update.bits.is_ret                                      -> BranchAttribute.Return,
+      io.fromFtq.update.bits.is_jal                                      -> BranchAttribute.OtherDirect,
+      io.fromFtq.update.bits.is_jalr                                     -> BranchAttribute.OtherIndirect
+    )
+  )
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
 
@@ -129,7 +150,22 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s2_override || s3_override || redirect.valid)
 
-  private val s1_prediction = fallThrough.io.prediction.bits // FIXME
+  // s1 prediction:
+  // if ubtb hits, use meta (i.e. cfiPosition, attribute) from ubtb
+  // otherwise, use fallThrough
+  private val s1_prediction = Wire(new BranchPrediction)
+  s1_prediction := Mux(
+    ubtb.io.prediction.valid,
+    ubtb.io.prediction.bits,
+    fallThrough.io.prediction.bits
+  )
+  // and, if ubtb predicts a taken branch, use target from ubtb
+  // otherwise, use fallThrough
+  s1_prediction.target := Mux(
+    ubtb.io.prediction.valid && ubtb.io.prediction.bits.cfiPosition.valid,
+    ubtb.io.prediction.bits.target,
+    fallThrough.io.prediction.bits.target
+  )
 
   // s2 prediction: TODO
   private val s2_prediction = Wire(new BranchPrediction)
