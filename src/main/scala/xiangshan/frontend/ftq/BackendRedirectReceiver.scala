@@ -31,22 +31,26 @@ trait BackendRedirectReceiver extends HasXSParameter {
     // FTQ can process the redirect when it comes. Otherwise, FTQ has to delay the redirect for one cycle.
 
     // TODO: Now only channel 0 is used. Will change to single valid bundle and remove ftqIdxSelOH in the future.
-    val ftqIdxInAdvance     = fromBackend.ftqIdxAhead(0)
-    val ftqIdxInAdvanceNext = RegNext(ftqIdxInAdvance.valid)
-    XSError(
-      ftqIdxInAdvanceNext && !fromBackend.redirect.valid,
-      "FTQ index sent in advance, but no redirect comes in the next cycle\n"
-    )
-    XSError(
-      ftqIdxInAdvanceNext && fromBackend.redirect.bits.ftqIdx =/= ftqIdxInAdvance.bits,
-      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
-    )
+    val ftqIdxInAdvance = Wire(Valid(new FtqPtr))
+    ftqIdxInAdvance.valid := fromBackend.ftqIdxAhead(0).valid && !fromBackend.redirect.valid
+    ftqIdxInAdvance.bits  := fromBackend.ftqIdxAhead(0).bits
+    val ftqIdxInAdvanceValidNext = RegNext(ftqIdxInAdvance.valid)
+    // TODO: why this is not designed as folloing two assertions?
+//    XSError(
+//      ftqIdxInAdvanceValidNext && !fromBackend.redirect.valid,
+//      "FTQ index sent in advance, but no redirect comes in the next cycle\n"
+//    )
+//    XSError(
+//      ftqIdxInAdvanceValidNext && fromBackend.redirect.bits.ftqIdx =/= RegNext(ftqIdxInAdvance.bits),
+//      "FTQ index sent in advance, but it is not the same with redirect FTQ index\n"
+//    )
 
     val redirect = Wire(Valid(new BranchPredictionRedirect))
     redirect.valid := fromBackend.redirect.valid
     redirect.bits.connectRedirect(fromBackend.redirect.bits)
     redirect.bits.BTBMissBubble := false.B // FIXME: wtf?
     val redirectReg = RegNext(redirect)
+    redirectReg.valid := redirect.valid && !ftqIdxInAdvanceValidNext
 
     val ftqIdx = Wire(Valid(new FtqPtr))
     ftqIdx.valid := redirect.valid
@@ -54,7 +58,7 @@ trait BackendRedirectReceiver extends HasXSParameter {
 
     (
       Mux(ftqIdxInAdvance.valid, ftqIdxInAdvance, ftqIdx),
-      Mux(ftqIdxInAdvanceNext, redirect, redirectReg)
+      Mux(ftqIdxInAdvanceValidNext, redirect, redirectReg)
     )
   }
 }
