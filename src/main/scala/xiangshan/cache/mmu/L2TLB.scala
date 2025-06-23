@@ -88,15 +88,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val priv   = csr_dup(0).priv
   val mPBMTE = csr_dup(0).mPBMTE
   val hPBMTE = csr_dup(0).hPBMTE
-  val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed
+  val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed || priv.virt_changed
 
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck) 4 else 3)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
+  val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck) 5 else 4)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
   if (HasBitmapCheck) {
     pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, ModeS, pmp.io.pmp, pmp.io.pma))
   } else {
-    pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma)) 
+    pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
   }
 
   // add bitmapcheck
@@ -588,13 +588,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
   ptw.io.pmp.resp <> pmp_check(0).resp
-  pmp_check(1).req <> llptw.io.pmp.req
-  llptw.io.pmp.resp <> pmp_check(1).resp
-  pmp_check(2).req <> hptw.io.pmp.req
-  hptw.io.pmp.resp <> pmp_check(2).resp
+  pmp_check(1).req <> llptw.io.pmp(0).req
+  llptw.io.pmp(0).resp <> pmp_check(1).resp
+  pmp_check(2).req <> llptw.io.pmp(1).req
+  llptw.io.pmp(1).resp <> pmp_check(2).resp
+  pmp_check(3).req <> hptw.io.pmp.req
+  hptw.io.pmp.resp <> pmp_check(3).resp
   if (HasBitmapCheck) {
-    pmp_check(3).req <> bitmap.get.io.pmp.req
-    bitmap.get.io.pmp.resp <> pmp_check(3).resp
+    pmp_check(4).req <> bitmap.get.io.pmp.req
+    bitmap.get.io.pmp.resp <> pmp_check(4).resp
   }
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
@@ -917,8 +919,8 @@ object PTWDelayN {
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)
   val flush = VecInit(Seq.fill(PtwWidth)(false.B))
-  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed, itlbParams.fenceDelay)
-  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed, ldtlbParams.fenceDelay)
+  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, itlbParams.fenceDelay)
+  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, ldtlbParams.fenceDelay)
   for (i <- 0 until PtwWidth) {
     val helper = Module(new PTEHelper())
     helper.clock := clock

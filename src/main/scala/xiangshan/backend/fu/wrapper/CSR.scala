@@ -270,6 +270,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.vsum := csrMod.io.tlb.vsum
   tlb.priv.spvp := csrMod.io.tlb.spvp
   tlb.priv.virt := csrMod.io.tlb.dvirt
+  tlb.priv.virt_changed := DataChanged(tlb.priv.virt)
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
 

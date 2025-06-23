@@ -119,7 +119,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val mode = satp.mode
   val hgatp = io.csr.hgatp
-  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed
   val s2xlate = enableS2xlate && !onlyS1xlate
   val level = RegInit(3.U(log2Up(Level + 1).W))
   val af_level = RegInit(3.U(log2Up(Level + 1).W)) // access fault return this level
@@ -665,10 +665,10 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val flush_latch = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
   val cache = DecoupledIO(new L2TlbInnerBundle())
-  val pmp = new Bundle {
-    val req = Valid(new PMPReqBundle())
+  val pmp = Vec(2, new Bundle {
+    val req  = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
-  }
+  })
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle{
       val source = UInt(bSourceWidth.W)
@@ -711,7 +711,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mbmc = io.csr.mbmc
   val bitmap_enable = (if (HasBitmapCheck) true.B else false.B) && mbmc.BME === 1.U && mbmc.CMODE === 0.U
 
-  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed
   val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: state_bitmap_check :: state_bitmap_resp :: Nil = Enum(12)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
@@ -844,7 +844,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).first_s2xlate_fault := false.B
     mem_resp_hit(enq_ptr) := to_bitmap_req || to_mem_out || to_last_hptw_req
   }
-  
+
   if (HasBitmapCheck) {
     when (io.in.bits.bitmapCheck.get.jmp_bitmap_check && io.in.fire) {
       state(enq_ptr) := state_bitmap_check
@@ -874,16 +874,25 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val addr = RegEnable(MakeAddr(io.in.bits.ppn(ppnLen - 1, 0), getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire)
-  io.pmp.req.valid := need_addr_check || hptw_need_addr_check
-  io.pmp.req.bits.addr := Mux(hptw_need_addr_check, hpaddr, addr)
-  io.pmp.req.bits.cmd := TlbCmd.read
-  io.pmp.req.bits.size := 3.U // TODO: fix it
-  val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid) {
-    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
-    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    val ptr = Mux(hptw_need_addr_check, hptw_resp_ptr_reg, enq_ptr_reg);
-    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+
+  io.pmp(0).req.valid := need_addr_check
+  io.pmp(0).req.bits.addr := addr
+  io.pmp(0).req.bits.cmd := TlbCmd.read
+  io.pmp(0).req.bits.size := 3.U // TODO: fix it
+  when (io.pmp(0).req.valid) {  // same cycle
+    val ptr = enq_ptr_reg
+    val accessFault = io.pmp(0).resp.ld || io.pmp(0).resp.mmio
+    entries(ptr).af := accessFault
+    state(ptr) := Mux(accessFault, state_mem_out, state_mem_req)
+  }
+
+  io.pmp(1).req.valid := hptw_need_addr_check
+  io.pmp(1).req.bits.addr := hpaddr
+  io.pmp(1).req.bits.cmd := TlbCmd.read
+  io.pmp(1).req.bits.size := 3.U // TODO: fix it
+  when (io.pmp(1).req.valid) {  // same cycle
+    val ptr = hptw_resp_ptr_reg
+    val accessFault = io.pmp(1).resp.ld || io.pmp(1).resp.mmio
     entries(ptr).af := accessFault
     state(ptr) := Mux(accessFault, state_mem_out, state_mem_req)
   }
@@ -1161,7 +1170,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val hgatp = io.csr.hgatp
   val mpbmte = io.csr.mPBMTE
   val sfence = io.sfence
-  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed
+  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.priv.virt_changed
   val mode = hgatp.mode
 
   // mbmc:bitmap csr
@@ -1241,8 +1250,8 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     gpf = pageFault && !accessFault,
     gaf = accessFault || (ppn_af && !pageFault),
     level = Mux(accessFault, af_level, level),
-    pte = pte, 
-    vpn = vpn, 
+    pte = pte,
+    vpn = vpn,
     vmid = hgatp.vmid
   )
   io.resp.valid := resp_valid

@@ -103,7 +103,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val csr = io.csr
   val sfence = io.sfence
-  val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
+  val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed
   val bitmap_base = csr.mbmc.BMA << 6
 
   val entries = Reg(Vec(l2tlbParams.llptwsize+2, new bitmapEntry()))
@@ -122,7 +122,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val waiting = ParallelOR(is_waiting).asBool
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
-  val mem_ptr = ParallelPriorityEncoder(is_having) 
+  val mem_ptr = ParallelPriorityEncoder(is_having)
   val mem_arb = Module(new RRArbiter(new bitmapEntry(), l2tlbParams.llptwsize+2))
 
   val bitmapdata = Wire(Vec(blockBits / XLEN, UInt(XLEN.W)))
@@ -155,10 +155,10 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
 
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
-  val to_mem_out = dup_wait_resp 
+  val to_mem_out = dup_wait_resp
 
   val enq_state_normal = MuxCase(state_addr_check, Seq(
-    to_mem_out -> state_mem_out, 
+    to_mem_out -> state_mem_out,
     to_wait -> state_mem_waiting
   ))
   val enq_state =  enq_state_normal
@@ -166,11 +166,11 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val need_addr_check = RegNext(enq_state === state_addr_check && io.req.fire && !flush)
 
-  io.pmp.req.valid := need_addr_check 
+  io.pmp.req.valid := need_addr_check
   io.pmp.req.bits.addr := RegEnable(getBitmapAddr(io.req.bits.bmppn),io.req.fire)
   io.pmp.req.bits.cmd := TlbCmd.read
-  io.pmp.req.bits.size := 3.U 
-  val pmp_resp_valid = io.pmp.req.valid 
+  io.pmp.req.bits.size := 3.U
+  val pmp_resp_valid = io.pmp.req.valid
 
   when (io.req.fire) {
     state(enq_ptr) := enq_state
@@ -208,7 +208,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.cache.req.bits.tag := cache_req_arb.io.out.bits.tag
   io.cache.req.bits.order := cache_req_arb.io.out.bits.order
   cache_req_arb.io.out.ready := io.cache.req.ready
-  
+
 
   when (cache_req_arb.io.out.fire) {
     for (i <- state.indices) {
@@ -313,7 +313,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   // when don't hit, refill the data to bitmap cache
   io.refill.valid := io.resp.valid && !entries(mem_ptr).hit
   io.refill.bits.tag := entries(mem_ptr).ppn
-  io.refill.bits.data := entries(mem_ptr).data  
+  io.refill.bits.data := entries(mem_ptr).data
 
   XSPerfAccumulate("bitmap_req", io.req.fire)
   XSPerfAccumulate("bitmap_mem_req", io.mem.req.fire)
@@ -361,7 +361,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val csr = io.csr
   val sfence = io.sfence
-  val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed
+  val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed
   val bitmap_cache_clear = csr.mbmc.BCLEAR
 
   val bitmapCachesize = 16
@@ -427,7 +427,7 @@ class BitmapCache(implicit p: Parameters) extends XSModule with HasPtwConst {
     bitmapReplace.access(refillindex)
   }
   when (bitmap_cache_clear === 1.U) {
-    bitmapcache.foreach(_.valid := false.B) 
+    bitmapcache.foreach(_.valid := false.B)
   }
 
   XSPerfAccumulate("bitmap_cache_resp", io.resp.fire)
