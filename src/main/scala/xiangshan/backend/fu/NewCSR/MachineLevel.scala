@@ -539,7 +539,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
     reg.FS := ContextStatus.Dirty
   }
 
-  when (robCommit.vsDirty || writeVCSR) {
+  when (robCommit.vsDirty || writeVCSR || robCommit.vstart.valid && robCommit.vstart.bits =/= 0.U) {
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
