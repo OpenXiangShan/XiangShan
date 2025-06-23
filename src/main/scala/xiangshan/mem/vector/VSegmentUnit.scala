@@ -311,24 +311,28 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
-        when(io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable)) {
-          stateNext := s_finish
-        }.otherwise {
-          stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
-        }
+        stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
     }
   }.elsewhen(state === s_misalign_merge_data) {
-    stateNext := Mux(!curPtr, s_tlb_req, s_latch_and_merge_data)
+    when(exception_pa) {
+      stateNext := s_finish
+    } .otherwise {
+      stateNext := Mux(!curPtr, s_tlb_req, s_latch_and_merge_data)
+    }
   }.elsewhen(state === s_latch_and_merge_data) {
-    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
-      ((segmentIdx === maxSegIdx) && !segmentActive)) {
+    when(exception_pa) {
+      stateNext := s_finish
+    } .otherwise {
+      when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
+        ((segmentIdx === maxSegIdx) && !segmentActive)) {
 
-      stateNext := s_finish // segment instruction finish
-    }.otherwise {
-      stateNext := s_tlb_req // need continue
+        stateNext := s_finish // segment instruction finish
+      }.otherwise {
+        stateNext := s_tlb_req // need continue
+      }
     }
     /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
@@ -586,10 +590,22 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
 
-  when(state === s_cache_resp && io.rdcache.resp.fire && !io.rdcache.resp.bits.miss && !io.rdcache.s2_bank_conflict) {
-    exceptionVec(hardwareError) := io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable)
-    exception_pa := exceptionVec(hardwareError)
-    instMicroOp.exception_pa := exception_pa
+  // HardwareError response will be one beat late
+  when(
+    (state === s_latch_and_merge_data || state === s_misalign_merge_data) &&
+    io.rdcache.resp.bits.error_delayed && GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
+    segmentActive
+  ) {
+    exception_pa := true.B
+    instMicroOp.exception_pa := true.B
+
+    when(canTriggerException) {
+      exceptionVec(hardwareError) := true.B
+      instMicroOp.exceptionVstart := segmentIdx // for exception
+    }.otherwise {
+      instMicroOp.exceptionVl.valid := true.B
+      instMicroOp.exceptionVl.bits := segmentIdx
+    }
   }
 
   /**
