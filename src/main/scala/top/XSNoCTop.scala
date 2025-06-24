@@ -155,8 +155,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     val noc_reset = EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
     val soc_clock = IO(Input(Clock()))
     val soc_reset = IO(Input(AsyncReset()))
-    val ref_clock = Option.when(SeperateTLBus)(IO(Input(Clock())))
-    val ref_reset = Option.when(SeperateTLBus)(IO(Input(AsyncReset())))
     private val hasMbist = tiles.head.hasMbist
     private val hasSramCtl = tiles.head.hasSramCtl
     val io = IO(new Bundle {
@@ -197,7 +195,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     // imsic bare io
     val imsic = wrapper.u_imsic_bus_top.module.msi.map(x => IO(chiselTypeOf(x)))
 
-    val ref_reset_sync = ref_reset.map(_ => withClockAndReset(ref_clock, ref_reset) { ResetGen(2, io.dft_reset) })
     val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(noc_clock, noc_reset) { ResetGen(2, io.dft_reset) })
     val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(2, io.dft_reset) }
     wrapper.core_with_l2.module.io.sramTest.mbist.zip(io.dft).foreach { case (a, b) => a := b }
@@ -337,6 +334,8 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
     SeperateTLBus match {
       case true =>
+        val ref_clock = false.B.asClock
+        val ref_reset_sync = true.B
         withClockAndReset(ref_clock, ref_reset_sync) {
           val ClintVldGen = Module(new TimeVldGen())
           ClintVldGen.io.i_time := io.clintTime.bits
@@ -408,8 +407,6 @@ class XSNoCDiffTop(implicit p: Parameters) extends Module {
   exposeOptionIO(soc.imsic_m_tl, "imsic_m_tl")
   exposeOptionIO(soc.imsic_s_tl, "imsic_s_tl")
   exposeOptionIO(soc.imsic, "imsic")
-  exposeOptionIO(soc.ref_clock, "ref_clock")//syscnt clk
-  exposeOptionIO(soc.ref_reset, "ref_reset")//syscnt reset
 
   // TODO:
   // XSDiffTop is only part of DUT, we can not instantiate difftest here.
