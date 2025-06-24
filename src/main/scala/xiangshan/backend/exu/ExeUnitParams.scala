@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
-import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, FpScheduler, VfScheduler, MemScheduler}
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -85,9 +85,21 @@ case class ExeUnitParams(
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
+  val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 
+  def needDataFromI2F: Boolean = {
+    val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
+    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2F)) false
+    else this.getFpWBPort.get.port == exuI2FWBPort
+  }
+  // F2I includes FcmpCfg and FcvtCfg
+  def needDataFromF2I: Boolean = {
+    val exuF2IWBPort = backendParam.allExuParams(backendParam.getExuIdxF2I).getIntWBPort.get.port
+    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I)) false
+    else this.getIntWBPort.get.port == exuF2IWBPort
+  }
   def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
@@ -119,7 +131,11 @@ case class ExeUnitParams(
   val wbV0Index : Int = wbIndexeds.getOrElse("v0" , 0)
   val wbVlIndex : Int = wbIndexeds.getOrElse("vl" , 0)
   val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
-
+  def getForwardIndex(): Int = {
+    if (this.isIntExeUnit) wbIntIndex
+    else if (this.isFpExeUnit) wbFpIndex
+    else 0
+  }
 
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
@@ -267,6 +283,10 @@ case class ExeUnitParams(
   def hasAluFu = fuConfigs.map(_.fuType == FuType.alu).reduce(_ || _)
 
   def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
+
+  def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)
+
+  def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 

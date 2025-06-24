@@ -280,11 +280,22 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     b.io.read.map(_.req).zip(readAddr).map(x => x._1 := x._2)
     // only int src need srcLoadDependency, src0 src1
     if (i == 0) {
-      val srcLoadDependencyUpdate = fromRenameUpdate.map(x => x.bits.srcLoadDependency.zipWithIndex.filter(x => idxseq.contains(x._2)).map(_._1)).flatten
-      val srcType = fromRenameUpdate.map(x => x.bits.srcType.zipWithIndex.filter(x => idxseq.contains(x._2)).map(_._1)).flatten
-      // for std, int src need srcLoadDependency, fp src donot need srcLoadDependency
-      srcLoadDependencyUpdate.lazyZip(b.io.read.map(_.loadDependency)).lazyZip(srcType).map{ case (sink, source, srctype) =>
-        sink := Mux(SrcType.isXp(srctype), source, 0.U.asTypeOf(sink))
+      // int and fp idx 0 1 2(only fp)
+      val srcLoadDependencyUpdate = fromRenameUpdate.map(x => x.bits.srcLoadDependency.zipWithIndex.filter(x => x._2 < 3).map(_._1))
+      val srcType = fromRenameUpdate.map(x => x.bits.srcType.zipWithIndex.filter(x => x._2 < 3).map(_._1))
+      // for int is 2 src, fp is 3 src
+      srcLoadDependencyUpdate.zip(srcType).zipWithIndex.map{ case ((sinks, srctypes), idx) =>
+        sinks.zip(srctypes).zipWithIndex.map{ case ((sink, srctype), srcidx) =>
+          println(s"srcidx = ${srcidx}")
+          val fpRead = busyTables(1).io.read(idx * 3 + srcidx).loadDependency
+          if (srcidx < 2) {
+            val intRead = busyTables(0).io.read(idx * 2 + srcidx).loadDependency
+            sink := Mux(SrcType.isFp(srctype), fpRead, intRead)
+          }
+          else {
+            sink := Mux(SrcType.isFp(srctype), fpRead, 0.U.asTypeOf(sink))
+          }
+        }
       }
       // only int src need rcTag
       val rcTagUpdate = fromRenameUpdate.map(x => x.bits.regCacheIdx.zipWithIndex.filter(x => idxseq.contains(x._2)).map(_._1)).flatten

@@ -19,6 +19,8 @@ class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
 
   val flush = Input(flushGen)
   val enq = Flipped(Valid(new EnqBundle))
+  // i2f and fdiv use enqAppend
+  val enqAppend = Flipped(DecoupledIO(new EnqBundle))
   val deq = Output(Valid(lastGen))
 }
 
@@ -59,14 +61,17 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
     case (deq, 0) => deq
     case (deq, i) => modificationFunc(deq)
   }))
-
-  pipesOut.valid := pipesValidVec.asUInt.orR
-  pipesOut.bits := Mux1H(pipesValidVec, pipesBitsVec)
-  pipesOut.bits.rfWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.rfWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
-  pipesOut.bits.fpWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.fpWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
-  pipesOut.bits.vecWen.foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.vecWen.get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
-  pipesOut.bits.v0Wen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.v0Wen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
-  pipesOut.bits.vlWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.vlWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  // for i2f in fp iq, donot need && !pipesValidVec.asUInt.orR, for fdiv, need !pipesValidVec.asUInt.orR
+  val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.valid && !pipesValidVec.asUInt.orR))
+  val allBitsVec = VecInit(pipesBitsVec :+ io.enqAppend.bits.uop)
+  io.enqAppend.ready := Mux(io.enqAppend.valid, !pipesValidVec.asUInt.orR, true.B)
+  pipesOut.valid := allValidVec.asUInt.orR
+  pipesOut.bits := Mux1H(allValidVec, allBitsVec)
+  pipesOut.bits.rfWen .foreach(_ := allValidVec.zip(allBitsVec.map(_.rfWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.fpWen .foreach(_ := allValidVec.zip(allBitsVec.map(_.fpWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.vecWen.foreach(_ := allValidVec.zip(allBitsVec.map(_.vecWen.get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.v0Wen .foreach(_ := allValidVec.zip(allBitsVec.map(_.v0Wen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.vlWen .foreach(_ := allValidVec.zip(allBitsVec.map(_.vlWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
 
   lastConnect.valid := pipesOut.valid
   lastConnect.bits := lastConnectFunc(pipesOut.bits, lastConnect.bits)
@@ -74,5 +79,5 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   io.deq.valid := lastConnect.valid
   io.deq.bits := lastConnect.bits
 
-  assert(PopCount(pipesValidVec) <= 1.U, "PopCount(pipesValidVec) should be no more than 1")
+  assert(PopCount(allValidVec) <= 1.U, "PopCount(allValidVec) should be no more than 1")
 }

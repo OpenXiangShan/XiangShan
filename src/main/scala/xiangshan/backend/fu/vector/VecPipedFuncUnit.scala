@@ -65,8 +65,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val vs1 = src0
   protected val oldVd = inData.src(2)
 
-  protected val outCtrl     = ctrlVec.last
-  protected val outData     = dataVec.last
+  protected val outCtrl     = ctrlVec(cfg.latency.orginLatencyVal.get)
+  protected val outData     = dataVec(cfg.latency.orginLatencyVal.get)
 
   protected val outVecCtrl  = outCtrl.vpu.get
   protected val outVm       = outVecCtrl.vm

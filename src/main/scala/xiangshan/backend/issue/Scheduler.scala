@@ -115,6 +115,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val fromVecExuBlock = if (params.isVfSchd) Some(new Bundle {
     val uncertainWakeupIn = Option.when(params.isVfSchd)(Flipped(params.genExuWakeUpOutValidBundle))
   }) else None
+  val I2FWakeupIn = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
+  val F2IWakeupIn = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val fromDataPath = new Bundle {
     val resp: MixedVec[MixedVec[OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
     val og0Cancel = Input(ExuVec())
@@ -316,21 +318,36 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   if (params.issueBlockParams.map(_.needUncertainWakeupFromExu).fold(false)(_ || _)) {
     if (params.isIntSchd){
       issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromIntExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
-        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
-        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+        iq.io.wakeupFromExu.get.map(x => x.valid := false.B)
+        iq.io.wakeupFromExu.get.map(x => x.bits := 0.U.asTypeOf(x.bits))
+        iq.io.wakeupFromExu.get.head <> exuWakeUpIn
       }
     }
     else if (params.isFpSchd){
       issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromFpExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
-        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
-        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+        iq.io.wakeupFromExu.get.map(x => x.valid := false.B)
+        iq.io.wakeupFromExu.get.map(x => x.bits := 0.U.asTypeOf(x.bits))
+        iq.io.wakeupFromExu.get.head <> exuWakeUpIn
       }
     }
     else if (params.isVfSchd){
       issueQueues.filter(_.params.needUncertainWakeupFromExu).zip(io.fromVecExuBlock.get.uncertainWakeupIn.get).map { case (iq, exuWakeUpIn) =>
-        iq.io.wakeupFromExu.get := 0.U.asTypeOf(iq.io.wakeupFromExu.get)
-        iq.io.wakeupFromExu.get.head := exuWakeUpIn
+        iq.io.wakeupFromExu.get.map(x => x.valid := false.B)
+        iq.io.wakeupFromExu.get.map(x => x.bits := 0.U.asTypeOf(x.bits))
+        iq.io.wakeupFromExu.get.head <> exuWakeUpIn
       }
+    }
+  }
+  issueQueues.zipWithIndex.foreach { case(iq, i) =>
+    if (iq.params.needWakeupFromI2F) {
+      println(s"${iq.name} need wakeupFromI2F")
+      iq.io.wakeupFromI2F.get := io.I2FWakeupIn.get
+    }
+  }
+  issueQueues.zipWithIndex.foreach { case (iq, i) =>
+    if (iq.params.needWakeupFromF2I) {
+      println(s"${iq.name} need wakeupFromF2I")
+      iq.io.wakeupFromF2I.get := io.F2IWakeupIn.get
     }
   }
   // Connect each replace RCIdx to IQ
@@ -521,8 +538,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       wakeupFromV0WBVecDelayed.zipWithIndex.filter(x => iq.params.needWakeupFromV0WBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++
       wakeupFromVlWBVecDelayed.zipWithIndex.filter(x => iq.params.needWakeupFromVlWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq
     ).foreach { case (sink, source) => sink := source }
-    // here disable fp load fast wakeup to std, and no FEX wakeup to std
-    iq.io.wakeupFromIQ.map(_.bits.fpWen := false.B)
   }
 
   (stdEnqs ++ hydEnqs).zip(staEnqs ++ hyaEnqs).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>

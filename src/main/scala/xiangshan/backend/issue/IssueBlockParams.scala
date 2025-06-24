@@ -45,6 +45,8 @@ case class IssueBlockParams(
 
   def inIntSchd: Boolean = schdType == IntScheduler()
 
+  def inFpSchd: Boolean = schdType == FpScheduler()
+
   def inVfSchd: Boolean = schdType == VfScheduler()
 
   def isMemAddrIQ: Boolean = inMemSchd && (LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0)
@@ -211,6 +213,21 @@ case class IssueBlockParams(
 
   def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
 
+  def needWakeupFromI2F: Boolean = {
+    val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
+    exuBlockParams.map{ x =>
+      if (x.getFpWBPort.isEmpty) false
+      else (x.getFpWBPort.get.port == exuI2FWBPort) && x.isFpExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromF2I: Boolean = {
+    val exuF2IWBPort = backendParam.allExuParams(backendParam.getExuIdxF2I).getIntWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getIntWBPort.isEmpty) false
+      else (x.getIntWBPort.get.port == exuF2IWBPort) && x.isIntExeUnit
+    }.reduce(_ || _)
+  }
   /**
     * Get the regfile type that this issue queue need to read
     */
