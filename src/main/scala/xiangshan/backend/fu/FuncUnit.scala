@@ -95,6 +95,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val outValidAhead3Cycle = OptionWrapper(FuConfig.needUncertainWakeupFuConfigs.contains(cfg), Output(Bool()))
   val outRFWenAhead3Cycle = OptionWrapper(cfg.isCsr, Output(Bool()))
   val outPdestAhead3Cycle = OptionWrapper(cfg.isCsr, Output(UInt(PhyRegIdxWidth.W)))
+  val wakeupSuccess = OptionWrapper(FuConfig.needUncertainWakeupFuConfigs.contains(cfg), Input(Bool()))
   val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
@@ -130,7 +131,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.debug_seqNum := RegEnable(io.in.bits.debug_seqNum, io.in.fire)
   }
 
-  def connectNonPipedCtrlSingalForCSR: Unit = {
+  def connectNonPipedCtrlDataHoldBypass: Unit = {
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
     io.out.bits.ctrl.rfWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))

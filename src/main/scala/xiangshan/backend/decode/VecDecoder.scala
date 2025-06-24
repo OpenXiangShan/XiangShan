@@ -10,7 +10,7 @@ import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
-import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType}
+import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType, FcmpOpCode}
 import xiangshan.backend.decode.Zvbb._
 
 abstract class VecDecode extends XSDecodeBase {
@@ -492,15 +492,15 @@ object VecDecoder extends DecodeConstants {
     FSUB_S -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsub, F, T, F, UopSplitType.SCA_SIM),
     FSUB_D -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsub, F, T, F, UopSplitType.SCA_SIM),
     FSUB_H -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsub, F, T, F, UopSplitType.SCA_SIM),
-    FEQ_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfeq , T, F, F, UopSplitType.SCA_SIM),
-    FLT_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vflt , T, F, F, UopSplitType.SCA_SIM),
-    FLE_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
-    FEQ_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfeq , T, F, F, UopSplitType.SCA_SIM),
-    FLT_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vflt , T, F, F, UopSplitType.SCA_SIM),
-    FLE_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
-    FEQ_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfeq , T, F, F, UopSplitType.SCA_SIM),
-    FLT_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vflt , T, F, F, UopSplitType.SCA_SIM),
-    FLE_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
+    FEQ_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.feq , T, F, F, UopSplitType.SCA_SIM),
+    FLT_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.flt , T, F, F, UopSplitType.SCA_SIM),
+    FLE_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fle , T, F, F, UopSplitType.SCA_SIM),
+    FEQ_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.feq , T, F, F, UopSplitType.SCA_SIM),
+    FLT_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.flt , T, F, F, UopSplitType.SCA_SIM),
+    FLE_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fle , T, F, F, UopSplitType.SCA_SIM),
+    FEQ_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.feq , T, F, F, UopSplitType.SCA_SIM),
+    FLT_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.flt , T, F, F, UopSplitType.SCA_SIM),
+    FLE_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.fcmp, FcmpOpCode.fle , T, F, F, UopSplitType.SCA_SIM),
     FMIN_S -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
     FMIN_D -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
     FMAX_S -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
