@@ -9,7 +9,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 import utility._
-import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
+import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
@@ -39,6 +39,8 @@ class ExuBlockImp(
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.csrin.foreach(exuio => io.csrin.get <> exuio)
+    exu.io.I2FDataIn.foreach(exuio => io.I2FDataIn.get <> exuio)
+    exu.io.F2IDataIn.foreach(exuio => io.F2IDataIn.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
@@ -53,10 +55,36 @@ class ExuBlockImp(
 //    }
     XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
+  io.I2FWakeupOut.foreach{ x =>
+    val exuI2FIn = exus.filter(x => x.wrapper.exuParams.fuConfigs.contains(I2fCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuI2FIn.valid && exuI2FIn.bits.fpWen.get
+    x.bits.fpWen := exuI2FIn.bits.fpWen.get
+    x.bits.pdest := exuI2FIn.bits.pdest
+  }
+  io.F2IWakeupOut.foreach { x =>
+    val exuF2IIn = exus.filter(x => x.wrapper.exuParams.fuConfigs.contains(FcmpCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuF2IIn.valid && exuF2IIn.bits.rfWen.get
+    x.bits.rfWen := exuF2IIn.bits.rfWen.get
+    x.bits.pdest := exuF2IIn.bits.pdest
+  }
   io.uncertainWakeupOut.foreach{ x =>
-    println(s"io.uncertainWakeupOut.get.length: ${io.uncertainWakeupOut.get.length}")
-    println(s"exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get).length: ${exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get).length}")
-    x := exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)
+    x.zip(exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)).map{ case (sink, source) =>
+      sink <> source
+    }
+  }
+  val fpDataIdx = 2
+  io.I2FDataOut.foreach { x =>
+    val i2fFuOut = exus.filter(exu => exu.wrapper.exuParams.hasi2fFu).head.io.out
+    x.valid := i2fFuOut.valid && i2fFuOut.bits.fpWen.get
+    x.bits := i2fFuOut.bits.data(fpDataIdx)
+  }
+  val intDataIdx = 1
+  io.F2IDataOut.foreach { x =>
+    val f2iFuOut = exus.filter(exu => exu.wrapper.exuParams.hasf2iFu).head.io.out
+    x.valid := f2iFuOut.valid && f2iFuOut.bits.intWen.get
+    x.bits := f2iFuOut.bits.data(intDataIdx)
   }
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
@@ -80,7 +108,12 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
   val uncertainWakeupOut = Option.when(params.issueBlockParams.map(_.needUncertainWakeupFromExu).reduce(_ ||_))(params.genExuWakeUpOutValidBundle)
-
+  val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
+  val I2FDataOut = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
+  val I2FDataIn= Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
+  val F2IDataOut = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
+  val F2IDataIn = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))

@@ -59,4 +59,6 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
 
   io.out.bits.res.fflags.get := fflagsData
   io.out.bits.res.data       := resultData
+  io.outValidAhead3Cycle.get := fdiv.io.outValidAhead3Cycle
+  fdiv.io.wakeupSuccess := io.wakeupSuccess.get
 }

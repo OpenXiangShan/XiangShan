@@ -29,16 +29,18 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
+import xiangshan.backend.fu.FuConfig.{I2fCfg, needUncertainWakeupFuConfigs}
 import xiangshan.backend.issue.WakeupQueue
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(params, hasCopySrc = true)))
   val out = DecoupledIO(new ExuOutput(params))
-  val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(Valid(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
+  val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(DecoupledIO(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val I2FDataIn = Option.when(params.needDataFromI2F)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped(ValidIO(UInt(XLEN.W))))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
@@ -202,6 +204,9 @@ class ExeUnitImp(
   }
   funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
     val latency = fu.cfg.latency.latencyVal.getOrElse(0)
+    if (fu.cfg == I2fCfg){
+      println(s"I2fCfg latency = $latency")
+    }
     for (i <- 0 until (latency+1)) {
       val sink = fu.io.in.bits.ctrlPipe.get(i)
       val source = inPipe._1(i)
@@ -269,7 +274,11 @@ class ExeUnitImp(
 
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
-  private val fuIntWenVec = funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
+  private val fuIntWenVec = if (exuParams.needDataFromF2I) {
+    funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B)) :+ io.F2IDataIn.get.valid
+  } else {
+    funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
+  }
   private val fuFpWenVec  = funcUnits.map( x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
   private val fuVecWenVec = funcUnits.map(x => x.cfg.needVecWen.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
   private val fuV0WenVec = funcUnits.map(x => x.cfg.needV0Wen.B && x.io.out.bits.ctrl.v0Wen.getOrElse(false.B))
@@ -278,10 +287,22 @@ class ExeUnitImp(
 
   private val outDataVec = Seq(
     Some(fuOutresVec.map(_.data)),
-    Option.when(funcUnits.exists(_.cfg.writeIntRf))
-      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuout) => fuout.data}),
-    Option.when(funcUnits.exists(_.cfg.writeFpRf))
-      (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuout) => fuout.data}),
+    Option.when(funcUnits.exists(_.cfg.writeIntRf)) {
+      if (exuParams.needDataFromF2I) {
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.bits)
+      }
+      else {
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data })
+      }
+    },
+    Option.when(funcUnits.exists(_.cfg.writeFpRf)){
+      if (exuParams.needDataFromI2F){
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeFpRf }.map{ case (_, fuout) => fuout.data} :+ io.I2FDataIn.get.bits)
+      }
+      else{
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeFpRf }.map{ case (_, fuout) => fuout.data})
+      }
+    },
     Option.when(funcUnits.exists(_.cfg.writeVecRf))
       (funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuout) => fuout.data}),
     Option.when(funcUnits.exists(_.cfg.writeV0Rf))
@@ -291,10 +312,22 @@ class ExeUnitImp(
   ).flatten
   private val outDataValidOH = Seq(
     Some(fuOutValidOH),
-    Option.when(funcUnits.exists(_.cfg.writeIntRf))
-      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuoutOH) => fuoutOH}),
-    Option.when(funcUnits.exists(_.cfg.writeFpRf))
-      (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    Option.when(funcUnits.exists(_.cfg.writeIntRf)) {
+      // io.F2IDataIn.get.valid and funcUnits may valid at same time when they write different reg file
+      if (exuParams.needDataFromF2I) {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuoutOH) => !io.F2IDataIn.get.valid && fuoutOH } :+ io.F2IDataIn.get.valid)
+      } else {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuoutOH) => fuoutOH })
+      }
+    },
+    Option.when(funcUnits.exists(_.cfg.writeFpRf)){
+      if (exuParams.needDataFromI2F) {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeFpRf }.map { case (_, fuoutOH) => !io.I2FDataIn.get.valid && fuoutOH } :+ io.I2FDataIn.get.valid)
+      }
+      else {
+        (funcUnits.zip(fuOutValidOH).filter { case (fu, _) => fu.cfg.writeFpRf }.map { case (_, fuoutOH) => fuoutOH})
+      }
+    },
     Option.when(funcUnits.exists(_.cfg.writeVecRf))
       (funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => fuoutOH}),
     Option.when(funcUnits.exists(_.cfg.writeV0Rf))
@@ -307,22 +340,16 @@ class ExeUnitImp(
   generateCriticalErrors()
 
   io.out.valid := Cat(fuOutValidOH).orR
-  funcUnits.foreach{ case fu => {
-    if (needUncertainWakeupFuConfigs.contains(fu.cfg)) {
-      println(p"${exuParams.name}: ${fu.cfg.name} ready need change")
-      fu.io.out.ready := !funcUnits.filterNot(x => needUncertainWakeupFuConfigs.contains(x.cfg)).map(y => y.io.out.valid).fold(false.B)(_ || _) && fu.io.out.valid
-    }
-    else {
-      fu.io.out.ready := io.out.ready
-    }
-    fu.io.out.ready := true.B
-  }
+  funcUnits.foreach{ fu =>
+    fu.io.out.ready := io.out.ready
+    fu.io.wakeupSuccess.foreach(_ := false.B)
   }
   io.uncertainWakeupOut.foreach{ out => {
     val uncertainFus = funcUnits.filter(x => needUncertainWakeupFuConfigs.contains(x.cfg))
     if (uncertainFus.length == 1) {
       val fu = uncertainFus(0)
       out.valid := fu.io.outValidAhead3Cycle.get
+      fu.io.wakeupSuccess.get := out.ready
       out.bits := 0.U.asTypeOf(out.bits)
       // div
       fu.io.out.bits.ctrl.rfWen.foreach(x => out.bits.rfWen := x)
@@ -355,7 +382,8 @@ class ExeUnitImp(
   io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
-  io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
+  val F2IIntWen = io.F2IDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec) || F2IIntWen)
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
   io.out.bits.v0Wen.foreach(x => x := Mux1H(fuOutValidOH, fuV0WenVec))

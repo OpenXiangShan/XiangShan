@@ -369,9 +369,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intScheduler.io.vfWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vfWriteBackDelayed)
   intScheduler.io.v0WriteBackDelayed := 0.U.asTypeOf(intScheduler.io.v0WriteBackDelayed)
   intScheduler.io.vlWriteBackDelayed := 0.U.asTypeOf(intScheduler.io.vlWriteBackDelayed)
-  intScheduler.io.fromIntExuBlock.foreach(x => x.uncertainWakeupIn.get := intExuBlock.io.uncertainWakeupOut.get)
-  fpScheduler.io.fromFpExuBlock.foreach(x => x.uncertainWakeupIn.get := fpExuBlock.io.uncertainWakeupOut.get)
-  vfScheduler.io.fromVecExuBlock.foreach(x => x.uncertainWakeupIn.get := vfExuBlock.io.uncertainWakeupOut.get)
+  intScheduler.io.fromIntExuBlock.foreach(x => x.uncertainWakeupIn.get <> intExuBlock.io.uncertainWakeupOut.get)
+  fpScheduler.io.fromFpExuBlock.foreach(x => x.uncertainWakeupIn.get <> fpExuBlock.io.uncertainWakeupOut.get)
+  vfScheduler.io.fromVecExuBlock.foreach(x => x.uncertainWakeupIn.get <> vfExuBlock.io.uncertainWakeupOut.get)
+  fpScheduler.io.I2FWakeupIn.foreach(x => x := intExuBlock.io.I2FWakeupOut.get)
+  intScheduler.io.F2IWakeupIn.foreach(x => x := fpExuBlock.io.F2IWakeupOut.get)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   intScheduler.io.fromSchedulers.wakeupVecDelayed.foreach { wakeup => wakeup := iqWakeUpMappedBundleDelayed(wakeup.bits.exuIdx) }
@@ -559,6 +561,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     for (j <- 0 until intExuBlock.io.in(i).length) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.int(i)(j).bits.loadDependency, io.mem.ldCancel)
       val rightOut = Wire(chiselTypeOf(intExuBlock.io.in(i)(j)))
+      // no block for uops to exu, when idiv busy, use og1 resp
       rightOut.ready := true.B
       NewPipelineConnect(
         bypassNetwork.io.toExus.int(i)(j), rightOut, rightOut.fire,
@@ -571,7 +574,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       )
       intExuBlock.io.in(i)(j).valid := rightOut.valid
       intExuBlock.io.in(i)(j).bits := rightOut.bits
-      bypassNetwork.io.toExus.int(i)(j).ready := intExuBlock.io.in(i)(j).ready
+      val ldCancelResp = !intExuBlock.io.in(i)(j).bits.params.needUncertainWakeup.B || !shouldLdCancel
+      bypassNetwork.io.toExus.int(i)(j).ready := intExuBlock.io.in(i)(j).ready && ldCancelResp
     }
   }
 
@@ -633,18 +637,26 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   // to fpExuBlock
   fpExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
+  fpExuBlock.io.I2FDataIn.get := intExuBlock.io.I2FDataOut.get
+  intExuBlock.io.F2IDataIn.get := fpExuBlock.io.F2IDataOut.get
   for (i <- 0 until fpExuBlock.io.in.length) {
     for (j <- 0 until fpExuBlock.io.in(i).length) {
       val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.fp(i)(j).bits.loadDependency, io.mem.ldCancel)
+      val rightOut = Wire(chiselTypeOf(fpExuBlock.io.in(i)(j)))
+      rightOut.ready := true.B
       NewPipelineConnect(
-        bypassNetwork.io.toExus.fp(i)(j), fpExuBlock.io.in(i)(j), fpExuBlock.io.in(i)(j).fire,
+        bypassNetwork.io.toExus.fp(i)(j), rightOut, rightOut.fire,
         Mux(
-          bypassNetwork.io.toExus.fp(i)(j).fire,
+          bypassNetwork.io.toExus.fp(i)(j).valid,
           bypassNetwork.io.toExus.fp(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
-          fpExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
+          false.B
         ),
         Option("bypassNetwork2fpExuBlock")
       )
+      fpExuBlock.io.in(i)(j).valid := rightOut.valid
+      fpExuBlock.io.in(i)(j).bits := rightOut.bits
+      val ldCancelResp = !fpExuBlock.io.in(i)(j).bits.params.needUncertainWakeup.B || !shouldLdCancel
+      bypassNetwork.io.toExus.fp(i)(j).ready := fpExuBlock.io.in(i)(j).ready && ldCancelResp
     }
   }
 

@@ -22,8 +22,8 @@ class FpPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cf
   with HasPipelineReg
   with FpFuncUnitAlias
 {
-  protected val outCtrl     = ctrlVec.last
-  protected val outData     = dataVec.last
+  protected val outCtrl     = ctrlVec(cfg.latency.orginLatencyVal.get)
+  protected val outData     = dataVec(cfg.latency.orginLatencyVal.get)
 
   override def latency: Int = cfg.latency.latencyVal.get
 

@@ -58,10 +58,10 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     ): Unit = {
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
-          sink.valid := source.valid
+          sink.valid := source.valid || source.bits.params.needDataFromF2I.B && source.bits.intWen.getOrElse(false.B)
           sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
           sink.bits.pdest := source.bits.pdest
-          sink.bits.data := source.bits.data(0)
+          sink.bits.data := source.bits.data(source.bits.params.getForwardIndex)
         }
       }
     }
@@ -98,7 +98,17 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   )
 
   private val bypassDataVec = VecInit(
-    fromExus.map(x => ZeroExt(RegEnable(x.bits.data, x.valid), RegDataMaxWidth))
+    // remove fp exu which need i2f data's clock gate
+    // remove int exu which need f2i data's clock gate
+    fromExus.map(x => {
+      if (x.bits.params.needDataFromI2F || x.bits.params.needDataFromF2I) {
+        // because RegNext unset width, canot ZeroExt
+        val tempWire = Wire(UInt(RegDataMaxWidth.W))
+        tempWire := RegNext(x.bits.data)
+        ZeroExt(tempWire, RegDataMaxWidth)
+      }
+      else ZeroExt(RegEnable(x.bits.data, x.valid), RegDataMaxWidth)
+    })
   )
 
   private val intExuNum = params.intSchdParams.get.numExu

@@ -12,5 +12,5 @@ class FpNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit
   protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)
   protected val outData     = DataHoldBypass(io.in.bits.data, io.in.fire)
 
-  connectNonPipedCtrlSingal
+  connectNonPipedCtrlDataHoldBypass
 }
