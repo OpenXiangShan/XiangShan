@@ -62,7 +62,9 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val intBusyTableNeedLoadCancel = allExuParams.map(x =>
     x.needLoadDependency && x.writeIntRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readIntRf).foldLeft(false)(_ || _)
   ).reduce(_ || _)
-  val fpBusyTableNeedLoadCancel = false
+  val fpBusyTableNeedLoadCancel = allExuParams.map(x =>
+    x.needLoadDependency && x.writeFpRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readFpRf).foldLeft(false)(_ || _)
+  ).reduce(_ || _)
   val vfBusyTableNeedLoadCancel = allExuParams.map(x =>
     x.needLoadDependency && x.writeVfRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVecRf).foldLeft(false)(_ || _)
   ).reduce(_ || _)
@@ -85,7 +87,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val allWakeUp = io.wakeUpInt ++ io.wakeUpFp ++ io.wakeUpVec ++ io.wakeUpMem
   val wakeUpIn = pregWB match {
     case IntWB(_, _) => allWakeUp.filter{x => x.bits.params.writeIntRf && (x.bits.params.hasLoadExu || x.bits.params.hasAluFu)}
-    case FpWB(_, _) => allWakeUp.filter{x => x.bits.params.writeFpRf && !x.bits.params.hasLoadExu}
+    case FpWB(_, _) => allWakeUp.filter{x => x.bits.params.writeFpRf && !x.bits.params.isIntExeUnit}
     case VfWB(_, _) => allWakeUp.filter(_.bits.params.writeVfRf)
     case V0WB(_, _) => allWakeUp.filter(_.bits.params.writeV0Rf)
     case VlWB(_, _) => allWakeUp.filter(_.bits.params.writeVlRf)
