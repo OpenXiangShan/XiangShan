@@ -4,6 +4,8 @@ src/main/scala/xiangshan/frontend/instruncache @ngc7331
 src/main/scala/xiangshan/frontend/ifu @ngc7331 @my-mayfly
 src/main/scala/xiangshan/frontend/ftq @Yan-Muzi
 src/main/scala/xiangshan/frontend/bpu @eastonman
+src/main/scala/xiangshan/frontend/bpu/ubtb @ngc7331
+src/main/scala/xiangshan/frontend/bpu/abtb @TheKiteRunner24
 src/main/scala/xiangshan/frontend/Frontend.scala @eastonman
 src/main/scala/xiangshan/frontend/FrontendBundle.scala @eastonman
 src/main/scala/xiangshan/frontend/IBuffer.scala @eastonman
