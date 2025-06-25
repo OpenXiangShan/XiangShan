@@ -41,6 +41,7 @@ import xiangshan.TopDownCounters
 import xiangshan.ValidUndirectioned
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FrontendTopDownBundle
@@ -48,14 +49,11 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.BpuToFtqIO
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.FTBEntry_FtqMem
 import xiangshan.frontend.bpu.HasBPUConst
-import xiangshan.frontend.icache._
 import xiangshan.frontend.icache.HasICacheParameters
-import xiangshan.frontend.ifu._
 import xiangshan.frontend.mmioCommitRead
 
 class Ftq(implicit p: Parameters) extends FtqModule
@@ -185,8 +183,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
 //  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
 //  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
-  val bpu_s2_redirect = io.fromBpu.resp.bits.s2_override
-  val bpu_s3_redirect = io.fromBpu.resp.bits.s3_override
+  val bpu_s2_redirect = io.fromBpu.resp.bits.s2Override.valid
+  val bpu_s3_redirect = io.fromBpu.resp.bits.s3Override.valid
 
   io.toBpu.enq_ptr := bpuPtr
   val enq_fire    = io.fromBpu.resp.fire && allowBpuIn // from bpu s1
@@ -203,7 +201,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // resp from uBTB
   ftq_pc_mem.io.wen   := bpu_in_fire
   ftq_pc_mem.io.waddr := bpu_in_resp_idx
-  ftq_pc_mem.io.wdata.fromPrediction(bpu_in_resp.prediction)
+  ftq_pc_mem.io.wdata.fromPrediction(bpu_in_resp)
 
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_mem = Module(new SyncDataModuleTemplate(
@@ -263,8 +261,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val last_cycle_bpu_in       = RegNext(bpu_in_fire)
   val last_cycle_bpu_in_ptr   = RegEnable(bpu_in_resp_ptr, bpu_in_fire)
   val last_cycle_bpu_in_idx   = last_cycle_bpu_in_ptr.value
-  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.prediction.target, bpu_in_fire)
-  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.prediction.cfiPosition, bpu_in_fire)
+  val last_cycle_bpu_target   = RegEnable(bpu_in_resp.target, bpu_in_fire)
+  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.cfiPosition, bpu_in_fire)
   val last_cycle_bpu_in_stage = RegEnable(bpu_in_stage, bpu_in_fire)
 
   val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))

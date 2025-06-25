@@ -45,6 +45,12 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val stallWidth = UInt(log2Ceil(PredictWidth).W)
 }
 
+class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
+  // FIXME: remove old FullBranchPrediction
+  val resp: DecoupledIO[NewFullBranchPrediction] = DecoupledIO(new NewFullBranchPrediction)
+  // TODO: topdown, etc.
+}
+
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
   // fast path: Timing critical
@@ -104,7 +110,7 @@ class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICachePa
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
-  // NOTE: req.bits must be prepare in T cycle
+  // NOTE: req.bits must be prepared in T cycle
   // while req.valid is set true in T + 1 cycle
   val fetchReq:     DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
   val prefetchReq:  DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
@@ -767,14 +773,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
       s1.valid                     -> BP_S1
     ))
   def lastStage = s3
-}
-
-class BpuToFtqBundle(implicit p: Parameters) extends XSBundle {
-  val prediction  = new NewFullBranchPrediction // FIXME: remove old FullBranchPrediction
-  val s2_override = Bool()
-  val s3_override = Bool()
-  val s2_ftqPtr   = new FtqPtr
-  val s3_ftqPtr   = new FtqPtr
 }
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {

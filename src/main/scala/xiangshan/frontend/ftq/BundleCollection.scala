@@ -23,7 +23,6 @@ import utility.ParallelPriorityMux
 import xiangshan.ValidUndirectioned
 import xiangshan.XSBundle
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.BpuToFtqBundle
 import xiangshan.frontend.BranchPredictionBundle
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.BranchPredictionUpdate

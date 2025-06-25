@@ -38,7 +38,7 @@ import xiangshan.XSBundle
 import xiangshan.XSModule
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.AllFoldedHistories
-import xiangshan.frontend.BpuToFtqBundle
+import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionBundle
 import xiangshan.frontend.BranchPredictionResp
 import xiangshan.frontend.BranchPredictionUpdate
@@ -163,10 +163,6 @@ trait HasPredictorCommonSignals extends HasXSParameter {
 
   val ctrl   = new BPUCtrl
   val update = Valid(new BranchPredictionUpdate)
-}
-
-class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val resp = DecoupledIO(new BpuToFtqBundle)
 }
 
 class BpuIO(implicit p: Parameters) extends XSBundle {

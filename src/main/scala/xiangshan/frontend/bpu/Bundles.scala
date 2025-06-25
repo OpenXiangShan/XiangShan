@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.ftq.FtqPtr
 
 class BranchAttribute extends Bundle {
   val branchType: UInt = BranchAttribute.BranchType()
@@ -104,10 +105,18 @@ class BranchPrediction(implicit p: Parameters) extends BpuBundle {
   // TODO: what else do we need?
 }
 
+class OverrideBranchPrediction(implicit p: Parameters) extends BpuBundle {
+  val ftqPtr: FtqPtr = new FtqPtr
+}
+
 // Bpu -> Ftq
 class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
   val startVAddr:  PrunedAddr  = PrunedAddr(VAddrBits)
   val cfiPosition: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val target:      PrunedAddr  = PrunedAddr(VAddrBits)
+  // override valid
+  val s2Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+  val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+
   // TODO: what else do we need?
 }

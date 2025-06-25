@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.DelayN
 import utility.XSError
+import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.ftq.FtqToBpuIO
@@ -128,25 +129,53 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s2_override || s3_override || redirect.valid)
 
-  private val s1_prediction = fallThrough.io.prediction // FIXME
+  private val s1_prediction = fallThrough.io.prediction.bits // FIXME
+
+  // s2 prediction: TODO
+  private val s2_prediction = Wire(new BranchPrediction)
+  s2_prediction := DontCare
+
+  // s3 prediction: TODO
+  private val s3_prediction = Wire(new BranchPrediction)
+  s3_prediction := DontCare
 
   io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
 
-  io.toFtq.resp.bits.prediction.startVAddr  := s1_pc   // FIXME
-  io.toFtq.resp.bits.prediction.target      := s1_prediction.bits.target
-  io.toFtq.resp.bits.prediction.cfiPosition := s1_prediction.bits.cfiPosition
-  io.toFtq.resp.bits.s2_ftqPtr              := s2_ftqPtr
-  io.toFtq.resp.bits.s3_ftqPtr              := s3_ftqPtr
-  io.toFtq.resp.bits.s2_override            := false.B // FIXME
-  io.toFtq.resp.bits.s3_override            := false.B // FIXME
+  // FIXME: if override, use s2/3 prediction
+  io.toFtq.resp.bits.startVAddr := MuxCase(
+    s1_pc,
+    Seq(
+      s3_override -> s3_pc,
+      s2_override -> s2_pc
+    )
+  )
+  io.toFtq.resp.bits.target := MuxCase(
+    s1_prediction.target,
+    Seq(
+      s3_override -> s3_prediction.target,
+      s2_override -> s2_prediction.target
+    )
+  )
+  io.toFtq.resp.bits.cfiPosition := MuxCase(
+    s1_prediction.cfiPosition,
+    Seq(
+      s3_override -> s3_prediction.cfiPosition,
+      s2_override -> s2_prediction.cfiPosition
+    )
+  )
+  // override
+  io.toFtq.resp.bits.s2Override.valid       := s2_override
+  io.toFtq.resp.bits.s2Override.bits.ftqPtr := s2_ftqPtr
+  io.toFtq.resp.bits.s3Override.valid       := s3_override
+  io.toFtq.resp.bits.s3Override.bits.ftqPtr := s3_ftqPtr
 
   s0_pc := MuxCase(
     s0_pcReg,
     Seq(
       redirect.valid -> PrunedAddrInit(redirect.bits.cfiUpdate.target),
-      s3_override    -> s1_prediction.bits.target, // FIXME
-      s2_override    -> s1_prediction.bits.target, // FIXME
-      s1_valid       -> s1_prediction.bits.target
+      s3_override    -> s3_prediction.target,
+      s2_override    -> s2_prediction.target,
+      s1_valid       -> s1_prediction.target
     )
   )
 
