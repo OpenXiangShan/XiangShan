@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.ubtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchPrediction
@@ -60,6 +61,9 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
     s1_hitOH,
     entries.map { e =>
       val info = Wire(new BranchPrediction)
+      // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
+      // and for those jumps, takenCnt will remain unchanged during training,
+      // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
       info.cfiPosition.valid := e.slot1.takenCnt.isPositive
       info.cfiPosition.bits  := e.slot1.position
       info.target            := getFullTarget(s1_startVAddr, e.slot1.target)
@@ -121,33 +125,32 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t1_updateEntry = entries(t1_updateIdx)
 
   // init a new entry
-  private def updateEntryInit(): Unit = {
-    t1_updateEntry.valid := true.B
-    t1_updateEntry.tag   := t1_tag
-    t1_updateEntry.usefulCnt.resetPositive() // usefulCnt inits at strong positive, in/decrease by policy
-    // slot1
-    t1_updateEntry.slot1.position  := t1_position
-    t1_updateEntry.slot1.attribute := t1_attribute
-    t1_updateEntry.slot1.target    := t1_target
-    t1_updateEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
-    t1_updateEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
-    // TODO: 2-taken train
-    t1_updateEntry.slot2.valid := false.B
-  }
+  private def initEntryIfNotUseful(notUseful: Bool): Unit =
+    when(notUseful) {
+      t1_updateEntry.valid := true.B
+      t1_updateEntry.tag   := t1_tag
+      t1_updateEntry.usefulCnt.resetPositive() // usefulCnt inits at strong positive, in/decrease by policy
+      // slot1
+      t1_updateEntry.slot1.position  := t1_position
+      t1_updateEntry.slot1.attribute := t1_attribute
+      t1_updateEntry.slot1.target    := t1_target
+      t1_updateEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
+      t1_updateEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
+      // TODO: 2-taken train
+      t1_updateEntry.slot2.valid := false.B
+    }.otherwise {
+      t1_updateEntry.usefulCnt.decrease()
+    }
 
   when(t1_valid) {
     when(!t1_hit) {
       // not hit
       // simply init a new entry
-      updateEntryInit()
+      initEntryIfNotUseful(true.B)
     }.elsewhen(!t1_hitAttributeSame) {
       // hit, but attribute mismatch
       // if already not useful, init a new entry, otherwise decrease usefulCnt
-      when(t1_hitNotUseful) {
-        updateEntryInit()
-      }.otherwise {
-        t1_updateEntry.usefulCnt.decrease()
-      }
+      initEntryIfNotUseful(t1_hitNotUseful)
     }.elsewhen(t1_attribute.isConditional) {
       // attribute match, and is conditional (branch)
       when(
@@ -187,17 +190,13 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
       when(!t1_hitPositionSame) {
         // position mismatch
         // if already not useful, init a new entry, otherwise decrease usefulCnt
-        when(t1_hitNotUseful) {
-          updateEntryInit()
-        }.otherwise {
-          t1_updateEntry.usefulCnt.decrease()
-        }
+        initEntryIfNotUseful(t1_hitNotUseful)
       }.elsewhen(t1_hitTargetSame) {
         // position match, and target match
         // increase usefulCnt
         t1_updateEntry.usefulCnt.increase()
       }.otherwise {
-        // position match, but target mismatch (should not happen for direct jumps)
+        // position match, but target mismatch (should not happen for direct jumps unless self-modifies)
         // decrease usefulCnt and mark as not static target
         t1_updateEntry.usefulCnt.decrease()
         t1_updateEntry.slot1.isStaticTarget := false.B // target is not static anymore
@@ -208,4 +207,42 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   // update replacer
   replacer.io.trainTouch.valid := t1_valid
   replacer.io.trainTouch.bits  := t1_updateIdx
+
+  /* *** perf *** */
+  XSPerfAccumulate("allocateNotUseful", t1_valid && !t1_hit && replacer.io.perf.replaceNotUseful)
+  XSPerfAccumulate("allocatePlru", t1_valid && !t1_hit && !replacer.io.perf.replaceNotUseful)
+  XSPerfAccumulate(
+    "replace",
+    t1_valid && t1_hit && (
+      !t1_hitAttributeSame && t1_hitNotUseful ||
+        t1_hitAttributeSame && !t1_hitPositionSame && t1_hitNotUseful
+    )
+  )
+
+  XSPerfAccumulate("mispredictAttribute", t1_valid && t1_hit && !t1_hitAttributeSame)
+
+  XSPerfAccumulate(
+    "mispredictConditional",
+    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isConditional && (
+      t1_hitPositionSame && t1_actualTaken && !t1_hitTaken ||
+        t1_hitPositionHigh && t1_actualTaken ||
+        !t1_actualTaken && t1_hitTaken
+    )
+  )
+
+  XSPerfAccumulate(
+    "mispredictDirect",
+    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isDirect && (
+      !t1_hitPositionSame ||
+        !t1_hitTargetSame // should not happen unless self-modifies
+    )
+  )
+
+  XSPerfAccumulate(
+    "mispredictIndirect",
+    t1_valid && t1_hit && t1_hitAttributeSame && t1_attribute.isIndirect && (
+      !t1_hitPositionSame ||
+        !t1_hitTargetSame
+    )
+  )
 }

@@ -29,6 +29,8 @@ class UbtbReplacer(implicit p: Parameters) extends UbtbModule {
     val usefulCnt: Vec[SaturateCounter] = Input(Vec(nEntries, new SaturateCounter(UsefulCntWidth)))
 
     val victim: UInt = Output(UInt(log2Up(nEntries).W))
+
+    val perf: ReplacerPerfInfo = Output(new ReplacerPerfInfo)
   }
 
   val io: UbtbReplacerIO = IO(new UbtbReplacerIO)
@@ -43,5 +45,9 @@ class UbtbReplacer(implicit p: Parameters) extends UbtbModule {
   // if all entries are useful, select by replacement policy
   io.victim := Mux(notUseful, notUsefulIdx, replacer.way)
 
+  // touch Plru
   replacer.access(Seq(io.predTouch, io.trainTouch))
+
+  /* *** perf *** */
+  io.perf.replaceNotUseful := notUseful
 }

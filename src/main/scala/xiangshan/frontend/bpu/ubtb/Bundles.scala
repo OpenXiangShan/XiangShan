@@ -68,3 +68,7 @@ class UbtbTrain(implicit p: Parameters) extends UbtbBundle {
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        UbtbMeta        = new UbtbMeta // not used now
 }
+
+class ReplacerPerfInfo(implicit p: Parameters) extends UbtbBundle {
+  val replaceNotUseful: Bool = Bool() // if not, replacePlru
+}
