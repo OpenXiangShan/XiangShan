@@ -138,7 +138,7 @@
  <check enabled="true" class="org.scalastyle.scalariform.FieldNamesChecker" level="warning">
   <parameters>
    <!-- we allow sx_lowerCamelCase for pipeline signals -->
-   <parameter name="regex">^(s[0-9]_)?[a-z][A-Za-z0-9]*$</parameter>
+   <parameter name="regex">^(([a-z][0-9]|perf|debug)_)?[a-z][A-Za-z0-9]*$</parameter>
    <parameter name="objectFieldRegex">^[A-Z][A-Za-z0-9]*$</parameter>
   </parameters>
  </check>
