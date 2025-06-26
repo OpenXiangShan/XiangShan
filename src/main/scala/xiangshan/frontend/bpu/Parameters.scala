@@ -18,17 +18,27 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
+import xiangshan.frontend.bpu.ubtb.UbtbParameters
 
-// TODO: expose this to Parameters.scala / XSCore.scala
-trait HasBpuParameters extends HasXSParameter {
-  // general
-  def FetchBlockMaxSize:    Int = 32 // bytes // FIXME: 64B
-  def FetchBlockAlign:      Int = 32 // bytes
-  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlign)
-
-  def CfiPositionWidth: Int = log2Ceil(FetchBlockMaxSize) - 1 // 2B(rvc inst) aligned
-
+case class BpuParameters(
+    // general
+    FetchBlockMaxSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchBlockAlign:   Int = 32, // bytes
+    // sub predictors
+    ubtbParameters: UbtbParameters = UbtbParameters()
+) {
   // sanity check
   require(isPow2(FetchBlockMaxSize))
   require(isPow2(FetchBlockAlign))
+}
+
+trait HasBpuParameters extends HasXSParameter {
+  def bpuParameters: BpuParameters = coreParams.bpuParameters
+
+  // general
+  def FetchBlockMaxSize:    Int = bpuParameters.FetchBlockMaxSize
+  def FetchBlockAlign:      Int = bpuParameters.FetchBlockAlign
+  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlign)
+
+  def CfiPositionWidth: Int = log2Ceil(FetchBlockMaxSize) - 1 // 2B(rvc inst) aligned
 }

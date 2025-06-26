@@ -23,19 +23,19 @@ import xiangshan.frontend.bpu.SaturateCounter
 
 class UbtbReplacer(implicit p: Parameters) extends UbtbModule {
   class UbtbReplacerIO extends Bundle {
-    val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(nEntries).W)))
-    val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(nEntries).W)))
+    val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
+    val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
 
-    val usefulCnt: Vec[SaturateCounter] = Input(Vec(nEntries, new SaturateCounter(UsefulCntWidth)))
+    val usefulCnt: Vec[SaturateCounter] = Input(Vec(NumEntries, new SaturateCounter(UsefulCntWidth)))
 
-    val victim: UInt = Output(UInt(log2Up(nEntries).W))
+    val victim: UInt = Output(UInt(log2Up(NumEntries).W))
 
     val perf: ReplacerPerfInfo = Output(new ReplacerPerfInfo)
   }
 
   val io: UbtbReplacerIO = IO(new UbtbReplacerIO)
 
-  private val replacer = ReplacementPolicy.fromString(Replacer, nEntries)
+  private val replacer = ReplacementPolicy.fromString(Replacer, NumEntries)
 
   // select first not-useful entry
   private val notUsefulVec = VecInit(io.usefulCnt.map(_.isSaturateNegative))

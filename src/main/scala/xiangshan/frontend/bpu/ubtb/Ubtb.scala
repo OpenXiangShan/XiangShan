@@ -35,7 +35,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   val io: UbtbIO = IO(new UbtbIO)
 
   /* *** submodules *** */
-  private val entries = RegInit(VecInit(Seq.fill(nEntries)(0.U.asTypeOf(new UbtbEntry))))
+  private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new UbtbEntry))))
 
   private val replacer = Module(new UbtbReplacer)
   replacer.io.usefulCnt := VecInit(entries.map(_.usefulCnt))

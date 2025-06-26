@@ -21,15 +21,25 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.HasBpuParameters
 
+case class UbtbParameters(
+    NumEntries:     Int = 32,
+    TagWidth:       Int = 22,
+    TargetWidth:    Int = 22, // 2B aligned
+    UsefulCntWidth: Int = 2,
+    TakenCntWidth:  Int = 2,
+    Replacer:       String = "plru"
+) {}
+
 // TODO: expose this to Parameters.scala / XSCore.scala
 trait HasUbtbParameters extends HasBpuParameters {
-  def nEntries:       Int = 32
-  def TagWidth:       Int = 22
-  def TargetWidth:    Int = 22 // 2B aligned
-  def UsefulCntWidth: Int = 2
-  def TakenCntWidth:  Int = 2
+  def ubtbParameters: UbtbParameters = bpuParameters.ubtbParameters
 
-  def Replacer: String = "plru"
+  def NumEntries:     Int    = ubtbParameters.NumEntries
+  def TagWidth:       Int    = ubtbParameters.TagWidth
+  def TargetWidth:    Int    = ubtbParameters.TargetWidth
+  def UsefulCntWidth: Int    = ubtbParameters.UsefulCntWidth
+  def TakenCntWidth:  Int    = ubtbParameters.TakenCntWidth
+  def Replacer:       String = ubtbParameters.Replacer
 
   def getTag(vAddr: PrunedAddr): UInt =
     vAddr(TagWidth, 1)
