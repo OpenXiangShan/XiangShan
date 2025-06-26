@@ -558,7 +558,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.splitStoreReq.bits.alignedType  := Mux(req.isvec, splitStoreReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
   io.splitStoreReq.bits.isFinalSplit := curPtr(0)
 
-  when (io.splitStoreResp.valid) {
+  when (io.splitStoreResp.valid && bufferState === s_resp && req.uop.robIdx === io.splitStoreResp.bits.uop.robIdx) {
     val resp = io.splitStoreResp.bits
     splitStoreResp(curPtr) := io.splitStoreResp.bits
     when (isUncache) {

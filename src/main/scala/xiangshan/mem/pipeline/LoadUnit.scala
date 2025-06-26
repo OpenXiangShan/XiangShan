@@ -1173,11 +1173,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_mmio_req.valid := RegNextN(io.lsq.uncache.fire, 2, Some(false.B))
   s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits, 2)
 
+  val s1_misalign_wakeup_req = Wire(Valid(new LqWriteBundle))
+  val s1_misalign_wakeup_req_bits = WireInit(0.U.asTypeOf(new LqWriteBundle))
+  connectSamePort(s1_misalign_wakeup_req_bits, io.misalign_ldin.bits)
+  s1_misalign_wakeup_req.valid := RegNext(io.misalign_ldin.bits.misalignNeedWakeUp && io.misalign_ldin.fire)
+  s1_misalign_wakeup_req.bits  := RegNext(s1_misalign_wakeup_req_bits)
+
+  val s1_misaligfn_wakeup_redirect = s1_misalign_wakeup_req.bits.uop.robIdx.needFlush(s1_redirect_reg)
+
   val s3_misalign_wakeup_req = Wire(Valid(new LqWriteBundle))
   val s3_misalign_wakeup_req_bits = WireInit(0.U.asTypeOf(new LqWriteBundle))
   connectSamePort(s3_misalign_wakeup_req_bits, io.misalign_ldin.bits)
-  s3_misalign_wakeup_req.valid := RegNextN(io.misalign_ldin.bits.misalignNeedWakeUp && io.misalign_ldin.fire, 3, Some(false.B))
-  s3_misalign_wakeup_req.bits  := RegNextN(s3_misalign_wakeup_req_bits, 3)
+  s3_misalign_wakeup_req.valid := RegNextN(s1_misalign_wakeup_req.valid && !s1_misaligfn_wakeup_redirect, 2, Some(false.B))
+  s3_misalign_wakeup_req.bits  := RegNextN(s1_misalign_wakeup_req.bits, 2)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
