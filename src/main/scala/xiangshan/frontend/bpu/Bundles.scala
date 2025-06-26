@@ -40,16 +40,23 @@ class BranchAttribute extends Bundle {
   def isDirect:      Bool = branchType === BranchAttribute.BranchType.Direct
   def isIndirect:    Bool = branchType === BranchAttribute.BranchType.Indirect
 
-  def isOtherIndirect: Bool =
-    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.None
-
   // NOTE: maybe we should check branchType === BranchAttribute.BranchType.Direct/Indirect,
-  //       but as BranchAttribute.BranchType is declared as private,
-  //       we should not able to create attribute with (Conditional, Push) or something like that.
+  //       but we should not create attribute with (Conditional, Push) or something like that.
   //       So, just check rasAction should be enough.
   def isCall:          Bool = rasAction === BranchAttribute.RasAction.Push
   def isReturn:        Bool = rasAction === BranchAttribute.RasAction.Pop
   def isReturnAndCall: Bool = rasAction === BranchAttribute.RasAction.PopAndPush
+
+  def isDirectCall: Bool =
+    branchType === BranchAttribute.BranchType.Direct && rasAction === BranchAttribute.RasAction.Push
+  def isIndirectCall: Bool =
+    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.Push
+
+  def isOtherDirect: Bool =
+    branchType === BranchAttribute.BranchType.Direct && rasAction === BranchAttribute.RasAction.None
+
+  def isOtherIndirect: Bool =
+    branchType === BranchAttribute.BranchType.Indirect && rasAction === BranchAttribute.RasAction.None
 
   // hasPop = isPop || isPushAndPop, hasPush = isPush || isPushAndPop
   def hasPop:  Bool = rasAction(BranchAttribute.RasAction.popBit)

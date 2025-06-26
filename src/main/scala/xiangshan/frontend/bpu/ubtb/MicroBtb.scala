@@ -21,13 +21,15 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.Prediction
 
-// TODO: 2-taken
 class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // predict
     val prediction: Prediction = Output(new Prediction)
+    // 2-taken
+    val predictionTwoTaken: Valid[Prediction] = Valid(new Prediction)
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -72,6 +74,16 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.attribute   := s1_hitEntry.slot1.attribute
 
+  io.predictionTwoTaken.valid            := s1_hit && s1_hitEntry.slot2.valid
+  io.predictionTwoTaken.bits.taken       := s1_hitEntry.slot2.taken
+  io.predictionTwoTaken.bits.cfiPosition := s1_hitEntry.slot2.position
+  io.predictionTwoTaken.bits.target := getFullTarget(
+    s1_startVAddr,
+    s1_hitEntry.slot2.target,
+    s1_hitEntry.slot2.targetCarry
+  )
+  io.predictionTwoTaken.bits.attribute := s1_hitEntry.slot2.attribute
+
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire
   replacer.io.predTouch.bits  := s1_hitIdx
@@ -115,12 +127,14 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_hitT1Update = t1_valid && t0_tag === t1_tag
   // if t0 hits but t1 is replacing it, we should see it as not hit
   private val t0_hitT1Victim = t1_valid && t0_realHitIdx === replacer.io.victim && t1_allocate
+  // also, if we can 2-taken, we can just update the latest updated entry (i.e. t1_updateIdx)
+  private val t0_updateTwoTaken = Wire(Bool())
 
   // fix final hit
   private val t0_hit = t0_realHit && !t0_hitT1Victim || t0_hitT1Update
   // select hit entry: use t1_updatedEntry if t0_hitT1Update, otherwise use real hit entry
-  private val t0_hitIdx   = Mux(t0_hitT1Update, t1_updateIdx, t0_realHitIdx)
-  private val t0_hitEntry = Mux(t0_hitT1Update, t1_updatedEntry, entries(t0_realHitIdx))
+  private val t0_hitIdx   = Mux(t0_hitT1Update || t0_updateTwoTaken, t1_updateIdx, t0_realHitIdx)
+  private val t0_hitEntry = Mux(t0_hitT1Update || t0_updateTwoTaken, t1_updatedEntry, entries(t0_realHitIdx))
 
   // calculate hit flags, valid only when t0_hit
   private val t0_hitNotUseful     = t0_hitEntry.usefulCnt.isSaturateNegative
@@ -130,6 +144,30 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_hitAttributeSame = t0_hitEntry.slot1.attribute === t0_attribute
   private val t0_hitTargetSame    = t0_hitEntry.slot1.target === t0_target
   private val t0_hitTaken         = t0_hitEntry.slot1.takenCnt.isPositive
+
+  // NOTE: even if !t1_valid, t1_xxx is holding the previous training data (except first t0_valid after reset),
+  // so, we can define t1_xxx in advance and use them to calculate 2-taken condition
+  private val t1_attribute = Wire(new BranchAttribute)
+
+  // TODO: check isStaticTarget
+  t0_updateTwoTaken :=
+    // do not 2-taken if second train(t0) is conditional, we don't have takenCnt for it
+    !t0_attribute.isConditional &&
+      // also do not 2-taken if first train(t1) is already hits a 2-taken entry
+      !t1_updatedEntry.slot2.valid &&
+      // if the first train(t1) is:
+      (
+        // 1. conditional, good
+        t1_attribute.isConditional ||
+          // 2. direct call, good iff second not a call (we can't push 2 entry to Ras in 1 cycle)
+          t1_attribute.isDirectCall && !t0_attribute.isCall ||
+          // 3. indirect call, bad (it may !isStaticTarget)
+          // 4. other direct, good
+          t1_attribute.isOtherDirect ||
+          // 5. return, bad (!isStaticTarget)
+          // 6. other indirect, good ||
+          t1_attribute.isOtherIndirect
+      )
 
   /* *** train stage 1 ***
    * - select victim
@@ -142,7 +180,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_valid)
   private val t1_position    = RegEnable(t0_position, t0_valid)
   private val t1_target      = RegEnable(t0_target, t0_valid)
-  private val t1_attribute   = RegEnable(t0_attribute, t0_valid)
+  t1_attribute := RegEnable(t0_attribute, t0_valid)
   private val t1_targetCarry = t0_targetCarry.map(w => RegEnable(w, t0_valid)) // if (EnableTargetFix)
 
   private val t1_hit    = RegEnable(t0_hit, t0_valid)
@@ -158,6 +196,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_valid)
   private val t1_hitTaken         = RegEnable(t0_hitTaken, t0_valid)
 
+  // 2-taken?
+  private val t1_updateTwoTaken = RegEnable(t0_updateTwoTaken, t0_valid)
+
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
     when(notUseful) {
@@ -171,14 +212,22 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
       t1_updatedEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
       t1_updatedEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
       t1_updatedEntry.slot1.targetCarry.foreach(_ := t1_targetCarry.get) // if (EnableTargetFix)
-      // TODO: 2-taken train
+      // slot2: inits at invalid
       t1_updatedEntry.slot2.valid := false.B
     }.otherwise {
       t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getDecrease
     }
 
   when(t1_valid) {
-    when(!t1_hit) {
+    when(t1_updateTwoTaken) {
+      // if we are doing updateTwoTaken, we don't care if it's hit or not, the previous updated entry is always valid,
+      // so we simply update the second slot and write back to previous updated entry (selected by t0_hitIdx)
+      t1_updatedEntry.slot2.valid     := true.B
+      t1_updatedEntry.slot2.position  := t1_position
+      t1_updatedEntry.slot2.attribute := t1_attribute
+      t1_updatedEntry.slot2.target    := t1_target
+      t1_updatedEntry.slot2.taken     := t1_actualTaken
+    }.elsewhen(!t1_hit) {
       // not hit
       // simply init a new entry
       initEntryIfNotUseful(true.B)
@@ -236,6 +285,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
         t1_updatedEntry.usefulCnt.value := t1_hitEntry.usefulCnt.getDecrease
         // and, since we've seen a different target, target is not static anymore
         t1_updatedEntry.slot1.isStaticTarget := false.B
+        // and, the old 2-taken entry is no longer valid (startVAddr of second slot is changed)
+        t1_updatedEntry.slot2.valid := false.B
       }
     }
   }
@@ -266,6 +317,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
         t1_hitAttributeSame && !t1_hitPositionSame && t1_hitNotUseful
     )
   )
+
+  XSPerfAccumulate("update2Taken", t1_valid && t1_updateTwoTaken)
 
   XSPerfAccumulate("mispredictAttribute", t1_valid && t1_hit && !t1_hitAttributeSame)
 
