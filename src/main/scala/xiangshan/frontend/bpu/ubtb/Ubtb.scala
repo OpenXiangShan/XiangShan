@@ -21,12 +21,14 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchPrediction
 
 // TODO: 2-taken
 class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters {
   class UbtbIO(implicit p: Parameters) extends BasePredictorIO {
     // predict request
+    val predictionTwoTaken: Valid[BranchPrediction] = Valid(new BranchPrediction)
     // ... all inherited from BasePredictorIO
     // train request
     val train: Valid[UbtbTrain] = Flipped(Valid(new UbtbTrain))
@@ -40,12 +42,19 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val replacer = Module(new UbtbReplacer)
   replacer.io.usefulCnt := VecInit(entries.map(_.usefulCnt))
 
-  /* *** predict stage 0 *** */
+  /* *** predict stage 0 ***
+   * - io.startVAddr timing might be bad, simply cache it
+   */
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
 
   private val s0_startVAddr = io.startVAddr
 
-  /* *** predict stage 1 *** */
+  /* *** predict stage 1 ***
+   * - read regfile
+   * - check if it's hit
+   * - generate prediction
+   * - update replacer
+   */
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
 
   private val s1_startVAddr = RegEnable(s0_startVAddr, s0_fire)
@@ -53,30 +62,31 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
 
   private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
   assert(PopCount(s1_hitOH) <= 1.U, "Ubtb s1_hitOH should be one-hot")
-  private val s1_hit    = s1_hitOH.orR
-  private val s1_hitIdx = OHToUInt(s1_hitOH)
+  private val s1_hit      = s1_hitOH.orR
+  private val s1_hitIdx   = OHToUInt(s1_hitOH)
+  private val s1_hitEntry = entries(s1_hitIdx)
 
-  io.prediction.valid := s1_hit
-  io.prediction.bits := Mux1H(
-    s1_hitOH,
-    entries.map { e =>
-      val info = Wire(new BranchPrediction)
-      // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
-      // and for those jumps, takenCnt will remain unchanged during training,
-      // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
-      info.cfiPosition.valid := e.slot1.takenCnt.isPositive
-      info.cfiPosition.bits  := e.slot1.position
-      info.target            := getFullTarget(s1_startVAddr, e.slot1.target)
-      info.attribute         := e.slot1.attribute
-      info
-    }
-  )
+  io.prediction.valid                  := s1_hit
+  io.prediction.bits.cfiPosition.valid := s1_hitEntry.slot1.takenCnt.isPositive
+  io.prediction.bits.cfiPosition.bits  := s1_hitEntry.slot1.position
+  io.prediction.bits.target            := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target)
+  io.prediction.bits.attribute         := s1_hitEntry.slot1.attribute
+
+  io.predictionTwoTaken.valid                  := s1_hit && s1_hitEntry.slot2.valid
+  io.predictionTwoTaken.bits.cfiPosition.valid := s1_hitEntry.slot2.taken
+  io.predictionTwoTaken.bits.cfiPosition.bits  := s1_hitEntry.slot2.position
+  io.predictionTwoTaken.bits.target            := getFullTarget(s1_startVAddr, s1_hitEntry.slot2.target)
+  io.predictionTwoTaken.bits.attribute         := s1_hitEntry.slot2.attribute
 
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire
   replacer.io.predTouch.bits  := s1_hitIdx
 
-  /* *** train stage 0 *** */
+  /* *** train stage 0 ***
+   * - read regfile
+   * - check if it's hit
+   * - calculate hit states
+   */
   private val t0_valid = io.train.valid
 
   private val t0_startVAddr  = io.train.bits.startVAddr
@@ -86,9 +96,19 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t0_target      = getEntryTarget(io.train.bits.target)
   private val t0_attribute   = io.train.bits.attribute
 
-  private val t0_hitOH  = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
-  private val t0_hit    = t0_hitOH.orR
-  private val t0_hitIdx = OHToUInt(t0_hitOH)
+  // If there are two contiguous trains, the first one is too late to be written to the regfile,
+  // the second train might be a false "not hit" and allocate a new entry, causing a multi-hit.
+  // So, we define t1_tag in advance, and use it to check if the first train is hit.
+  private val t1_tag       = Wire(UInt(TagWidth.W))
+  private val t1_updateIdx = Wire(UInt(log2Up(NumEntries).W))
+
+  private val t0_hitT1 = t1_tag === t0_tag
+
+  private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
+  private val t0_hit   = t0_hitOH.orR || t0_hitT1
+  // if we can 2-taken, we just update the lastest updated entry (i.e. t1_updateIdx)
+  private val t0_updateTwoTaken = Wire(Bool())
+  private val t0_hitIdx         = Mux(t0_hitT1 || t0_updateTwoTaken, t1_updateIdx, OHToUInt(t0_hitOH))
 
   // calculate hit states (flags), valid only when t0_hit
   private val t0_hitEntry         = entries(t0_hitIdx)
@@ -100,13 +120,41 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t0_hitTargetSame    = t0_hitEntry.slot1.target === t0_target
   private val t0_hitTaken         = t0_hitEntry.slot1.takenCnt.isPositive
 
-  /* *** train stage 1 *** */
-  private val t1_valid       = RegNext(t0_valid, false.B)
-  private val t1_tag         = RegEnable(t0_tag, t0_valid)
+  // NOTE: even if !t1_valid, t1_xxx is holding the previous training data (except first t0_valid after reset),
+  // so, we can define t1_xxx in advance and use them to calculate 2-taken condition
+  private val t1_updateEntry = entries(t1_updateIdx)
+  private val t1_attribute   = Wire(new BranchAttribute)
+
+  // TODO: check isStaticTarget
+  t0_updateTwoTaken :=
+    // do not 2-taken if second train(t0) is conditional, we don't have takenCnt for it
+    !t0_attribute.isConditional &&
+      // also do not 2-taken if first train(t1) is already hits a 2-taken entry
+      !t1_updateEntry.slot2.valid &&
+      // if the first train(t1) is:
+      (
+        // 1. conditional, good
+        t1_attribute.isConditional ||
+          // 2. direct call, good iff second not a call (we can't push 2 entry to Ras in 1 cycle)
+          t1_attribute.isDirectCall && !t0_attribute.isCall ||
+          // 3. indirect call, bad (it may !isStaticTarget)
+          // 4. other direct, good
+          t1_attribute.isOtherDirect ||
+          // 5. return, bad (!isStaticTarget)
+          // 6. other indirect, good ||
+          t1_attribute.isOtherIndirect
+      )
+
+  /* *** train stage 1 ***
+   * - update regfile
+   * - update replacer
+   */
+  private val t1_valid = RegNext(t0_valid, false.B)
+  t1_tag := RegEnable(t0_tag, t0_valid)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_valid)
   private val t1_position    = RegEnable(t0_position, t0_valid)
   private val t1_target      = RegEnable(t0_target, t0_valid)
-  private val t1_attribute   = RegEnable(t0_attribute, t0_valid)
+  t1_attribute := RegEnable(t0_attribute, t0_valid)
 
   private val t1_hit    = RegEnable(t0_hit, t0_valid)
   private val t1_hitIdx = RegEnable(t0_hitIdx, t0_valid)
@@ -120,9 +168,11 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_valid)
   private val t1_hitTaken         = RegEnable(t0_hitTaken, t0_valid)
 
+  // 2-taken?
+  private val t1_updateTwoTaken = RegEnable(t0_updateTwoTaken, t0_valid)
+
   // select the entry: if hit, use the hit entry, otherwise use the victim from replacer (first not useful, or PLRU)
-  private val t1_updateIdx   = Mux(t1_hit, t1_hitIdx, replacer.io.victim)
-  private val t1_updateEntry = entries(t1_updateIdx)
+  t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
 
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
@@ -136,14 +186,20 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
       t1_updateEntry.slot1.target    := t1_target
       t1_updateEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
       t1_updateEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
-      // TODO: 2-taken train
+      // slot2: inits at invalid
       t1_updateEntry.slot2.valid := false.B
     }.otherwise {
       t1_updateEntry.usefulCnt.decrease()
     }
 
   when(t1_valid) {
-    when(!t1_hit) {
+    when(t1_updateTwoTaken) {
+      t1_updateEntry.slot2.valid     := true.B
+      t1_updateEntry.slot2.position  := t1_position
+      t1_updateEntry.slot2.attribute := t1_attribute
+      t1_updateEntry.slot2.target    := t1_target
+      t1_updateEntry.slot2.taken     := t1_actualTaken
+    }.elsewhen(!t1_hit) {
       // not hit
       // simply init a new entry
       initEntryIfNotUseful(true.B)
@@ -218,6 +274,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
         t1_hitAttributeSame && !t1_hitPositionSame && t1_hitNotUseful
     )
   )
+  XSPerfAccumulate("update2Taken", t1_valid && t1_updateTwoTaken)
 
   XSPerfAccumulate("mispredictAttribute", t1_valid && t1_hit && !t1_hitAttributeSame)
 
