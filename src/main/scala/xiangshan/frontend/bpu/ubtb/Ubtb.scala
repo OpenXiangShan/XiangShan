@@ -60,24 +60,18 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
 
   private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
   assert(PopCount(s1_hitOH) <= 1.U, "Ubtb s1_hitOH should be one-hot")
-  private val s1_hit    = s1_hitOH.orR
-  private val s1_hitIdx = OHToUInt(s1_hitOH)
+  private val s1_hit      = s1_hitOH.orR
+  private val s1_hitIdx   = OHToUInt(s1_hitOH)
+  private val s1_hitEntry = entries(s1_hitIdx)
 
-  io.prediction.valid := s1_hit
-  io.prediction.bits := Mux1H(
-    s1_hitOH,
-    entries.map { e =>
-      val info = Wire(new BranchPrediction)
-      // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
-      // and for those jumps, takenCnt will remain unchanged during training,
-      // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
-      info.cfiPosition.valid := e.slot1.takenCnt.isPositive
-      info.cfiPosition.bits  := e.slot1.position
-      info.target            := getFullTarget(s1_startVAddr, e.slot1.target)
-      info.attribute         := e.slot1.attribute
-      info
-    }
-  )
+  io.hit := s1_hit
+  // we do not need to check attribute.isDirect/Indirect here, as entry.slot1.takenCnt is initialized to weak taken
+  // and for those jumps, takenCnt will remain unchanged during training,
+  // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
+  io.prediction.taken       := s1_hitEntry.slot1.takenCnt.isPositive
+  io.prediction.cfiPosition := s1_hitEntry.slot1.position
+  io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target)
+  io.prediction.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire

@@ -99,7 +99,8 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
 
 // sub predictors -> Bpu top
 class BranchPrediction(implicit p: Parameters) extends BpuBundle {
-  val cfiPosition: Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
   // TODO: what else do we need?
@@ -111,12 +112,21 @@ class OverrideBranchPrediction(implicit p: Parameters) extends BpuBundle {
 
 // Bpu -> Ftq
 class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
-  val startVAddr:  PrunedAddr  = PrunedAddr(VAddrBits)
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  // FIXME: do not use Valid[UInt] for cfiPosition, currently keeping it for Ftq compatibility
+//  val taken:       Bool       = Bool()
   val cfiPosition: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val target:      PrunedAddr  = PrunedAddr(VAddrBits)
   // override valid
   val s2Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
   val s3Override: Valid[OverrideBranchPrediction] = Valid(new OverrideBranchPrediction)
+
+  def fromStage(pc: PrunedAddr, prediction: BranchPrediction): Unit = {
+    this.startVAddr        := pc
+    this.cfiPosition.valid := prediction.taken
+    this.cfiPosition.bits  := prediction.cfiPosition
+    this.target            := prediction.target
+  }
 
   // TODO: what else do we need?
 }

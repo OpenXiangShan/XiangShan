@@ -155,16 +155,16 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   // otherwise, use fallThrough
   private val s1_prediction = Wire(new BranchPrediction)
   s1_prediction := Mux(
-    ubtb.io.prediction.valid,
-    ubtb.io.prediction.bits,
-    fallThrough.io.prediction.bits
+    ubtb.io.hit,
+    ubtb.io.prediction,
+    fallThrough.io.prediction
   )
   // and, if ubtb predicts a taken branch, use target from ubtb
   // otherwise, use fallThrough
   s1_prediction.target := Mux(
-    ubtb.io.prediction.valid && ubtb.io.prediction.bits.cfiPosition.valid,
-    ubtb.io.prediction.bits.target,
-    fallThrough.io.prediction.bits.target
+    ubtb.io.hit && ubtb.io.prediction.taken,
+    ubtb.io.prediction.target,
+    fallThrough.io.prediction.target
   )
 
   // s2 prediction: TODO
@@ -177,28 +177,14 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
 
   io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
 
-  // FIXME: if override, use s2/3 prediction
-  io.toFtq.resp.bits.startVAddr := MuxCase(
-    s1_pc,
-    Seq(
-      s3_override -> s3_pc,
-      s2_override -> s2_pc
-    )
-  )
-  io.toFtq.resp.bits.target := MuxCase(
-    s1_prediction.target,
-    Seq(
-      s3_override -> s3_prediction.target,
-      s2_override -> s2_prediction.target
-    )
-  )
-  io.toFtq.resp.bits.cfiPosition := MuxCase(
-    s1_prediction.cfiPosition,
-    Seq(
-      s3_override -> s3_prediction.cfiPosition,
-      s2_override -> s2_prediction.cfiPosition
-    )
-  )
+  when(s3_override) {
+    io.toFtq.resp.bits.fromStage(s3_pc, s3_prediction)
+  }.elsewhen(s2_override) {
+    io.toFtq.resp.bits.fromStage(s2_pc, s2_prediction)
+  }.otherwise {
+    io.toFtq.resp.bits.fromStage(s1_pc, s1_prediction)
+  }
+
   // override
   io.toFtq.resp.bits.s2Override.valid       := s2_override
   io.toFtq.resp.bits.s2Override.bits.ftqPtr := s2_ftqPtr

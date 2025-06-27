@@ -34,9 +34,9 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
 
-  io.prediction.valid                  := true.B
-  io.prediction.bits.cfiPosition.valid := true.B // the last inst in fetch block act as a taken branch
-  io.prediction.bits.cfiPosition.bits  := (FetchBlockMaxSize - 1).U
-  io.prediction.bits.target            := s1_fallThroughAddr
-  io.prediction.bits.attribute         := BranchAttribute.None
+  io.hit                    := true.B
+  io.prediction.taken       := false.B
+  io.prediction.cfiPosition := DontCare
+  io.prediction.target      := s1_fallThroughAddr
+  io.prediction.attribute   := BranchAttribute.None
 }

@@ -36,7 +36,8 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict request
   val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
   // predict response
-  val prediction: Valid[BranchPrediction] = Valid(new BranchPrediction)
+  val hit:        Bool             = Output(Bool())
+  val prediction: BranchPrediction = Output(new BranchPrediction)
   // maybe meta, differs from predictor to predictor
   // predict stage control
   val stageCtrl: StageCtrl = Input(new StageCtrl)
