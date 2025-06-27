@@ -38,6 +38,7 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.HasBPUConst
 
 class Ftq(implicit p: Parameters) extends FtqModule
@@ -138,6 +139,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // TODO: resp is a bad name
   io.fromBpu.resp.ready := validEntries < FtqSize.U || readyToCommit
+  io.fromBpu.meta.ready := validEntries < FtqSize.U || readyToCommit
 
   private val bpuResp = io.fromBpu.resp.bits
 
@@ -184,16 +186,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   redirectQueue.io.waddr := DontCare
   redirectQueue.io.wdata := DontCare
 
-//  metaQueue.io.wen        := bpuResp.lastStage.valid
-//  metaQueue.io.waddr      := bpuResp.lastStage.ftq_idx.value
-//  metaQueue.io.wdata.meta := bpuResp.s3_meta
-//  if (metaQueue.io.wdata.paddingBit.isDefined) {
-//    metaQueue.io.wdata.paddingBit.get := 0.U
-//  }
-//  metaQueue.io.wdata.ftb_entry := bpuResp.s3_ftbEntry
-  metaQueue.io.wen   := false.B
-  metaQueue.io.waddr := DontCare
-  metaQueue.io.wdata := DontCare
+  metaQueue.io.wen             := io.fromBpu.meta.valid
+  metaQueue.io.waddr           := io.fromBpu.resp.bits.s3Override.bits.ftqPtr.value
+  metaQueue.io.wdata.meta      := DontCare
+  metaQueue.io.wdata.newMeta   := io.fromBpu.meta.bits
+  metaQueue.io.wdata.ftb_entry := DontCare
+  if (metaQueue.io.wdata.paddingBit.isDefined) {
+    metaQueue.io.wdata.paddingBit.get := 0.U
+  }
 
 //  ftbEntryQueue.io.wen   := bpuResp.lastStage.valid
 //  ftbEntryQueue.io.waddr := bpuResp.lastStage.ftq_idx.value
@@ -573,8 +573,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   metaQueue.io.ren   := readyToCommit
   metaQueue.io.raddr := commitPtr(0).value
-  private val s2_commitMeta = metaQueue.io.rdata.meta
-  private val s2_commitFtb  = metaQueue.io.rdata.ftb_entry // TODO: why not FTB entry queue?
+  private val s2_commitMeta    = metaQueue.io.rdata.meta
+  private val s2_commitNewMeta = metaQueue.io.rdata.newMeta
+  private val s2_commitFtb     = metaQueue.io.rdata.ftb_entry // TODO: why not FTB entry queue?
 
   private val s1_commitCfi = cfiIndexVec(commitPtr(0).value)
   private val s2_commitCfi = RegEnable(s1_commitCfi, readyToCommit)
@@ -613,6 +614,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.update.bits.pred_hit          := s2_commitHit === entryHit || s2_commitHit === entryFalseHit
   io.toBpu.update.bits.br_taken_mask     := ftbGenerator.io.taken_mask
   io.toBpu.update.bits.jmp_taken         := ftbGenerator.io.jmp_taken
+
+  io.toBpu.newUpdate.valid              := s2_commitValid && s2_readyToCommit
+  io.toBpu.newUpdate.bits.startVAddr    := s2_commitEntry.startAddr
+  io.toBpu.newUpdate.bits.target        := s2_commitTarget
+  io.toBpu.newUpdate.bits.hasMispredict := s2_commitMispredict.reduce(_ || _)
+  io.toBpu.newUpdate.bits.taken         := s2_commitCfi.valid
+  io.toBpu.newUpdate.bits.cfiPosition   := s2_commitCfi.bits
+  io.toBpu.newUpdate.bits.cfiAttribute  := BranchAttribute.None // FIXME
+  io.toBpu.newUpdate.bits.aBtbMeta      := s2_commitNewMeta.aBtbMeta
 
   // --------------------------------------------------------------------------------
   // Performance monitoring
