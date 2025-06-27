@@ -213,10 +213,10 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val s2_override = WireDefault(false.B)
   val s3_override = WireDefault(false.B)
 
-  val s0_pc     = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-  val s0_pc_reg = RegEnable(s0_pc, !s0_stall)
+  val s0_pc    = WireDefault(0.U.asTypeOf(PrunedAddr(VAddrBits)))
+  val s0_pcReg = RegEnable(s0_pc, !s0_stall)
   when(RegNext(RegNext(reset.asBool)) && !reset.asBool) {
-    s0_pc_reg := io.reset_vector
+    s0_pcReg := io.reset_vector
   }
 
   val s1_pc = RegEnable(s0_pc, s0_fire)
@@ -263,7 +263,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   val s2_ahead_fh_oldest_bits = RegEnable(s1_ahead_fh_oldest_bits, 0.U.asTypeOf(s0_ahead_fh_oldest_bits), s1_fire)
   val s3_ahead_fh_oldest_bits = RegEnable(s2_ahead_fh_oldest_bits, 0.U.asTypeOf(s0_ahead_fh_oldest_bits), s2_fire)
 
-  val npcGen         = new PhyPriorityMuxGenerator[PrunedAddr]
   val foldedGhGen    = new PhyPriorityMuxGenerator[AllFoldedHistories]
   val ghistPtrGen    = new PhyPriorityMuxGenerator[CGHPtr]
   val lastBrNumOHGen = new PhyPriorityMuxGenerator[UInt]
@@ -355,9 +354,9 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   bpuResp.s3.ftq_idx     := s3_ftq_idx
   bpuResp.s3.full_pred   := ftb.io.out.s3_fullPred
 
-  // jalr target selection
+  // select indirect target
   bpuResp.s3.full_pred.targets.last := MuxCase(
-    ftb.io.out.s3_fullPred.targets.last, // default
+    ftb.io.out.s3_fullPred.targets.last,
     Seq(
       ras.io.out.predictionValid    -> ras.io.out.s3_returnAddress,
       ittage.io.out.predictionValid -> ittage.io.out.s3_jalrTarget
@@ -389,6 +388,17 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   io.toFtq.resp.valid := s1_valid && s2_ready || s2_fire && s2_override || s3_fire && s3_override
   io.toFtq.resp.bits  := bpuResp
 
+  // generate new s0_pc
+  s0_pc := MuxCase(
+    s0_pcReg,
+    Seq(
+      do_redirect.valid -> PrunedAddrInit(do_redirect.bits.cfiUpdate.target),
+      s3_override       -> bpuResp.s3.getTarget,
+      s2_override       -> bpuResp.s2.getTarget,
+      s1_valid          -> bpuResp.s1.getTarget
+    )
+  )
+
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s2_override || s3_override || do_redirect.valid)
 
@@ -399,11 +409,10 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     powerOnResetState := false.B
   }
   XSError(
-    !powerOnResetState && s0_stall && s0_pc =/= s0_pc_reg,
+    !powerOnResetState && s0_stall && s0_pc =/= s0_pcReg,
     "s0_stall but s0_pc is differenct from s0_pc_reg"
   )
 
-  npcGen.register(true.B, s0_pc_reg, Some("stallPC"), 0)
   foldedGhGen.register(true.B, s0_folded_gh_reg, Some("stallFGH"), 0)
   ghistPtrGen.register(true.B, s0_ghist_ptr_reg, Some("stallGHPtr"), 0)
   lastBrNumOHGen.register(true.B, s0_last_br_num_oh_reg, Some("stallBrNumOH"), 0)
@@ -453,7 +462,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     )
   )
 
-  npcGen.register(s1_valid, bpuResp.s1.getTarget, Some("s1_target"), 4)
   foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
   ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 4)
   lastBrNumOHGen.register(s1_valid, bpuResp.s1.lastBrPosOH.asUInt, Some("s1_BrNumOH"), 4)
@@ -553,7 +561,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
 
   s2_override := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_ || _)
 
-  npcGen.register(s2_override, bpuResp.s2.getTarget, Some("s2_target"), 5)
   foldedGhGen.register(s2_override, s2_predicted_fh, Some("s2_FGH"), 5)
   ghistPtrGen.register(s2_override, s2_predicted_ghist_ptr, Some("s2_GHPtr"), 5)
   lastBrNumOHGen.register(s2_override, bpuResp.s2.lastBrPosOH.asUInt, Some("s2_BrNumOH"), 5)
@@ -685,7 +692,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     s3_override && !(s3_redirect_on_br_taken || s3_redirect_on_jalr_target)
   )
 
-  npcGen.register(s3_override, bpuResp.s3.getTarget, Some("s3_target"), 3)
   foldedGhGen.register(s3_override, s3_predicted_fh, Some("s3_FGH"), 3)
   ghistPtrGen.register(s3_override, s3_predicted_ghist_ptr, Some("s3_GHPtr"), 3)
   lastBrNumOHGen.register(s3_override, bpuResp.s3.lastBrPosOH.asUInt, Some("s3_BrNumOH"), 3)
@@ -803,7 +809,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
     }
   }
 
-  npcGen.register(do_redirect.valid, PrunedAddrInit(do_redirect.bits.cfiUpdate.target), Some("redirect_target"), 2)
   foldedGhGen.register(do_redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
   ghistPtrGen.register(do_redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
   lastBrNumOHGen.register(do_redirect.valid, thisBrNumOH, Some("redirect_BrNumOH"), 2)
@@ -821,7 +826,6 @@ class Bpu(implicit p: Parameters) extends XSModule with HasBPUConst with HasCirc
   // foldedGhGen.register(need_reset, 0.U.asTypeOf(s0_folded_gh), Some("reset_FGH"), 1)
   // ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 1)
 
-  s0_pc                   := npcGen()
   s0_folded_gh            := foldedGhGen()
   s0_ghist_ptr            := ghistPtrGen()
   s0_ahead_fh_oldest_bits := aheadFhObGen()
