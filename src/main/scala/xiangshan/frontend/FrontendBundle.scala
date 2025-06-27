@@ -34,6 +34,7 @@ import xiangshan.frontend.bpu.{FullBranchPrediction => NewFullBranchPrediction}
 import xiangshan.frontend.bpu.BPUUtils
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.HasBPUConst
+import xiangshan.frontend.bpu.NewPredictorMeta
 import xiangshan.frontend.bpu.PredictorMeta
 import xiangshan.frontend.bpu.RasPtr
 import xiangshan.frontend.icache._
@@ -48,6 +49,7 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
   // FIXME: remove old FullBranchPrediction
   val resp: DecoupledIO[NewFullBranchPrediction] = DecoupledIO(new NewFullBranchPrediction)
+  val meta: DecoupledIO[NewPredictorMeta]        = DecoupledIO(new NewPredictorMeta)
   // TODO: topdown, etc.
 }
 
