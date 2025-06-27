@@ -18,6 +18,8 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
+import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.ubtb.UbtbParameters
 
 case class BpuParameters(
@@ -41,4 +43,9 @@ trait HasBpuParameters extends HasXSParameter {
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlign)
 
   def CfiPositionWidth: Int = log2Ceil(FetchBlockMaxSize) - 1 // 2B(rvc inst) aligned
+
+  def getAlignedAddr(addr: PrunedAddr): PrunedAddr = PrunedAddrInit(Cat(
+    addr(addr.length - 1, FetchBlockAlignWidth),
+    0.U(FetchBlockAlignWidth.W)
+  ))
 }

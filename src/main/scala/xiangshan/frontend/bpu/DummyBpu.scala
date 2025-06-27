@@ -49,6 +49,9 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     aBtb
   )
 
+  /* *** aliases *** */
+  private val train = io.fromFtq.update
+
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
@@ -104,13 +107,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     p.io.stageCtrl.s3_fire := s3_fire
   }
 
+  // NOTE: we should discard training data for ubtb/abtb if (pc + position) crosses FetchBlockAlign(32B) boundary
+  //       so, we won't predict a branch that crosses 32B boundary and satisfies Mbtb
+  // FIXME: is there a better way than comparing 2 pc?
+  private val discardNotAlignedTrain =
+    train.bits.pc + train.bits.cfi_idx.bits >= getAlignedAddr(train.bits.pc) + FetchBlockAlign.U
+
   // ubtb specific inputs
   // FIXME: should use s3_prediction to train ubtb
-  ubtb.io.train.valid                  := io.fromFtq.update.valid
-  ubtb.io.train.bits.startVAddr        := io.fromFtq.update.bits.pc
-  ubtb.io.train.bits.cfiPosition.valid := io.fromFtq.update.bits.cfi_idx.valid
-  ubtb.io.train.bits.cfiPosition.bits  := io.fromFtq.update.bits.cfi_idx.bits
-  ubtb.io.train.bits.target            := io.fromFtq.update.bits.full_target
+  ubtb.io.train.valid                  := train.valid && !discardNotAlignedTrain
+  ubtb.io.train.bits.startVAddr        := train.bits.pc
+  ubtb.io.train.bits.cfiPosition.valid := train.bits.cfi_idx.valid
+  ubtb.io.train.bits.cfiPosition.bits  := train.bits.cfi_idx.bits
+  ubtb.io.train.bits.target            := train.bits.full_target
   ubtb.io.train.bits.attribute := MuxCase(
     BranchAttribute.Conditional,
     Seq(
@@ -249,4 +258,5 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
 
   /* *** perf train *** */
   XSPerfAccumulate("train", io.fromFtq.update.valid)
+  XSPerfAccumulate("trainNotAligned", io.fromFtq.update.valid && discardNotAlignedTrain)
 }

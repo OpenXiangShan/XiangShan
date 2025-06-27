@@ -29,7 +29,8 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
 
   private val s0_startVAddr = io.startVAddr
 
-  private val s0_fallThroughAddr = s0_startVAddr + FetchBlockMaxSize.U
+  // fall-through address = startVAddr + FetchBlockMaxSize(64B), aligned to FetchBlockAlign(32B)
+  private val s0_fallThroughAddr = getAlignedAddr(s0_startVAddr + FetchBlockMaxSize.U)
 
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
