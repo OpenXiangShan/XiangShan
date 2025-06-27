@@ -279,7 +279,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val hartIsInReset = RegInit(true.B)
-    hartIsInReset := io.hartIsInReset.resetInFrontend || reset.asBool
+    hartIsInReset := io.hartIsInReset.resetInFrontend
     io.hartIsInReset.toTile := hartIsInReset
 
     if (l2cache.isDefined) {
