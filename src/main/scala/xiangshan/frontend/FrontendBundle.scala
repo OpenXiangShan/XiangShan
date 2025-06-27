@@ -782,7 +782,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val spec_info = new FtqRedirectSramEntry
   val ftb_entry = new FTBEntry
 
-  val cfi_idx           = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset         = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val br_taken_mask     = Vec(numBr, Bool())
   val br_committed      = Vec(numBr, Bool()) // High only when br valid && br committed
   val jmp_taken         = Bool()
@@ -801,8 +801,8 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
   def is_ret  = ftb_entry.tailSlot.valid && ftb_entry.isRet
 
-  def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
-  def is_ret_taken  = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
+  def is_call_taken = is_call && jmp_taken && ftqOffset.valid && ftqOffset.bits === ftb_entry.tailSlot.offset
+  def is_ret_taken  = is_ret && jmp_taken && ftqOffset.valid && ftqOffset.bits === ftb_entry.tailSlot.offset
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")

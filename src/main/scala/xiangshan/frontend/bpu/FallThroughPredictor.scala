@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
+class FallThroughPredictor(implicit p: Parameters) extends BasePredictor with HalfAlignHelper {
   class FallThroughPredictorIO extends BasePredictorIO {}
 
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
@@ -29,7 +29,8 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
 
   private val s0_startVAddr = io.startVAddr
 
-  private val s0_fallThroughAddr = s0_startVAddr + FetchBlockSize.U
+  // fall-through address = startVAddr + FetchBlockMaxSize(64B), aligned to FetchBlockAlign(32B)
+  private val s0_fallThroughAddr = getAlignedAddr(s0_startVAddr + FetchBlockSize.U)
 
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)

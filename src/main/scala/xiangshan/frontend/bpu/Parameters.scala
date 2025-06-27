@@ -21,17 +21,19 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
+// For users: these are default Bpu parameters set by dev, do not change them here,
+// use top-level Parameters.scala instead.
 case class BpuParameters(
     // general
-    FetchBlockSize:      Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
-    FetchBlockAlignSize: Int = 32, // bytes
+    FetchBlockSize:      Int = 32,           // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     aBtbParameters: AheadBtbParameters = AheadBtbParameters()
 ) {
   // sanity check
   require(isPow2(FetchBlockSize))
-  require(isPow2(FetchBlockAlignSize))
+  require(isPow2(FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)))
 }
 
 trait HasBpuParameters extends HasXSParameter {
@@ -39,7 +41,7 @@ trait HasBpuParameters extends HasXSParameter {
 
   // general
   def FetchBlockSize:       Int = bpuParameters.FetchBlockSize
-  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize
+  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
   def FetchBlockInstNum:    Int = FetchBlockSize / instBytes
 

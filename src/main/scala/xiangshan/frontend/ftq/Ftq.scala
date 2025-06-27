@@ -265,7 +265,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   val last_cycle_bpu_in_ptr   = RegEnable(bpu_in_resp_ptr, bpu_in_fire)
   val last_cycle_bpu_in_idx   = last_cycle_bpu_in_ptr.value
   val last_cycle_bpu_target   = RegEnable(bpu_in_resp.target, bpu_in_fire)
-  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.cfiPosition, bpu_in_fire)
+  val last_cycle_cfiIndex     = RegEnable(bpu_in_resp.ftqOffset, bpu_in_fire)
   val last_cycle_bpu_in_stage = RegEnable(bpu_in_stage, bpu_in_fire)
 
   val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum)(RegNext(bpu_in_fire)))
@@ -956,7 +956,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   update.false_hit   := s2_commitHit === h_false_hit
   update.pc          := s2_commitPcBundle.startAddr
   update.meta        := s2_commitMeta
-  update.cfi_idx     := s2_commitCfi
+  update.ftqOffset   := s2_commitCfi
   update.full_target := s2_commitTarget
   update.from_stage  := s2_commitStage
   update.spec_info   := s2_commitSpecMeta

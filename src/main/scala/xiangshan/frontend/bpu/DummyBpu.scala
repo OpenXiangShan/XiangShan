@@ -29,7 +29,7 @@ import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
-class DummyBpu(implicit p: Parameters) extends BpuModule {
+class DummyBpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class DummyBpuIO extends Bundle {
     val ctrl:        BPUCtrl    = Input(new BPUCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -49,6 +49,10 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     ubtb,
     abtb
   )
+
+  /* *** aliases *** */
+  private val train    = io.fromFtq.update
+  private val redirect = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
@@ -93,9 +97,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   private val s2_pc = RegEnable(s1_pc, s1_fire)
   private val s3_pc = RegEnable(s2_pc, s2_fire)
 
-  private val redirect = io.fromFtq.redirect
-
-  // connect common inputs
+  /* *** common inputs *** */
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
     p.io.startVAddr        := s0_pc
@@ -105,27 +107,47 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     p.io.stageCtrl.s3_fire := s3_fire
   }
 
-  // ubtb specific inputs
-  // FIXME: should use s3_prediction to train ubtb
-  ubtb.io.train.valid                  := io.fromFtq.update.valid
-  ubtb.io.train.bits.startVAddr        := io.fromFtq.update.bits.pc
-  ubtb.io.train.bits.cfiPosition.valid := io.fromFtq.update.bits.cfi_idx.valid
-  ubtb.io.train.bits.cfiPosition.bits  := io.fromFtq.update.bits.cfi_idx.bits
-  ubtb.io.train.bits.target            := io.fromFtq.update.bits.full_target
-  ubtb.io.train.bits.attribute := MuxCase(
+  /* *** predictor specific inputs *** */
+  // fall-through and ubtb currently doesn't have
+  // abtb
+  abtb.io.redirectValid := redirect.valid
+  abtb.io.overrideValid := s3_override
+
+  /* *** train *** */
+  private val t0_valid      = train.valid
+  private val t0_startVAddr = train.bits.pc
+  private val t0_taken      = train.bits.ftqOffset.valid
+  private val (t0_cfiPosition, t0_cfiPositionCarry) = getAlignedPosition(
+    train.bits.pc,
+    train.bits.ftqOffset.bits
+  )
+  assert(
+    !(train.valid && train.bits.ftqOffset.valid && t0_cfiPositionCarry),
+    "ftqOffset exceeds 2 * 32B aligned fetch block range, cfiPosition overflow!"
+  )
+  private val t0_target = train.bits.full_target
+  private val t0_attribute = MuxCase(
     BranchAttribute.Conditional,
     Seq(
-      (io.fromFtq.update.bits.is_call && io.fromFtq.update.bits.is_jal)  -> BranchAttribute.DirectCall,
-      (io.fromFtq.update.bits.is_call && io.fromFtq.update.bits.is_jalr) -> BranchAttribute.IndirectCall,
-      io.fromFtq.update.bits.is_ret                                      -> BranchAttribute.Return,
-      io.fromFtq.update.bits.is_jal                                      -> BranchAttribute.OtherDirect,
-      io.fromFtq.update.bits.is_jalr                                     -> BranchAttribute.OtherIndirect
+      (train.bits.is_call && train.bits.is_jal)  -> BranchAttribute.DirectCall,
+      (train.bits.is_call && train.bits.is_jalr) -> BranchAttribute.IndirectCall,
+      train.bits.is_ret                          -> BranchAttribute.Return,
+      train.bits.is_jal                          -> BranchAttribute.OtherDirect,
+      train.bits.is_jalr                         -> BranchAttribute.OtherIndirect
     )
   )
 
-  abtb.io.redirectValid := redirect.valid
-  abtb.io.overrideValid := s3_override
-  abtb.io.update        := io.fromFtq.newUpdate
+  // FIXME: should use s3_prediction to train ubtb
+  // ubtb
+  ubtb.io.train.valid            := t0_valid
+  ubtb.io.train.bits.startVAddr  := t0_startVAddr
+  ubtb.io.train.bits.taken       := t0_taken
+  ubtb.io.train.bits.cfiPosition := t0_cfiPosition
+  ubtb.io.train.bits.target      := t0_target
+  ubtb.io.train.bits.attribute   := t0_attribute
+
+  // abtb
+  abtb.io.update := io.fromFtq.newUpdate
 
   dontTouch(abtb.io.hit)
   dontTouch(abtb.io.prediction)
@@ -248,8 +270,8 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.resp.bits.cfiPosition.valid,
-      io.toFtq.resp.bits.cfiPosition.bits,
+      io.toFtq.resp.bits.ftqOffset.valid,
+      io.toFtq.resp.bits.ftqOffset.bits,
       FetchBlockInstNum.U
     ),
     io.toFtq.resp.fire,
