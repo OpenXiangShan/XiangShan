@@ -72,6 +72,7 @@ class XSArgs(object):
         self.num_cores = args.num_cores
         # Makefile arguments
         self.threads = args.threads
+        self.make_threads = args.make_threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
         self.is_spike = "Spike" if args.spike else None
@@ -240,7 +241,8 @@ class XiangShan(object):
         self.show()
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
-        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
+        threads = self.args.make_threads
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
     def build_simv(self):
@@ -674,6 +676,7 @@ if __name__ == "__main__":
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
+    parser.add_argument('--make-threads', nargs='?', type=int, help='number of make threads', default=200)
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
