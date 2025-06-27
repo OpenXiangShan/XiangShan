@@ -510,7 +510,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.splitLoadReq.bits.uop.fuOpType := Mux(req.isvec, req.uop.fuOpType, Cat(reqIsHlv, reqIsHlvx, 0.U(1.W), splitLoadReqs(curPtr).uop.fuOpType(1, 0)))
   io.splitLoadReq.bits.alignedType  := Mux(req.isvec, splitLoadReqs(curPtr).uop.fuOpType(1, 0), req.alignedType)
 
-  when (io.splitLoadResp.valid) {
+  when (io.splitLoadResp.valid && bufferState === s_resp && req.uop.robIdx === io.splitLoadResp.bits.uop.robIdx) {
     val resp = io.splitLoadResp.bits
     splitLoadResp(curPtr) := io.splitLoadResp.bits
     when (isUncache) {
