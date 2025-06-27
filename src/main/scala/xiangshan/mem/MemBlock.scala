@@ -2178,7 +2178,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         sig.cgen := dft.cgen
       }
       if (hasSramCtl) {
-        sig.ram_ctl := RegNext(dft.ram_ctl)
+        sig.ram_ctl := dft.ram_ctl
       }
   }
   io.dft_frnt.zip(sigFromSrams).foreach({ case (a, b) => a := b })
