@@ -50,6 +50,7 @@ import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BPUUtils
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.FTBEntry
 import xiangshan.frontend.bpu.FTBEntry_FtqMem
 import xiangshan.frontend.bpu.HasBPUConst
@@ -180,6 +181,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // **********************************************************************
   val new_entry_ready = validEntries < FtqSize.U || readyToCommit
   io.fromBpu.resp.ready := new_entry_ready
+  io.fromBpu.meta.ready := new_entry_ready
 
 //  val bpu_s2_resp     = io.fromBpu.resp.bits.s2
 //  val bpu_s3_resp     = io.fromBpu.resp.bits.s3
@@ -219,9 +221,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   val ftq_meta_1r_sram = Module(new FtqNrSram(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
-  ftq_meta_1r_sram.io.wen             := false.B
-  ftq_meta_1r_sram.io.waddr           := 0.U
+  ftq_meta_1r_sram.io.wen             := io.fromBpu.meta.valid
+  ftq_meta_1r_sram.io.waddr           := io.fromBpu.resp.bits.s3Override.bits.ftqPtr.value
   ftq_meta_1r_sram.io.wdata.meta      := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).meta)
+  ftq_meta_1r_sram.io.wdata.newMeta   := io.fromBpu.meta.bits
   ftq_meta_1r_sram.io.wdata.ftb_entry := 0.U.asTypeOf((new Ftq_1R_SRAMEntry).ftb_entry)
   if (ftq_meta_1r_sram.io.wdata.paddingBit.isDefined) {
     ftq_meta_1r_sram.io.wdata.paddingBit.get := 0.U
@@ -912,6 +915,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   ftq_meta_1r_sram.io.ren(0)   := readyToCommit
   ftq_meta_1r_sram.io.raddr(0) := commitPtr.value
   val s2_commitMeta     = ftq_meta_1r_sram.io.rdata(0).meta
+  val s2_commitNewMeta  = ftq_meta_1r_sram.io.rdata(0).newMeta
   val s2_commitFtbEntry = ftq_meta_1r_sram.io.rdata(0).ftb_entry
 
   val s1_commitCfi = WireInit(cfiIndex_vec(commitPtr.value))
@@ -956,6 +960,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   update.full_target := s2_commitTarget
   update.from_stage  := s2_commitStage
   update.spec_info   := s2_commitSpecMeta
+
+  io.toBpu.newUpdate.valid              := s2_commitValid && s2_readyToCommit
+  io.toBpu.newUpdate.bits.startVAddr    := s2_commitPcBundle.startAddr
+  io.toBpu.newUpdate.bits.target        := s2_commitTarget
+  io.toBpu.newUpdate.bits.hasMispredict := s2_commitMispredict.reduce(_ || _)
+  io.toBpu.newUpdate.bits.taken         := s2_commitCfi.valid
+  io.toBpu.newUpdate.bits.cfiPosition   := s2_commitCfi.bits
+  io.toBpu.newUpdate.bits.cfiAttribute  := BranchAttribute.None // FIXME
+  io.toBpu.newUpdate.bits.aBtbMeta      := s2_commitNewMeta.aBtbMeta
 
   val s2_commitRealHit = s2_commitHit === h_hit
   val update_ftb_entry = update.ftb_entry

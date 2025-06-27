@@ -23,6 +23,7 @@ import utility.XSError
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.ubtb.Ubtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
@@ -39,16 +40,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new Ubtb)
+  private val aBtb        = Module(new AheadBtb)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
-    ubtb
+    ubtb,
+    aBtb
   )
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtb_enable
+  aBtb.io.enable        := true.B // FIXME
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -87,6 +91,8 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   private val s2_pc = RegEnable(s1_pc, s1_fire)
   private val s3_pc = RegEnable(s2_pc, s2_fire)
 
+  private val redirect = io.fromFtq.redirect
+
   // connect common inputs
   predictors.foreach { p =>
     // TODO: duplicate pc and fire to solve high fan-out issue
@@ -115,10 +121,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     )
   )
 
+  aBtb.io.redirectValid := redirect.valid
+  aBtb.io.overrideValid := s3_override
+  aBtb.io.update        := io.fromFtq.newUpdate
+
+  dontTouch(aBtb.io.hit)
+  dontTouch(aBtb.io.prediction)
+
+  when(aBtb.io.prediction.taken) {
+    assert(aBtb.io.debug_startVaddr === s1_pc)
+  }
+
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
-
-  private val redirect = io.fromFtq.redirect
 
   s3_flush := redirect.valid
   s2_flush := s3_flush || s3_override
@@ -190,6 +205,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   io.toFtq.resp.bits.s2Override.bits.ftqPtr := s2_ftqPtr
   io.toFtq.resp.bits.s3Override.valid       := s3_override
   io.toFtq.resp.bits.s3Override.bits.ftqPtr := s3_ftqPtr
+
+  // aBtb meta delay to s3
+  val s2_aBtbMeta = RegEnable(aBtb.io.meta, s1_fire)
+  val s3_aBtbMeta = RegEnable(s2_aBtbMeta, s2_fire)
+
+  private val predictorMeta = Wire(new NewPredictorMeta)
+  predictorMeta.aBtbMeta := s3_aBtbMeta
+  // TODO: other meta
+
+  io.toFtq.meta.valid := s3_valid
+  io.toFtq.meta.bits  := predictorMeta
 
   s0_pc := MuxCase(
     s0_pcReg,

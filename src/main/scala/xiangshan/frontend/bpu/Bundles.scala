@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.ftq.FtqPtr
 
 class BranchAttribute extends Bundle {
@@ -129,4 +130,9 @@ class FullBranchPrediction(implicit p: Parameters) extends BpuBundle {
   }
 
   // TODO: what else do we need?
+}
+
+class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
+  val aBtbMeta: AheadBtbMeta = new AheadBtbMeta
+  // TODO: other meta
 }
