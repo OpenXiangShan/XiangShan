@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.DelayN
 import utility.XSError
+import utility.XSPerfAccumulate
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
@@ -237,4 +238,15 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     !powerOnResetState && s0_stall && s0_pc =/= s0_pcReg,
     "s0_stall but s0_pc is different from s0_pc_reg"
   )
+
+  /* *** perf pred *** */
+  XSPerfAccumulate("toFtqFire", io.toFtq.resp.fire)
+  XSPerfAccumulate("s2Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s2Override.valid)
+  XSPerfAccumulate("s3Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s3Override.valid)
+  XSPerfAccumulate("ubtbHit", io.toFtq.resp.fire && ubtb.io.hit)
+
+  XSPerfAccumulate("s1Invalid", !s1_valid)
+
+  /* *** perf train *** */
+  XSPerfAccumulate("train", io.fromFtq.update.valid)
 }
