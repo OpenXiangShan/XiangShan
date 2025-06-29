@@ -36,7 +36,7 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
 
   io.hit                    := true.B
   io.prediction.taken       := false.B
-  io.prediction.cfiPosition := DontCare
+  io.prediction.cfiPosition := (FetchBlockMaxSize - 1).U
   io.prediction.target      := s1_fallThroughAddr
   io.prediction.attribute   := BranchAttribute.None
 }
