@@ -92,15 +92,5 @@ trait IfuHelper extends HasXSParameter with HasIfuParameters {
     result(ICacheLineBytes / 2 - 1) := Cat(dataVec(0), dataVec(ICacheLineBytes / 2 - 1))
     result
   }
-  // def cut(cacheline: UInt, cutPtr: Vec[UInt]): Vec[UInt] = {
-  //   // FIXME: !HasCExtension
-  //   require(HasCExtension)
-  //   // if(HasCExtension){
-  //   val result  = Wire(Vec(PredictWidth + 1, UInt(16.W)))
-  //   val dataVec = cacheline.asTypeOf(Vec(blockBytes, UInt(16.W))) // 32 16-bit data vector
-  //   (0 until PredictWidth + 1).foreach(i =>
-  //     result(i) := dataVec(cutPtr(i)) // the max ptr is 3*blockBytes/4-1
-  //   )
-  //   result
-  // }
+
 }

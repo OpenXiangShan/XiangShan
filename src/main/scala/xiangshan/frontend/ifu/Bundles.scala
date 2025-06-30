@@ -54,7 +54,7 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
 
 class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParameters {
   val valid: Bool = Bool()
-  val value: UInt = UInt(log2Ceil(ICacheLineSize / 2).W)
+  val value: UInt = UInt(log2Ceil(ICacheLineBytes / 2).W)
 }
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {

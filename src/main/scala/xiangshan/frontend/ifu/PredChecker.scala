@@ -41,7 +41,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val firstTarget:      PrunedAddr = PrunedAddr(VAddrBits)
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
       val selectFetchBlock: Vec[Bool]  = Vec(PredictWidth, Bool())
-      val invalidTaken:     Vec[Bool]  = Vec(PredictWidth, Bool()) // 半条指令的情况，由S1级进行判断。这种情况下，半条指令由下一个FetchBlock进行处理。
+      val invalidTaken:     Vec[Bool]  = Vec(PredictWidth, Bool())
       val instrOffset:      Vec[UInt]  = Vec(PredictWidth, UInt(log2Ceil(PredictWidth).W))
     }
 

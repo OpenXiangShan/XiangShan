@@ -5,11 +5,8 @@ import xiangshan.HasXSParameter
 import xiangshan.frontend.icache.HasICacheParameters
 
 trait HasIfuParameters extends HasICacheParameters {
-  def PreDecodeWidth: Int = PredictWidth + 4
-  def FetchPorts:     Int = 2
-  def ICacheLineSize: Int = blockBytes
-  def FetchInstrPort: Int = blockBytes / 2
+  def FetchPorts:       Int = 2
+  def ICacheLineBytes:  Int = 64
   // equal lower_result overflow bit
-  def PcCutPoint:      Int = (VAddrBits / 4) - 1
-  def ICacheLineBytes: Int = 64
+  def PcCutPoint:       Int = (VAddrBits / 4) - 1
 }

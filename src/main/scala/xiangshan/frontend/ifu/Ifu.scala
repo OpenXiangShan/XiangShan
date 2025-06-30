@@ -379,7 +379,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   )) // cat with overflow bit
 
   private val firstFetchBlockIndex =
-    VecInit.tabulate(PredictWidth)(i => s2_firstFetchBlockPcLowerResult(i)(log2Ceil(ICacheLineSize) - 1, 1))
+    VecInit.tabulate(PredictWidth)(i => s2_firstFetchBlockPcLowerResult(i)(log2Ceil(ICacheLineBytes) - 1, 1))
 
   private val fetchBlockIndex = VecInit.tabulate(PredictWidth)(i =>
     Mux(s2_firstFetchSize > i.U, firstFetchBlockIndex(i), firstFetchBlockIndex(i))
