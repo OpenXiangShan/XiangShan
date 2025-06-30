@@ -23,7 +23,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.ExceptionNO._
 
 class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](p => p(XSCoreParamsKey).IBufSize) {}
 
@@ -49,99 +48,63 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val stallReason          = new StallReasonIO(DecodeWidth)
 }
 
-object IBufferExceptionType extends EnumUInt(8) {
-  def None:        UInt = "b000".U(width.W)
-  def NonCrossPF:  UInt = "b001".U(width.W)
-  def NonCrossGPF: UInt = "b010".U(width.W)
-  def NonCrossAF:  UInt = "b011".U(width.W)
-  def RvcII:       UInt = "b100".U(width.W) // illegal instruction
-  def CrossPF:     UInt = "b101".U(width.W)
-  def CrossGPF:    UInt = "b110".U(width.W)
-  def CrossAF:     UInt = "b111".U(width.W)
-
-  def cvtFromFetchExcpAndCrossPageAndRVCII(fetchExcp: ExceptionType, crossPage: Bool, rvcIll: Bool): UInt =
-    MuxCase(
-      0.U,
-      Seq(
-        crossPage              -> Cat(1.U(1.W), fetchExcp.value),
-        fetchExcp.hasException -> fetchExcp.value,
-        rvcIll                 -> this.RvcII
-      )
-    )
-
-  def isRVCII(uint: UInt): Bool = {
-    this.checkInputWidth(uint)
-    uint(2) && uint(1, 0) === 0.U
-  }
-
-  def isCrossPage(uint: UInt): Bool = {
-    this.checkInputWidth(uint)
-    uint(2) && uint(1, 0) =/= 0.U
-  }
-
-  def isPF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossPF(1, 0)
-  def isGPF(uint: UInt): Bool = uint(1, 0) === this.NonCrossGPF(1, 0)
-  def isAF(uint:  UInt): Bool = uint(1, 0) === this.NonCrossAF(1, 0)
-}
-
 class IBufEntry(implicit p: Parameters) extends XSBundle {
-  val inst             = UInt(32.W)
-  val pc               = PrunedAddr(VAddrBits)
-  val foldpc           = UInt(MemPredPCWidth.W)
-  val pd               = new PreDecodeInfo
-  val pred_taken       = Bool()
-  val ftqPtr           = new FtqPtr
-  val ftqPcOffset      = new FtqPcOffset
-  val exceptionType    = IBufferExceptionType()
-  val backendException = Bool()
-  val triggered        = TriggerAction()
-  val isLastInFtqEntry = Bool()
-  val debug_seqNum     = InstSeqNum()
+  val inst:               UInt          = UInt(32.W)
+  val pc:                 PrunedAddr    = PrunedAddr(VAddrBits)
+  val foldpc:             UInt          = UInt(MemPredPCWidth.W)
+  val pd:                 PreDecodeInfo = new PreDecodeInfo
+  val pred_taken:         Bool          = Bool()
+  val ftqPtr:             FtqPtr        = new FtqPtr
+  val ftqPcOffset:        FtqPcOffset   = new FtqPcOffset
+  val exceptionType:      ExceptionType = new ExceptionType
+  val exceptionCrossPage: Bool          = Bool() // whether the exception is cross page
+  val isBackendException: Bool          = Bool()
+  val triggered:          UInt          = TriggerAction()
+  val isLastInFtqEntry:   Bool          = Bool()
+  val debug_seqNum:       UInt          = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst        := fetch.instrs(i)
-    pc          := fetch.pc(i)
-    foldpc      := fetch.foldpc(i)
-    pd          := fetch.pd(i)
-    pred_taken  := fetch.ftqPcOffset(i).valid
-    ftqPtr      := fetch.ftqPtr
-    ftqPcOffset := fetch.ftqPcOffset(i).bits
-    exceptionType := IBufferExceptionType.cvtFromFetchExcpAndCrossPageAndRVCII(
-      fetch.exceptionType(i),
-      fetch.crossPageIPFFix(i),
-      fetch.illegalInstr(i)
-    )
-    backendException := fetch.backendException(i)
-    triggered        := fetch.triggered(i)
-    isLastInFtqEntry := fetch.isLastInFtqEntry(i)
-    debug_seqNum     := fetch.debug_seqNum(i)
+    inst               := fetch.instrs(i)
+    pc                 := fetch.pc(i)
+    foldpc             := fetch.foldpc(i)
+    pd                 := fetch.pd(i)
+    pred_taken         := fetch.ftqPcOffset(i).valid
+    ftqPtr             := fetch.ftqPtr
+    ftqPcOffset        := fetch.ftqPcOffset(i).bits
+    exceptionType      := fetch.exceptionType(i)
+    exceptionCrossPage := fetch.exceptionCrossPage(i)
+    isBackendException := fetch.isBackendException(i)
+    triggered          := fetch.triggered(i)
+    isLastInFtqEntry   := fetch.isLastInFtqEntry(i)
+    debug_seqNum       := fetch.debug_seqNum(i)
     this
   }
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
-    cf.instr                             := inst
-    cf.pc                                := pc.toUInt
-    cf.foldpc                            := foldpc
-    cf.exceptionVec                      := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault)      := IBufferExceptionType.isPF(this.exceptionType)
-    cf.exceptionVec(instrGuestPageFault) := IBufferExceptionType.isGPF(this.exceptionType)
-    cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF(this.exceptionType)
-    cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
-    cf.backendException                  := backendException
-    cf.trigger                           := triggered
-    cf.pd                                := pd
-    cf.pred_taken                        := pred_taken
-    cf.crossPageIPFFix                   := IBufferExceptionType.isCrossPage(this.exceptionType)
-    cf.storeSetHit                       := DontCare
-    cf.waitForRobIdx                     := DontCare
-    cf.loadWaitBit                       := DontCare
-    cf.loadWaitStrict                    := DontCare
-    cf.ssid                              := DontCare
-    cf.ftqPtr                            := ftqPtr
-    cf.ftqOffset                         := ftqPcOffset.offset
-    cf.isLastInFtqEntry                  := isLastInFtqEntry
-    cf.debug_seqNum                      := debug_seqNum
+    cf.instr                                         := inst
+    cf.pc                                            := pc.toUInt
+    cf.foldpc                                        := foldpc
+    cf.exceptionVec                                  := 0.U.asTypeOf(ExceptionVec())
+    cf.exceptionVec(ExceptionNO.instrPageFault)      := this.exceptionType.isPf
+    cf.exceptionVec(ExceptionNO.instrGuestPageFault) := this.exceptionType.isGpf
+    cf.exceptionVec(ExceptionNO.instrAccessFault)    := this.exceptionType.isAf
+    cf.exceptionVec(ExceptionNO.illegalInstr)        := this.exceptionType.isIll
+    cf.exceptionVec(ExceptionNO.hardwareError)       := this.exceptionType.isHwe
+    cf.backendException                              := isBackendException
+    cf.trigger                                       := triggered
+    cf.pd                                            := pd
+    cf.pred_taken                                    := pred_taken
+    cf.crossPageIPFFix                               := this.exceptionCrossPage
+    cf.storeSetHit                                   := DontCare
+    cf.waitForRobIdx                                 := DontCare
+    cf.loadWaitBit                                   := DontCare
+    cf.loadWaitStrict                                := DontCare
+    cf.ssid                                          := DontCare
+    cf.ftqPtr                                        := ftqPtr
+    cf.ftqOffset                                     := ftqPcOffset.offset
+    cf.isLastInFtqEntry                              := isLastInFtqEntry
+    cf.debug_seqNum                                  := debug_seqNum
     cf
   }
 }

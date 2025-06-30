@@ -496,7 +496,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_expdInstr = VecInit(rvcExpanders.map { expander: RvcExpander =>
     Mux(expander.io.ill, expander.io.in, expander.io.out.bits)
   })
-  private val s3_ill = VecInit(rvcExpanders.map(_.io.ill))
+  private val s3_rvcException = VecInit(rvcExpanders.map { expander: RvcExpander =>
+    ExceptionType.fromRvcExpander(expander.io.ill)
+  })
 
   private val s3_pdWire                = RegEnable(s2_pd, s2_fire)
   private val s3_pd                    = WireInit(s3_pdWire)
@@ -511,6 +513,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s3_pcLastLowerResultPlus2 = RegEnable(s2_pcLowerResult(PredictWidth - 1) + 2.U, s2_fire)
   private val s3_pcLastLowerResultPlus4 = RegEnable(s2_pcLowerResult(PredictWidth - 1) + 4.U, s2_fire)
+
+  // merge exceptionVec: input from s2 has the highest priority, crossPage fixes, then rvcExpanders
+  private val s3_exceptionVecOut = VecInit(
+    (s3_exceptionVec zip s3_crossPageExceptionVec zip s3_rvcException).map {
+      case ((in, cross), rvc) => in || cross || rvc
+    }
+  )
 
   /**
     ***********************************************************************
@@ -680,7 +689,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResp) {
       when(fromUncache.fire) {
         val respIsRVC = isRVC(fromUncache.bits.data(1, 0))
-        val exception = ExceptionType(hasAf = fromUncache.bits.corrupt)
+        val exception = ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
         // when response is not RVC, and lower bits of pAddr is 6 => request crosses 8B boundary, need resend
         val needResend = !respIsRVC && s3_pAddr(0)(2, 1) === 3.U && exception.isNone
         mmioState     := Mux(needResend, MmioFsmState.SendTlb, MmioFsmState.WaitCommit)
@@ -734,7 +743,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     is(MmioFsmState.WaitResendResp) {
       when(fromUncache.fire) {
         mmioState     := MmioFsmState.WaitCommit
-        mmioException := ExceptionType(hasAf = fromUncache.bits.corrupt)
+        mmioException := ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
         mmioData(1)   := fromUncache.bits.data(15, 0)
       }
     }
@@ -853,20 +862,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
     a.bits.offset := i.U
     a.valid       := checkerOutStage1.fixedTaken(i) && !s3_reqIsMmio
   }
-  io.toIBuffer.bits.foldpc := s3_foldPc
-  io.toIBuffer.bits.exceptionType := VecInit((s3_exceptionVec zip s3_crossPageExceptionVec).map { case (e, ce) =>
-    e || ce // merge, cross page fix has lower priority
-  })
+  io.toIBuffer.bits.foldpc        := s3_foldPc
+  io.toIBuffer.bits.exceptionType := s3_exceptionVecOut
   // backendException only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
-  io.toIBuffer.bits.backendException := (0 until PredictWidth).map {
+  io.toIBuffer.bits.isBackendException := (0 until PredictWidth).map {
     case 0 => s3_isBackendException
     case _ => false.B
   }
-  io.toIBuffer.bits.crossPageIPFFix := s3_crossPageExceptionVec.map(_.hasException)
-  io.toIBuffer.bits.illegalInstr    := s3_ill
-  io.toIBuffer.bits.triggered       := s3_triggered
+  io.toIBuffer.bits.exceptionCrossPage := s3_crossPageExceptionVec.map(_.hasException)
+  io.toIBuffer.bits.triggered          := s3_triggered
 
   when(s3_lastHalf.valid) {
     io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedRange.asUInt & s3_instrValid.asUInt & s3_lastHalfMask
@@ -936,6 +942,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     val (brType, isCall, isRet) = getBrInfo(inst)
 
+    val mmioRvcException = ExceptionType.fromRvcExpander(mmioRvcExpander.io.ill)
+
     io.toIBuffer.bits.instrs(0) := Mux(mmioRvcExpander.io.ill, mmioRvcExpander.io.in, mmioRvcExpander.io.out.bits)
 
     io.toIBuffer.bits.pd(0).valid  := true.B
@@ -944,10 +952,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
     io.toIBuffer.bits.pd(0).isCall := isCall
     io.toIBuffer.bits.pd(0).isRet  := isRet
 
-    io.toIBuffer.bits.exceptionType(0) := mmioException
+    io.toIBuffer.bits.exceptionType(0) := mmioException || mmioRvcException
     // exception can happen in next page only when resend
-    io.toIBuffer.bits.crossPageIPFFix(0) := mmioHasResend && mmioException.hasException
-    io.toIBuffer.bits.illegalInstr(0)    := mmioRvcExpander.io.ill
+    io.toIBuffer.bits.exceptionCrossPage(0) := mmioHasResend && mmioException.hasException
 
     io.toIBuffer.bits.enqEnable := s3_mmioRange.asUInt
 

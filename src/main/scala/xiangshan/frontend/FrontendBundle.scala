@@ -159,6 +159,8 @@ class ExceptionType extends Bundle {
   def isPf:   Bool = value === ExceptionType.Value.Pf
   def isGpf:  Bool = value === ExceptionType.Value.Gpf
   def isAf:   Bool = value === ExceptionType.Value.Af
+  def isIll:  Bool = value === ExceptionType.Value.Ill
+  def isHwe:  Bool = value === ExceptionType.Value.Hwe
 
   def hasException: Bool = value =/= ExceptionType.Value.None
 
@@ -176,11 +178,13 @@ class ExceptionType extends Bundle {
 }
 
 object ExceptionType {
-  private object Value extends EnumUInt(4) {
+  private object Value extends EnumUInt(6) {
     def None: UInt = 0.U(width.W)
     def Pf:   UInt = 1.U(width.W) // instruction page fault
     def Gpf:  UInt = 2.U(width.W) // instruction guest page fault
     def Af:   UInt = 3.U(width.W) // instruction access fault
+    def Ill:  UInt = 4.U(width.W) // illegal instruction
+    def Hwe:  UInt = 5.U(width.W) // hardware error
   }
 
   def apply(that: UInt): ExceptionType = {
@@ -194,14 +198,18 @@ object ExceptionType {
   def Pf:   ExceptionType = apply(Value.Pf)
   def Gpf:  ExceptionType = apply(Value.Gpf)
   def Af:   ExceptionType = apply(Value.Af)
+  def Ill:  ExceptionType = apply(Value.Ill)
+  def Hwe:  ExceptionType = apply(Value.Hwe)
 
-  def apply(hasPf: Bool, hasGpf: Bool, hasAf: Bool): ExceptionType = {
+  def apply(hasPf: Bool, hasGpf: Bool, hasAf: Bool, hasIll: Bool, hasHwe: Bool): ExceptionType = {
     assert(
-      PopCount(VecInit(hasPf, hasGpf, hasAf)) <= 1.U,
-      "ExceptionType receives input that is not one-hot: pf=%d, gpf=%d, af=%d",
+      PopCount(VecInit(hasPf, hasGpf, hasAf, hasIll, hasHwe)) <= 1.U,
+      "ExceptionType receives input that is not one-hot: pf=%d, gpf=%d, af=%d, ill=%d, hwe=%d",
       hasPf,
       hasGpf,
-      hasAf
+      hasAf,
+      hasIll,
+      hasHwe
     )
     // input is at-most-one-hot encoded, so we don't worry about priority here.
     MuxCase(
@@ -209,7 +217,9 @@ object ExceptionType {
       Seq(
         hasPf  -> Pf,
         hasGpf -> Gpf,
-        hasAf  -> Af
+        hasAf  -> Af,
+        hasIll -> Ill,
+        hasHwe -> Hwe
       )
     )
   }
@@ -217,7 +227,17 @@ object ExceptionType {
   // only af is used most frequently (pmp / ecc / tilelink), so we define a shortcut
   // we cannot use default parameter in apply(), as it is overloaded and scala won't allow
   def apply(hasAf: Bool): ExceptionType =
-    apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf)
+    apply(hasPf = false.B, hasGpf = false.B, hasAf = hasAf, hasIll = false.B, hasHwe = false.B)
+
+  // raise pf/gpf/af according to backend request (via redirect.cfiUpdate)
+  def fromBackend(cfiUpdate: CfiUpdateInfo): ExceptionType =
+    apply(
+      hasPf = cfiUpdate.backendIPF,
+      hasGpf = cfiUpdate.backendIGPF,
+      hasAf = cfiUpdate.backendIAF,
+      hasIll = false.B,
+      hasHwe = false.B
+    )
 
   // raise pf/gpf/af according to itlb response
   def fromTlbResp(resp: TlbResp, useDup: Int = 0): ExceptionType = {
@@ -226,13 +246,29 @@ object ExceptionType {
     apply(
       hasPf = resp.excp(useDup).pf.instr,
       hasGpf = resp.excp(useDup).gpf.instr,
-      hasAf = resp.excp(useDup).af.instr
+      hasAf = resp.excp(useDup).af.instr,
+      hasIll = false.B,
+      hasHwe = false.B
     )
   }
 
   // raise af if pmp check failed
   def fromPmpResp(resp: PMPRespBundle): ExceptionType =
     apply(hasAf = resp.instr)
+
+  // raise af / hwe according to tilelink response
+  def fromTileLink(corrupt: Bool, denied: Bool): ExceptionType = {
+    //  corrupt && denied -> access fault
+    //  corrupt && !denied -> hardware error
+    //  !corrupt && !denied -> no exception
+    //  !corrupt && denied -> violates tilelink specification, should not happen
+    assert(!corrupt || denied, "TileLink response should not be !corrupt && denied at the same time")
+    apply(hasPf = false.B, hasGpf = false.B, hasAf = denied, hasIll = false.B, hasHwe = corrupt && !denied)
+  }
+
+  // raise ill according to rvc expander
+  def fromRvcExpander(ill: Bool): ExceptionType =
+    apply(hasPf = false.B, hasGpf = false.B, hasAf = false.B, hasIll = ill, hasHwe = false.B)
 }
 
 object BrType extends EnumUInt(4) {
@@ -262,18 +298,17 @@ class FtqPcOffset(implicit p: Parameters) extends XSBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs           = Vec(PredictWidth, UInt(32.W))
-  val valid            = UInt(PredictWidth.W)
-  val enqEnable        = UInt(PredictWidth.W)
-  val pd               = Vec(PredictWidth, new PreDecodeInfo)
-  val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqPcOffset      = Vec(PredictWidth, ValidUndirectioned(new FtqPcOffset))
-  val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, new ExceptionType)
-  val crossPageIPFFix  = Vec(PredictWidth, Bool())
-  val illegalInstr     = Vec(PredictWidth, Bool())
-  val triggered        = Vec(PredictWidth, TriggerAction())
-  val isLastInFtqEntry = Vec(PredictWidth, Bool())
+  val instrs             = Vec(PredictWidth, UInt(32.W))
+  val valid              = UInt(PredictWidth.W)
+  val enqEnable          = UInt(PredictWidth.W)
+  val pd                 = Vec(PredictWidth, new PreDecodeInfo)
+  val foldpc             = Vec(PredictWidth, UInt(MemPredPCWidth.W))
+  val ftqPcOffset        = Vec(PredictWidth, ValidUndirectioned(new FtqPcOffset))
+  val isBackendException = Vec(PredictWidth, Bool())
+  val exceptionType      = Vec(PredictWidth, new ExceptionType)
+  val exceptionCrossPage = Vec(PredictWidth, Bool())
+  val triggered          = Vec(PredictWidth, TriggerAction())
+  val isLastInFtqEntry   = Vec(PredictWidth, Bool())
 
   val pc           = Vec(PredictWidth, PrunedAddr(VAddrBits))
   val debug_seqNum = Vec(PredictWidth, InstSeqNum())
