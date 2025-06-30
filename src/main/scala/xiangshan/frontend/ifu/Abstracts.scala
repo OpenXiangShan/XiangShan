@@ -19,6 +19,6 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSBundle
 import xiangshan.XSModule
 
-abstract class IfuBundle(implicit p: Parameters) extends XSBundle
+abstract class IfuBundle(implicit p: Parameters) extends XSBundle with HasIfuParameters
 
-abstract class IfuModule(implicit p: Parameters) extends XSModule
+abstract class IfuModule(implicit p: Parameters) extends XSModule with HasIfuParameters
