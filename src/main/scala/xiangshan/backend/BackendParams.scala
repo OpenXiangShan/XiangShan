@@ -41,6 +41,8 @@ case class BackendParams(
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
 
+  def robCompressEn: Boolean = true
+
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
