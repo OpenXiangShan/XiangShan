@@ -113,7 +113,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val frontendTrigger  = Module(new FrontendTrigger)
   private val rvcExpanders     = Seq.fill(PredictWidth)(Module(new RvcExpander))
   private val mmioRvcExpander  = Module(new RvcExpander)
-  // private val f3PreDecoder    = Module(new F3PreDecode)
 
   // alias
   private val (toFtq, fromFtq)              = (io.toFtq, io.fromFtq)
@@ -232,9 +231,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", !fromFtq.req.valid && fromFtq.req.ready)
-  // XSPerfAccumulate("fetch_bubble_pipe_stall",    s0_valid && toICache(0).ready && toICache(1).ready && !s1_ready )
-  // XSPerfAccumulate("fetch_bubble_icache_0_busy",   s0_valid && !toICache(0).ready  )
-  // XSPerfAccumulate("fetch_bubble_icache_1_busy",   s0_valid && !toICache(1).ready  )
   XSPerfAccumulate("fetch_flush_backend_redirect", backendRedirect)
   XSPerfAccumulate("fetch_flush_wb_redirect", wbRedirect.valid)
   XSPerfAccumulate("fetch_flush_s0_flush_from_bpu", s0_flushFromBpu)
@@ -252,50 +248,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s1_ready := s1_fire || !s1_valid
 
   assert(!(fromFtq.flushFromBpu.shouldFlushByStage3(s1_ftqReq.ftqIdx) && s1_valid))
-
-  private val s1_pcHigh      = s1_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
-  private val s1_pcHighPlus1 = s1_pcHigh + 1.U
-
-  /**
-   * In order to reduce power consumption, avoid calculating the full PC value in the first level.
-   * code of original logic, this code has been deprecated
-   * val s1_pc                 = VecInit(s1_pcLowerResult.map{ i =>
-   *   Mux(
-   *     i(s1_pc_adder_cut_point),
-   *     Cat(s1_pcHighPlus1,i(s1_pc_adder_cut_point-1,0)),
-   *     Cat(s1_pcHigh,i(s1_pc_adder_cut_point-1,0))
-   *     )
-   *   })
-   */
-  private val s1_pcLowerResult = VecInit((0 until PredictWidth).map(i =>
-    Cat(0.U(1.W), s1_ftqReq.startAddr(PcCutPoint - 1, 0)) + (i * 2).U
-  )) // cat with overflow bit
-
-  private val s1_pc = catPC(s1_pcLowerResult, s1_pcHigh, s1_pcHighPlus1)
-
-  private val s1_halfSnpcLowerResult = VecInit((0 until PredictWidth).map(i =>
-    Cat(0.U(1.W), s1_ftqReq.startAddr(PcCutPoint - 1, 0)) + ((i + 2) * 2).U
-  )) // cat with overflow bit
-  private val s1_halfSnpc = catPC(s1_halfSnpcLowerResult, s1_pcHigh, s1_pcHighPlus1)
-
-  if (env.FPGAPlatform) {
-    val s1_pcDiff       = VecInit((0 until PredictWidth).map(i => s1_ftqReq.startAddr + (i * 2).U))
-    val s1_halfSnpcDiff = VecInit((0 until PredictWidth).map(i => s1_ftqReq.startAddr + ((i + 2) * 2).U))
-
-    XSError(
-      s1_pc.zip(s1_pcDiff).map { case (a, b) => a.asUInt =/= b.asUInt }.reduce(_ || _),
-      "s1_halfSnpc adder cut fail"
-    )
-    XSError(
-      s1_halfSnpc.zip(s1_halfSnpcDiff).map { case (a, b) => a.asUInt =/= b.asUInt }.reduce(_ || _),
-      "s1_halfSnpc adder cut fail"
-    )
-  }
-
-  private val s1_cutPtr =
-    if (HasCExtension)
-      VecInit((0 until PredictWidth + 1).map(i => Cat(0.U(2.W), s1_ftqReq.startAddr(blockOffBits - 1, 1)) + i.U))
-    else VecInit((0 until PredictWidth).map(i => Cat(0.U(2.W), s1_ftqReq.startAddr(blockOffBits - 1, 2)) + i.U))
 
   private val s1_firstFetchSize = Mux(
     s1_ftqReq.ftqOffset.valid,
@@ -331,16 +283,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_ftqReq            = RegEnable(s1_ftqReq, s1_fire)
   private val s2_doubleline        = RegEnable(s1_doubleline, s1_fire)
   private val s2_prevLastIsHalfRvi = RegInit(false.B)
-  private val s2_firstFetchSize    = RegEnable(s1_firstFetchSize, s0_fire)
-  private val s2_totalFetchSize    = RegEnable(s1_totalFetchSize, s0_fire)
-  private val s2_firstEndPos       = RegEnable(s1_firstEndPos, s0_fire)
-  private val s2_totalEndPos       = RegEnable(s1_totalEndPos, s0_fire)
-  private val s2_firstJumpRange    = RegEnable(s1_firstJumpRange, s0_fire)
-  private val s2_firstFtrRange     = RegEnable(s1_firstFtrRange, s0_fire)
-  private val s2_firstInstrRange   = "hffff".U                            // s1_firstJumpRange & s1_firstFtrRange
-  private val s2_secondInstrRange  = 0.U(PredictWidth.W)
-  private val s2_tempInstrRange    = s2_firstJumpRange & s2_firstFtrRange // 为了暂时兼容 V2 做出的妥协
-  private val s2_totalInstrRange   = (s2_secondInstrRange << s2_firstFetchSize) | s2_firstInstrRange
+  private val s2_firstFetchSize    = RegEnable(s1_firstFetchSize, s1_fire)
+  private val s2_totalFetchSize    = RegEnable(s1_totalFetchSize, s1_fire)
+  private val s2_firstEndPos       = RegEnable(s1_firstEndPos, s1_fire)
+  private val s2_totalEndPos       = RegEnable(s1_totalEndPos, s1_fire)
+  private val s2_firstJumpRange    = RegEnable(s1_firstJumpRange, s1_fire)
+  private val s2_firstFtrRange     = RegEnable(s1_firstFtrRange, s1_fire)
+  // Temporary compromise for V2 compatibility; actually uses RegEnable(s1_firstJumpRange & s1_firstFtrRange, s1_fire)
+  private val s2_firstInstrRange  = RegEnable(s1_firstJumpRange & s1_firstFtrRange, s1_fire)
+  private val s2_secondInstrRange = 0.U(PredictWidth.W)
+  private val s2_totalInstrRange  = (s2_secondInstrRange << s2_firstFetchSize) | s2_firstInstrRange
 
   private val s2_instrPcLowerResult  = WireDefault(VecInit.fill(PredictWidth)(0.U((PcCutPoint + 1).W)))
   private val s2_bubblePcLowerResult = WireDefault(VecInit.fill(PredictWidth)(0.U((PcCutPoint + 1).W)))
@@ -471,7 +423,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
         index.valid                := validOH.reduce(_ || _)
         index.value                := Mux1H(validOH, computeIndex)
         instrSelectFetchBlock(idx) := Mux1H(validOH, computeSelect)
-        // instrSelectLowIndex(idx)     := !index.value(log2Ceil(ICacheLineSize/2)-1)
         s2_instrPcLowerResult(idx) := Mux1H(validOH, computePcLowerResult)
         s2_instrIsRvc(idx)         := Mux1H(validOH, computIsRvc)
         s2_instrOffset(idx)        := Mux1H(validOH, computeInstrOffset)
@@ -497,7 +448,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
         index.valid                := validOH.reduce(_ || _)
         index.value                := Mux1H(validOH, computeIndex)
         instrSelectFetchBlock(idx) := Mux1H(validOH, computeSelect)
-        // instrSelectLowIndex(idx)     := !index.value(log2Ceil(ICacheLineSize/2)-1)
         s2_instrPcLowerResult(idx) := Mux1H(validOH, computePcLowerResult)
         s2_instrIsRvc(idx)         := Mux1H(validOH, computIsRvc)
         s2_instrOffset(idx)        := Mux1H(validOH, computeInstrOffset)
@@ -514,10 +464,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_firstBlock  = WireDefault(0.U.asTypeOf(new FetchBlockInfo))
   private val s2_secondBlock = WireDefault(0.U.asTypeOf(new FetchBlockInfo))
-  s2_firstBlock.ftqIdx           := s2_ftqReq.ftqIdx
-  s2_firstBlock.preTakenIdx      := s2_firstTakenIdx
-  s2_firstBlock.invalidTaken     := !bubbleInstrValid(firstFtqOffset.bits) && firstFtqOffset.valid
-  s2_firstBlock.instrRange       := s2_firstInstrRange // 为了暂时兼容V2做出的妥协， 实际上 s1_firstJumpRange & s1_firstFtrRange
+  s2_firstBlock.ftqIdx       := s2_ftqReq.ftqIdx
+  s2_firstBlock.preTakenIdx  := s2_firstTakenIdx
+  s2_firstBlock.invalidTaken := !bubbleInstrValid(firstFtqOffset.bits) && firstFtqOffset.valid
+
+  s2_firstBlock.instrRange := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
   s2_firstBlock.pcHigh           := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
   s2_firstBlock.pcHighPlus1      := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint) + 1.U
   s2_firstBlock.target           := s2_ftqReq.nextStartAddr
@@ -563,10 +514,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_itlbPbmt           = RegEnable(s2_itlbPbmt, s2_fire)
   private val s3_instrOffset        = RegEnable(s2_instrOffset, s2_fire)
   private val s3_resendVAddr        = RegEnable(s2_ftqReq.startAddr + 2.U, s2_fire)
-
-  private val s3_tempInstrCount    = RegEnable(PopCount(bubbleInstrValid.asUInt & s2_tempInstrRange), s2_fire)
-  val tempInstrEndIdx              = (s3_tempInstrCount - 1.U)(log2Ceil(PredictWidth - 1), 0)
-  private val s3_tempNoBubbleRange = Fill(PredictWidth, 1.U(1.W)) >> ((~tempInstrEndIdx) & "hf".U)
 
   private val s3_instrPcLowerResult  = RegEnable(s2_instrPcLowerResult, s2_fire)
   private val s3_bubblePcLowerResult = RegEnable(s2_bubblePcLowerResult, s2_fire)
@@ -617,7 +564,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - ICache respond to IFU:
    * https://github.com/OpenXiangShan/XiangShan/blob/d4078d6edbfb4611ba58c8b0d1d8236c9115dbfc/src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala#L473
    */
-  // private val s2_copiedData = Cat(s2_rawData, s2_rawData)
 
   private val s3_lowICacheData  = cutICacheData(s3_rawDataDup(0))
   private val s3_highICacheData = cutICacheData(s3_rawDataDup(1))
@@ -649,10 +595,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(mmioRedirect.valid) {
     s3_prevIBufEnqPtr := mmioRedirect.prevIBufEnqPtr + mmioRedirect.instrCount
   }.elsewhen(s3_fire) {
-    s3_prevIBufEnqPtr := s3_prevIBufEnqPtr + PopCount(s3_instrValid.asUInt & s3_tempNoBubbleRange(
-      PredictWidth - 1,
-      0
-    ).asUInt) - s3_prevLastIsHalfRvi
+    s3_prevIBufEnqPtr := s3_prevIBufEnqPtr + s3_instrCount - s3_prevLastIsHalfRvi
   }
 
   // PreDecode: delimitation, does not expand RVC
@@ -749,7 +692,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_bubbleInstrValid  = RegEnable(s3_bubbleInstrValid, s3_fire)
   private val s4_prevLastIsHalfRvi = RegEnable(s3_prevLastIsHalfRvi, s3_fire)
   private val s4_instrOffset       = RegEnable(s3_instrOffset, s3_fire)
-  private val s4_tempNoBubbleRange = RegEnable(s3_tempNoBubbleRange, s3_fire)
 
   // Expand 1 bit to prevent overflow when assert
   private val s4_ftqReqStartAddr     = PrunedAddrInit(Cat(0.U(1.W), s4_ftqReq.startAddr.toUInt))
@@ -1020,17 +962,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** frontend Trigger  ** */
   frontendTrigger.io.pds             := s4_pd
   frontendTrigger.io.pc              := s4_pc
-  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufEnqWidth + 1, UInt(16.W))) // s3_noBubbleInstrData
+  frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufEnqWidth + 1, UInt(16.W))) // s4_noBubbleInstrData
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
   private val s4_triggered = frontendTrigger.io.triggered
 
   /* ** send to IBuffer ** */
   private val s4_toIBufferValid = s4_valid && (!s4_reqIsMmio || s4_mmioCanGo) && !s4_flush
 
-  io.toIBuffer.valid       := s4_toIBufferValid
-  io.toIBuffer.bits.instrs := s4_expdInstr
-  io.toIBuffer.bits.valid  := s4_realInstrValid.asUInt
-  io.toIBuffer.bits.enqEnable := checkerOutStage1.fixedTwoFetchRange.asUInt & s4_realInstrValid.asUInt & s4_tempNoBubbleRange
+  io.toIBuffer.valid               := s4_toIBufferValid
+  io.toIBuffer.bits.instrs         := s4_expdInstr
+  io.toIBuffer.bits.valid          := s4_realInstrValid.asUInt
+  io.toIBuffer.bits.enqEnable      := checkerOutStage1.fixedTwoFetchRange.asUInt & s4_realInstrValid.asUInt
   io.toIBuffer.bits.pd             := s4_pd
   io.toIBuffer.bits.ftqPtr         := s4_ftqReq.ftqIdx
   io.toIBuffer.bits.pc             := s4_pc
@@ -1177,39 +1119,35 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val wbFirstInstrRange =
     wbCheckResultStage2.fixedFirstBubbleInstrRange & RegEnable(s4_firstBlock.instrRange, wbEnable)
 
-  private val wbPcLowerResult    = RegEnable(s4_bubblePcLowerResult, wbEnable)
-  private val wbFirstPcHigh      = RegEnable(s4_firstBlock.pcHigh, wbEnable)
-  private val wbFirstPcHighPlus1 = RegEnable(s4_firstBlock.pcHighPlus1, wbEnable)
-  private val wbFirstPc          = catPC(wbPcLowerResult, wbFirstPcHigh, wbFirstPcHighPlus1)
-  private val wbPd               = RegEnable(bubblePds, wbEnable)
-  private val wbInstrValid       = RegEnable(VecInit(s4_firstBlock.bubbleInstrValid.asBools), wbEnable)
-  private val tempPd             = RegEnable(s4_pd, wbEnable)
-  private val tempInstrValid     = RegEnable(s4_instrValid.asTypeOf(Vec(PredictWidth, Bool())), wbEnable)
-  private val wbInstrOffset      = RegEnable(s4_instrOffset, wbEnable)
-  private val tempfinishIdx = RegEnable(
-    PopCount(checkerOutStage1.fixedTwoFetchRange.asUInt & s4_instrValid.asUInt & s4_tempNoBubbleRange) - 1.U,
-    wbEnable
-  )
+  private val wbBubblePcLowerResult   = RegEnable(s4_bubblePcLowerResult, wbEnable)
+  private val wbFirstPcHigh           = RegEnable(s4_firstBlock.pcHigh, wbEnable)
+  private val wbFirstPcHighPlus1      = RegEnable(s4_firstBlock.pcHighPlus1, wbEnable)
+  private val wbFirstBubblePc         = catPC(wbBubblePcLowerResult, wbFirstPcHigh, wbFirstPcHighPlus1)
+  private val wbBubblePd              = RegEnable(bubblePds, wbEnable)
+  private val wbFirstBubbleInstrValid = RegEnable(VecInit(s4_firstBlock.bubbleInstrValid.asBools), wbEnable)
+  private val wbPd                    = RegEnable(s4_pd, wbEnable)
+  private val wbInstrValid            = RegEnable(s4_instrValid.asTypeOf(Vec(PredictWidth, Bool())), wbEnable)
+  private val wbInstrOffset           = RegEnable(s4_instrOffset, wbEnable)
 
   s4_wbNotFlush := wbFtqReq.ftqIdx === s4_ftqReq.ftqIdx && s4_valid && wbValid
 
   private val checkFlushWb = Wire(Valid(new PredecodeWritebackBundle))
-  private val checkFlushWbJalTargetIdx = ParallelPriorityEncoder(VecInit(tempPd.zip(tempInstrValid).map {
+  private val checkFlushWbJalTargetIdx = ParallelPriorityEncoder(VecInit(wbPd.zip(wbInstrValid).map {
     case (pd, v) =>
       v && pd.isJal
   }))
   private val checkFlushWbTargetIdx = wbCheckResultStage2.fixedFirstMissPredIdx.bits
   checkFlushWb.valid   := wbValid
-  checkFlushWb.bits.pc := wbFirstPc
-  checkFlushWb.bits.pd := wbPd
-  checkFlushWb.bits.pd.zipWithIndex.foreach { case (instr, i) => instr.valid := wbInstrValid(i) }
+  checkFlushWb.bits.pc := wbFirstBubblePc
+  checkFlushWb.bits.pd := wbBubblePd
+  checkFlushWb.bits.pd.zipWithIndex.foreach { case (instr, i) => instr.valid := wbFirstBubbleInstrValid(i) }
   checkFlushWb.bits.ftqIdx    := wbFtqReq.ftqIdx
   checkFlushWb.bits.ftqOffset := wbFtqReq.ftqOffset.bits
-  checkFlushWb.bits.misOffset.valid := wbCheckResultStage2.fixedFirstMissPredIdx.valid && (wbCheckResultStage2.fixedFirstMissPredIdx.bits <= tempfinishIdx) // ParallelOR(wbCheckResultStage2.fixedMissPred)
+  checkFlushWb.bits.misOffset.valid := wbCheckResultStage2.fixedFirstMissPredIdx.valid // ParallelOR(wbCheckResultStage2.fixedMissPred)
   checkFlushWb.bits.misOffset.bits := wbInstrOffset(
     wbCheckResultStage2.fixedFirstMissPredIdx.bits
   ) // ParallelPriorityEncoder(wbCheckResultStage2.fixedMissPred)
-  checkFlushWb.bits.cfiOffset.valid := wbCheckResultStage2.fixedFirstTakenIdx.valid && (wbCheckResultStage2.fixedFirstTakenIdx.bits <= tempfinishIdx) // ParallelOR(wbCheckResultStage1.fixedTaken)
+  checkFlushWb.bits.cfiOffset.valid := wbCheckResultStage2.fixedFirstTakenIdx.valid // ParallelOR(wbCheckResultStage1.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits := wbInstrOffset(
     wbCheckResultStage2.fixedFirstTakenIdx.bits
   ) // ParallelPriorityEncoder(wbCheckResultStage1.fixedTaken)

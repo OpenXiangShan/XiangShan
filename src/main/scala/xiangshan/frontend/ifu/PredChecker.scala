@@ -252,16 +252,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   fixedSecondMissPredIdx.valid := (misPreIdxNext.valid && !misIsFirstBlockNext) || targetFault(secondTakenIdxNext)
   fixedSecondMissPredIdx.bits := Mux(misPreIdxNext.valid && !misIsFirstBlockNext, misPreIdxNext.bits, firstTakenIdxNext)
 
-  // val fixedFirstMissPred    = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  // val fixedSecondMissPred   = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  // fixedFirstMissPred.valid  := (misPreOffsetNext.valid && misPreOffsetNext.bits <= firstTakenIdxNext) || targetFault(firstTakenIdxNext)
-  // fixedFirstMissPred.bits   := Mux(misPreOffsetNext.valid && misPreOffsetNext.bits <= firstTakenIdxNext, noBubbleOffsetNext(misPreOffsetNext.bits), noBubbleOffsetNext(firstTakenIdxNext))
-  // val fixedFirstBubbleRange   = (Fill(PredictWidth, !fixedFirstMissPred.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~fixedFirstMissPred.bits) & firstBubbleRangeNext
-
-  // fixedSecondMissPred.valid := (misPreOffsetNext.valid && misPreOffsetNext.bits <= secondTakenIdxNext) || targetFault(secondTakenIdxNext)
-  // fixedSecondMissPred.bits  := Mux(misPreOffsetNext.valid && misPreOffsetNext.bits <= secondTakenIdxNext, noBubbleOffsetNext(misPreOffsetNext.bits), noBubbleOffsetNext(secondTakenIdxNext))
-  // val fixedSecondBubbleRange  = (Fill(PredictWidth, !fixedSecondMissPred.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~fixedSecondMissPred.bits) & secondBubbleRangeNext
-
   io.resp.stage2Out.fixedFirstMissPredIdx  := fixedFirstMissPredIdx
   io.resp.stage2Out.fixedSecondMissPredIdx := fixedSecondMissPredIdx
 
@@ -279,22 +269,4 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     PredictWidth,
     !(misPreIdxNext.valid && !misIsFirstBlockNext)
   ) | Fill(PredictWidth, 1.U(1.W)) >> ~misInstrOffset(log2Ceil(PredictWidth) - 1, 0)
-
-  // val testValidNext     = RegNext(io.req.valid, init = false.B)
-  // val testFirstLastValidIdx  = ParallelPosteriorityEncoder(fixedFirstBubbleRange)
-  // val testSecondLastValidIdx  = ParallelPosteriorityEncoder(fixedSecondBubbleRange)
-  // XSError(
-  //   testValidNext && !fixedFirstMissPred.valid && !fixedFirstTakenOffsetNext.valid && (testFirstLastValidIdx =/= (PredictWidth - 1).U),
-  //   "The predicted block executes in the correct order, but its size does not match expectations."
-  // )
-
-  // XSError(
-  //   testValidNext && !fixedSecondMissPred.valid && !fixedSecondTakenOffsetNext.valid && (testSecondLastValidIdx =/= PredictWidth.U),
-  //   "The predicted block executes in the correct order, but its size does not match expectations."
-  // )
-
-//  /* ** handle half RVI in the last 2 Bytes ** */
-//  private def hasLastHalf(idx: UInt): Bool =
-//    !s3_pd(idx).isRVC && checkerOutStage1.fixedRange(idx) && s3_instrValid(idx) &&
-//      !checkerOutStage1.fixedTaken(idx) && !s3_reqIsMmio
 }
