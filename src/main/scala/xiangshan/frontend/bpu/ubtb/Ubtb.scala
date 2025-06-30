@@ -21,10 +21,9 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BranchPrediction
 
 // TODO: 2-taken
-class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters {
+class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters with Helpers {
   class UbtbIO(implicit p: Parameters) extends BasePredictorIO {
     // predict request
     // ... all inherited from BasePredictorIO
@@ -48,7 +47,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val s0_startVAddr = io.startVAddr
 
   /* *** predict stage 1 ***
-   * - read regfile
+   * - read entries
    * - check if it's hit
    * - generate prediction
    * - update replacer

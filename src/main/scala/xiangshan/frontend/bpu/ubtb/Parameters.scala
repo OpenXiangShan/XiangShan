@@ -15,12 +15,9 @@
 
 package xiangshan.frontend.bpu.ubtb
 
-import chisel3._
-import chisel3.util._
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.HasBpuParameters
 
+// default MicroBtb parameters, do not change here, use top-level xiangshan/Parameters.scala
 case class UbtbParameters(
     NumEntries:     Int = 32,
     TagWidth:       Int = 22,
@@ -30,7 +27,6 @@ case class UbtbParameters(
     Replacer:       String = "plru"
 ) {}
 
-// TODO: expose this to Parameters.scala / XSCore.scala
 trait HasUbtbParameters extends HasBpuParameters {
   def ubtbParameters: UbtbParameters = bpuParameters.ubtbParameters
 
@@ -41,16 +37,4 @@ trait HasUbtbParameters extends HasBpuParameters {
   def TakenCntWidth:  Int    = ubtbParameters.TakenCntWidth
   def Replacer:       String = ubtbParameters.Replacer
 
-  def getTag(vAddr: PrunedAddr): UInt =
-    vAddr(TagWidth, 1)
-
-  def getFullTarget(startVAddr: PrunedAddr, target: UInt): PrunedAddr =
-    PrunedAddrInit(Cat(
-      startVAddr(VAddrBits - 1, TargetWidth + 1),
-      target, // (TargetWidth, 1)
-      0.U(1.W)
-    ))
-
-  def getEntryTarget(fullTarget: PrunedAddr): UInt =
-    fullTarget(TargetWidth, 1) // (TargetWidth, 1)
 }
