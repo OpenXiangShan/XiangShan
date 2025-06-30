@@ -577,6 +577,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
   is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.common.fuType))
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
+  val flushReg = RegNextWithEnable(io.flush)
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -595,7 +596,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         !source.readReg || win_int && win_fp && win_vf && win_v0 && win_vl
       }.fold(true.B)(_ && _)
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && fpWbNotBlock(i)(j) && vfWbNotBlock(i)(j) && v0WbNotBlock(i)(j) && vlWbNotBlock(i)(j)
-      val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
+      val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, flushReg))
       val s1_cancel = og1FailedVec2(i)(j)
       val s0_cancel = Wire(Bool())
       if (s0.bits.exuParams.isIQWakeUpSink) {
@@ -638,9 +639,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
           val og1resp = toIU.og1resp
           val hasUncertain = s1_toExuData(iqIdx)(iuIdx).params.needUncertainWakeup
-          val lastUncertainFire = RegNext(s1_toExuValid(iqIdx)(iuIdx) && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && s1_toExuReady(iqIdx)(iuIdx))
+          val lastUncertainFire = RegNext(toExu(iqIdx)(iuIdx).valid && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && s1_toExuReady(iqIdx)(iuIdx))
           if (hasUncertain){
-            og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && (!s1_toExuReady(iqIdx)(iuIdx) || lastUncertainFire)
+            og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && (!s1_toExuReady(iqIdx)(iuIdx) || s1_toExuReady(iqIdx)(iuIdx) && lastUncertainFire)
           }
           else{
             og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
