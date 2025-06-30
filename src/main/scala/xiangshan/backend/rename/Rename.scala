@@ -193,7 +193,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
     sink.valid := valid && !io.singleStep
     sink.bits := source.bits
-    sink.bits.canRobCompress := source.bits.canRobCompress && isFusion
+    sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion)
   }
   compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
