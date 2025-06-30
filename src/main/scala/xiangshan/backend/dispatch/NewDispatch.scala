@@ -290,7 +290,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
           val fpRead = busyTables(1).io.read(idx * 3 + srcidx).loadDependency
           if (srcidx < 2) {
             val intRead = busyTables(0).io.read(idx * 2 + srcidx).loadDependency
-            sink := Mux(SrcType.isFp(srctype), fpRead, intRead)
+            sink := Mux1H(
+              Seq(SrcType.isFp(srctype), SrcType.isXp(srctype), !SrcType.isFp(srctype) && !SrcType.isXp(srctype)),
+              Seq(fpRead, intRead, 0.U.asTypeOf(sink))
+            )
           }
           else {
             sink := Mux(SrcType.isFp(srctype), fpRead, 0.U.asTypeOf(sink))
