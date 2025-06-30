@@ -140,15 +140,26 @@ class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
 class TargetState extends Bundle {
   val value: UInt = TargetState.Value()
 
-  def NoCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
-  def Carry:            Bool = value === TargetState.Value.Carry
-  def Borrow:           Bool = value === TargetState.Value.Borrow
+  def noCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
+  def isCarry:          Bool = value === TargetState.Value.Carry
+  def isBorrow:         Bool = value === TargetState.Value.Borrow
 }
 
 object TargetState {
-  object Value extends EnumUInt(3) {
+  private object Value extends EnumUInt(3) {
     def NoCarryAndBorrow: UInt = 0.U(width.W)
     def Carry:            UInt = 1.U(width.W)
     def Borrow:           UInt = 2.U(width.W)
   }
+
+  def apply(value: UInt): TargetState = {
+    Value.assertLegal(value)
+    val e = Wire(new TargetState)
+    e.value := value
+    e
+  }
+
+  def NoCarryAndBorrow: TargetState = apply(Value.NoCarryAndBorrow)
+  def Carry:            TargetState = apply(Value.Carry)
+  def Borrow:           TargetState = apply(Value.Borrow)
 }

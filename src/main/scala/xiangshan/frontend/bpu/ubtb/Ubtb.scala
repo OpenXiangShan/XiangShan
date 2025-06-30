@@ -69,7 +69,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   // so e.slot1.takenCnt.isPositive is always true if e.slot1.attribute.isDirect/Indirect
   io.prediction.taken       := s1_hitEntry.slot1.takenCnt.isPositive
   io.prediction.cfiPosition := s1_hitEntry.slot1.position
-  io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target)
+  io.prediction.target      := getFullTarget(s1_startVAddr, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetState)
   io.prediction.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
@@ -90,6 +90,8 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t0_position    = io.train.bits.cfiPosition.bits
   private val t0_target      = getEntryTarget(io.train.bits.target)
   private val t0_attribute   = io.train.bits.attribute
+  private val t0_targetState =
+    if (EnableTargetFix) Option(getEntryTargetState(t0_startVAddr, io.train.bits.target)) else None
 
   private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
   // t0 may hit t1, so we add a "real" prefix for entries hit
@@ -139,6 +141,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t1_position    = RegEnable(t0_position, t0_valid)
   private val t1_target      = RegEnable(t0_target, t0_valid)
   private val t1_attribute   = RegEnable(t0_attribute, t0_valid)
+  private val t1_targetState = t0_targetState.map(w => RegEnable(w, t0_valid)) // if (EnableTargetFix)
 
   t1_hit := RegEnable(t0_hit, t0_valid)
   private val t1_hitIdx = RegEnable(t0_hitIdx, t0_valid)
@@ -165,6 +168,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
       t1_updatedEntry.slot1.target    := t1_target
       t1_updatedEntry.slot1.takenCnt.resetNeutral() // takenCnt inits at neutral (weak taken), in/decrease by policy
       t1_updatedEntry.slot1.isStaticTarget := true.B // inits at true, set to false when we see a different target
+      t1_updatedEntry.slot1.targetState.foreach(_ := t1_targetState.get) // if (EnableTargetFix)
       // TODO: 2-taken train
       t1_updatedEntry.slot2.valid := false.B
     }.otherwise {

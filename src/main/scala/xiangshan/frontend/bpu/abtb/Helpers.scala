@@ -74,8 +74,8 @@ trait Helpers extends HasAheadBtbParameters {
     val targetUpperBits = MuxCase(
       startPcUpperBits,
       Seq(
-        entry.targetState.Carry  -> (startPcUpperBits + 1.U),
-        entry.targetState.Borrow -> (startPcUpperBits - 1.U)
+        entry.targetState.isCarry  -> (startPcUpperBits + 1.U),
+        entry.targetState.isBorrow -> (startPcUpperBits - 1.U)
       )
     )
     val targetLowerBits = entry.targetLowerBits
@@ -86,14 +86,12 @@ trait Helpers extends HasAheadBtbParameters {
   def getTargetState(startPc: PrunedAddr, target: PrunedAddr): TargetState = {
     val startPcUpperBits = getPcUpperBits(startPc)
     val targetUpperBits  = getPcUpperBits(target)
-    val targetState      = Wire(new TargetState)
-    targetState.value := MuxCase(
-      TargetState.Value.NoCarryAndBorrow,
+    MuxCase(
+      TargetState.NoCarryAndBorrow,
       Seq(
-        (targetUpperBits > startPcUpperBits) -> TargetState.Value.Carry,
-        (targetUpperBits < startPcUpperBits) -> TargetState.Value.Borrow
+        (targetUpperBits > startPcUpperBits) -> TargetState.Carry,
+        (targetUpperBits < startPcUpperBits) -> TargetState.Borrow
       )
     )
-    targetState
   }
 }

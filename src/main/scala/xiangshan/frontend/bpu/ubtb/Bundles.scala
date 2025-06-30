@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.TargetState
 
 class UbtbEntry(implicit p: Parameters) extends UbtbBundle {
   class SlotBase extends Bundle {
@@ -30,6 +31,9 @@ class UbtbEntry(implicit p: Parameters) extends UbtbBundle {
     val attribute: BranchAttribute = new BranchAttribute
     // partial target: full target = Cat(fetchBlockVAddr(VAddrBits-1, TargetWidth), target)
     val target: UInt = UInt(TargetWidth.W)
+
+    // target fix, see comment in Parameters.scala
+    val targetState: Option[TargetState] = if (EnableTargetFix) Option(new TargetState) else None
   }
 
   class Slot1 extends SlotBase {

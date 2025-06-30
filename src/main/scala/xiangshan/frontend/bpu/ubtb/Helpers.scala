@@ -19,18 +19,49 @@ import chisel3._
 import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasUbtbParameters {
   def getTag(vAddr: PrunedAddr): UInt =
-    vAddr(TagWidth, 1)
+    vAddr(TagWidth, instOffsetBits)
 
-  def getFullTarget(startVAddr: PrunedAddr, target: UInt): PrunedAddr =
+  def getTargetUpper(vAddr: PrunedAddr): UInt =
+    vAddr(VAddrBits - 1, TargetWidth + instOffsetBits)
+
+  def getFixedTargetUpper(startVAddr: PrunedAddr, targetState: Option[TargetState]): UInt = {
+    val startVAddrUpper = getTargetUpper(startVAddr)
+    if (EnableTargetFix) {
+      MuxCase(
+        startVAddrUpper,
+        Seq(
+          targetState.get.isCarry  -> (startVAddrUpper + 1.U),
+          targetState.get.isBorrow -> (startVAddrUpper - 1.U)
+        )
+      )
+    } else {
+      startVAddrUpper
+    }
+  }
+
+  def getFullTarget(startVAddr: PrunedAddr, target: UInt, targetState: Option[TargetState]): PrunedAddr =
     PrunedAddrInit(Cat(
-      startVAddr(VAddrBits - 1, TargetWidth + 1),
-      target, // (TargetWidth, 1)
-      0.U(1.W)
+      getFixedTargetUpper(startVAddr, targetState), // (VAddrBits - 1, TargetWidth + instOffsetBits)
+      target,                                       // (TargetWidth + instOffsetBits - 1, instOffsetBits)
+      0.U(instOffsetBits.W)                         // (instOffsetBits - 1, 0)
     ))
 
   def getEntryTarget(fullTarget: PrunedAddr): UInt =
-    fullTarget(TargetWidth, 1) // (TargetWidth, 1)
+    fullTarget(TargetWidth, instOffsetBits)
+
+  def getEntryTargetState(startVAddr: PrunedAddr, fullTarget: PrunedAddr): TargetState = {
+    val startVAddrUpper = getTargetUpper(startVAddr)
+    val targetUpper     = getTargetUpper(fullTarget)
+    MuxCase(
+      TargetState.NoCarryAndBorrow,
+      Seq(
+        (targetUpper > startVAddrUpper) -> TargetState.Carry,
+        (targetUpper < startVAddrUpper) -> TargetState.Borrow
+      )
+    )
+  }
 }
