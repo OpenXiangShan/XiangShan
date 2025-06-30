@@ -10,7 +10,8 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
+import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, FpScheduler, VfScheduler, MemScheduler}
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -84,9 +85,21 @@ case class ExeUnitParams(
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
+  val isFpExeUnit: Boolean = schdType.isInstanceOf[FpScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 
+  def needDataFromI2F: Boolean = {
+    val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
+    if (this.getFpWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxI2F)) false
+    else this.getFpWBPort.get.port == exuI2FWBPort
+  }
+  // F2I includes FcmpCfg and FcvtCfg
+  def needDataFromF2I: Boolean = {
+    val exuF2IWBPort = backendParam.allExuParams(backendParam.getExuIdxF2I).getIntWBPort.get.port
+    if (this.getIntWBPort.isEmpty || (this.exuIdx == backendParam.getExuIdxF2I)) false
+    else this.getIntWBPort.get.port == exuF2IWBPort
+  }
   def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
   def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
@@ -118,7 +131,11 @@ case class ExeUnitParams(
   val wbV0Index : Int = wbIndexeds.getOrElse("v0" , 0)
   val wbVlIndex : Int = wbIndexeds.getOrElse("vl" , 0)
   val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
-
+  def getForwardIndex(): Int = {
+    if (this.isIntExeUnit) wbIntIndex
+    else if (this.isFpExeUnit) wbFpIndex
+    else 0
+  }
 
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
@@ -150,6 +167,7 @@ case class ExeUnitParams(
     * Check if this exu has certain latency
     */
   def latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _)
+  def latencyCertainFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.latency.latencyVal.nonEmpty)
   def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def fpLatencyCertain: Boolean = writeFpFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
@@ -169,8 +187,10 @@ case class ExeUnitParams(
       if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
       fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
-    else
-      Map()
+    else {
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigs")
+      latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (latencyCertain)
@@ -178,7 +198,7 @@ case class ExeUnitParams(
     else if (hasUncertainLatencyVal)
       fuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.uncertainLatencyVal.get)).toMap
     else
-      Map()
+      latencyCertainFuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.latencyVal.get)).toMap
   }
 
   /**
@@ -264,6 +284,10 @@ case class ExeUnitParams(
 
   def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
 
+  def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)
+
+  def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
+
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
   def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
@@ -316,6 +340,8 @@ case class ExeUnitParams(
 
   def hasUncertainLatency: Boolean = fuConfigs.map(_.latency.latencyVal.isEmpty).reduce(_ || _)
 
+  def needUncertainWakeup: Boolean = fuConfigs.map(x => needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
+
   def bindBackendParam(param: BackendParams): Unit = {
     backendParam = param
   }
@@ -323,9 +349,6 @@ case class ExeUnitParams(
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
-    if (this.isIQWakeUpSource) {
-      require(!this.hasUncertainLatency || hasLoadFu || hasHyldaFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
-    }
     val loadWakeUpSourcePairs = cfgs.filter(x => x.source.getExuParam(backendParam.allExuParams).hasLoadFu || x.source.getExuParam(backendParam.allExuParams).hasHyldaFu)
     val wakeUpByLoadNames = loadWakeUpSourcePairs.map(_.sink.name).toSet
     val thisWakeUpByNames = iqWakeUpSinkPairs.map(_.source.name).toSet

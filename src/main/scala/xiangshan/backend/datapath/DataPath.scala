@@ -20,6 +20,7 @@ import xiangshan.backend.regfile._
 import xiangshan.backend.regcache._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.FuType.is0latency
+import xiangshan.backend.fu.FuType.isUncertain
 import xiangshan.mem.{LqPtr, SqPtr}
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -576,6 +577,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
   is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.common.fuType))
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
+  val flushReg = RegNextWithEnable(io.flush)
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -594,7 +596,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         !source.readReg || win_int && win_fp && win_vf && win_v0 && win_vl
       }.fold(true.B)(_ && _)
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && fpWbNotBlock(i)(j) && vfWbNotBlock(i)(j) && v0WbNotBlock(i)(j) && vlWbNotBlock(i)(j)
-      val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
+      val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, flushReg))
       val s1_cancel = og1FailedVec2(i)(j)
       val s0_cancel = Wire(Bool())
       if (s0.bits.exuParams.isIQWakeUpSink) {
@@ -636,7 +638,14 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og0resp.bits.fuType           := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
           val og1resp = toIU.og1resp
-          og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
+          val hasUncertain = s1_toExuData(iqIdx)(iuIdx).params.needUncertainWakeup
+          val lastUncertainFire = RegNext(toExu(iqIdx)(iuIdx).valid && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && s1_toExuReady(iqIdx)(iuIdx))
+          if (hasUncertain){
+            og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && isUncertain(s1_toExuData(iqIdx)(iuIdx).fuType) && (!s1_toExuReady(iqIdx)(iuIdx) || s1_toExuReady(iqIdx)(iuIdx) && lastUncertainFire)
+          }
+          else{
+            og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
+          }
           og1resp.valid                 := s1_toExuValid(iqIdx)(iuIdx)
           og1resp.bits.robIdx           := s1_toExuData(iqIdx)(iuIdx).robIdx
           og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
@@ -659,7 +668,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
   io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
-                    if (params.isIQWakeUpSource && params.latencyCertain && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
+                    if (params.isIQWakeUpSource && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
                   }.toSeq
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
 
@@ -675,7 +684,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       // refs
       val sinkData = toExu(i)(j).bits
       // assign
-      toExu(i)(j).valid := s1_toExuValid(i)(j)
+      toExu(i)(j).valid := s1_toExuValid(i)(j) && !og1FailedVec2(i)(j)
       s1_toExuReady(i)(j) := toExu(i)(j).ready
       sinkData := s1_toExuData(i)(j)
       // s1Reg --[Ctrl]--> exu(s1) ---------- end

@@ -164,6 +164,9 @@ case class FuConfig (
     Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
+  def needUncertainWakeup: Boolean = {
+    FuConfig.needUncertainWakeupFuConfigs.contains(this)
+  }
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
   def isMul: Boolean = fuType == FuType.mul
@@ -255,8 +258,21 @@ object FuConfig {
     piped = true,
     writeFpRf = true,
     writeFflags = true,
-    latency = CertainLatency(2),
+    latency = CertainLatency(2, extraValue = 1),
     needSrcFrm = true,
+  )
+
+  val FcmpCfg: FuConfig = FuConfig(
+    name = "fcmp",
+    FuType.fcmp,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FCMP(cfg)(p).suggestName("fcmp")),
+    srcData = Seq(
+      Seq(FpData(), FpData()),
+    ),
+    piped = true,
+    writeIntRf = true,
+    writeFflags = true,
+    latency = CertainLatency(0, extraValue = 3),
   )
 
   val I2vCfg: FuConfig = FuConfig (
@@ -270,7 +286,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0),
+    latency = CertainLatency(0, extraValue = 3),
     destDataBits = 128,
     srcDataBits = Some(64),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
@@ -288,7 +304,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0),
+    latency = CertainLatency(0, extraValue = 3),
     destDataBits = 128,
     srcDataBits = Some(64),
   )
@@ -701,7 +717,6 @@ object FuConfig {
     ),
     piped = true,
     writeFpRf = true,
-    writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
     destDataBits = 64,
@@ -749,7 +764,7 @@ object FuConfig {
     writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(2),
+    latency = CertainLatency(2, extraValue = 1),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -845,6 +860,10 @@ object FuConfig {
 
   def VecArithFuConfigs = Seq(
     VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
+  )
+
+  def needUncertainWakeupFuConfigs = Seq(
+    CsrCfg, DivCfg, FdivCfg, VfdivCfg, VidivCfg
   )
 }
 
