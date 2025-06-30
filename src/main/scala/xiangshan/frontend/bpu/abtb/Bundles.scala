@@ -18,26 +18,10 @@ package xiangshan.frontend.bpu.abtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utils.EnumUInt
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BranchAttribute
-
-class TargetState extends Bundle {
-  val value: UInt = TargetState.Value()
-
-  def NoCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
-  def Carry:            Bool = value === TargetState.Value.Carry
-  def Borrow:           Bool = value === TargetState.Value.Borrow
-}
-
-object TargetState {
-  object Value extends EnumUInt(3, useOneHot = true) {
-    def NoCarryAndBorrow: UInt = 1.U(width.W)
-    def Carry:            UInt = 2.U(width.W)
-    def Borrow:           UInt = 4.U(width.W)
-  }
-}
+import xiangshan.frontend.bpu.TargetState
 
 class AheadBtbMeta(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val valid         = Bool()

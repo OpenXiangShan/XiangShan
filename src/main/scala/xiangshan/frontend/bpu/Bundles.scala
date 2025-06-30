@@ -136,3 +136,19 @@ class NewPredictorMeta(implicit p: Parameters) extends BpuBundle {
   val aBtbMeta: AheadBtbMeta = new AheadBtbMeta
   // TODO: other meta
 }
+
+class TargetState extends Bundle {
+  val value: UInt = TargetState.Value()
+
+  def NoCarryAndBorrow: Bool = value === TargetState.Value.NoCarryAndBorrow
+  def Carry:            Bool = value === TargetState.Value.Carry
+  def Borrow:           Bool = value === TargetState.Value.Borrow
+}
+
+object TargetState {
+  object Value extends EnumUInt(3) {
+    def NoCarryAndBorrow: UInt = 0.U(width.W)
+    def Carry:            UInt = 1.U(width.W)
+    def Borrow:           UInt = 2.U(width.W)
+  }
+}

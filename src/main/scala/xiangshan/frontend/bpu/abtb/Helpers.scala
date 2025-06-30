@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasAheadBtbParameters {
   def getSetIndex(pc: PrunedAddr): UInt =
@@ -70,11 +71,13 @@ trait Helpers extends HasAheadBtbParameters {
 
   def getTarget(entry: AheadBtbEntry, startPc: PrunedAddr): PrunedAddr = {
     val startPcUpperBits = getPcUpperBits(startPc)
-    val targetUpperBits = Mux1H(Seq(
-      entry.targetState.NoCarryAndBorrow -> startPcUpperBits,
-      entry.targetState.Carry            -> (startPcUpperBits + 1.U),
-      entry.targetState.Borrow           -> (startPcUpperBits - 1.U)
-    ))
+    val targetUpperBits = MuxCase(
+      startPcUpperBits,
+      Seq(
+        entry.targetState.Carry  -> (startPcUpperBits + 1.U),
+        entry.targetState.Borrow -> (startPcUpperBits - 1.U)
+      )
+    )
     val targetLowerBits = entry.targetLowerBits
     val target          = PrunedAddrInit(Cat(targetUpperBits, targetLowerBits, 0.U(instOffsetBits.W)))
     target
