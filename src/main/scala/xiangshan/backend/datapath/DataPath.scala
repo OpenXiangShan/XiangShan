@@ -378,9 +378,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
   private val vecExcpUseVecRdPorts = Seq(6, 7, 8, 9, 10, 11, 0, 1)
-  private val vecExcpUseVecWrPorts = Seq(1, 4, 5, 3)
+  private val vecExcpUseVecWrPorts = Seq(0, 1, 2, 3)
   private val vecExcpUseV0RdPorts = Seq(2, 3)
-  private val vecExcpUsev0WrPorts = Seq(4)
+  private val vecExcpUsev0WrPorts = Seq(0)
 
   private var v0RdPortsIter: Iterator[Int] = vecExcpUseV0RdPorts.iterator
   private val v0WrPortsIter: Iterator[Int] = vecExcpUsev0WrPorts.iterator
