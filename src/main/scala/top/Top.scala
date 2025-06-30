@@ -462,30 +462,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   lazy val module = new XSTopImp(this)
 }
 
-class XSTileDiffTop(implicit p: Parameters) extends Module {
-  override val desiredName: String = "XSDiffTop"
-  val l_soc = LazyModule(new XSTop())
-  val soc = Module(l_soc.module)
-
-  // Expose XSTop IOs outside, i.e. io
-  def exposeIO(data: Data, name: String): Unit = {
-    val dummy = IO(chiselTypeOf(data)).suggestName(name)
-    dummy <> data
+class XSTileDiffTop(implicit p: Parameters) extends XSTop {
+  //TODO: need to keep the same module name as XSNoCDiffTop
+  override lazy val desiredName: String = "XSTop"
+  class XSTileDiffTopImp(wrapper: XSTop) extends XSTopImp(wrapper) {
+    DifftestWiring.createAndConnectExtraIOs()
+    Profile.generateJson("XiangShan")
   }
-  def exposeOptionIO(data: Option[Data], name: String): Unit = {
-    if (data.isDefined) {
-      val dummy = IO(chiselTypeOf(data.get)).suggestName(name)
-      dummy <> data.get
-    }
-  }
-  exposeIO(l_soc.nmi,"nmi")
-  exposeIO(soc.memory, "memory")
-  exposeIO(soc.peripheral,"peripheral")
-  exposeIO(soc.io,"io")
-  exposeOptionIO(soc.dma, "dma")
 
-  DifftestWiring.createAndConnectExtraIOs()
-  Profile.generateJson("XiangShan")
+  override lazy val module = new XSTileDiffTopImp(this)
 }
 
 object TopMain extends App {
@@ -503,7 +488,8 @@ object TopMain extends App {
     val soc = DisableMonitors(p => LazyModule(new XSNoCDiffTop()(p)))(config)
     Generator.execute(firrtlOpts, soc.module, firtoolOpts)
   } else if (config(SoCParamsKey).UseXSTileDiffTop) {
-    Generator.execute(firrtlOpts, DisableMonitors(p => new XSTileDiffTop()(p))(config), firtoolOpts)
+    val soc = DisableMonitors(p => LazyModule(new XSTileDiffTop()(p)))(config)
+    Generator.execute(firrtlOpts, soc.module, firtoolOpts)
   } else {
     val soc = if (config(SoCParamsKey).UseXSNoCTop)
       DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
