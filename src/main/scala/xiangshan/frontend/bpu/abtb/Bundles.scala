@@ -24,9 +24,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchPrediction
+import xiangshan.frontend.bpu.HasBpuParameters
 
-trait HasAheadBtbParams extends HasXSParameter {
-  val FetchBlockSize     = 32 // Byte TODO: 64
+trait HasAheadBtbParams extends HasBpuParameters {
   val FetchAddrAlignSize = 32 // Byte
   val NumEntries         = 1024
   val NumWays            = 4

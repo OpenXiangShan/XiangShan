@@ -29,14 +29,14 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor {
 
   private val s0_startVAddr = io.startVAddr
 
-  private val s0_fallThroughAddr = s0_startVAddr + FetchBlockMaxSize.U
+  private val s0_fallThroughAddr = s0_startVAddr + FetchBlockSize.U
 
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
 
   io.hit                    := true.B
   io.prediction.taken       := false.B
-  io.prediction.cfiPosition := (FetchBlockMaxSize / 2 - 1).U
+  io.prediction.cfiPosition := (FetchBlockInstNum - 1).U
   io.prediction.target      := s1_fallThroughAddr
   io.prediction.attribute   := BranchAttribute.None
 }

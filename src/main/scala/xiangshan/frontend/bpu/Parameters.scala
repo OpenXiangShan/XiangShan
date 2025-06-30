@@ -22,23 +22,24 @@ import xiangshan.frontend.bpu.ubtb.UbtbParameters
 
 case class BpuParameters(
     // general
-    FetchBlockMaxSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
-    FetchBlockAlign:   Int = 32, // bytes
+    FetchBlockSize:      Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+    FetchBlockAlignSize: Int = 32, // bytes
     // sub predictors
     ubtbParameters: UbtbParameters = UbtbParameters()
 ) {
   // sanity check
-  require(isPow2(FetchBlockMaxSize))
-  require(isPow2(FetchBlockAlign))
+  require(isPow2(FetchBlockSize))
+  require(isPow2(FetchBlockAlignSize))
 }
 
 trait HasBpuParameters extends HasXSParameter {
   def bpuParameters: BpuParameters = coreParams.bpuParameters
 
   // general
-  def FetchBlockMaxSize:    Int = bpuParameters.FetchBlockMaxSize
-  def FetchBlockAlign:      Int = bpuParameters.FetchBlockAlign
-  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlign)
+  def FetchBlockSize:       Int = bpuParameters.FetchBlockSize
+  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize
+  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
+  def FetchBlockInstNum:    Int = FetchBlockSize / instBytes
 
-  def CfiPositionWidth: Int = log2Ceil(FetchBlockMaxSize) - 1 // 2B(rvc inst) aligned
+  def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
 }
