@@ -99,7 +99,7 @@ class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
   // When the first inst in decode vector is complex inst, pass it in
   val in = Flipped(DecoupledIO(new DecodeUnitCompInput))
   val out = new DecodeUnitCompOutput
-  val complexNum = Output(UInt(3.W))
+  val complexNum = Output(UInt((DecodeWidth.U.getWidth).W))
 }
 
 /**

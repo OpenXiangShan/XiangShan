@@ -209,6 +209,10 @@ case class IssueBlockParams(
 
   def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
 
+  def needReadIntRegFile: Boolean = exuBlockParams.map(_.readIntRf).reduce(_ || _)
+
+  def needReadFpRegFile: Boolean = exuBlockParams.map(_.readFpRf).reduce(_ || _)
+
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
   def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
