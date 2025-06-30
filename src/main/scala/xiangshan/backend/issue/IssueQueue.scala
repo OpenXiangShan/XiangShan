@@ -105,9 +105,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
-  val wakeupFuLatencyMaps : Seq[Map[FuType.OHType, Int]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap)
+  val wakeupFuLatencySeqs : Seq[Seq[(FuType.OHType, Int)]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap.toSeq.sortBy(_._2))
 
-  println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${wakeupFuLatencyMaps}")
+  println(s"[IssueQueueImp] ${params.getIQName} fuLatencySeqs: ${wakeupFuLatencySeqs}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   if (params.hasIQWakeUp) {
     val exuSourcesEncodeString = params.wakeUpSourceExuIdx.map(x => 1 << x).reduce(_ + _).toBinaryString
@@ -1003,7 +1003,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux(FuType.isUncertain(fuType),
       1.U,
-      Mux1H(wakeupFuLatencyMaps(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
+      Mux1H(wakeupFuLatencySeqs(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
     )
   }
 
