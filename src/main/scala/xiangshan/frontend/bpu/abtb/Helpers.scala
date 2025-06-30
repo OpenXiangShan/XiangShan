@@ -17,12 +17,10 @@ package xiangshan.frontend.bpu.abtb
 
 import chisel3._
 import chisel3.util._
-import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.SaturateCounter
 
-trait Helpers extends HasAheadBtbParams with HasXSParameter {
+trait Helpers extends HasAheadBtbParameters {
   def getSetIndex(pc: PrunedAddr): UInt =
     pc(SetIndexLen + BankIdxLen + instOffsetBits - 1, BankIdxLen + instOffsetBits)
 
@@ -39,7 +37,7 @@ trait Helpers extends HasAheadBtbParams with HasXSParameter {
     target(TargetLowerBitsLen + instOffsetBits - 1, instOffsetBits)
 
   def getAlignedPc(pc: PrunedAddr): PrunedAddr = {
-    val shiftAmount = log2Ceil(FetchAddrAlignSize)
+    val shiftAmount = log2Ceil(FetchBlockAlignSize)
     val alignedPc   = (pc.toUInt >> shiftAmount) << shiftAmount
     PrunedAddrInit(alignedPc.asUInt)
   }

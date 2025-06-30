@@ -27,7 +27,7 @@ import xiangshan.frontend.bpu.SaturateCounter
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
  */
-class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParams with Helpers {
+class AheadBtb(implicit p: Parameters) extends BasePredictor with HasAheadBtbParameters with Helpers {
   class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // Input
     val redirectValid: Bool                  = Input(Bool())

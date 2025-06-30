@@ -19,33 +19,9 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BranchAttribute
-import xiangshan.frontend.bpu.BranchPrediction
-import xiangshan.frontend.bpu.HasBpuParameters
-
-trait HasAheadBtbParams extends HasBpuParameters {
-  val FetchAddrAlignSize = 32 // Byte
-  val NumEntries         = 1024
-  val NumWays            = 4
-  val NumSets            = NumEntries / NumWays
-  val TagLen             = 24
-  val TargetLowerBitsLen = 22 // Note: The LSB (bit 0) of the target address is excluded.
-  val NumBanks           = 4
-  val SetIndexLen        = log2Ceil(NumSets)
-  val WayIdxLen          = log2Ceil(NumWays)
-  val BankIdxLen         = log2Ceil(NumBanks)
-  val WriteBufferSize    = 4
-  val TakenCounterWidth  = 2
-
-  require(isPow2(FetchBlockSize))
-  require(isPow2(FetchAddrAlignSize))
-  require(isPow2(NumWays))
-  require(isPow2(NumSets))
-  require(isPow2(NumBanks))
-}
 
 class TargetState extends Bundle {
   val value: UInt = TargetState.Value()
@@ -63,7 +39,7 @@ object TargetState {
   }
 }
 
-class AheadBtbMeta(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AheadBtbMeta(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val valid         = Bool()
   val taken         = Bool()
   val takenPosition = UInt(log2Ceil(PredictWidth).W)
@@ -72,7 +48,7 @@ class AheadBtbMeta(implicit p: Parameters) extends BpuBundle with HasAheadBtbPar
   val positions     = Vec(NumWays, UInt(log2Ceil(PredictWidth).W))
 }
 
-class AheadBtbEntry(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AheadBtbEntry(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val valid           = Bool()
   val tag             = UInt(TagLen.W)
   val position        = UInt(log2Ceil(PredictWidth).W)

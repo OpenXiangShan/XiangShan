@@ -25,22 +25,22 @@ import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-class AbtbBankReadReq(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AbtbBankReadReq(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val setIdx = UInt(SetIndexLen.W)
 }
 
-class AbtbBankReadResp(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AbtbBankReadResp(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val entries = Vec(NumWays, new AheadBtbEntry)
 }
 
-class AbtbBankWriteReq(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AbtbBankWriteReq(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val isNewEntry  = Bool()
   val setIdx      = UInt(SetIndexLen.W)
   val writeWayIdx = UInt(WayIdxLen.W)
   val entry       = new AheadBtbEntry
 }
 
-class AbtbBankWriteResp(implicit p: Parameters) extends BpuBundle with HasAheadBtbParams {
+class AbtbBankWriteResp(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters {
   val writeWayIdx = UInt(log2Ceil(NumWays).W)
 //  private val writeDone = Bool()
 }
@@ -48,7 +48,7 @@ class AbtbBankWriteResp(implicit p: Parameters) extends BpuBundle with HasAheadB
 /**
   * This module stores the ahead BTB entries.
   */
-class AheadBtbBank(implicit p: Parameters) extends BpuModule with HasAheadBtbParams {
+class AheadBtbBank(implicit p: Parameters) extends BpuModule with HasAheadBtbParameters {
   val io = IO(new Bundle {
     val readReq    = Flipped(Decoupled(new AbtbBankReadReq))
     val readResp   = Output(new AbtbBankReadResp)
