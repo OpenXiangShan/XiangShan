@@ -70,7 +70,7 @@ class MicroBtbTrain(implicit p: Parameters) extends MicroBtbBundle {
   val cfiPosition: Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
-  val meta:        MicroBtbMeta        = new MicroBtbMeta // not used now
+  val meta:        MicroBtbMeta    = new MicroBtbMeta // not used now
 }
 
 class ReplacerPerfInfo(implicit p: Parameters) extends MicroBtbBundle {

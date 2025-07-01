@@ -41,19 +41,19 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
-  private val aBtb        = Module(new AheadBtb)
+  private val abtb        = Module(new AheadBtb)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
-    aBtb
+    abtb
   )
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   fallThrough.io.enable := true.B // fallThrough is always enabled
   ubtb.io.enable        := ctrl.ubtb_enable
-  aBtb.io.enable        := true.B // FIXME
+  abtb.io.enable        := true.B // FIXME
 
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -122,15 +122,15 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
     )
   )
 
-  aBtb.io.redirectValid := redirect.valid
-  aBtb.io.overrideValid := s3_override
-  aBtb.io.update        := io.fromFtq.newUpdate
+  abtb.io.redirectValid := redirect.valid
+  abtb.io.overrideValid := s3_override
+  abtb.io.update        := io.fromFtq.newUpdate
 
-  dontTouch(aBtb.io.hit)
-  dontTouch(aBtb.io.prediction)
+  dontTouch(abtb.io.hit)
+  dontTouch(abtb.io.prediction)
 
-  when(aBtb.io.prediction.taken) {
-    assert(aBtb.io.debug_startVaddr === s1_pc)
+  when(abtb.io.prediction.taken) {
+    assert(abtb.io.debug_startVaddr === s1_pc)
   }
 
   private val s2_ftqPtr = RegEnable(io.fromFtq.enq_ptr, s1_fire)
@@ -207,12 +207,12 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   io.toFtq.resp.bits.s3Override.valid       := s3_override
   io.toFtq.resp.bits.s3Override.bits.ftqPtr := s3_ftqPtr
 
-  // aBtb meta delay to s3
-  val s2_aBtbMeta = RegEnable(aBtb.io.meta, s1_fire)
-  val s3_aBtbMeta = RegEnable(s2_aBtbMeta, s2_fire)
+  // abtb meta delay to s3
+  val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
+  val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
   private val predictorMeta = Wire(new NewPredictorMeta)
-  predictorMeta.aBtbMeta := s3_aBtbMeta
+  predictorMeta.aBtbMeta := s3_abtbMeta
   // TODO: other meta
 
   io.toFtq.meta.valid := s3_valid

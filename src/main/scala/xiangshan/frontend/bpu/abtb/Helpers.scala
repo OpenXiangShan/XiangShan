@@ -23,7 +23,7 @@ import xiangshan.frontend.bpu.TargetState
 
 trait Helpers extends HasAheadBtbParameters {
   def getSetIndex(pc: PrunedAddr): UInt =
-    pc(SetIndexLen + BankIdxLen + instOffsetBits - 1, BankIdxLen + instOffsetBits)
+    pc(SetIdxLen + BankIdxLen + instOffsetBits - 1, BankIdxLen + instOffsetBits)
 
   def getBankIndex(pc: PrunedAddr): UInt =
     pc(BankIdxLen + instOffsetBits - 1, instOffsetBits)

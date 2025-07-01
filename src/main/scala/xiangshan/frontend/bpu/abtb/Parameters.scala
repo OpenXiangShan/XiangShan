@@ -22,10 +22,11 @@ case class AheadBtbParameters(
     NumEntries:         Int = 1024,
     NumWays:            Int = 4,
     TagLen:             Int = 24,
-    TargetLowerBitsLen: Int = 22, // Note: The LSB (bit 0) of the target address is excluded.
+    TargetLowerBitsLen: Int = 22,
     NumBanks:           Int = 4,
     WriteBufferSize:    Int = 4,
-    TakenCounterWidth:  Int = 2
+    TakenCounterWidth:  Int = 2,
+    UsefulCounterWidth: Int = 3
 ) {}
 
 trait HasAheadBtbParameters extends HasBpuParameters {
@@ -37,9 +38,10 @@ trait HasAheadBtbParameters extends HasBpuParameters {
   def TagLen:             Int = aBtbParameters.TagLen
   def TargetLowerBitsLen: Int = aBtbParameters.TargetLowerBitsLen
   def NumBanks:           Int = aBtbParameters.NumBanks
-  def SetIndexLen:        Int = log2Ceil(NumSets)
+  def SetIdxLen:          Int = log2Ceil(NumSets)
   def WayIdxLen:          Int = log2Ceil(NumWays)
   def BankIdxLen:         Int = log2Ceil(NumBanks)
   def WriteBufferSize:    Int = aBtbParameters.WriteBufferSize
   def TakenCounterWidth:  Int = aBtbParameters.TakenCounterWidth
+  def UsefulCounterWidth: Int = aBtbParameters.UsefulCounterWidth
 }
