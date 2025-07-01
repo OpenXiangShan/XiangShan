@@ -399,7 +399,7 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = VecScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX0", Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), VlWB(port = vfSchdVlWbPort, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0)), Seq(VlRD(0, 0)))),
+        ExeUnitParams("VFEX0", Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg), Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), VlWB(port = vfSchdVlWbPort, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0)), Seq(VlRD(0, 0)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
         ExeUnitParams("VFEX1", Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg), Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0)), Seq(VlRD(1, 0)))),

@@ -10,7 +10,7 @@ import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
-import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType, FcmpOpCode}
+import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VmoveType, VfmaType, VfdivType, VfcvtType, VidivType, FcmpOpCode}
 import xiangshan.backend.decode.Zvbb._
 
 abstract class VecDecode extends XSDecodeBase {
@@ -209,9 +209,9 @@ object VecDecoder extends DecodeConstants {
     VMSBC_VV        -> OPIVV(FuType.vialuF, VialuFixType.vmsbc_vv, F, T, F, UopSplitType.VEC_VVM),
     VMSBC_VVM       -> OPIVV(FuType.vialuF, VialuFixType.vmsbc_vvm, F, T, F, UopSplitType.VEC_VVM),
 
-    VMERGE_VVM      -> OPIVV(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
+    VMERGE_VVM      -> OPIVV(FuType.vmove, VmoveType.vmerge_vvm, T, F, F),
 
-    VMV_V_V         -> OPIVV(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = vs1[i], vs2=v0
+    VMV_V_V         -> OPIVV(FuType.vmove, VmoveType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = vs1[i], vs2=v0
 
     VMSEQ_VV        -> OPIVV(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, UopSplitType.VEC_VVM),
     VMSNE_VV        -> OPIVV(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, UopSplitType.VEC_VVM),
@@ -275,9 +275,9 @@ object VecDecoder extends DecodeConstants {
     VMSBC_VX      -> OPIVX(FuType.vialuF, VialuFixType.vmsbc_vv, F, T, F, UopSplitType.VEC_VXM),
     VMSBC_VXM     -> OPIVX(FuType.vialuF, VialuFixType.vmsbc_vvm, F, T, F, UopSplitType.VEC_VXM),
 
-    VMERGE_VXM    -> OPIVX(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
+    VMERGE_VXM    -> OPIVX(FuType.vmove, VmoveType.vmerge_vvm, T, F, F),
 
-    VMV_V_X    -> OPIVX(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = x[rs1], vs2 = v0
+    VMV_V_X       -> OPIVX(FuType.vmove, VmoveType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = x[rs1], vs2 = v0
 
     VMSEQ_VX      -> OPIVX(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, UopSplitType.VEC_VXM),
     VMSNE_VX      -> OPIVX(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, UopSplitType.VEC_VXM),
@@ -331,9 +331,9 @@ object VecDecoder extends DecodeConstants {
     VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopSplitType = UopSplitType.VEC_VXM),
     VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, uopSplitType = UopSplitType.VEC_VXM),
 
-    VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
+    VMERGE_VIM    -> OPIVI(FuType.vmove, VmoveType.vmerge_vvm, T, F, F),
 
-    VMV_V_I       -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = imm, vs2 = v0
+    VMV_V_I       -> OPIVI(FuType.vmove, VmoveType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = imm, vs2 = v0
 
     VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
     VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
@@ -357,10 +357,10 @@ object VecDecoder extends DecodeConstants {
     VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
     VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
 
-    VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmv1r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
-    VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmv2r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
-    VMV4R_V       -> OPIVI(FuType.vppu, VpermType.vmv4r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
-    VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
+    VMV1R_V       -> OPIVI(FuType.vmove, VmoveType.vmv1r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
+    VMV2R_V       -> OPIVI(FuType.vmove, VmoveType.vmv2r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
+    VMV4R_V       -> OPIVI(FuType.vmove, VmoveType.vmv4r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
+    VMV8R_V       -> OPIVI(FuType.vmove, VmoveType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
 
     // Zvbb
     VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, selImm = SelImm.IMM_VRORVI, UopSplitType.VEC_VXV),
@@ -398,7 +398,7 @@ object VecDecoder extends DecodeConstants {
     VMULHSU_VV   -> OPMVV(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VVV),
     VMULHU_VV    -> OPMVV(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VVV),
 
-    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.vmv_x_s, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
+    VMV_X_S      -> OPMVV(T, FuType.vmove, VmoveType.vmv_x_s, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
     VNMSAC_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VVV),
     VNMSUB_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VVV),
     VREDAND_VS   -> OPMVV(T, FuType.vipu, VipuType.vredand_vs, F, T, F, UopSplitType.VEC_VRED),
@@ -454,7 +454,7 @@ object VecDecoder extends DecodeConstants {
     VMULH_VX       -> OPMVX(T, FuType.vimac, VimacType.vmulh, F, T, F, UopSplitType.VEC_VXV),
     VMULHSU_VX     -> OPMVX(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VXV),
     VMULHU_VX      -> OPMVX(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VXV),
-    VMV_S_X        -> OPMVX(T, FuType.vialuF, VialuFixType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.no), // vmv.s.x vd, rs1 # vd[0] = x[rs1] (vs2=0)
+    VMV_S_X        -> OPMVX(T, FuType.vmove, VmoveType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.no), // vmv.s.x vd, rs1 # vd[0] = x[rs1] (vs2=0)
 
     VNMSAC_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VXV),
     VNMSUB_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VXV),
@@ -724,14 +724,14 @@ object VecDecoder extends DecodeConstants {
     VMFGE_VF           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vfalu, VfaluType.vfge, F, F, T, UopSplitType.VEC_VFM),
 
     // 13.15. Vector Floating-Point Merge Instruction
-    VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmerge, F, T, F, UopSplitType.VEC_VFV),
+    VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.vp , FuType.vmove, VmoveType.vfmerge, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.16. Vector Floating-Point Move Instruction
-    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
+    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vmove, VmoveType.vfmv, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.dummy), // f[rd] = vs2[0] (rs1=0)
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.X), // vd[0] = f[rs1] (vs2=0)
+    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vmove, VmoveType.vfmv_f_s, T, F, F, UopSplitType.dummy), // f[rd] = vs2[0] (rs1=0)
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vmove, VmoveType.vfmv_s_f, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.X), // vd[0] = f[rs1] (vs2=0)
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 

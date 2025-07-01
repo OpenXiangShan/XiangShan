@@ -36,7 +36,7 @@ import xiangshan.mem.GenRealFlowNum
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.NewCSR.CSROoORead
-import yunsuan.{VfaluType, VipuType}
+import yunsuan.{VfaluType, VipuType, VmoveType}
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -387,10 +387,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         !UopSplitType.isAMOCAS(in.bits.uopSplitType) &&
         // vfmv.f.s, vcpop.m, vfirst.m and vmv.x.s don't change vector state
         !Seq(
-          (FuType.vfalu, VfaluType.vfmv_f_s), // vfmv.f.s
+          (FuType.vmove, VmoveType.vfmv_f_s), // vfmv.f.s
           (FuType.vipu, VipuType.vcpop_m),    // vcpop.m
           (FuType.vipu, VipuType.vfirst_m),   // vfirst.m
-          (FuType.vipu, VipuType.vmv_x_s)     // vmv.x.s
+          (FuType.vmove, VmoveType.vmv_x_s)     // vmv.x.s
         ).map(x => FuTypeOrR(in.bits.fuType, x._1) && in.bits.fuOpType === x._2).reduce(_ || _)
       ).reverse)
     ).orR
