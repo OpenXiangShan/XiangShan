@@ -43,14 +43,14 @@ class BankReadResp(implicit p: Parameters) extends AheadBtbBundle {
   val entries: Vec[AheadBtbEntry] = Vec(NumWays, new AheadBtbEntry)
 }
 
-class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
-  val isNewEntry: Bool          = Bool()
-  val setIdx:     UInt          = UInt(SetIdxLen.W)
-  val wayIdx:     UInt          = UInt(WayIdxLen.W)
-  val entry:      AheadBtbEntry = new AheadBtbEntry
-}
+// class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
+//   val isNewEntry: Bool          = Bool()
+//   val setIdx:     UInt          = UInt(SetIdxLen.W)
+//   val wayIdx:     UInt          = UInt(WayIdxLen.W)
+//   val entry:      AheadBtbEntry = new AheadBtbEntry
+// }
 
-class BankWriteReqBundle(implicit p: Parameters) extends WriteReqBundle with HasAheadBtbParameters {
+class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasAheadBtbParameters {
   val setIdx:     UInt          = UInt(SetIdxLen.W)
   val isNewEntry: Bool          = Bool()
   val wayIdx:     UInt          = UInt(WayIdxLen.W)

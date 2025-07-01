@@ -39,6 +39,7 @@ class WriteBuffer[T <: WriteReqBundle](
     gen:          T,
     val numEntries:  Int,
     val pipe:     Boolean = false,
+    val flow:     Boolean = false,
     val hasFlush: Boolean = false
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
@@ -73,11 +74,13 @@ class WriteBuffer[T <: WriteReqBundle](
 
   private val empty = enq_ptr === deq_ptr
   private val full  = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
+  private val do_enq = WireDefault(io.enq.fire)
+  private val do_deq = WireDefault(io.deq.fire)
 
-  when(io.enq.fire) {
+  when(do_enq) {
     enq_ptr := enq_ptr + 1.U
   }
-  when(io.deq.fire) {
+  when(do_deq) {
     deq_ptr               := deq_ptr + 1.U
     valids(enq_ptr.value) := false.B
   }
@@ -90,7 +93,7 @@ class WriteBuffer[T <: WriteReqBundle](
     valids.foreach(_ := false.B)
   }
 
-  when(io.enq.fire) {
+  when(do_enq) {
     for (i <- 0 until numEntries) {
       hitMask(i) := valids(i) && io.enq.bits.setIdx === entries(i).setIdx &&
         io.enq.bits.tag=== entries(i).tag
@@ -110,12 +113,21 @@ class WriteBuffer[T <: WriteReqBundle](
   io.deq.valid := !empty
   io.enq.ready := !full
 
+  if (flow) {
+    when(io.enq.valid) { io.deq.valid := true.B }
+    when(empty) {
+      io.deq.bits := io.enq.bits
+      do_deq := false.B
+      when(io.deq.ready) { do_enq := false.B }
+    }
+  }
+
   if (pipe) {
     when(io.deq.ready)(io.enq.ready := true.B)
   }
 
-  XSPerfAccumulate("writeBuffer_update_hit", io.enq.fire && hit)
-  XSPerfAccumulate("writeBuffer_update_miss", io.enq.fire && !hit)
+  XSPerfAccumulate("writeBuffer_update_hit", do_enq && hit)
+  XSPerfAccumulate("writeBuffer_update_miss", do_enq && !hit)
   XSPerfAccumulate("writeBuffer_update_full", io.enq.valid && full)
 
   // XSDebug(
