@@ -22,31 +22,20 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 
-//1. Ensure read priority and temporarily store write data in case of read/write conflicts
-//2. Ensure that the data is up-to-date and that the data stored in the write buffer can be updated
-
-// Abstract class for write request bundle for write buffer entry update
-abstract class WriteReqBundle(implicit p: Parameters) extends BpuBundle {
-  // val writeIdx: UInt = Input(UInt(idxWidth.W))
-  // val writeTag: UInt = Input(UInt(tagWidth.W))
-  val setIdx: UInt  // 方向由子类定义
-  // val writeTag: UInt
-  def tag: UInt
-  // val write_data: T
-}
-
+// Ensure read priority and temporarily store write data in case of read/write conflicts
+// Ensure that the data is up-to-date and that the data stored in the write buffer can be updated
 class WriteBuffer[T <: WriteReqBundle](
-    gen:          T,
-    val numEntries:  Int,
-    val pipe:     Boolean = false,
-    val flow:     Boolean = false,
-    val hasFlush: Boolean = false
+    gen:            T,
+    val numEntries: Int,
+    val pipe:       Boolean = false,
+    val flow:       Boolean = false,
+    val hasFlush:   Boolean = false
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   val io = IO(new Bundle {
-    val enq: DecoupledIO[T]= Flipped(DecoupledIO(gen))
-    val deq: DecoupledIO[T] = DecoupledIO(gen)
-    val flush: Option[Bool] = Option.when(hasFlush)(Input(Bool()))
+    val enq:   DecoupledIO[T] = Flipped(DecoupledIO(gen))
+    val deq:   DecoupledIO[T] = DecoupledIO(gen)
+    val flush: Option[Bool]   = Option.when(hasFlush)(Input(Bool()))
   })
 
   // clean write buffer when flush is true
@@ -63,7 +52,7 @@ class WriteBuffer[T <: WriteReqBundle](
     }
   }
 
-  private val valids        = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
+  private val valids  = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
   private val entries = RegInit(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))
   private val hitMask = WireDefault(VecInit(Seq.fill(numEntries)(false.B)))
   private val hit     = hitMask.reduce(_ || _)
@@ -72,8 +61,8 @@ class WriteBuffer[T <: WriteReqBundle](
   private val enq_ptr = RegInit(FIFOPtr(false.B, 0.U))
   private val deq_ptr = RegInit(FIFOPtr(false.B, 0.U))
 
-  private val empty = enq_ptr === deq_ptr
-  private val full  = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
+  private val empty  = enq_ptr === deq_ptr
+  private val full   = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
   private val do_enq = WireDefault(io.enq.fire)
   private val do_deq = WireDefault(io.deq.fire)
 
@@ -96,7 +85,7 @@ class WriteBuffer[T <: WriteReqBundle](
   when(do_enq) {
     for (i <- 0 until numEntries) {
       hitMask(i) := valids(i) && io.enq.bits.setIdx === entries(i).setIdx &&
-        io.enq.bits.tag=== entries(i).tag
+        io.enq.bits.tag === entries(i).tag
     }
     assert(PopCount(hitMask) <= 1.U, "WriteBuffer hitMask should be one-hot")
     when(hit) {
@@ -105,7 +94,7 @@ class WriteBuffer[T <: WriteReqBundle](
     }.otherwise {
       // If miss, enqueue the new data
       entries(enq_ptr.value) := io.enq.bits
-      valids(enq_ptr.value)        := true.B
+      valids(enq_ptr.value)  := true.B
     }
   }
   io.deq.bits := entries(deq_ptr.value)
@@ -114,11 +103,11 @@ class WriteBuffer[T <: WriteReqBundle](
   io.enq.ready := !full
 
   if (flow) {
-    when(io.enq.valid) { io.deq.valid := true.B }
+    when(io.enq.valid)(io.deq.valid := true.B)
     when(empty) {
-      io.deq.bits := io.enq.bits
-      do_deq := false.B
-      when(io.deq.ready) { do_enq := false.B }
+      io.deq.bits               := io.enq.bits
+      do_deq                    := false.B
+      when(io.deq.ready)(do_enq := false.B)
     }
   }
 
@@ -129,15 +118,4 @@ class WriteBuffer[T <: WriteReqBundle](
   XSPerfAccumulate("writeBuffer_update_hit", do_enq && hit)
   XSPerfAccumulate("writeBuffer_update_miss", do_enq && !hit)
   XSPerfAccumulate("writeBuffer_update_full", io.enq.valid && full)
-
-  // XSDebug(
-  //   io.wen && hit,
-  //   p"wrbypass hit entry #${hit_idx}, idx ${io.write_idx}" +
-  //     p"tag ${io.write_tag.getOrElse(0.U)}data ${io.write_data}\n"
-  // )
-  // XSDebug(
-  //   io.wen && !hit,
-  //   p"wrbypass enq entry #${enq_idx}, idx ${io.write_idx}" +
-  //     p"tag ${io.write_tag.getOrElse(0.U)}data ${io.write_data}\n"
-  // )
 }

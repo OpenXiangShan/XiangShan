@@ -53,9 +53,7 @@ class Bank(implicit p: Parameters) extends AheadBtbModule {
   // single port SRAM can not be written and read at the same time
   // read has higher priority than write
   // we use a write buffer to store the write requests when read and write are both valid
-  // private val writeBuffer = Module(new Queue(new BankWriteReq, WriteBufferSize, pipe = true, flow = true))
   private val writeBuffer = Module(new WriteBuffer(new BankWriteReq, WriteBufferSize, pipe = true, flow = true))
-
 
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
   writeBuffer.io.enq.valid := io.writeReq.valid
@@ -75,30 +73,6 @@ class Bank(implicit p: Parameters) extends AheadBtbModule {
   io.writeResp.bits.setIdx := writeSetIdx
   io.writeResp.bits.wayIdx := writeWayIdx
 
-
-  // ===================================== write buffer test ======================================= //
-
-  // private  val writeBufferReq = WireInit(0.U.asTypeOf(new BankWriteReqBundle()))
-  // writeBufferReq.setIdx := io.writeReq.bits.setIdx
-  // // writeBufferReq.writeTag := io.writeReq.bits.entry.tag
-  // writeBufferReq.isNewEntry := io.writeReq.bits.isNewEntry
-  // writeBufferReq.wayIdx := io.writeReq.bits.wayIdx
-  // writeBufferReq.entry := io.writeReq.bits.entry
-
-  // private val testWriteBuffer = Module(new WriteBuffer(new BankWriteReqBundle, 4))
-  // testWriteBuffer.io.enq.valid := io.writeReq.valid  // only write
-  // testWriteBuffer.io.enq.bits :=  writeBufferReq  // use the updated entry
-  // testWriteBuffer.io.deq.ready := false.B
-  // private val deqData = WireInit(0.U.asTypeOf(new BankWriteReqBundle())) // data to be written back to entries
-  // when(testWriteBuffer.io.deq.valid && !io.readReq.valid) {
-  //   // write back the entry from write buffer
-  //   deqData := writeBuffer.io.deq.bits
-  //   writeBuffer.io.deq.ready := true.B
-  // }
-  // dontTouch(deqData) // avoid warning about unused deqData
-
-  XSPerfAccumulate("abtb_bank_read_write_conflict", io.readReq.valid && writeBuffer.io.deq.valid)
+  XSPerfAccumulate("abtb_bank_read_write_conflict", writeBuffer.io.deq.valid && io.readReq.valid)
   XSPerfAccumulate("abtb_bank_write_buffer_full", !writeBuffer.io.enq.ready)
-  XSPerfAccumulate("abtb_bank_read", io.readReq.fire)
-  XSPerfAccumulate("abtb_bank_write", writeBuffer.io.deq.fire)
 }
