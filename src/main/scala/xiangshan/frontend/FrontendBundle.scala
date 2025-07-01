@@ -266,10 +266,11 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val triggered        = Vec(PredictWidth, TriggerAction())
   val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
-  val pc           = Vec(PredictWidth, PrunedAddr(VAddrBits))
-  val debug_seqNum = Vec(PredictWidth, InstSeqNum())
-  val ftqPtr       = new FtqPtr
-  val topdown_info = new FrontendTopDownBundle
+  val pc             = Vec(PredictWidth, PrunedAddr(VAddrBits))
+  val prevIBufEnqPtr = new IBufPtr
+  val debug_seqNum   = Vec(PredictWidth, InstSeqNum())
+  val ftqPtr         = new FtqPtr
+  val topdown_info   = new FrontendTopDownBundle
 }
 
 class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
