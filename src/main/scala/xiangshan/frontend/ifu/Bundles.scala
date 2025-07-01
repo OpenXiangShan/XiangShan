@@ -59,7 +59,7 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle with HasIfuParam
 
 class FetchBlockInfo(implicit p: Parameters) extends IfuBundle {
   val ftqIdx:           FtqPtr                   = new FtqPtr
-  val preTakenIdx:      ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val predTakenIdx:     ValidUndirectioned[UInt] = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val invalidTaken:     Bool                     = Bool()
   val target:           PrunedAddr               = PrunedAddr(VAddrBits)
   val instrRange:       UInt                     = UInt(PredictWidth.W)

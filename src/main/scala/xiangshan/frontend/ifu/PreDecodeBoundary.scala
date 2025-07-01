@@ -23,7 +23,7 @@ import utility.XSError
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 
-class PreDecodeBound(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
+class PreDecodeBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
   class PreDecodeBoundIO(implicit p: Parameters) extends IfuBundle {
     class PreDecodeBoundReq(implicit p: Parameters) extends IfuBundle {
       val instrRange:        Vec[Bool] = Vec(PredictWidth, Bool())
@@ -142,6 +142,6 @@ class PreDecodeBound(implicit p: Parameters) extends IfuModule with PreDecodeHel
   io.resp.bits.isRvc := VecInit(io.resp.bits.instrValid.zip(currentIsRvc).map { case (valid, rvc) =>
     valid & rvc
   })
-  io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPosition) && 
-  !currentIsRvc(io.req.bits.endPosition)
+  io.resp.bits.isLastHalfRvi := io.resp.bits.instrValid(io.req.bits.endPosition) &&
+    !currentIsRvc(io.req.bits.endPosition)
 }

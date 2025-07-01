@@ -29,14 +29,14 @@ import xiangshan.frontend.PrunedAddr
 class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
-      val instrJumpOffset:      Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
-      val instrValid:           Vec[Bool]          = Vec(PredictWidth, Bool())
-      val instrPds:             Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
-      val instrPc:              Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
+      val instrJumpOffset:       Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
+      val instrValid:            Vec[Bool]          = Vec(PredictWidth, Bool())
+      val instrPds:              Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
+      val instrPc:               Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
       val tempPrevLastIsHalfRvi: Bool               = Bool()
 
-      val firstFtqPreTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
-      val secondFtqPreTakenIdx: Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+      val firstFtqPredTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+      val secondFtqPredTakenIdx: Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
 
       val firstTarget:      PrunedAddr = PrunedAddr(VAddrBits)
       val secondTarget:     PrunedAddr = PrunedAddr(VAddrBits)
@@ -76,9 +76,9 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   val io: PredCheckerIO = IO(new PredCheckerIO)
 
   private val (firstTakenIdx, firstPredTaken) =
-    (io.req.bits.firstFtqPreTakenIdx.bits, io.req.bits.firstFtqPreTakenIdx.valid)
+    (io.req.bits.firstFtqPredTakenIdx.bits, io.req.bits.firstFtqPredTakenIdx.valid)
   private val (secondTakenIdx, secondPredTaken) =
-    (io.req.bits.secondFtqPreTakenIdx.bits, io.req.bits.secondFtqPreTakenIdx.valid)
+    (io.req.bits.secondFtqPredTakenIdx.bits, io.req.bits.secondFtqPredTakenIdx.valid)
   private val firstPredTarget  = io.req.bits.firstTarget
   private val secondPredTarget = io.req.bits.secondTarget
   private val selectFetchBlock = io.req.bits.selectFetchBlock

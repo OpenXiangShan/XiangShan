@@ -18,7 +18,6 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility._
 import utility.ChiselDB
 import utility.Constantin
 import utility.HasCircularQueuePtrHelper
@@ -27,6 +26,7 @@ import utility.ParallelOR
 import utility.ParallelPosteriorityEncoder
 import utility.ParallelPriorityEncoder
 import utility.PerfCCT
+import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
 import utility.XSDebug
@@ -108,7 +108,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   // submodule
   private val preDecoder       = Module(new PreDecode)
-  private val preDecodeBounder = Module(new PreDecodeBound)
+  private val preDecodeBounder = Module(new PreDecodeBoundary)
   private val predChecker      = Module(new PredChecker)
   private val frontendTrigger  = Module(new FrontendTrigger)
   private val rvcExpanders     = Seq.fill(PredictWidth)(Module(new RvcExpander))
@@ -261,7 +261,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Fill(PredictWidth, !s1_ftqReq.ftqOffset.valid) | Fill(PredictWidth, 1.U(1.W)) >> ~s1_ftqReq.ftqOffset.bits
   require(
     isPow2(PredictWidth),
-    "If PredictWidth does not satisfy the power of 2," +
+    "If PredictWidth is not power of 2," +
       "expression: Fill(PredictWidth, 1.U(1.W)) >> ~s0_ftqReq.ftqOffset.bits is not right !!"
   )
   private val s1_firstFtrRange =
@@ -465,10 +465,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_firstBlock  = WireDefault(0.U.asTypeOf(new FetchBlockInfo))
   private val s2_secondBlock = WireDefault(0.U.asTypeOf(new FetchBlockInfo))
   s2_firstBlock.ftqIdx       := s2_ftqReq.ftqIdx
-  s2_firstBlock.preTakenIdx  := s2_firstTakenIdx
+  s2_firstBlock.predTakenIdx := s2_firstTakenIdx
   s2_firstBlock.invalidTaken := !bubbleInstrValid(firstFtqOffset.bits) && firstFtqOffset.valid
 
-  s2_firstBlock.instrRange       := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
+  s2_firstBlock.instrRange := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
   s2_firstBlock.pcHigh           := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
   s2_firstBlock.pcHighPlus1      := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint) + 1.U
   s2_firstBlock.target           := s2_ftqReq.nextStartAddr
@@ -641,8 +641,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s4_fire := io.toIBuffer.fire
 
   private val invalidTaken = WireDefault(VecInit.fill(PredictWidth)(false.B))
-  invalidTaken(s3_firstBlock.preTakenIdx.bits)  := s3_firstBlock.invalidTaken
-  invalidTaken(s3_secondBlock.preTakenIdx.bits) := s3_secondBlock.invalidTaken
+  invalidTaken(s3_firstBlock.predTakenIdx.bits)  := s3_firstBlock.invalidTaken
+  invalidTaken(s3_secondBlock.predTakenIdx.bits) := s3_secondBlock.invalidTaken
 
   private val s4_firstBlock       = RegEnable(s3_firstBlock, s3_fire)
   private val s4_secondBlock      = RegEnable(s3_secondBlock, s3_fire)
@@ -848,7 +848,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
         val itlbException = ExceptionType.fromTlbResp(io.itlb.resp.bits)
         // if itlb re-check respond pbmt mismatch with previous check, must be access fault
         val pbmtMismatchException = ExceptionType(hasAf = io.itlb.resp.bits.pbmt(0) =/= s3_itlbPbmt)
-        // merge, itlbException has priority
+        // merge, itlbException has higher priority
         val exception = itlbException || pbmtMismatchException
         // if tlb has exception, abort checking pmp, just send instr & exception to iBuffer and wait for commit
         mmioState := Mux(exception.hasException, MmioFsmState.WaitCommit, MmioFsmState.SendPmp)
@@ -937,21 +937,21 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s4_realInstrValid = Wire(Vec(PredictWidth, Bool()))
 
   /* ** prediction result check ** */
-  checkerIn.valid                     := s4_valid
-  checkerIn.bits.instrJumpOffset      := s4_jumpOffset
-  checkerIn.bits.instrValid           := s4_instrValid.asTypeOf(Vec(PredictWidth, Bool()))
-  checkerIn.bits.instrPds             := s4_pd
-  checkerIn.bits.instrPc              := s4_pc
-  checkerIn.valid                     := RegNext(s3_fire, init = false.B)
-  checkerIn.bits.tempPrevLastIsHalfRvi  := s4_prevLastIsHalfRvi
+  checkerIn.valid                      := s4_valid
+  checkerIn.bits.instrJumpOffset       := s4_jumpOffset
+  checkerIn.bits.instrValid            := s4_instrValid.asTypeOf(Vec(PredictWidth, Bool()))
+  checkerIn.bits.instrPds              := s4_pd
+  checkerIn.bits.instrPc               := s4_pc
+  checkerIn.valid                      := RegNext(s3_fire, init = false.B)
+  checkerIn.bits.tempPrevLastIsHalfRvi := s4_prevLastIsHalfRvi
 
-  checkerIn.bits.firstFtqPreTakenIdx  := s4_firstBlock.preTakenIdx
-  checkerIn.bits.secondFtqPreTakenIdx := s4_secondBlock.preTakenIdx
-  checkerIn.bits.firstTarget          := s4_firstBlock.target
-  checkerIn.bits.secondTarget         := s4_secondBlock.target
-  checkerIn.bits.selectFetchBlock     := s4_selectFetchBlock
-  checkerIn.bits.invalidTaken         := s4_invalidTaken
-  checkerIn.bits.instrOffset          := s4_instrOffset
+  checkerIn.bits.firstFtqPredTakenIdx  := s4_firstBlock.predTakenIdx
+  checkerIn.bits.secondFtqPredTakenIdx := s4_secondBlock.predTakenIdx
+  checkerIn.bits.firstTarget           := s4_firstBlock.target
+  checkerIn.bits.secondTarget          := s4_secondBlock.target
+  checkerIn.bits.selectFetchBlock      := s4_selectFetchBlock
+  checkerIn.bits.invalidTaken          := s4_invalidTaken
+  checkerIn.bits.instrOffset           := s4_instrOffset
 
   s4_realInstrValid.zipWithIndex.map {
     case (valid, i) =>
