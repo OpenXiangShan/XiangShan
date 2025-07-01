@@ -468,7 +468,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_firstBlock.preTakenIdx  := s2_firstTakenIdx
   s2_firstBlock.invalidTaken := !bubbleInstrValid(firstFtqOffset.bits) && firstFtqOffset.valid
 
-  s2_firstBlock.instrRange := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
+  s2_firstBlock.instrRange       := s2_firstInstrRange // Temporary compromise for V2 compatibility; actually uses s1_firstJumpRange & s1_firstFtrRange
   s2_firstBlock.pcHigh           := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint)
   s2_firstBlock.pcHighPlus1      := s2_ftqReq.startAddr(VAddrBits - 1, PcCutPoint) + 1.U
   s2_firstBlock.target           := s2_ftqReq.nextStartAddr
