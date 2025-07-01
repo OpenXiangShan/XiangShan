@@ -70,10 +70,7 @@ trait FetchBlockHelper extends HasXSParameter with HasICacheParameters {
     pc(blockOffBits - 1, 0) === "b111110".U
 }
 
-trait PcCutHelper extends HasXSParameter {
-  // equal lower_result overflow bit
-  def PcCutPoint: Int = (VAddrBits / 4) - 1
-
+trait IfuHelper extends HasXSParameter with HasIfuParameters {
   def catPC(low: UInt, high: UInt, high1: UInt): PrunedAddr =
     PrunedAddrInit(Mux(
       low(PcCutPoint),
@@ -83,4 +80,17 @@ trait PcCutHelper extends HasXSParameter {
 
   def catPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[PrunedAddr] =
     VecInit(lowVec.map(catPC(_, high, high1)))
+
+  def cutICacheData(cacheline: UInt): Vec[UInt] = {
+    // FIXME: !HasCExtension
+    require(HasCExtension)
+    val result  = Wire(Vec(ICacheLineBytes / 2, UInt(32.W)))
+    val dataVec = cacheline.asTypeOf(Vec(ICacheLineBytes / 2, UInt(16.W)))
+    (0 until ICacheLineBytes / 2 - 1).foreach(i =>
+      result(i) := Cat(dataVec(i + 1), dataVec(i))
+    )
+    result(ICacheLineBytes / 2 - 1) := Cat(dataVec(0), dataVec(ICacheLineBytes / 2 - 1))
+    result
+  }
+
 }
