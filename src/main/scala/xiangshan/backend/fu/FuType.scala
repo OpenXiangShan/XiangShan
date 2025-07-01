@@ -58,6 +58,7 @@ object FuType extends OHEnumeration {
   val vimac = addType(name = "vimac")
   val vidiv = addType(name = "vidiv")
   val vfalu = addType(name = "vfalu")
+  val vmove = addType(name = "vmove")
   val vfma = addType(name = "vfma")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
@@ -264,6 +265,7 @@ object FuType extends OHEnumeration {
     vimac -> "vimac",
     vidiv -> "vidiv",
     vfalu -> "vfalu",
+    vmove -> "vmove",
     vfma -> "vfma",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
