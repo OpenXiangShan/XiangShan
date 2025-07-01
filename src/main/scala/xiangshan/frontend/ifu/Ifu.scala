@@ -943,7 +943,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   checkerIn.bits.instrPds             := s4_pd
   checkerIn.bits.instrPc              := s4_pc
   checkerIn.valid                     := RegNext(s3_fire, init = false.B)
-  checkerIn.bits.tempPreLastIsHalfRvi := s4_prevLastIsHalfRvi
+  checkerIn.bits.tempPrevLastIsHalfRvi  := s4_prevLastIsHalfRvi
 
   checkerIn.bits.firstFtqPreTakenIdx  := s4_firstBlock.preTakenIdx
   checkerIn.bits.secondFtqPreTakenIdx := s4_secondBlock.preTakenIdx
@@ -1136,16 +1136,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
     case (pd, v) =>
       v && pd.isJal
   }))
-  private val checkFlushWbTargetIdx = wbCheckResultStage2.fixedFirstMissPredIdx.bits
+  private val checkFlushWbTargetIdx = wbCheckResultStage2.fixedFirstMispredIdx.bits
   checkFlushWb.valid   := wbValid
   checkFlushWb.bits.pc := wbFirstBubblePc
   checkFlushWb.bits.pd := wbBubblePd
   checkFlushWb.bits.pd.zipWithIndex.foreach { case (instr, i) => instr.valid := wbFirstBubbleInstrValid(i) }
   checkFlushWb.bits.ftqIdx    := wbFtqReq.ftqIdx
   checkFlushWb.bits.ftqOffset := wbFtqReq.ftqOffset.bits
-  checkFlushWb.bits.misOffset.valid := wbCheckResultStage2.fixedFirstMissPredIdx.valid // ParallelOR(wbCheckResultStage2.fixedMissPred)
+  checkFlushWb.bits.misOffset.valid := wbCheckResultStage2.fixedFirstMispredIdx.valid // ParallelOR(wbCheckResultStage2.fixedMissPred)
   checkFlushWb.bits.misOffset.bits := wbInstrOffset(
-    wbCheckResultStage2.fixedFirstMissPredIdx.bits
+    wbCheckResultStage2.fixedFirstMispredIdx.bits
   ) // ParallelPriorityEncoder(wbCheckResultStage2.fixedMissPred)
   checkFlushWb.bits.cfiOffset.valid := wbCheckResultStage2.fixedFirstTakenIdx.valid // ParallelOR(wbCheckResultStage1.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits := wbInstrOffset(

@@ -33,7 +33,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       val instrValid:           Vec[Bool]          = Vec(PredictWidth, Bool())
       val instrPds:             Vec[PreDecodeInfo] = Vec(PredictWidth, new PreDecodeInfo)
       val instrPc:              Vec[PrunedAddr]    = Vec(PredictWidth, PrunedAddr(VAddrBits))
-      val tempPreLastIsHalfRvi: Bool               = Bool()
+      val tempPrevLastIsHalfRvi: Bool               = Bool()
 
       val firstFtqPreTakenIdx:  Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
       val secondFtqPreTakenIdx: Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
@@ -57,8 +57,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
         val twoFetchJalTarget:   Vec[PrunedAddr] = Vec(PredictWidth, PrunedAddr(VAddrBits))
         val twoFetchFaultType:   Vec[UInt]       = Vec(PredictWidth, PreDecodeFaultType())
 
-        val fixedFirstMissPredIdx:       Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
-        val fixedSecondMissPredIdx:      Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+        val fixedFirstMispredIdx:        Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
+        val fixedSecondMispredIdx:       Valid[UInt] = Valid(UInt(log2Ceil(PredictWidth).W))
         val fixedFirstBubbleInstrRange:  UInt        = UInt(PredictWidth.W)
         val fixedSecondBubbleInstrRange: UInt        = UInt(PredictWidth.W)
 
@@ -86,7 +86,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val instrOffset      = io.req.bits.instrOffset
 
   private val tempIgnore = WireDefault(VecInit.fill(PredictWidth)(false.B))
-  tempIgnore(0) := io.req.bits.tempPreLastIsHalfRvi
+  tempIgnore(0) := io.req.bits.tempPrevLastIsHalfRvi
 
   private val instrValid            = io.req.bits.instrValid
   private val valid                 = io.req.valid
@@ -103,22 +103,22 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   // Stage 1: detect remask fault
   /** first check: remask Fault */
   jalFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isJal && instrValid(i) && (((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(
-      i
-    )) ||
-      ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))) && !tempIgnore(i)
+    pd.isJal && instrValid(i) && (
+      ((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(i)) ||
+        ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))
+    ) && !tempIgnore(i)
   })
   jalrFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isJalr && !pd.isRet && instrValid(
-      i
-    ) && (((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(i)) ||
-      ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))) && !tempIgnore(i)
+    pd.isJalr && !pd.isRet && instrValid(i) && (
+      ((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(i)) ||
+        ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))
+    ) && !tempIgnore(i)
   })
   retFaultVec := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    pd.isRet && instrValid(i) && (((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(
-      i
-    )) ||
-      ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))) && !tempIgnore(i)
+    pd.isRet && instrValid(i) && (
+      ((firstTakenIdx > i.U && firstPredTaken || !firstPredTaken) && !selectFetchBlock(i)) ||
+        ((secondTakenIdx > i.U && secondPredTaken || !secondPredTaken) && selectFetchBlock(i))
+    ) && !tempIgnore(i)
   })
   private val remaskFault =
     VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i)))
@@ -129,25 +129,23 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   require(
     isPow2(PredictWidth),
-    "If PredictWidth does not statisfy the power of 2," +
+    "If PredictWidth does not satisfy the power of 2," +
       "expression: Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
   )
 
   io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
 
   val fixedFirstTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    instrValid(i) && fixedRange(
-      i
-    ) && (pd.isRet || pd.isJal || pd.isJalr || (firstTakenIdx === i.U && firstPredTaken && !pd.notCFI)) && !selectFetchBlock(
-      i
-    ) && !tempIgnore(i)
+    instrValid(i) && fixedRange(i) && (
+      pd.isRet || pd.isJal || pd.isJalr ||
+        (firstTakenIdx === i.U && firstPredTaken && !pd.notCFI)
+    ) && !selectFetchBlock(i) && !tempIgnore(i)
   })
   val fixedSecondTaken = VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    instrValid(i) && fixedRange(
-      i
-    ) && (pd.isRet || pd.isJal || pd.isJalr || (secondTakenIdx === i.U && secondPredTaken && !pd.notCFI)) && selectFetchBlock(
-      i
-    ) && !tempIgnore(i)
+    instrValid(i) && fixedRange(i) && (
+      pd.isRet || pd.isJal || pd.isJalr ||
+        (secondTakenIdx === i.U && secondPredTaken && !pd.notCFI)
+    ) && selectFetchBlock(i) && !tempIgnore(i)
   })
   io.resp.stage1Out.fixedTwoFetchTaken := VecInit(fixedFirstTaken.zip(fixedSecondTaken).map {
     case (firstTaken, secondTaken) =>
@@ -164,8 +162,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   /** second check: faulse prediction fault and target fault */
   notCfiTaken := VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    fixedRange(i) && instrValid(i) && pd.notCFI && ((i.U === firstTakenIdx && firstPredTaken && !selectFetchBlock(i)) ||
-      (i.U === secondTakenIdx && secondPredTaken && selectFetchBlock(i))) && !tempIgnore(i)
+    fixedRange(i) && instrValid(i) && pd.notCFI && (
+      (i.U === firstTakenIdx && firstPredTaken && !selectFetchBlock(i)) ||
+        (i.U === secondTakenIdx && secondPredTaken && selectFetchBlock(i))
+    ) && !tempIgnore(i)
   })
 
   XSError(
@@ -199,31 +199,29 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val notCFITakenNext  = RegEnable(notCfiTaken, io.req.valid)
   private val invalidTakenNext = RegEnable(invalidTaken, io.req.valid)
   private val instrOffsetNext  = RegEnable(instrOffset, io.req.valid)
-//  private val firstBubbleRangeNext      = RegEnable(firstBubbleRange, io.req.valid)
-//  private val secondBubbleRangeNext     = RegEnable(secondBubbleRange, io.req.valid)
+  //  private val firstBubbleRangeNext      = RegEnable(firstBubbleRange, io.req.valid)
+  //  private val secondBubbleRangeNext     = RegEnable(secondBubbleRange, io.req.valid)
   private val fixedFirstTakenInstrIdxNext  = RegEnable(fixedFirstTakenInstrIdx, io.req.valid)
   private val fixedSecondTakenInstrIdxNext = RegEnable(fixedSecondTakenInstrIdx, io.req.valid)
 
   targetFault := VecInit(pdsNext.zipWithIndex.map { case (pd, i) =>
-    fixedRangeNext(i) && instrValidNext(
-      i
-    ) && (pd.isJal || pd.isBr) && ((firstTakenIdxNext === i.U && firstPredTakenNext && (firstPredTargetNext =/= jumpTargetsNext(
-      i
-    ))) ||
-      (secondTakenIdxNext === i.U && secondPredTakenNext && (secondPredTargetNext =/= jumpTargetsNext(i))))
+    fixedRangeNext(i) && instrValidNext(i) && (pd.isJal || pd.isBr) && (
+      (firstTakenIdxNext === i.U && firstPredTakenNext && (firstPredTargetNext =/= jumpTargetsNext(i))) ||
+        (secondTakenIdxNext === i.U && secondPredTakenNext && (secondPredTargetNext =/= jumpTargetsNext(i)))
+    )
   })
 
-  // private val misPreOffset  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  private val misPreInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  // private val mispredOffset  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  private val mispredInstrIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
   private val stage1Fault = VecInit.tabulate(PredictWidth)(i =>
     jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || notCfiTaken(i) || invalidTaken(i)
   )
-  misPreInstrIdx.valid := ParallelOR(stage1Fault)
-  misPreInstrIdx.bits  := ParallelPriorityEncoder(stage1Fault)
+  mispredInstrIdx.valid := ParallelOR(stage1Fault)
+  mispredInstrIdx.bits  := ParallelPriorityEncoder(stage1Fault)
 
-  private val misPreIdxNext       = RegEnable(misPreInstrIdx, io.req.valid)
-  private val misIsFirstBlockNext = RegEnable(!selectFetchBlock(misPreInstrIdx.bits), io.req.valid)
-  private val misInstrOffset      = RegEnable(instrOffset(misPreInstrIdx.bits), io.req.valid)
+  private val mispredIdxNext          = RegEnable(mispredInstrIdx, io.req.valid)
+  private val mispredIsFirstBlockNext = RegEnable(!selectFetchBlock(mispredInstrIdx.bits), io.req.valid)
+  private val mispredInstrOffset      = RegEnable(instrOffset(mispredInstrIdx.bits), io.req.valid)
 
   io.resp.stage2Out.twoFetchFaultType.zipWithIndex.foreach { case (faultType, i) =>
     faultType := MuxCase(
@@ -244,16 +242,24 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   }
   io.resp.stage2Out.twoFetchJalTarget.zipWithIndex.foreach { case (target, i) => target := jumpTargetsNext(i) }
 
-  val fixedFirstMissPredIdx  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  val fixedSecondMissPredIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
-  fixedFirstMissPredIdx.valid := (misPreIdxNext.valid && misIsFirstBlockNext) || targetFault(firstTakenIdxNext)
-  fixedFirstMissPredIdx.bits  := Mux(misPreIdxNext.valid && misIsFirstBlockNext, misPreIdxNext.bits, firstTakenIdxNext)
+  val fixedFirstMispredIdx  = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  val fixedSecondMispredIdx = WireDefault(0.U.asTypeOf(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
+  fixedFirstMispredIdx.valid := (mispredIdxNext.valid && mispredIsFirstBlockNext) || targetFault(firstTakenIdxNext)
+  fixedFirstMispredIdx.bits := Mux(
+    mispredIdxNext.valid && mispredIsFirstBlockNext,
+    mispredIdxNext.bits,
+    firstTakenIdxNext
+  )
 
-  fixedSecondMissPredIdx.valid := (misPreIdxNext.valid && !misIsFirstBlockNext) || targetFault(secondTakenIdxNext)
-  fixedSecondMissPredIdx.bits := Mux(misPreIdxNext.valid && !misIsFirstBlockNext, misPreIdxNext.bits, firstTakenIdxNext)
+  fixedSecondMispredIdx.valid := (mispredIdxNext.valid && !mispredIsFirstBlockNext) || targetFault(secondTakenIdxNext)
+  fixedSecondMispredIdx.bits := Mux(
+    mispredIdxNext.valid && !mispredIsFirstBlockNext,
+    mispredIdxNext.bits,
+    firstTakenIdxNext
+  )
 
-  io.resp.stage2Out.fixedFirstMissPredIdx  := fixedFirstMissPredIdx
-  io.resp.stage2Out.fixedSecondMissPredIdx := fixedSecondMissPredIdx
+  io.resp.stage2Out.fixedFirstMispredIdx  := fixedFirstMispredIdx
+  io.resp.stage2Out.fixedSecondMispredIdx := fixedSecondMispredIdx
 
   // io.resp.stage2Out.fixedFirstBubbleRange   := fixedFirstBubbleRange
   // io.resp.stage2Out.fixedSecondBubbleRange  := fixedSecondBubbleRange
@@ -263,10 +269,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   io.resp.stage2Out.fixedFirstBubbleInstrRange := Fill(
     PredictWidth,
-    !(misPreIdxNext.valid && misIsFirstBlockNext)
-  ) | Fill(PredictWidth, 1.U(1.W)) >> ~misInstrOffset(log2Ceil(PredictWidth) - 1, 0)
+    !(mispredIdxNext.valid && mispredIsFirstBlockNext)
+  ) | Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrOffset(log2Ceil(PredictWidth) - 1, 0)
   io.resp.stage2Out.fixedSecondBubbleInstrRange := Fill(
     PredictWidth,
-    !(misPreIdxNext.valid && !misIsFirstBlockNext)
-  ) | Fill(PredictWidth, 1.U(1.W)) >> ~misInstrOffset(log2Ceil(PredictWidth) - 1, 0)
+    !(mispredIdxNext.valid && !mispredIsFirstBlockNext)
+  ) | Fill(PredictWidth, 1.U(1.W)) >> ~mispredInstrOffset(log2Ceil(PredictWidth) - 1, 0)
 }
