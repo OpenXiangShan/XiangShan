@@ -19,9 +19,9 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
+import ftq.FtqEntry
 import ftq.FtqPtr
 import ftq.FtqRedirectSramEntry
-import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils.EnumUInt
@@ -29,7 +29,14 @@ import xiangshan._
 import xiangshan.backend.GPAMemEntry
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.TlbResp
-import xiangshan.frontend.bpu._
+// FIXME: remove old FullBranchPrediction
+import xiangshan.frontend.bpu.{FullBranchPrediction => NewFullBranchPrediction}
+import xiangshan.frontend.bpu.BPUUtils
+import xiangshan.frontend.bpu.FTBEntry
+import xiangshan.frontend.bpu.HasBPUConst
+import xiangshan.frontend.bpu.NewPredictorMeta
+import xiangshan.frontend.bpu.PredictorMeta
+import xiangshan.frontend.bpu.RasPtr
 import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
@@ -37,6 +44,13 @@ import xiangshan.frontend.instruncache.InstrUncacheResp
 class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val reasons    = Vec(TopDownCounters.NumStallReasons.id, Bool())
   val stallWidth = UInt(log2Ceil(PredictWidth).W)
+}
+
+class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
+  // FIXME: remove old FullBranchPrediction
+  val resp: DecoupledIO[NewFullBranchPrediction] = DecoupledIO(new NewFullBranchPrediction)
+  val meta: DecoupledIO[NewPredictorMeta]        = DecoupledIO(new NewPredictorMeta)
+  // TODO: topdown, etc.
 }
 
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
@@ -49,24 +63,13 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   val ftqIdx    = new FtqPtr
   val ftqOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 
-  val topdown_info = new FrontendTopDownBundle
+  val topdownInfo = new FrontendTopDownBundle
 
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
 
-  def fromFtqPcBundle(b: FtqRfComponents) = {
+  def :=(b: FtqEntry): Unit = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
-    // when (b.fallThruError) {
-    //   val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
-    //   val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
-    //   this.nextStartAddr :=
-    //     Cat(nextBlockHigher,
-    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits) ^ 1.U(1.W),
-    //       startAddr(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits),
-    //       0.U(instOffsetBits.W)
-    //     )
-    // }
-    this
   }
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startAddr.toUInt)} [next] ${Hexadecimal(nextlineStart.toUInt)}" +
@@ -79,7 +82,7 @@ class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParam
   val nextlineStart  = PrunedAddr(VAddrBits)
   val ftqIdx         = new FtqPtr
   def crossCacheline = startAddr(blockOffBits - 1) === 1.U
-  def fromFtqPcBundle(b: FtqRfComponents) = {
+  def fromFtqPcBundle(b: FtqEntry) = {
     this.startAddr     := b.startAddr
     this.nextlineStart := b.nextLineAddr
     this
@@ -98,11 +101,12 @@ class FtqToFetchBundle(implicit p: Parameters) extends XSBundle with HasICachePa
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends XSBundle {
-  // NOTE: req.bits must be prepare in T cycle
+  // NOTE: req.bits must be prepared in T cycle
   // while req.valid is set true in T + 1 cycle
-  val fetchReq:     DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
-  val prefetchReq:  DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
-  val flushFromBpu: BpuFlushInfo                     = new BpuFlushInfo
+  val fetchReq:      DecoupledIO[FtqToFetchBundle]    = DecoupledIO(new FtqToFetchBundle)
+  val prefetchReq:   DecoupledIO[FtqToPrefetchBundle] = DecoupledIO(new FtqToPrefetchBundle)
+  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
+  val redirectFlush: Bool                             = Output(Bool())
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends XSBundle {
@@ -132,7 +136,8 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val pdWb: Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
+  val pdWb:           Valid[PredecodeWritebackBundle] = Valid(new PredecodeWritebackBundle)
+  val mmioCommitRead: MmioCommitRead                  = new MmioCommitRead
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
@@ -147,7 +152,7 @@ class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
   val instrRange = Vec(PredictWidth, Bool())
 }
 
-class mmioCommitRead(implicit p: Parameters) extends XSBundle {
+class MmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioFtqPtr     = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
 }
@@ -275,10 +280,11 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val triggered        = Vec(PredictWidth, TriggerAction())
   val isLastInFtqEntry = Vec(PredictWidth, Bool())
 
-  val pc           = Vec(PredictWidth, PrunedAddr(VAddrBits))
-  val debug_seqNum = Vec(PredictWidth, InstSeqNum())
-  val ftqPtr       = new FtqPtr
-  val topdown_info = new FrontendTopDownBundle
+  val pc             = Vec(PredictWidth, PrunedAddr(VAddrBits))
+  val prevIBufEnqPtr = new IBufPtr
+  val debug_seqNum   = Vec(PredictWidth, InstSeqNum())
+  val ftqPtr         = new FtqPtr
+  val topdown_info   = new FrontendTopDownBundle
 }
 
 class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
@@ -751,6 +757,15 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 
   val topdown_info = new FrontendTopDownBundle
 
+  def stage(idx: Int): BranchPredictionBundle = {
+    require(idx >= 1 && idx <= 3)
+    idx match {
+      case 1 => s1
+      case 2 => s2
+      case 3 => s3
+    }
+  }
+
   def selectedResp = {
     val res =
       PriorityMux(Seq(
@@ -768,8 +783,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
     ))
   def lastStage = s3
 }
-
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = PrunedAddr(VAddrBits)

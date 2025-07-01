@@ -1,5 +1,5 @@
-// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
 // Copyright (c) 2020-2021 Peng Cheng Laboratory
 //
 // XiangShan is licensed under Mulan PSL v2.
@@ -13,12 +13,12 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.ifu
+package xiangshan.frontend.bpu.abtb
 
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.XSBundle
-import xiangshan.XSModule
+import xiangshan.frontend.bpu.BpuBundle
+import xiangshan.frontend.bpu.BpuModule
 
-abstract class IfuBundle(implicit p: Parameters) extends XSBundle with HasIfuParameters
+abstract class AheadBtbBundle(implicit p: Parameters) extends BpuBundle with HasAheadBtbParameters
 
-abstract class IfuModule(implicit p: Parameters) extends XSModule with HasIfuParameters
+abstract class AheadBtbModule(implicit p: Parameters) extends BpuModule with HasAheadBtbParameters

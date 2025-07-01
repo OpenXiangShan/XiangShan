@@ -33,8 +33,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import ftq.Ftq
+import ftq.FtqEntry
 import ftq.FtqPtr
-import ftq.FtqRfComponents
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utility.mbist.MbistInterface
@@ -48,6 +48,7 @@ import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend.bpu.Bpu
+import xiangshan.frontend.bpu.DummyBpu
 import xiangshan.frontend.icache._
 import xiangshan.frontend.ifu._
 import xiangshan.frontend.instruncache.InstrUncache
@@ -109,10 +110,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // decouped-frontend modules
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
-  val bpu          = Module(new Bpu)
+  val bpu          = Module(new DummyBpu)
   val ifu          = Module(new Ifu)
   val ibuffer      = Module(new IBuffer)
   val ftq          = Module(new Ftq)
+  ftq.io.reset_vector := io.reset_vector
 
   val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
@@ -134,8 +136,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   ifu.io.csrFsIsOff := csrCtrl.fsIsOff
 
   // bpu ctrl
-  bpu.io.ctrl         := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := io.reset_vector
+  bpu.io.ctrl        := csrCtrl.bp_ctrl
+  bpu.io.resetVector := io.reset_vector
 
   // pmp
   val PortNumber = ICacheParameters().PortNumber
@@ -190,13 +192,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   bpu.io.fromFtq <> ftq.io.toBpu
   ftq.io.fromBpu <> bpu.io.toFtq
 
-  ftq.io.mmioCommitRead <> ifu.io.mmioCommitRead
-
   // ICache-Ftq
   icache.io.fromFtq <> ftq.io.toICache
   // override fetchReq.ready to sync with Ifu
   ftq.io.toICache.fetchReq.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
-  icache.io.flush                := ftq.io.icacheFlush
+  icache.io.flush                := DontCare
 
   // Ifu-ICache
   ifu.io.fromICache <> icache.io.toIfu
@@ -214,7 +214,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqRfComponents))
+  val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
@@ -440,7 +440,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.take(8)
 
-  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEvents)
+  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
   val perfFromIO    = Seq()
   val perfBlock     = Seq()
   // let index = 0 be no event
