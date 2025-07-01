@@ -384,27 +384,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.wakeUpFromWB                                      := 0.U.asTypeOf(io.wakeupFromWB)
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
     entriesIO.wakeUpFromWBDelayed                               := 0.U.asTypeOf(io.wakeupFromWBDelayed)
+    println(s"[issueQueue] name = ${params.getIQName}")
+    val wakeupFromWBExuName = io.wakeupFromWB.map(x => x.bits.exuIndices).map(i => i.map(backendParams.allExuParams(_).name))
+    println(s"[issueQueue] wakeupFromWBExuName = ${wakeupFromWBExuName}")
+    val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
+    println(s"[issueQueue] vecExuIndices = ${vecExuIndices}")
+    val vecWBIndices = io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
+    println(s"[issueQueue] vecWBIndices = ${vecWBIndices}")
+    vecWBIndices.map{ case i =>
+      entriesIO.wakeUpFromWB(i) := io.wakeupFromWB(i)
+      entriesIO.wakeUpFromWBDelayed(i) := io.wakeupFromWBDelayed(i)
+    }
     if (params.inVfSchd || params.isVecMemIQ){
       entriesIO.wakeUpFromWB                                    := io.wakeupFromWB
       entriesIO.wakeUpFromWBDelayed                             := io.wakeupFromWBDelayed
-    }
-    if (params.needReadIntRegFile){
-      println(s"[IssueQueue] params.getIQName = ${params.getIQName}")
-      println(s"[IssueQueue] io.wakeupFromWB.size = ${io.wakeupFromWB.size}")
-      println(s"[IssueQueue] params.needWakeupFromIntWBPort = ${params.needWakeupFromIntWBPort}")
-      // index 0 is f2i, index1 is v2i
-      entriesIO.wakeUpFromWB(1) := io.wakeupFromWB(1)
-      entriesIO.wakeUpFromWBDelayed(1) := io.wakeupFromWBDelayed(1)
-    }
-    if (params.needReadFpRegFile) {
-      println(s"[IssueQueue] params.getIQName = ${params.getIQName}")
-      println(s"[IssueQueue] io.wakeupFromWB.size = ${io.wakeupFromWB.size}")
-      println(s"[IssueQueue] params.needWakeupFromFpWBPort = ${params.needWakeupFromFpWBPort}")
-      // index 0 is i2f, index1 is v2i
-      entriesIO.wakeUpFromWB(1) := io.wakeupFromWB(1)
-      entriesIO.wakeUpFromWBDelayed(1) := io.wakeupFromWBDelayed(1)
-      entriesIO.wakeUpFromWB(2) := io.wakeupFromWB(2)
-      entriesIO.wakeUpFromWBDelayed(2) := io.wakeupFromWBDelayed(2)
     }
     entriesIO.wakeUpFromIQDelayed                               := wakeupFromIQDelayed
     entriesIO.vlFromIntIsZero                                   := io.vlFromIntIsZero
