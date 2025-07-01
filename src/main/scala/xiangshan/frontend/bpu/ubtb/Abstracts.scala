@@ -19,6 +19,6 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.frontend.bpu.BpuBundle
 import xiangshan.frontend.bpu.BpuModule
 
-abstract class UbtbBundle(implicit p: Parameters) extends BpuBundle with HasUbtbParameters
+abstract class MicroBtbBundle(implicit p: Parameters) extends BpuBundle with HasMicroBtbParameters
 
-abstract class UbtbModule(implicit p: Parameters) extends BpuModule with HasUbtbParameters
+abstract class MicroBtbModule(implicit p: Parameters) extends BpuModule with HasMicroBtbParameters

@@ -25,7 +25,7 @@ import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
-import xiangshan.frontend.bpu.ubtb.Ubtb
+import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.ftq.FtqToBpuIO
 
 class DummyBpu(implicit p: Parameters) extends BpuModule {
@@ -40,7 +40,7 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
 
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
-  private val ubtb        = Module(new Ubtb)
+  private val ubtb        = Module(new MicroBtb)
   private val aBtb        = Module(new AheadBtb)
 
   private def predictors: Seq[BasePredictor] = Seq(

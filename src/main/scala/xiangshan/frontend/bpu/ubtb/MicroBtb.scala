@@ -23,20 +23,20 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 
 // TODO: 2-taken
-class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters with Helpers {
-  class UbtbIO(implicit p: Parameters) extends BasePredictorIO {
+class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbParameters with Helpers {
+  class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // predict request
     // ... all inherited from BasePredictorIO
     // train request
-    val train: Valid[UbtbTrain] = Flipped(Valid(new UbtbTrain))
+    val train: Valid[MicroBtbTrain] = Flipped(Valid(new MicroBtbTrain))
   }
 
-  val io: UbtbIO = IO(new UbtbIO)
+  val io: MicroBtbIO = IO(new MicroBtbIO)
 
   /* *** submodules *** */
-  private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new UbtbEntry))))
+  private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))
 
-  private val replacer = Module(new UbtbReplacer)
+  private val replacer = Module(new MicroBtbReplacer)
   replacer.io.usefulCnt := VecInit(entries.map(_.usefulCnt))
 
   /* *** predict stage 0 ***
@@ -58,7 +58,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val s1_tag        = getTag(s1_startVAddr)
 
   private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
-  assert(PopCount(s1_hitOH) <= 1.U, "Ubtb s1_hitOH should be one-hot")
+  assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
   private val s1_hit      = s1_hitOH.orR
   private val s1_hitIdx   = OHToUInt(s1_hitOH)
   private val s1_hitEntry = entries(s1_hitIdx)
@@ -106,7 +106,7 @@ class Ubtb(implicit p: Parameters) extends BasePredictor with HasUbtbParameters 
   private val t1_hit          = Wire(Bool())
   private val t1_tag          = Wire(UInt(TagWidth.W))
   private val t1_updateIdx    = Wire(UInt(log2Up(NumEntries).W))
-  private val t1_hitEntry     = Wire(new UbtbEntry)
+  private val t1_hitEntry     = Wire(new MicroBtbEntry)
   private val t1_updatedEntry = WireDefault(t1_hitEntry) // will be updated in t1, then write back to entries
 
   // if t0_tag === t1_tag, t1 must be updating the entry, so we can see it as a hit, and use t1_updateIdx as hitIdx

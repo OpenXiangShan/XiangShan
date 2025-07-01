@@ -21,8 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
 import xiangshan.frontend.bpu.SaturateCounter
 
-class UbtbReplacer(implicit p: Parameters) extends UbtbModule {
-  class UbtbReplacerIO extends Bundle {
+class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
+  class MicroBtbReplacerIO extends Bundle {
     val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
     val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumEntries).W)))
 
@@ -33,7 +33,7 @@ class UbtbReplacer(implicit p: Parameters) extends UbtbModule {
     val perf: ReplacerPerfInfo = Output(new ReplacerPerfInfo)
   }
 
-  val io: UbtbReplacerIO = IO(new UbtbReplacerIO)
+  val io: MicroBtbReplacerIO = IO(new MicroBtbReplacerIO)
 
   private val replacer = ReplacementPolicy.fromString(Replacer, NumEntries)
 

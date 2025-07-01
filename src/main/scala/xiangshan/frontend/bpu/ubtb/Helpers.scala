@@ -21,7 +21,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.TargetState
 
-trait Helpers extends HasUbtbParameters {
+trait Helpers extends HasMicroBtbParameters {
   def getTag(vAddr: PrunedAddr): UInt =
     vAddr(TagWidth, instOffsetBits)
 

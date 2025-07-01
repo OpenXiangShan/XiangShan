@@ -18,7 +18,7 @@ package xiangshan.frontend.bpu.ubtb
 import xiangshan.frontend.bpu.HasBpuParameters
 
 // default MicroBtb parameters, do not change here, use top-level xiangshan/Parameters.scala
-case class UbtbParameters(
+case class MicroBtbParameters(
     NumEntries:     Int = 32,
     TagWidth:       Int = 22,
     TargetWidth:    Int = 22, // 2B aligned
@@ -30,8 +30,8 @@ case class UbtbParameters(
     EnableTargetFix: Boolean = false
 ) {}
 
-trait HasUbtbParameters extends HasBpuParameters {
-  def ubtbParameters: UbtbParameters = bpuParameters.ubtbParameters
+trait HasMicroBtbParameters extends HasBpuParameters {
+  def ubtbParameters: MicroBtbParameters = bpuParameters.ubtbParameters
 
   def NumEntries:     Int    = ubtbParameters.NumEntries
   def TagWidth:       Int    = ubtbParameters.TagWidth

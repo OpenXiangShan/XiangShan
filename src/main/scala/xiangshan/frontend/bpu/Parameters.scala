@@ -19,14 +19,14 @@ import chisel3._
 import chisel3.util._
 import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
-import xiangshan.frontend.bpu.ubtb.UbtbParameters
+import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
 case class BpuParameters(
     // general
     FetchBlockSize:      Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
     FetchBlockAlignSize: Int = 32, // bytes
     // sub predictors
-    ubtbParameters: UbtbParameters = UbtbParameters(),
+    ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     aBtbParameters: AheadBtbParameters = AheadBtbParameters()
 ) {
   // sanity check

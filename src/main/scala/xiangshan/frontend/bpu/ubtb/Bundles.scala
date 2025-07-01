@@ -23,7 +23,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TargetState
 
-class UbtbEntry(implicit p: Parameters) extends UbtbBundle {
+class MicroBtbEntry(implicit p: Parameters) extends MicroBtbBundle {
   class SlotBase extends Bundle {
     // branch position: at fetchBlockVAddr + position
     val position: UInt = UInt(CfiPositionWidth.W)
@@ -61,18 +61,18 @@ class UbtbEntry(implicit p: Parameters) extends UbtbBundle {
   val slot2: Slot2 = new Slot2
 }
 
-class UbtbMeta(implicit p: Parameters) extends UbtbBundle {
+class MicroBtbMeta(implicit p: Parameters) extends MicroBtbBundle {
   // seems no meta is needed now, reserved for future use
 }
 
-class UbtbTrain(implicit p: Parameters) extends UbtbBundle {
+class MicroBtbTrain(implicit p: Parameters) extends MicroBtbBundle {
   val startVAddr:  PrunedAddr      = Input(PrunedAddr(VAddrBits))
   val cfiPosition: Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
-  val meta:        UbtbMeta        = new UbtbMeta // not used now
+  val meta:        MicroBtbMeta        = new MicroBtbMeta // not used now
 }
 
-class ReplacerPerfInfo(implicit p: Parameters) extends UbtbBundle {
+class ReplacerPerfInfo(implicit p: Parameters) extends MicroBtbBundle {
   val replaceNotUseful: Bool = Bool() // if not, replacePlru
 }
