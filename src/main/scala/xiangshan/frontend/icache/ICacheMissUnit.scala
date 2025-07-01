@@ -261,19 +261,24 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
    * perf
    * ***************************************************************************** */
   // Total requests, duplicate requests will be excluded.
-  XSPerfAccumulate("enq_fetch_req", fetchDemux.io.in.fire)
-  XSPerfAccumulate("enq_prefetch_req", prefetchDemux.io.in.fire)
+  XSPerfAccumulate("enqFetchReq", fetchDemux.io.in.fire)
+  XSPerfAccumulate("enqPrefetchReq", prefetchDemux.io.in.fire)
+
+  // Duplicate requests
+  XSPerfAccumulate("duplicateFetchReq", fetchHit)
+  XSPerfAccumulate("duplicatePrefetchReq", prefetchHit) // includes prefetchHitFetchReq
+  XSPerfAccumulate("prefetchHitFetchReq", prefetchHitFetchReq)
 
   // Mshr occupancy
   XSPerfHistogram(
-    "fetchMshrReadyCnt",
+    "fetchMshrEmptyCnt",
     PopCount(fetchDemux.io.out.map(_.ready)),
     true.B,
     0,
     nFetchMshr
   )
   XSPerfHistogram(
-    "prefetchMshrReadyCnt",
+    "prefetchMshrEmptyCnt",
     PopCount(prefetchDemux.io.out.map(_.ready)),
     true.B,
     0,

@@ -19,8 +19,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
+import utility.BoolStopWatch
 import utility.MemReqSource
 import utility.ReqSourceKey
+import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
 
 class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
@@ -122,4 +124,13 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := !(valid && issue)
+
+  XSPerfHistogram(
+    "responseLatency",
+    BoolStopWatch(io.acquire.fire, io.invalid),
+    io.invalid,
+    0,
+    200,
+    10
+  )
 }
