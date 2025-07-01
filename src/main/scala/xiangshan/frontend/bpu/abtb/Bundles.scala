@@ -23,6 +23,8 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TargetState
+import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.WriteReqBundle
 
 class AheadBtbIO(implicit p: Parameters) extends BasePredictorIO {
   val redirectValid: Bool                  = Input(Bool())
@@ -46,6 +48,15 @@ class BankWriteReq(implicit p: Parameters) extends AheadBtbBundle {
   val setIdx:     UInt          = UInt(SetIdxLen.W)
   val wayIdx:     UInt          = UInt(WayIdxLen.W)
   val entry:      AheadBtbEntry = new AheadBtbEntry
+}
+
+class BankWriteReqBundle(implicit p: Parameters) extends WriteReqBundle with HasAheadBtbParameters {
+  val setIdx:     UInt          = UInt(SetIdxLen.W)
+  val isNewEntry: Bool          = Bool()
+  val wayIdx:     UInt          = UInt(WayIdxLen.W)
+  val entry:      AheadBtbEntry = new AheadBtbEntry
+  // This is not needed since we use setIdx directly in the write buffer
+  def tag: UInt = entry.tag // use entry's tag directly
 }
 
 class BankWriteResp(implicit p: Parameters) extends AheadBtbBundle {

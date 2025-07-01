@@ -20,6 +20,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
+import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.WriteReqBundle
 
 /**
   * This module stores the ahead BTB entries.
@@ -70,6 +72,28 @@ class Bank(implicit p: Parameters) extends AheadBtbModule {
   io.writeResp.valid       := sram.io.w.req.fire
   io.writeResp.bits.setIdx := writeSetIdx
   io.writeResp.bits.wayIdx := writeWayIdx
+
+
+  // ===================================== write buffer test ======================================= //
+
+  private  val writeBufferReq = WireInit(0.U.asTypeOf(new BankWriteReqBundle()))
+  writeBufferReq.setIdx := io.writeReq.bits.setIdx
+  // writeBufferReq.writeTag := io.writeReq.bits.entry.tag
+  writeBufferReq.isNewEntry := io.writeReq.bits.isNewEntry
+  writeBufferReq.wayIdx := io.writeReq.bits.wayIdx
+  writeBufferReq.entry := io.writeReq.bits.entry
+
+  private val testWriteBuffer = Module(new WriteBuffer(new BankWriteReqBundle, 4))
+  testWriteBuffer.io.enq.valid := io.writeReq.valid  // only write
+  testWriteBuffer.io.enq.bits :=  writeBufferReq  // use the updated entry
+  testWriteBuffer.io.deq.ready := false.B
+  private val deqData = WireInit(0.U.asTypeOf(new BankWriteReqBundle())) // data to be written back to entries
+  when(testWriteBuffer.io.deq.valid && !io.readReq.valid) {
+    // write back the entry from write buffer
+    deqData := writeBuffer.io.deq.bits
+    writeBuffer.io.deq.ready := true.B
+  }
+  dontTouch(deqData) // avoid warning about unused deqData
 
   XSPerfAccumulate("abtb_bank_read_write_conflict", io.readReq.valid && writeBuffer.io.deq.valid)
   XSPerfAccumulate("abtb_bank_write_buffer_full", !writeBuffer.io.enq.ready)
