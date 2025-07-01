@@ -127,17 +127,17 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val needAllocVec = VecInit(io.req.map(req => req.valid && req.bits.isVset && req.bits.lastUop))
   private val enqCount = PopCount(needAllocVec)
 
-  private val commitCount   = Wire(UInt(log2Up(CommitWidth).W))
-  private val walkCount     = Wire(UInt(log2Up(CommitWidth).W))
-  private val spclWalkCount = Wire(UInt(log2Up(CommitWidth).W))
+  private val commitCount   = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val walkCount     = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val spclWalkCount = Wire(UInt(CommitWidth.U.getWidth.W))
 
-  private val commitSize   = RegInit(0.U(log2Up(size).W))
-  private val walkSize     = RegInit(0.U(log2Up(size).W))
-  private val spclWalkSize = RegInit(0.U(log2Up(size).W))
+  private val commitSize   = RegInit(0.U(size.U.getWidth.W))
+  private val walkSize     = RegInit(0.U(size.U.getWidth.W))
+  private val spclWalkSize = RegInit(0.U(size.U.getWidth.W))
 
-  private val commitSizeNext   = Wire(UInt(log2Up(CommitWidth).W))
-  private val walkSizeNext     = Wire(UInt(log2Up(CommitWidth).W))
-  private val spclWalkSizeNext = Wire(UInt(log2Up(CommitWidth).W))
+  private val commitSizeNext   = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val walkSizeNext     = Wire(UInt(CommitWidth.U.getWidth.W))
+  private val spclWalkSizeNext = Wire(UInt(CommitWidth.U.getWidth.W))
 
   private val newCommitSize   = io.fromRob.commitSize
   private val newWalkSize     = io.fromRob.walkSize
