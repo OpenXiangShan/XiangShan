@@ -26,96 +26,115 @@ import xiangshan._
 // Ensure that the data is up-to-date and that the data stored in the write buffer can be updated
 class WriteBuffer[T <: WriteReqBundle](
     gen:            T,
-    val numEntries: Int,
+    val NumEntries: Int,
+    val validWidth: Int = 1,
     val pipe:       Boolean = false,
-    val flow:       Boolean = false,
     val hasFlush:   Boolean = false
 )(implicit p: Parameters) extends XSModule {
-  require(numEntries >= 0)
+  require(NumEntries >= 0)
+  require(validWidth >= 1)
   val io = IO(new Bundle {
-    val enq:   DecoupledIO[T] = Flipped(DecoupledIO(gen))
-    val deq:   DecoupledIO[T] = DecoupledIO(gen)
+    val write: DecoupledIO[T] = Flipped(DecoupledIO(gen))
+    val read:  DecoupledIO[T] = DecoupledIO(gen)
     val flush: Option[Bool]   = Option.when(hasFlush)(Input(Bool()))
   })
 
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
 
-  // Circular queue pointer
-  private class FIFOPtr extends CircularQueuePtr[FIFOPtr](numEntries)
-  private object FIFOPtr {
-    def apply(f: Bool, v: UInt): FIFOPtr = {
-      val ptr = Wire(new FIFOPtr)
-      ptr.flag  := f
-      ptr.value := v
-      ptr
-    }
-  }
+  private val valids  = RegInit(0.U.asTypeOf(Vec(NumEntries, new SaturateCounter(validWidth))))
+  private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(gen.cloneType))))
 
-  private val valids  = RegInit(0.U.asTypeOf(Vec(numEntries, Bool())))
-  private val entries = RegInit(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))
-  private val hitMask = WireDefault(VecInit(Seq.fill(numEntries)(false.B)))
-  private val hit     = hitMask.reduce(_ || _)
-  private val hit_idx = OHToUInt(hitMask)
+  private val hitMask    = WireDefault(VecInit(Seq.fill(NumEntries)(false.B)))
+  private val hitTouch   = WireDefault(0.U.asTypeOf(Valid(UInt(log2Ceil(NumEntries).W))))
+  private val writeTouch = WireDefault(0.U.asTypeOf(Valid(UInt(log2Ceil(NumEntries).W))))
 
-  private val enq_ptr = RegInit(FIFOPtr(false.B, 0.U))
-  private val deq_ptr = RegInit(FIFOPtr(false.B, 0.U))
+  private val writeValid = WireDefault(io.write.valid)
+  private val readReady  = WireDefault(io.read.ready)
 
-  private val empty  = enq_ptr === deq_ptr
-  private val full   = (enq_ptr.value === deq_ptr.value) && (enq_ptr.flag ^ deq_ptr.flag)
-  private val do_enq = WireDefault(io.enq.fire)
-  private val do_deq = WireDefault(io.deq.fire)
+  // Used to select a valid entry for writing to SRAM
+  private val readVec = VecInit(valids.map(_.isPositive))
+  private val readIdx = PriorityEncoder(readVec)
 
-  when(do_enq) {
-    enq_ptr := enq_ptr + 1.U
-  }
-  when(do_deq) {
-    deq_ptr               := deq_ptr + 1.U
-    valids(enq_ptr.value) := false.B
-  }
+  private val replacer = ReplacementPolicy.fromString("plru", NumEntries) // TODO: make it configurable
 
-  when(flush) {
-    enq_ptr.value := 0.U
-    enq_ptr.flag  := false.B
-    deq_ptr.value := 0.U
-    deq_ptr.flag  := false.B
-    valids.foreach(_ := false.B)
-  }
+  private val empty = !readVec.reduce(_ || _)
+  private val full  = readVec.reduce(_ && _)
 
-  when(do_enq) {
-    for (i <- 0 until numEntries) {
-      hitMask(i) := valids(i) && io.enq.bits.setIdx === entries(i).setIdx &&
-        io.enq.bits.tag === entries(i).tag
+  private val victim = WireDefault(0.U(log2Up(NumEntries).W))
+
+  private val invalidVec = VecInit(valids.map(_.isSaturateNegative))
+  private val hasInvalid = invalidVec.reduce(_ || _)
+  private val invalidIdx = PriorityEncoder(invalidVec)
+  private val replacerWayInvalid =
+    valids(replacer.way).isSaturateNegative // If the replacer way is invalid, we need to priority select
+
+  victim := Mux(replacerWayInvalid, replacer.way, Mux(hasInvalid, invalidIdx, replacer.way))
+
+  io.write.ready := !full
+  io.read.valid  := !empty
+  io.read.bits   := DontCare
+
+  when(writeValid) {
+    for (i <- 0 until NumEntries) {
+      hitMask(i) := io.write.bits.setIdx === entries(i).setIdx &&
+        io.write.bits.tag === entries(i).tag
     }
     assert(PopCount(hitMask) <= 1.U, "WriteBuffer hitMask should be one-hot")
-    when(hit) {
-      // If hit, update the data
-      entries(hit_idx) := io.enq.bits
+    // If a hit occurs, update the replacer regardless of whether the entry is valid
+    hitTouch.valid := hitMask.reduce(_ || _)
+    hitTouch.bits  := OHToUInt(hitMask)
+    when(hitTouch.valid) {
+      // If the write request hits a valid entry, update the entry
+      when(valids(hitTouch.bits).isPositive) {
+        entries(hitTouch.bits) := io.write.bits
+      }
+    }.elsewhen(!hitTouch.valid && readReady && empty) {
+      // If the current write request misses, the WriteBuffer is empty, and the read request is ready,
+      // forward the write data stream to the read request.
+      entries(victim)  := io.write.bits
+      valids(victim)   := 0.U.asTypeOf(new SaturateCounter(validWidth))
+      io.read.bits     := io.write.bits
+      writeTouch.valid := true.B
+      writeTouch.bits  := victim
     }.otherwise {
-      // If miss, enqueue the new data
-      entries(enq_ptr.value) := io.enq.bits
-      valids(enq_ptr.value)  := true.B
+      // If the victim is not valid, we enqueue the new data
+      entries(victim) := io.write.bits
+      valids(victim).increase()
+      writeTouch.valid := true.B
+      writeTouch.bits  := victim
     }
   }
-  io.deq.bits := entries(deq_ptr.value)
 
-  io.deq.valid := !empty
-  io.enq.ready := !full
-
-  if (flow) {
-    when(io.enq.valid)(io.deq.valid := true.B)
-    when(empty) {
-      io.deq.bits               := io.enq.bits
-      do_deq                    := false.B
-      when(io.deq.ready)(do_enq := false.B)
+  when(readReady) {
+    when(!empty) {
+      // If there is a valid entry, we read the data
+      io.read.bits := entries(readIdx)
+      // io.read.valid := true.B
+      valids(readIdx) := 0.U.asTypeOf(new SaturateCounter(validWidth))
+    }.elsewhen(writeValid && empty) {
+      io.read.valid := true.B
+    }.otherwise {
+      // If there is no valid entry, we do not read
+      io.read.valid := false.B
     }
   }
 
   if (pipe) {
-    when(io.deq.ready)(io.enq.ready := true.B)
+    when(io.read.ready)(io.write.ready := true.B)
   }
 
-  XSPerfAccumulate("writeBuffer_update_hit", do_enq && hit)
-  XSPerfAccumulate("writeBuffer_update_miss", do_enq && !hit)
-  XSPerfAccumulate("writeBuffer_update_full", io.enq.valid && full)
+  when(flush) {
+    // Reset the write buffer valids when flush is true
+    for (i <- 0 until NumEntries) {
+      valids(i) := 0.U.asTypeOf(new SaturateCounter(validWidth))
+    }
+  }
+
+  replacer.access(Seq(hitTouch, writeTouch))
+
+  XSPerfAccumulate("hit_write_update", writeValid && hitTouch.valid && valids(hitTouch.bits).isPositive)
+  XSPerfAccumulate("hit_recent_entry", writeValid && hitTouch.valid && valids(hitTouch.bits).isNegative)
+  XSPerfAccumulate("write_request_miss", writeValid && !hitTouch.valid)
+  XSPerfAccumulate("write_request_drop", writeValid && full)
 }
