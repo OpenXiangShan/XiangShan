@@ -564,7 +564,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * flush sbuffer IO Assign
    */
-  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req)
+  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req || state === s_wait_flush_sbuffer_resp)
 
   /**
   * update curPtr
