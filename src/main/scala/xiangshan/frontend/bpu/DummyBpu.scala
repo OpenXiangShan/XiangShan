@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
@@ -244,6 +245,17 @@ class DummyBpu(implicit p: Parameters) extends BpuModule {
   XSPerfAccumulate("s2Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s2Override.valid)
   XSPerfAccumulate("s3Override", io.toFtq.resp.fire && io.toFtq.resp.bits.s3Override.valid)
   XSPerfAccumulate("ubtbHit", io.toFtq.resp.fire && ubtb.io.hit)
+  XSPerfHistogram(
+    "fetchBlockSize",
+    Mux(
+      io.toFtq.resp.bits.cfiPosition.valid,
+      io.toFtq.resp.bits.cfiPosition.bits,
+      FetchBlockInstNum.U
+    ),
+    io.toFtq.resp.fire,
+    0,
+    FetchBlockInstNum
+  )
 
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
