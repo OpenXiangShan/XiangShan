@@ -21,21 +21,24 @@ import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
+// For users: these are default Bpu parameters set by dev, do not change them here,
+// use top-level Parameters.scala instead.
 case class BpuParameters(
     // general
-    FetchBlockAlignSize: Int = 32, // bytes
+    FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
     // sub predictors
     ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
     aBtbParameters: AheadBtbParameters = AheadBtbParameters()
-) {
-  // sanity check
-  require(isPow2(FetchBlockAlignSize))
-}
+) {}
 
 trait HasBpuParameters extends HasFrontendParameters {
   def bpuParameters: BpuParameters = frontendParameters.bpuParameters
 
   // general
-  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize
+  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
   def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
+
+  // sanity check
+  // should do this check in `case class BpuParameters` constructor, but we don't have access to `FetchBlockSize` there
+  require(isPow2(FetchBlockAlignSize))
 }
