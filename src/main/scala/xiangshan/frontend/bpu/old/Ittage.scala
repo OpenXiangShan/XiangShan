@@ -535,15 +535,15 @@ class Ittage(implicit p: Parameters) extends XSModule with ITTageParams with BPU
     io.in.update.bits.full_target,
     io.in.update.valid // not using mispred_mask, because mispred_mask timing is bad
   )
-  update.cfi_idx.bits := RegEnable(
-    io.in.update.bits.cfi_idx.bits,
-    io.in.update.valid && io.in.update.bits.cfi_idx.valid
+  update.ftqOffset.bits := RegEnable(
+    io.in.update.bits.ftqOffset.bits,
+    io.in.update.valid && io.in.update.bits.ftqOffset.valid
   )
   update.ghist := RegEnable(io.in.update.bits.ghist, io.in.update.valid) // TODO: CGE
 
   val updateValid = update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
-    update.jmp_taken && update.cfi_idx.valid &&
-    update.cfi_idx.bits === update.ftb_entry.tailSlot.offset && !update.ftb_entry.strong_bias(numBr - 1)
+    update.jmp_taken && update.ftqOffset.valid &&
+    update.ftqOffset.bits === update.ftb_entry.tailSlot.offset && !update.ftb_entry.strong_bias(numBr - 1)
 
   val updateMask            = WireInit(0.U.asTypeOf(Vec(ITTageNTables, Bool())))
   val updateUMask           = WireInit(0.U.asTypeOf(Vec(ITTageNTables, Bool())))

@@ -86,8 +86,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val t0_startVAddr  = io.train.bits.startVAddr
   private val t0_tag         = getTag(t0_startVAddr)
-  private val t0_actualTaken = io.train.bits.cfiPosition.valid
-  private val t0_position    = io.train.bits.cfiPosition.bits
+  private val t0_actualTaken = io.train.bits.taken
+  private val t0_position    = io.train.bits.cfiPosition
   private val t0_target      = getEntryTarget(io.train.bits.target)
   private val t0_attribute   = io.train.bits.attribute
   private val t0_targetState =
