@@ -237,12 +237,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val pipeBits         = io.fromPipeline.map(_.bits)
   val pipeValidReg     = io.fromPipeline.map(x => RegNext(x.valid))
   val pipeBitsReg      = io.fromPipeline.map(x => RegEnable(x.bits, x.valid))
-  val wbElemIdx        = pipeBits.map(_.elemIdx)
-  val wbMbIndex        = pipeBits.map(_.mBIndex)
-  val wbElemIdxInField = wbElemIdx.zip(wbMbIndex).map{x =>
-    val elemIdxInField = x._1 & (entries(x._2).vlmax - 1.U)
-    if(isVStore) elemIdxInField else RegNext(elemIdxInField)
-  }
+  // // if is VLoad, need latch 1 cycle to merge data.
+  val wbElemIdx        = if(isVStore) pipeBits.map(_.elemIdx) else pipeBitsReg.map(_.elemIdx)
   val selBits          = if(isVStore) pipeBits else pipeBitsReg
 
   // this port have exception or merged port have exception
@@ -261,7 +257,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entryVstart         = entry.vstart
     val entryElemIdx        = entry.elemIdx
 
-    val sel                    = selectOldest(mergePortMatrixHasExcpWrap(i), selBits, wbElemIdxInField)
+    val sel                    = selectOldest(mergePortMatrixHasExcpWrap(i), selBits, wbElemIdx)
     val selPort                = sel._2
     val selElemInfield         = selPort(0).elemIdx & (entries(pipeWbMbIndex).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
