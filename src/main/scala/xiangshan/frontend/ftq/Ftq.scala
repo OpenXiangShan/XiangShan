@@ -163,7 +163,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   when((fromBpu.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
     entryQueue(fromBpuPtr.value) := fromBpu.bits.startVAddr
-    cfiQueue(fromBpuPtr.value)   := fromBpu.bits.cfiPosition
+    cfiQueue(fromBpuPtr.value)   := fromBpu.bits.ftqOffset
   }
 
   metaQueue.io.wen             := io.fromBpu.meta.valid

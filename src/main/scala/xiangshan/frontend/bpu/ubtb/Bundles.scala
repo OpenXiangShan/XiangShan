@@ -66,8 +66,9 @@ class MicroBtbMeta(implicit p: Parameters) extends MicroBtbBundle {
 }
 
 class MicroBtbTrain(implicit p: Parameters) extends MicroBtbBundle {
-  val startVAddr:  PrunedAddr      = Input(PrunedAddr(VAddrBits))
-  val cfiPosition: Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
+  val startVAddr:  PrunedAddr      = PrunedAddr(VAddrBits)
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val target:      PrunedAddr      = PrunedAddr(VAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
   val meta:        MicroBtbMeta    = new MicroBtbMeta // not used now
