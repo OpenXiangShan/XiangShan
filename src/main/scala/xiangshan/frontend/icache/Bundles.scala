@@ -33,7 +33,7 @@ import xiangshan.frontend.ftq.FtqPtr
  * Naming:
  * - I/O:
  *   - ICache inner use only: xxxBundle
- *   - Other modules use: ICacheXxxBundle, consider move to FrontendBundle.scala
+ *   - Other modules use: ICacheXxxBundle, consider move to Bundles.scala
  * - Sram/register: xxxEntry
  *
  * Try avoiding directed Bundle, unless it's req-resp pair
@@ -190,8 +190,8 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   def crossCacheline: Bool = startAddr(blockOffBits - 1) === 1.U
 
   def fromFtqICacheInfo(info: FtqICacheInfo): PrefetchReqBundle = {
-    this.startAddr      := info.startAddr
-    this.nextlineStart  := info.nextlineStart
+    this.startAddr      := info.startVAddr
+    this.nextlineStart  := info.nextCachelineVAddr
     this.ftqIdx         := info.ftqIdx
     this.isSoftPrefetch := false.B
     this

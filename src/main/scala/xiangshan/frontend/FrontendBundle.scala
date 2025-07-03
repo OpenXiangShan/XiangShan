@@ -13,22 +13,9 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.ftq
+package xiangshan.frontend
 
-import chisel3._
 import org.chipsalliance.cde.config.Parameters
-import utility.CircularQueuePtr
-import xiangshan.XSCoreParamsKey
+import xiangshan.XSBundle
 
-class FtqPtr(entries: Int) extends CircularQueuePtr[FtqPtr](entries) {
-  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize)
-}
-
-object FtqPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
-    val ptr = Wire(new FtqPtr)
-    ptr.flag  := f
-    ptr.value := v
-    ptr
-  }
-}
+abstract class FrontendBundle(implicit p: Parameters) extends XSBundle with HasFrontendParameters
