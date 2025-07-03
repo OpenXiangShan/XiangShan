@@ -90,7 +90,7 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
 }
 
-trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] =>
+trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] with HasAsyncClockImp =>
   def core = core_with_l2.module
 
   /* connect core lp io */
