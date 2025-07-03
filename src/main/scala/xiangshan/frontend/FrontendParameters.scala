@@ -13,22 +13,27 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.ftq
+package xiangshan.frontend
 
 import chisel3._
-import org.chipsalliance.cde.config.Parameters
-import utility.CircularQueuePtr
-import xiangshan.XSCoreParamsKey
+import chisel3.util._
+import xiangshan.HasXSParameter
+import xiangshan.frontend.bpu.BpuParameters
+import xiangshan.frontend.ftq.FtqParameters
 
-class FtqPtr(entries: Int) extends CircularQueuePtr[FtqPtr](entries) {
-  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).frontendParameters.ftqParameters.FtqSize)
+case class FrontendParameters(
+    FetchBlockSize: Int = 32, // bytes // FIXME: 64B, waiting for ftq/icache support
+
+    bpuParameters: BpuParameters = BpuParameters(),
+    ftqParameters: FtqParameters = FtqParameters()
+) {
+  // sanity check
+  require(isPow2(FetchBlockSize))
 }
 
-object FtqPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
-    val ptr = Wire(new FtqPtr)
-    ptr.flag  := f
-    ptr.value := v
-    ptr
-  }
+trait HasFrontendParameters extends HasXSParameter {
+  def frontendParameters: FrontendParameters = coreParams.frontendParameters
+
+  def FetchBlockSize:    Int = frontendParameters.FetchBlockSize
+  def FetchBlockInstNum: Int = FetchBlockSize / instBytes
 }
