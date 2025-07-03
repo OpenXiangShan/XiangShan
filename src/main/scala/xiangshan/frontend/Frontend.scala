@@ -138,12 +138,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   bpu.io.resetVector := io.reset_vector
 
   // pmp
-  val PortNumber = ICacheParameters().PortNumber
-  val pmp        = Module(new PMP())
-  val pmp_check  = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
+  val pmp       = Module(new PMP())
+  val pmp_check = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
   val pmp_req_vec = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
-  (0 until 2 * PortNumber).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
+  (0 until 2).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req) // magic number 2: prefetchPipe & mainPipe
   pmp_req_vec.last <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
@@ -153,12 +152,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
       pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
     }
   }
-  (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
+  (0 until 2).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
   ifu.io.pmp.resp <> pmp_check.last.resp
 
-  val itlb =
-    Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq.fill(PortNumber)(false) ++ Seq(true), itlbParams))
-  itlb.io.requestor.take(PortNumber) zip icache.io.itlb foreach { case (a, b) => a <> b }
+  // icache use a non-block tlb port, ifu use a block tlb port
+  val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false, true), itlbParams))
+  itlb.io.requestor.head <> icache.io.itlb
   itlb.io.requestor.last <> ifu.io.itlb // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)

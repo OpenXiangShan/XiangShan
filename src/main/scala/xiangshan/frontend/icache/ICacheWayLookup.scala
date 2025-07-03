@@ -139,7 +139,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   io.write.ready := !full && !gpfStall
   when(io.write.fire) {
     entries(writePtr.value) := io.write.bits.entry
-    when(io.write.bits.itlbException.map(_.isGpf).reduce(_ || _)) {
+    when(io.write.bits.itlbException.isGpf) {
       // if gpfEntry is bypassed, we don't need to save it
       // note this will override the read (L156)
       gpfEntry.valid := !(canBypass && io.read.fire)

@@ -54,7 +54,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val req:   DecoupledIO[FtqToFetchBundle] = Flipped(DecoupledIO(new FtqToFetchBundle))
     val flush: Bool                          = Input(Bool())
     // Pmp
-    val pmp: Vec[PmpCheckBundle] = Vec(PortNumber, new PmpCheckBundle)
+    val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
     val resp:      Valid[ICacheRespBundle] = ValidIO(new ICacheRespBundle)
     val respStall: Bool                    = Input(Bool())
@@ -71,7 +71,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val (toData, fromData) = (io.dataRead.req, io.dataRead.resp)
   private val toMetaFlush        = io.metaFlush.req
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
-  private val (toPmp, fromPmp)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
+  private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
   private val fromWayLookup      = io.wayLookupRead
   private val eccEnable =
     if (ForceMetaEccFail || ForceDataEccFail) true.B else io.eccEnable
@@ -205,18 +205,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * PMP check
     ******************************************************************************
     */
-  toPmp.zipWithIndex.foreach { case (p, i) =>
-    // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
-    p.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
-    p.bits.addr := s1_pAddr(i).toUInt
-    p.bits.size := 3.U
-    p.bits.cmd  := TlbCmd.exec
-  }
-  private val s1_pmpException = VecInit(fromPmp.map(ExceptionType.fromPmpResp))
-  private val s1_pmpMmio      = VecInit(fromPmp.map(_.mmio))
+  // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
+  toPmp.valid     := s1_valid // && !ExceptionType.hasException(s1_itlbException(i))
+  toPmp.bits.addr := s1_pAddr.head.toUInt
+  toPmp.bits.size := 3.U
+  toPmp.bits.cmd  := TlbCmd.exec
+  private val s1_pmpException = ExceptionType.fromPmpResp(fromPmp)
+  private val s1_pmpMmio      = fromPmp.mmio
 
-  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next
-  private val s1_exceptionOut = VecInit((s1_itlbException zip s1_pmpException).map { case (i, p) => i || p })
+  // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
+  private val s1_exceptionOut = s1_itlbException || s1_pmpException
 
   /**
     ******************************************************************************
@@ -398,24 +396,18 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   // merge pmp mmio and itlb pbmt
-  private val s2_isMmio = VecInit((s2_pmpMmio zip s2_itlbPbmt).map { case (mmio, pbmt) =>
-    mmio || Pbmt.isUncache(pbmt)
-  })
+  private val s2_isMmio = s2_pmpMmio || Pbmt.isUncache(s2_itlbPbmt)
 
   // try re-fetch data from L2 cache if ECC error is detected, unless it's from MSHR
   private val s2_corruptRefetch = (s2_metaCorrupt zip s2_dataCorrupt).map {
     case (meta, data) => meta || data
   }
 
-  /* s2_exception includes itlb pf/gpf/af, pmp af and meta corruption (af), neither of which should be fetched
-   * mmio should not be fetched, it will be fetched by IFU mmio fsm
-   * also, if previous has exception, latter port should also not be fetched
-   */
+  // do fetch if (not hit or trying re-fetch) and no exception/mmio
   private val s2_shouldFetch = VecInit((0 until PortNumber).map { i =>
     (!s2_hits(i) || s2_corruptRefetch(i)) &&
     (if (i == 0) true.B else s2_doubleline) &&
-    s2_exception.take(i + 1).map(_.isNone).reduce(_ && _) &&
-    s2_isMmio.take(i + 1).map(!_).reduce(_ && _)
+    s2_exception.isNone && !s2_isMmio
   })
 
   private val toMissArbiter = Module(new Arbiter(new MissReqBundle, PortNumber))
@@ -446,7 +438,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: do NOT raise af if meta/data corrupt is detected, they are automatically recovered by re-fetching from L2
 
   // merge s2 exceptions, itlb/pmp has the highest priority, then l2
-  private val s2_exceptionOut = VecInit((s2_exception zip s2_l2Exception).map { case (in, l2) => in || l2 })
+  // NOTE: s2_exception(itlb+pmp) is not a vec, as 2 cacheline should be identical,
+  //       but l2Exception is a vec, as each cacheline can be corrupt/denied by L2 cache separately.
+  //       so s2_exceptionOut should be a vec
+  private val s2_exceptionOut = VecInit(s2_l2Exception.map(l2 => s2_exception || l2))
 
   /**
     ******************************************************************************
@@ -462,8 +457,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).foreach { i =>
     val needThisLine = if (i == 0) true.B else s2_doubleline
     toIfu.bits.exception(i) := Mux(needThisLine, s2_exceptionOut(i), ExceptionType.None)
-    toIfu.bits.pmpMmio(i)   := Mux(needThisLine, s2_pmpMmio(i), false.B)
-    toIfu.bits.itlbPbmt(i)  := Mux(needThisLine, s2_itlbPbmt(i), Pbmt.pma)
+    toIfu.bits.pmpMmio(i)   := Mux(needThisLine, s2_pmpMmio, false.B)
+    toIfu.bits.itlbPbmt(i)  := Mux(needThisLine, s2_itlbPbmt, Pbmt.pma)
   }
   // valid only for the first gpf
   toIfu.bits.gpAddr            := s2_gpAddr
