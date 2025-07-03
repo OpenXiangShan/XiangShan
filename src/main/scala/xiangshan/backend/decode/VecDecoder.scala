@@ -532,9 +532,9 @@ object VecDecoder extends DecodeConstants {
     FMV_X_W -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     FMV_X_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcvt, FuOpType.FMVXF, T, F, F, UopSplitType.SCA_SIM),
     // donot wflags
-    FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.falu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
-    FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.falu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
-    FCLASS_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.falu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
+    FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),
+    FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),
+    FCLASS_H -> OPFFF(SrcType.fp, SrcType.X, SrcType.X, FuType.fcmp, FcmpOpCode.fclass, T, F, F, UopSplitType.SCA_SIM),
     FSGNJ_S  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsgnj , F, T, F, UopSplitType.SCA_SIM),
     FSGNJ_D  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsgnj , F, T, F, UopSplitType.SCA_SIM),
     FSGNJ_H  -> OPFFF(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.vfsgnj , F, T, F, UopSplitType.SCA_SIM),
