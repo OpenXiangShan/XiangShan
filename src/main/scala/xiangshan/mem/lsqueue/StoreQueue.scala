@@ -460,15 +460,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
-  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) &&
-   (mmio(ptr.value) || datavalid(ptr.value) || vecMbCommit(ptr.value))
-    && ptr =/= enqPtrExt(0))
+  val dataReadyLookup = dataReadyLookupVec.map(ptr =>
+    allocated(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value) || vecMbCommit(ptr.value)) && !unaligned(ptr.value) && ptr =/= enqPtrExt(0)
+  )
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
+  // move unalign ptr
+  val unalignedPtrMatchVec = deqPtrExt.map { case ptr =>
+    ptr === dataReadyPtrExt
+  }
+  val unalignedCanMove = unalignedPtrMatchVec.zipWithIndex.map { case (hit, i) =>
+    hit && sqDeqCnt > i.U
+  }.reduce(_|_)
+  val unalignedLookup = allocated(dataReadyPtrExt.value) && unaligned(dataReadyPtrExt.value) && unalignedCanMove
+  when (unalignedLookup) {
+    dataReadyPtrExt := dataReadyPtrExt + PriorityEncoder(VecInit(true.B +: unalignedPtrMatchVec))
+  }
+
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    stDataReadyVecReg(i) := allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i)))
+    stDataReadyVecReg(i) := allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i))) && !unaligned(i)
   })
   io.stDataReadyVec := GatedValidRegNext(stDataReadyVecReg)
 
@@ -903,7 +915,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     is(nc_idle) {
       when(
         nc(rptr0) && allocated(rptr0) && !completed(rptr0) && committed(rptr0) &&
-        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0) 
+        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0)
       ) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
