@@ -183,7 +183,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val aw_arrive_before_w = pending_write_req_valid.head && pending_write_need_req
   val write_req_enq_pending = aw_arrive_before_w || aw_arrive_before_w_last
   val write_req_enq_no_pending = aw_and_w_last_arrive_at_same_time || w_last_arrive_before_aw
-  val write_req_valid = write_req_enq_pending || write_req_enq_no_pending
+  val write_req_valid = write_req_enq_pending || RegNext(write_req_enq_no_pending, false.B)
   val write_req_enq_addr = Mux(write_req_enq_pending, pending_write_req_bits.addr, in.aw.bits.addr)
   val write_req_enq_id = Mux(write_req_enq_pending, pending_write_req_bits.id, in.aw.bits.id)
   pending_write_req_ready := writeRequest(write_req_valid, write_req_enq_addr, write_req_enq_id)
