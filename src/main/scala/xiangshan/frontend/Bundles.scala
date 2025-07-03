@@ -56,37 +56,29 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
   // fast path: Timing critical
-  val startAddr     = PrunedAddr(VAddrBits)
-  val nextlineStart = PrunedAddr(VAddrBits)
-  val nextStartAddr = PrunedAddr(VAddrBits)
+  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
+  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx    = new FtqPtr
   val ftqOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 
   val topdownInfo = new FrontendTopDownBundle
 
-  def crossCacheline = startAddr(blockOffBits - 1) === 1.U
+  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
 
-  def :=(b: FtqEntry): Unit = {
-    this.startAddr     := b.startAddr
-    this.nextlineStart := b.nextLineAddr
-  }
   override def toPrintable: Printable =
-    p"[start] ${Hexadecimal(startAddr.toUInt)} [next] ${Hexadecimal(nextlineStart.toUInt)}" +
-      p"[tgt] ${Hexadecimal(nextStartAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
+    p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
+      p"[tgt] ${Hexadecimal(nextStartVAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
       p" offset: ${ftqOffset.bits}\n"
 }
 
 class FtqICacheInfo(implicit p: Parameters) extends XSBundle with HasICacheParameters {
-  val startAddr      = PrunedAddr(VAddrBits)
-  val nextlineStart  = PrunedAddr(VAddrBits)
-  val ftqIdx         = new FtqPtr
-  def crossCacheline = startAddr(blockOffBits - 1) === 1.U
-  def fromFtqPcBundle(b: FtqEntry) = {
-    this.startAddr     := b.startAddr
-    this.nextlineStart := b.nextLineAddr
-    this
-  }
+  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
+  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val ftqIdx:             FtqPtr     = new FtqPtr
+
+  def crossCacheline: Bool = startVAddr(blockOffBits - 1) === 1.U
 }
 
 class FtqToPrefetchBundle(implicit p: Parameters) extends XSBundle {
