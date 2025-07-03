@@ -13,30 +13,19 @@
 //
 // See the Mulan PSL v2 for more details.
 
-package xiangshan.frontend.bpu
+package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
-import xiangshan.frontend.bpu.abtb.AheadBtbParameters
-import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
 
-case class BpuParameters(
-    // general
-    FetchBlockAlignSize: Int = 32, // bytes
-    // sub predictors
-    ubtbParameters: MicroBtbParameters = MicroBtbParameters(),
-    aBtbParameters: AheadBtbParameters = AheadBtbParameters()
+case class FtqParameters(
+    FtqSize: Int = 64
 ) {
   // sanity check
-  require(isPow2(FetchBlockAlignSize))
+  require(isPow2(FtqSize))
 }
 
-trait HasBpuParameters extends HasFrontendParameters {
-  def bpuParameters: BpuParameters = frontendParameters.bpuParameters
-
-  // general
-  def FetchBlockAlignSize:  Int = bpuParameters.FetchBlockAlignSize
-  def FetchBlockAlignWidth: Int = log2Ceil(FetchBlockAlignSize)
-  def CfiPositionWidth:     Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
+trait HasFtqParameters extends HasFrontendParameters {
+  def ftqParameters: FtqParameters = frontendParameters.ftqParameters
 }

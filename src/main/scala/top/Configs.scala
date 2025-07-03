@@ -36,6 +36,8 @@ import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
+import xiangshan.frontend.FrontendParameters
+import xiangshan.frontend.ftq.FtqParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -90,9 +92,11 @@ class MinimalConfig(n: Int = 1) extends Config(
         // ==============================
         RobSize = 48,
         RabSize = 96,
-        FtqSize = 8,
         IBufSize = 24,
         IBufNBank = 8,
+        frontendParameters = FrontendParameters(
+          ftqParameters = FtqParameters(FtqSize = 8)
+        ),
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
         IssueQueueSize = 10,
