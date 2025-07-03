@@ -100,7 +100,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
   val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
-  XSLog.collect(timer, logEnable, clean, dump)
+  // XSLog.collect(timer, logEnable, clean, dump)
 }
 
 object SimTop extends App {
