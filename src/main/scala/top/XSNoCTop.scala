@@ -90,7 +90,7 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val soc_reset_sync = withClockAndReset(soc_clock, soc_reset) { ResetGen(io.dft_reset) }
 }
 
-trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] =>
+trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHIImp[L] with HasAsyncClockImp =>
   def core = core_with_l2.module
 
   /* connect core lp io */
@@ -117,8 +117,10 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
     val isWFI = withClockAndReset(clock, cpuReset_sync) {
       AsyncResetSynchronizerShiftReg(core.io.cpu_halt, 3, 0)
     }
+    val exitcoSyn = withClockAndReset(noc_clock, noc_reset_sync) {
+      AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !io_chi.syscoack),3, 0)}
     val exitco = withClockAndReset(clock, cpuReset_sync) {
-      AsyncResetSynchronizerShiftReg((!io_chi.syscoreq & !sync_chi_syscoack),3, 0)}
+      AsyncResetSynchronizerShiftReg((exitcoSyn),3, 0)}
     val QACTIVE = WireInit(false.B)
     val QACCEPTn = WireInit(false.B)
     cpu_no_op := lpState === sPOFFREQ
