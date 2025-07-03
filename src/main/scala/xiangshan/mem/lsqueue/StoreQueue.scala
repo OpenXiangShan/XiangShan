@@ -467,12 +467,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   dataReadyPtrExt := nextDataReadyPtr
 
   // move unalign ptr
-  val unalignedMoveVec = deqPtrExt.zipWithIndex.map { case (ptr, i) =>
-    allocated(ptr.value) && unaligned(ptr.value) && dataReadyPtrExt === ptr && sqDeqCnt > i.U
-  }
-  val unalignedCanMove = unalignedMoveVec.reduce(_ || _)
+  val deqGroupHasUnalign = deqPtrExt.zipWithIndex.map { case (ptr, i) => unaligned(ptr.value) }.reduce(_|_)
+  val dataPtrInDeqGroupRangeVec = VecInit(deqPtrExt.zipWithIndex.map { case (ptr, i) =>
+    dataReadyPtrExt === ptr && sqDeqCnt > i.U
+  })
+  val unalignedCanMove = deqGroupHasUnalign && dataPtrInDeqGroupRangeVec.asUInt.orR
   when (unalignedCanMove) {
-    val step = sqDeqCnt - PriorityEncoder(VecInit(unalignedMoveVec))
+    val step = EnsbufferWidth.U - PriorityEncoder(dataPtrInDeqGroupRangeVec)
     dataReadyPtrExt := dataReadyPtrExt + step
   }
 
