@@ -28,6 +28,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
+import xiangshan.backend.fu.FuConfig._
 
 import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
@@ -39,6 +40,8 @@ case class BackendParams(
 ) {
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
+
+  def robCompressEn: Boolean = true
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 
@@ -356,6 +359,20 @@ case class BackendParams(
       foundExu.get.exuIdx
     } else
       -1
+  }
+
+  def getExuIdxI2F: Int = {
+    val exuParams = allRealExuParams
+    val foundExu = exuParams.find(_.fuConfigs.contains(I2fCfg))
+    require(foundExu.nonEmpty, s"exu contains I2f not find")
+    foundExu.get.exuIdx
+  }
+
+  def getExuIdxF2I: Int = {
+    val exuParams = allRealExuParams
+    val foundExu = exuParams.find(_.fuConfigs.contains(FcmpCfg))
+    require(foundExu.nonEmpty, s"exu contains FcmpCfg not find")
+    foundExu.get.exuIdx
   }
 
   def getExuName(idx: Int): String = {

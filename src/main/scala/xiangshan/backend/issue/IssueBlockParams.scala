@@ -13,6 +13,7 @@ import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
 import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
+import xiangshan.backend.fu.FuConfig
 
 case class IssueBlockParams(
   // top down
@@ -43,6 +44,8 @@ case class IssueBlockParams(
   def inMemSchd: Boolean = schdType == MemScheduler()
 
   def inIntSchd: Boolean = schdType == IntScheduler()
+
+  def inFpSchd: Boolean = schdType == FpScheduler()
 
   def inVfSchd: Boolean = schdType == VfScheduler()
 
@@ -206,8 +209,29 @@ case class IssueBlockParams(
 
   def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
 
+  def needReadIntRegFile: Boolean = exuBlockParams.map(_.readIntRf).reduce(_ || _)
+
+  def needReadFpRegFile: Boolean = exuBlockParams.map(_.readFpRf).reduce(_ || _)
+
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
+  def needUncertainWakeupFromExu: Boolean = exuBlockParams.map(_.fuConfigs).flatten.map(x => FuConfig.needUncertainWakeupFuConfigs.contains(x)).reduce(_ || _)
+
+  def needWakeupFromI2F: Boolean = {
+    val exuI2FWBPort = backendParam.allExuParams(backendParam.getExuIdxI2F).getFpWBPort.get.port
+    exuBlockParams.map{ x =>
+      if (x.getFpWBPort.isEmpty) false
+      else (x.getFpWBPort.get.port == exuI2FWBPort) && x.isFpExeUnit
+    }.reduce(_ || _)
+  }
+
+  def needWakeupFromF2I: Boolean = {
+    val exuF2IWBPort = backendParam.allExuParams(backendParam.getExuIdxF2I).getIntWBPort.get.port
+    exuBlockParams.map { x =>
+      if (x.getIntWBPort.isEmpty) false
+      else (x.getIntWBPort.get.port == exuF2IWBPort) && x.isIntExeUnit
+    }.reduce(_ || _)
+  }
   /**
     * Get the regfile type that this issue queue need to read
     */
@@ -270,13 +294,7 @@ case class IssueBlockParams(
 
   def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readIntRf).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromFpWBPort = if (this.exuBlockParams.map(_.hasStdFu).reduce(_ || _)) {
-    // here add fp load WB wakeup to std
-    backendParam.allExuParams.filter(x => (!wakeUpInExuSources.map(_.name).contains(x.name) || x.hasLoadExu) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
-  }
-  else {
-    backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
-  }
+  def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
 
   def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVecRf).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 

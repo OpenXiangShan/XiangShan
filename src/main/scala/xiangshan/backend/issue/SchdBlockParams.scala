@@ -7,6 +7,7 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.WakeUpSource
 import xiangshan.backend.datapath.WbConfig.PregWB
+import xiangshan.backend.fu.FuConfig.I2fCfg
 
 case class SchdBlockParams(
   issueBlockParams: Seq[IssueBlockParams],
@@ -172,6 +173,16 @@ case class SchdBlockParams(
       val copyNum = param.copyNum
       ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam, isCopyPdest, copyNum))
       })
+    )
+  }
+
+  def genExuWakeUpOutValidBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]] = {
+    val uncertainExuParams = this.issueBlockParams.map(_.allExuParams).flatten.filter(_.needUncertainWakeup)
+    MixedVec(uncertainExuParams.map(param => {
+      val isCopyPdest = param.copyWakeupOut
+      val copyNum = param.copyNum
+      DecoupledIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(param.name), backendParam, isCopyPdest, copyNum))
+    })
     )
   }
 
