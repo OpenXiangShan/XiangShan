@@ -24,10 +24,11 @@ trait HalfAlignHelper extends HasBpuParameters {
   def getAlignedAddrUpper(addr: PrunedAddr): UInt =
     addr(addr.length - 1, FetchBlockAlignWidth)
 
-  def getAlignedAddr(addr: PrunedAddr): PrunedAddr = PrunedAddrInit(Cat(
-    getAlignedAddrUpper(addr),
-    0.U(FetchBlockAlignWidth.W)
-  ))
+  def getAlignedAddr(addr: PrunedAddr): PrunedAddr =
+    PrunedAddrInit(Cat(
+      getAlignedAddrUpper(addr),
+      0.U(FetchBlockAlignWidth.W)
+    ))
 
   def getAlignedInstOffset(addr: PrunedAddr): UInt =
     // given an instruction address, return the offset of the instruction in the fetch block
@@ -70,4 +71,26 @@ trait HalfAlignHelper extends HasBpuParameters {
     )
     position - getAlignedInstOffset(startVAddr)
   }
+}
+
+trait CrossPageHelper extends HasBpuParameters {
+  // FIXME: is there a top-level getVPN function?
+  def getVpn(addr: PrunedAddr): UInt =
+    // get virtual page number (VPN) from a virtual address
+    addr(addr.length - 1, PageOffsetWidth)
+
+  def isCrossPage(startVAddr: PrunedAddr, target: PrunedAddr): Bool =
+    // a simplified version of isCrossPage, to tell if a single fetch block can cross page
+    // we only need to check the LSB of VPN, as +FetchBlockSize can only cross 1 boundary
+    startVAddr(PageOffsetWidth) =/= target(PageOffsetWidth)
+
+  def isCrossPageFull(addr1: PrunedAddr, addr2: PrunedAddr): Bool =
+    // check full VPN
+    getVpn(addr1) =/= getVpn(addr2)
+
+  def getPageAlignedAddr(addr: PrunedAddr): PrunedAddr =
+    PrunedAddrInit(Cat(
+      getVpn(addr),
+      0.U(PageOffsetWidth.W)
+    ))
 }
