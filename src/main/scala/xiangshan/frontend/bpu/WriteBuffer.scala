@@ -17,10 +17,10 @@ package xiangshan.frontend.bpu
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.Random.oneHot
 import org.chipsalliance.cde.config.Parameters
-import utility._
-import xiangshan._
+import utility.ReplacementPolicy
+import utility.XSPerfAccumulate
+import xiangshan.XSModule
 
 // Ensure read priority and temporarily store write data in case of read/write conflicts
 // Ensure that the data is up-to-date and that the data stored in the write buffer can be updated
