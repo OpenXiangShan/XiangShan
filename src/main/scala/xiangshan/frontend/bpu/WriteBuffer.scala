@@ -34,12 +34,13 @@ class WriteBuffer[T <: WriteReqBundle](
 )(implicit p: Parameters) extends XSModule {
   require(NumEntries >= 0)
   require(usefulWidth >= 1)
-  val io = IO(new Bundle {
+  class WriteBufferIO extends Bundle {
     val write: DecoupledIO[T] = Flipped(DecoupledIO(gen))
     val read:  DecoupledIO[T] = DecoupledIO(gen)
     val flush: Option[Bool]   = Option.when(hasFlush)(Input(Bool()))
     val taken: Option[Bool]   = Option.when(hasCnt)(Input(Bool()))
-  })
+  }
+  val io: WriteBufferIO = IO(new WriteBufferIO)
 
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
