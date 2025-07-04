@@ -49,4 +49,5 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
 abstract class WriteReqBundle(implicit p: Parameters) extends BpuBundle {
   val setIdx: UInt
   def tag: UInt
+  def cnt: Option[SaturateCounter] = None
 }

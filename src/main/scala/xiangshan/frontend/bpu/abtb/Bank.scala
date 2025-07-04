@@ -21,7 +21,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.WriteBuffer
-import xiangshan.frontend.bpu.WriteReqBundle
 
 /**
   * This module stores the ahead BTB entries.
@@ -75,4 +74,6 @@ class Bank(implicit p: Parameters) extends AheadBtbModule {
 
   XSPerfAccumulate("abtb_bank_read_write_conflict", writeBuffer.io.read.valid && io.readReq.valid)
   XSPerfAccumulate("abtb_bank_write_buffer_full", !writeBuffer.io.write.ready)
+  XSPerfAccumulate("abtb_bank_read", io.readReq.fire)
+  XSPerfAccumulate("abtb_bank_write", writeBuffer.io.read.fire)
 }
