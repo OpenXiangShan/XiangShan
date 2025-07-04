@@ -115,7 +115,7 @@ class L1CohMetaArray(readPorts: Int, writePorts: Int, bypassRead: Boolean = true
   }
 }
 
-class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
+class L1FlagMetaArray(readPorts: Int, writePorts: Int, enableBypass: Boolean = false)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
@@ -154,11 +154,16 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) e
             bypass_data := s0_way_wdata(way)(wport)
           }
         }
-        resp(way) := Mux(
-          RegEnable(read_way_bypass, read.valid),
-          RegEnable(bypass_data, read_way_bypass),
-          meta_array(RegEnable(read.bits.idx, read.valid))(way)
-        )
+
+        if (enableBypass) {
+          resp(way) := Mux(
+            RegEnable(read_way_bypass, read.valid),
+            RegEnable(bypass_data, read_way_bypass),
+            meta_array(RegEnable(read.bits.idx, read.valid))(way)
+          )
+        } else {
+          resp(way) := meta_array(RegEnable(read.bits.idx, read.valid))(way)
+        }
       })
   }
 
