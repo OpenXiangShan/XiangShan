@@ -18,8 +18,11 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSPerfAccumulate
 
-class FallThroughPredictor(implicit p: Parameters) extends BasePredictor with HalfAlignHelper {
+class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
+    with HalfAlignHelper
+    with CrossPageHelper {
   class FallThroughPredictorIO extends BasePredictorIO {}
 
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
@@ -29,8 +32,18 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor with Ha
 
   private val s0_startVAddr = io.startVAddr
 
-  // fall-through address = startVAddr + FetchBlockMaxSize(64B), aligned to FetchBlockAlign(32B)
-  private val s0_fallThroughAddr = getAlignedAddr(s0_startVAddr + FetchBlockSize.U)
+  // fall-through address = startVAddr + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
+  private val s0_nextBlockAlignedAddr = getAlignedAddr(s0_startVAddr + FetchBlockSize.U)
+
+  // if cross page, we need to align fallThroughAddr to the next page
+  private val s0_crossPage           = isCrossPage(s0_startVAddr, s0_nextBlockAlignedAddr) // compare LSB of Vpn
+  private val s0_nextPageAlignedAddr = getPageAlignedAddr(s0_nextBlockAlignedAddr)         // clear page offset
+
+  private val s0_fallThroughAddr = Mux(
+    s0_crossPage,
+    s0_nextPageAlignedAddr,
+    s0_nextBlockAlignedAddr
+  )
 
   /* *** predict stage 1 *** */
   private val s1_fallThroughAddr = RegEnable(s0_fallThroughAddr, s0_fire)
@@ -40,4 +53,7 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor with Ha
   io.prediction.cfiPosition := (FetchBlockInstNum - 1).U
   io.prediction.target      := s1_fallThroughAddr
   io.prediction.attribute   := BranchAttribute.None
+
+  XSPerfAccumulate("crossPage", s0_fire && s0_crossPage)
+  XSPerfAccumulate("crossPageFixed", s0_fire && s0_crossPage && s0_nextBlockAlignedAddr =/= s0_nextPageAlignedAddr)
 }
