@@ -473,7 +473,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   })
   val unalignedCanMove = deqGroupHasUnalign && dataPtrInDeqGroupRangeVec.asUInt.orR
   when (unalignedCanMove) {
-    val step = EnsbufferWidth.U - PriorityEncoder(dataPtrInDeqGroupRangeVec)
+    val step = sqDeqCnt - PriorityEncoder(dataPtrInDeqGroupRangeVec)
     dataReadyPtrExt := dataReadyPtrExt + step
   }
 
