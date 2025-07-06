@@ -461,13 +461,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
   val dataReadyLookup = dataReadyLookupVec.map(ptr =>
-    allocated(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value) || vecMbCommit(ptr.value)) && !unaligned(ptr.value) && ptr =/= enqPtrExt(0)
+    allocated(ptr.value) &&
+    (addrvalid(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value)) || vecMbCommit(ptr.value)) &&
+    !unaligned(ptr.value) &&
+    ptr =/= enqPtrExt(0)
   )
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
   // move unalign ptr
-  val deqGroupHasUnalign = deqPtrExt.zipWithIndex.map { case (ptr, i) => unaligned(ptr.value) }.reduce(_|_)
+  val deqGroupHasUnalign = deqPtrExt.map { case ptr => unaligned(ptr.value) }.reduce(_|_)
   val dataPtrInDeqGroupRangeVec = VecInit(deqPtrExt.zipWithIndex.map { case (ptr, i) =>
     dataReadyPtrExt === ptr && sqDeqCnt > i.U
   })
