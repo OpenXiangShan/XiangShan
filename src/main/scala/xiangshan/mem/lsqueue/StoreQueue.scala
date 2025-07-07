@@ -482,7 +482,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    stDataReadyVecReg(i) := allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i))) && !unaligned(i)
+    stDataReadyVecReg(i) := allocated(i) &&
+      (addrvalid(i) && (mmio(i) || datavalid(i)) || (isVec(i) && vecMbCommit(i))) && !unaligned(i)
   })
   io.stDataReadyVec := GatedValidRegNext(stDataReadyVecReg)
 
